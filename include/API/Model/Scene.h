@@ -4,6 +4,8 @@
 #include "GameObject.h"
 #include <memory>
 
+class iRender;
+
 class Scene
 {
 protected:
@@ -20,7 +22,8 @@ public:
 
 	void Start();
 
-	void Update();
+	void Update();              // game logic (Play mode)
+	void Render(iRender* r);    // draw pass: one render per camera (Edit + Play)
 };
 
 #endif // !NUKEE_SCENE_H

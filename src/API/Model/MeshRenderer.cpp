@@ -12,10 +12,10 @@ void MeshRenderer::Destroy() {
 
 }
 
-void MeshRenderer::Update() {
-	if (enabled)
-		iRender::getSingleton()->renderObject(mesh, mat, transform);
-}
+// MeshRenderer is now pure data (mesh + material + enabled). Drawing is done by
+// the render pass (Scene::Render), separate from the logic Update — this keeps
+// the editor (always rendering) and Play mode (logic Update) cleanly split.
+void MeshRenderer::Update() {}
 
 void MeshRenderer::FixedUpdate() {}
 

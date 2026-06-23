@@ -3,7 +3,7 @@
 #include <sstream>
 
 
-Vector2::Vector2() {}
+Vector2::Vector2() { x = 0; y = 0; }
 Vector2::Vector2(double x, double y)
 {
 	this->x = x;
@@ -120,7 +120,7 @@ std::wstring Vector2::toStringW()
 
 
 
-Vector3::Vector3() {}
+Vector3::Vector3() { x = 0; y = 0; z = 0; }
 Vector3::Vector3(double x, double y, double z)
 {
 	this->x = x;
@@ -442,7 +442,7 @@ std::wstring Vector4::toStringW()
 
 
 
-Quaternion::Quaternion() {}
+Quaternion::Quaternion() { x = 0; y = 0; z = 0; w = 1; } // identity
 Quaternion::Quaternion(double x, double y, double z, double w)
 {
 	this->x = x;

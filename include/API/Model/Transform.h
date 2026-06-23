@@ -9,7 +9,8 @@ class Transform : public NukeComponent
 {
 public:
 	Vector3 position;
-    Vector3 rotation;
+    Quaternion rotation;            // stored as a quaternion (no gimbal lock)
+    Vector3 eulerHint;              // last euler (deg) authored via SetEulerDeg — stable inspector display
     Vector3 scale = {1,1,1};
     GameObject *go = nullptr;
 
@@ -21,8 +22,12 @@ public:
 	Vector3 up();
 	Vector3 direction();
     Vector3 globalPosition();
-	Vector3 globalRotation();
+	Quaternion globalRotation();
 	Vector3 globalScale();
+
+	// Euler helpers (degrees) for the inspector / authoring. Internally quaternion.
+	void    SetEulerDeg(const Vector3& deg);
+	Vector3 EulerDeg();
 
 	void Destroy();
 	void Update();

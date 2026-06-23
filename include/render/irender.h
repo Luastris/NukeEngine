@@ -8,6 +8,22 @@
 
 namespace b = boost;
 
+// Backend-neutral camera description for one render pass. The renderer builds the
+// view/projection matrices itself (from these POD fields) so no glm/Diligent math
+// convention leaks across the seam.
+struct NukeCameraDesc
+{
+    uint64_t target = 0;                       // render-target id (0 = backbuffer)
+    int      vpW = 0, vpH = 0;                  // viewport size in pixels
+    float    clear[4] = {0.20f, 0.30f, 0.45f, 1.0f};
+    float    camPos[3] = {0.0f, 0.0f, 0.0f};    // camera world position
+    float    camFwd[3] = {0.0f, 0.0f, 1.0f};    // camera look direction
+    float    camUp[3]  = {0.0f, 1.0f, 0.0f};    // camera up vector
+    float    fov   = 1.0472f;                   // vertical FOV (radians, ~60deg)
+    float    nearZ = 0.1f;
+    float    farZ  = 1000.0f;
+};
+
 class iRender
 {
     friend class NukeOGL;
@@ -32,8 +48,13 @@ public:
 	bst::function<void(int x, int y)> _UImove;
 	bst::function<void(int x, int y)> _UIpmove;
 	bst::function<void(int w, int h)> _UIreshape;
+	bst::function<void(int key, int action, int mods)> _UIkey;   // raw key code/action/mods (GLFW numbering)
+	bst::function<void(unsigned int codepoint)>        _UIchar;  // typed text character
     virtual int render() = 0;
-    virtual void renderObject(Mesh* mesh, Material* mat, Transform* transform) = 0;
+    // Draw one mesh with the current camera. Global position + rotation quaternion
+    // (x,y,z,w) + scale passed as plain floats; the renderer builds the world matrix.
+    virtual void renderObject(Mesh* mesh, Material* mat,
+                              const float pos[3], const float quat[4], const float scale[3]) {}
     virtual int init(int w, int h) = 0;
     virtual void loop() = 0;
     virtual void deinit() = 0;
@@ -59,6 +80,18 @@ public:
     virtual void destroyTexture2D(uint64_t handle) {}
     // Render backend-neutral 2D draw lists for this frame.
     virtual void renderDrawLists(const NukeUIDrawData& data) {}
+
+    // --- Scene viewport / per-camera 3D seam ---------------------------------
+    // Render targets are off-screen surfaces a camera can draw into; their color
+    // texture can also be shown by the UI (ImGui::Image). Identified by a stable
+    // id (so resize keeps the same id). 0 == the backbuffer.
+    virtual uint64_t createRenderTarget(int w, int h) { return 0; }
+    virtual void     resizeRenderTarget(uint64_t id, int w, int h) {}
+    virtual uint64_t getRenderTargetTexture(uint64_t id) { return 0; } // current color SRV handle
+    // One camera pass: bind its target, set viewport, clear, set view/projection.
+    virtual void     beginCamera(const NukeCameraDesc& cam) {}
+    virtual void     endCamera() {}
+
     virtual void keyboard(int key, int scancode, int action, int mods) = 0;
     virtual void mouseMove(double xpos, double ypos) = 0;
     virtual void mouseClick(int button, int action, int mods) = 0;

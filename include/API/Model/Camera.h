@@ -20,6 +20,11 @@ public:
 	unsigned long int renderLayers;
     bool freeMode;
 
+    // Per-camera render contract (see Scene::Render).
+    uint64_t renderTarget = 0;                       // iRender RT id; 0 = backbuffer
+    int      depth = 0;                              // render order (lower drawn first)
+    float    clearColor[4] = {0.20f, 0.30f, 0.45f, 1.0f};
+
 	Camera();
 
 	Camera(iRender* renderer);

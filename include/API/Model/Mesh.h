@@ -28,5 +28,8 @@ public:
 	Mesh();
 
 	void ImportAIMesh(aiMesh* mesh);
+
+	// Primitive factories (procedural geometry, no asset needed).
+	static Mesh* CreateCube();
 };
 #endif // !NUKEE_MESH_H
