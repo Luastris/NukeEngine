@@ -10,7 +10,6 @@
 #include "../input/keyboard.h"
 #include "../input/mouse.h"
 #include "../render/irender.h"
-#include "../render/opengl/nukeogl.h"
 #include "./EditorMenu/MenuStrip.h"
 
 namespace bc = boost::container;

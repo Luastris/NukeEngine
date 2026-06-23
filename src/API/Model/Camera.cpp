@@ -3,6 +3,7 @@
 #include "API/Model/GameObject.h"
 #include "API/Model/Transform.h"
 #include "API/Model/Texture.h"
+#include "interface/AppInstance.h"
 
 Camera::Camera() : NukeComponent("Camera") {}
 
@@ -19,7 +20,9 @@ Camera::Camera(iRender* renderer) : NukeComponent("Camera")
 	renderer->fov = fov;
 	renderer->Far = _far;
 	renderer->Near = _near;
-	if (((NukeBGFX*)renderer) != NukeBGFX::getSingleton())
+	// Secondary (render-target) cameras own their renderer and must init it.
+	// The main renderer is the one held by AppInstance and is initialized by the bootstrap.
+	if (renderer != AppInstance::GetSingleton()->render)
 		renderer->init(r_width, r_height);
 	else
 		cout << "[Camera]\t\t" << "[!] Camera of main renderer" << endl;
@@ -229,7 +232,7 @@ void Camera::Init(GameObject* parent)
 	if (this->renderer)
 		this->renderer->transform = transform;
 	parent->components.push_back(this);
-	if (((NukeBGFX*)renderer) != NukeBGFX::getSingleton())
+	if (renderer != AppInstance::GetSingleton()->render)
 		renderer->init(r_width, r_height);
 	else
 		cout << "[Camera]\t\t" << "[!] Camera of main renderer" << endl;

@@ -4,7 +4,7 @@
 #include <string>
 
 struct NukeWindow{
-    int w, h;
+    int w = 1280, h = 720;
     std::string mainFont;
     bool hierarchy = true,
             console = true,

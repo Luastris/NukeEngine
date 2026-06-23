@@ -3,8 +3,6 @@
 #define NUKEE_CAMERA_H
 #include <boost/thread.hpp>
 #include "render/irender.h"
-#include "render/opengl/nukeogl.h"
-#include "render/universal/nukebgfx.h"
 #include <boost/bind.hpp>
 
 class Camera : public NukeComponent

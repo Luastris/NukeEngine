@@ -40,6 +40,10 @@ public:
     virtual char* getVersion() = 0;
     virtual void setOnGUI(bst::function<void(void)> cb) = 0;
     virtual void setOnRender(bst::function<void(void)> cb) = 0;
+    // Backend-agnostic close callback. Plugins register here instead of casting
+    // to a concrete renderer (e.g. NukeBGFX). Non-pure so existing backends that
+    // don't implement it still compile; backends override as needed.
+    virtual void setOnClose(bst::function<void()> cb) {}
     virtual void keyboard(int key, int scancode, int action, int mods) = 0;
     virtual void mouseMove(double xpos, double ypos) = 0;
     virtual void mouseClick(int button, int action, int mods) = 0;
