@@ -1,8 +1,10 @@
 #ifndef IRENDER_H
 #define IRENDER_H
 #include <boost/function.hpp>
+#include <cstdint>
 #include <API/Model/Transform.h>
 #include <API/Model/Mesh.h>
+#include "UIDrawData.h"
 
 namespace b = boost;
 
@@ -44,6 +46,19 @@ public:
     // to a concrete renderer (e.g. NukeBGFX). Non-pure so existing backends that
     // don't implement it still compile; backends override as needed.
     virtual void setOnClose(bst::function<void()> cb) {}
+
+    // --- Neutral UI seam ------------------------------------------------------
+    // The renderer exposes a generic 2D draw capability so a UI module (ImGui or
+    // anything else) can render through it without the renderer knowing the UI
+    // library, and the UI without knowing the graphics API. Non-pure (no-op
+    // defaults) so renderers that don't support UI still compile.
+    //
+    // Upload an RGBA8 texture (e.g. a font atlas); returns an opaque handle.
+    virtual uint64_t createTexture2D(const void* rgbaPixels, int width, int height) { return 0; }
+    // Release a texture previously returned by createTexture2D.
+    virtual void destroyTexture2D(uint64_t handle) {}
+    // Render backend-neutral 2D draw lists for this frame.
+    virtual void renderDrawLists(const NukeUIDrawData& data) {}
     virtual void keyboard(int key, int scancode, int action, int mods) = 0;
     virtual void mouseMove(double xpos, double ypos) = 0;
     virtual void mouseClick(int button, int action, int mods) = 0;

@@ -51,13 +51,11 @@ void GameObject::Update()
 {
 	for (auto child : children)
 	{
-		cout << "[GameObject]\t\t" << "Child update: " << child << ", " << child->name << endl;
 		if (child)
 			child->Update();
 	}
 	for (auto cmp : components)
 	{
-		cout << "[GameObject]\t\t" << "Component update: " << cmp << endl;
 		if(cmp)
 			cmp->Update();
 	}
