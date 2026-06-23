@@ -18,7 +18,7 @@ void InitModules(AppInstance* instance)
 				cout << p.path().filename().concat("\n").generic_string().c_str() << endl;
 				boost::shared_ptr<NUKEModule> plugin;
 				std::string s = "";
-				plugin = dll::import<NUKEModule>("modules/" + p.path().filename().generic_string(), "plugin");
+				plugin = dll::import_symbol<NUKEModule>("modules/" + p.path().filename().generic_string(), "plugin");
 				cout << plugin << endl;
 				plugin.get()->modulePath = p.path().generic_string();
 				modules.push_back(plugin);

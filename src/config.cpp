@@ -112,8 +112,7 @@ void Config::reload(Config* instance) {
 		instance->window.h = w["height"].cast<int>();
 		instance->window.w = w["width"].cast<int>();
 		std::string fontName = w["mainFont"].cast<std::string>();
-		//strcpy(instance->window.mainFont, fontName.c_str());
-		instance->window.mainFont = (char*)fontName.c_str();
+		instance->window.mainFont = fontName;
 		cout << PREFIX_CONF << "Window size = [" << instance->window.w << "x" << instance->window.h << "]" << endl;
 		cout << PREFIX_CONF << "FONT IS " << instance->window.mainFont << endl;
 	}

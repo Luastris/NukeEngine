@@ -1,10 +1,11 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 #include <backend/lua.h>
+#include <string>
 
 struct NukeWindow{
     int w, h;
-    char* mainFont;
+    std::string mainFont;
     bool hierarchy = true,
             console = true,
             browser = true,

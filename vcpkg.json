@@ -8,6 +8,15 @@
 		"lua",
 		"freeglut",
 		"glew",
-		"boost"
+		"boost-thread",
+		"boost-filesystem",
+		"boost-dll",
+		"boost-container",
+		"boost-function",
+		"boost-bind",
+		"boost-smart-ptr",
+		"boost-tokenizer",
+		"boost-tuple",
+		"boost-config"
 	]
 }
