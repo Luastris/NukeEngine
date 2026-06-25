@@ -110,6 +110,10 @@ public:
     // One camera pass: bind its target, set viewport, clear, set view/projection.
     virtual void     beginCamera(const NukeCameraDesc& cam) {}
     virtual void     endCamera() {}
+    // Read back the most recent camera pass's view & projection matrices (row-major,
+    // exactly as the renderer used them) so the editor can overlay a gizmo that lines
+    // up with the rendered image.
+    virtual void     getViewProj(float* view16, float* proj16) {}
 
     virtual void keyboard(int key, int scancode, int action, int mods) = 0;
     virtual void mouseMove(double xpos, double ypos) = 0;

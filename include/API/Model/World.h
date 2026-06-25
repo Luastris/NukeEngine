@@ -26,6 +26,10 @@ public:
 
 	void Update();              // game logic (Play mode)
 	void Render(iRender* r);    // draw pass: one render per camera (Edit + Play)
+
+	// Ray-pick the nearest Atom (with a MeshRenderer) hit by a world-space ray.
+	// Returns nullptr on miss. Used by the editor viewport for click-to-select.
+	Atom* Pick(const Vector3& origin, const Vector3& dir);
 };
 
 }  // namespace nuke
