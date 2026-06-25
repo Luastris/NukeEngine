@@ -39,6 +39,7 @@ struct Field {
     std::string name;
     FT type = FT::Unknown;
     std::function<void*(void*)> addr;   // returns &(obj->field)
+    bool hidden = false;                // serialized, but not drawn in the auto-inspector
 };
 
 struct TypeInfo {
