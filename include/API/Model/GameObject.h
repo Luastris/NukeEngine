@@ -46,7 +46,6 @@ public:
 	T* GetComponent(){
 		for (NukeComponent* cmp : this->components)
 		{
-			std::cout << "[GameObject]\t\t" << cmp << std::endl;
 			if (auto res = dynamic_cast<T*>(cmp))
 				return res;
 		}

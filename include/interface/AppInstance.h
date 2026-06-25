@@ -24,8 +24,10 @@ public:
 	
 	MenuStrip* menuStrip = nullptr;
 	GameObject* selectedInHieararchy = nullptr;
-	int manipulationMode = 0;
+	int manipulationMode = 0;   // 0=Select 1=Move 2=Rotate 3=Scale
 	int manipulationWorld = 0;
+	int playState = 0;          // PIE: 0=Stopped(Edit) 1=Playing 2=Paused
+	bool wireframe = false;     // viewport draw mode: false=Solid true=Wireframe
 	//bc::list<btups::tuple<string, bst::function<void()>>> editorWindows;
 	bc::map<string, bst::function<void()>>* editorWindows = nullptr;
 
