@@ -58,7 +58,7 @@ void Atom::Update()
 	}
 	for (auto cmp : components)
 	{
-		if(cmp)
+		if (cmp && cmp->enabled)
 			cmp->Update();
 	}
 }

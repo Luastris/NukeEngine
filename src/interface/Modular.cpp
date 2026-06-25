@@ -2,6 +2,11 @@
 
 namespace nuke {
 
+// Single instance, owned by the engine DLL.
+static bc::vector<boost::shared_ptr<NUKEModule>> g_modules;
+
+bc::vector<boost::shared_ptr<NUKEModule>>& GetModules() { return g_modules; }
+
 void InitModules(AppInstance* instance)
 {
 	if (!bfs::exists(bfs::path(bfs::current_path().concat("/modules"))))
@@ -27,7 +32,7 @@ void InitModules(AppInstance* instance)
 
 			auto plugin = boost::dll::import_symbol<NUKEModule>(p.path().string(), "plugin");
 			plugin->modulePath = p.path().generic_string();
-			modules.push_back(plugin);
+			g_modules.push_back(plugin);
 			cout << "[Modular]\tloaded plugin '" << plugin->title << "' from "
 			     << p.path().filename().string() << endl;
 			boost::thread(boost::bind(&NUKEModule::Run, plugin.get(), instance));
@@ -41,12 +46,12 @@ void InitModules(AppInstance* instance)
 }
 void UnloadModules()
 {
-	for (auto i : modules)
+	for (auto i : g_modules)
 	{
 		if (i) {
 			i.get()->Shutdown();
 		}
 	}
-	modules.clear();
+	g_modules.clear();
 }
 }  // namespace nuke

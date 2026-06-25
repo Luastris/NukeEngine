@@ -1,134 +1,160 @@
 #include "config.h"
 
+#include <nlohmann/json.hpp>
+#include <boost/filesystem.hpp>
+#include <fstream>
+#include <iostream>
+
 namespace nuke {
 
+namespace bfs = boost::filesystem;
+using json = nlohmann::json;
+using std::cout;
+using std::endl;
+
 #define PREFIX_CONF "[config]\t\t"
-struct confColor luaGetColor(lb::LuaRef ref, const char* name) {
-	auto col = ref[name];
-	struct confColor cc;
-	cc.x = ref["r"].cast<float>();
-	cc.y = ref["g"].cast<float>();
-	cc.z = ref["b"].cast<float>();
-	cc.w = ref["a"].cast<float>();
-	return cc;
+
+// --- small helpers -----------------------------------------------------------
+static confColor jColor(const json& j)
+{
+    confColor c{ 1, 1, 1, 1 };
+    if (j.is_object())
+    {
+        c.x = j.value("r", 1.0f);
+        c.y = j.value("g", 1.0f);
+        c.z = j.value("b", 1.0f);
+        c.w = j.value("a", 1.0f);
+    }
+    return c;
 }
 
-struct confUiVec luaGetVector(lb::LuaRef ref, const char* name) {
-	auto col = ref[name];
-	struct confUiVec cc;
-	cc.x = ref["x"].cast<int>();
-	cc.y = ref["y"].cast<int>();
-	return cc;
+static confUiVec jVec(const json& j)
+{
+    confUiVec v{ 0, 0 };
+    if (j.is_object())
+    {
+        v.x = j.value("x", 0);
+        v.y = j.value("y", 0);
+    }
+    return v;
 }
 
+static void loadTheme(NukeTheme* t, const json& j)
+{
+    t->WindowPadding     = jVec(j.value("WindowPadding",     json::object()));
+    t->FramePadding      = jVec(j.value("FramePadding",      json::object()));
+    t->ItemSpacing       = jVec(j.value("ItemSpacing",       json::object()));
+    t->ItemInnerSpacing  = jVec(j.value("ItemInnerSpacing",  json::object()));
 
-void loadTheme(struct NukeTheme* t, lb::LuaRef _t) {
-	t->WindowPadding = luaGetVector(_t, "WindowPadding");
-	t->FramePadding = luaGetVector(_t, "FramePadding");
-	t->ItemSpacing = luaGetVector(_t, "ItemSpacing");
-	t->ItemInnerSpacing = luaGetVector(_t, "ItemInnerSpacing");
+    t->WindowRounding    = j.value("WindowRounding",    0.0f);
+    t->FrameRounding     = j.value("FrameRounding",     0.0f);
+    t->IndentSpacing     = j.value("IndentSpacing",     0.0f);
+    t->ScrollbarSize     = j.value("ScrollbarSize",     0.0f);
+    t->ScrollbarRounding = j.value("ScrollbarRounding", 0.0f);
+    t->GrabMinSize       = j.value("GrabMinSize",       0.0f);
+    t->GrabRounding      = j.value("GrabRounding",      0.0f);
 
-	t->WindowRounding = _t["WindowRounding"].cast<float>();
-	t->FrameRounding = _t["FrameRounding"].cast<float>();
-	t->IndentSpacing = _t["IndentSpacing"].cast<float>();
-	t->ScrollbarSize = _t["ScrollbarSize"].cast<float>();
-	t->ScrollbarRounding = _t["ScrollbarRounding"].cast<float>();
-	t->GrabMinSize = _t["GrabMinSize"].cast<float>();
-	t->GrabRounding = _t["GrabRounding"].cast<float>();
+    auto col = [&](const char* k) { return jColor(j.value(k, json::object())); };
+    t->ImGuiCol_Text                 = col("ImGuiCol_Text");
+    t->ImGuiCol_TextDisabled         = col("ImGuiCol_TextDisabled");
+    t->ImGuiCol_WindowBg             = col("ImGuiCol_WindowBg");
+    t->ImGuiCol_ChildWindowBg        = col("ImGuiCol_ChildWindowBg");
+    t->ImGuiCol_PopupBg              = col("ImGuiCol_PopupBg");
+    t->ImGuiCol_Border               = col("ImGuiCol_Border");
+    t->ImGuiCol_BorderShadow         = col("ImGuiCol_BorderShadow");
+    t->ImGuiCol_FrameBg              = col("ImGuiCol_FrameBg");
+    t->ImGuiCol_FrameBgHovered       = col("ImGuiCol_FrameBgHovered");
+    t->ImGuiCol_FrameBgActive        = col("ImGuiCol_FrameBgActive");
+    t->ImGuiCol_TitleBg              = col("ImGuiCol_TitleBg");
+    t->ImGuiCol_TitleBgCollapsed     = col("ImGuiCol_TitleBgCollapsed");
+    t->ImGuiCol_TitleBgActive        = col("ImGuiCol_TitleBgActive");
+    t->ImGuiCol_MenuBarBg            = col("ImGuiCol_MenuBarBg");
+    t->ImGuiCol_ScrollbarBg          = col("ImGuiCol_ScrollbarBg");
+    t->ImGuiCol_ScrollbarGrab        = col("ImGuiCol_ScrollbarGrab");
+    t->ImGuiCol_ScrollbarGrabHovered = col("ImGuiCol_ScrollbarGrabHovered");
+    t->ImGuiCol_ScrollbarGrabActive  = col("ImGuiCol_ScrollbarGrabActive");
+    t->ImGuiCol_CheckMark            = col("ImGuiCol_CheckMark");
+    t->ImGuiCol_SliderGrab           = col("ImGuiCol_SliderGrab");
+    t->ImGuiCol_SliderGrabActive     = col("ImGuiCol_SliderGrabActive");
+    t->ImGuiCol_Button               = col("ImGuiCol_Button");
+    t->ImGuiCol_ButtonHovered        = col("ImGuiCol_ButtonHovered");
+    t->ImGuiCol_ButtonActive         = col("ImGuiCol_ButtonActive");
+    t->ImGuiCol_Header               = col("ImGuiCol_Header");
+    t->ImGuiCol_HeaderHovered        = col("ImGuiCol_HeaderHovered");
+    t->ImGuiCol_HeaderActive         = col("ImGuiCol_HeaderActive");
+    t->ImGuiCol_Column               = col("ImGuiCol_Column");
+    t->ImGuiCol_ColumnHovered        = col("ImGuiCol_ColumnHovered");
+    t->ImGuiCol_ColumnActive         = col("ImGuiCol_ColumnActive");
+    t->ImGuiCol_ResizeGrip           = col("ImGuiCol_ResizeGrip");
+    t->ImGuiCol_ResizeGripHovered    = col("ImGuiCol_ResizeGripHovered");
+    t->ImGuiCol_ResizeGripActive     = col("ImGuiCol_ResizeGripActive");
+    t->ImGuiCol_PlotLines            = col("ImGuiCol_PlotLines");
+    t->ImGuiCol_PlotLinesHovered     = col("ImGuiCol_PlotLinesHovered");
+    t->ImGuiCol_PlotHistogram        = col("ImGuiCol_PlotHistogram");
+    t->ImGuiCol_PlotHistogramHovered = col("ImGuiCol_PlotHistogramHovered");
+    t->ImGuiCol_TextSelectedBg       = col("ImGuiCol_TextSelectedBg");
+    t->ImGuiCol_ModalWindowDarkening = col("ImGuiCol_ModalWindowDarkening");
 
-	t->ImGuiCol_Text = luaGetColor(_t, "ImGuiCol_Text");
-	t->ImGuiCol_TextDisabled = luaGetColor(_t, "ImGuiCol_TextDisabled");
-	t->ImGuiCol_WindowBg = luaGetColor(_t, "ImGuiCol_WindowBg");
-	t->ImGuiCol_ChildWindowBg = luaGetColor(_t, "ImGuiCol_ChildWindowBg");
-	t->ImGuiCol_PopupBg = luaGetColor(_t, "ImGuiCol_PopupBg");
-	t->ImGuiCol_Border = luaGetColor(_t, "ImGuiCol_Border");
-	t->ImGuiCol_BorderShadow = luaGetColor(_t, "ImGuiCol_BorderShadow");
-	t->ImGuiCol_FrameBg = luaGetColor(_t, "ImGuiCol_FrameBg");
-	t->ImGuiCol_FrameBgHovered = luaGetColor(_t, "ImGuiCol_FrameBgHovered");
-	t->ImGuiCol_FrameBgActive = luaGetColor(_t, "ImGuiCol_FrameBgActive");
-	t->ImGuiCol_TitleBg = luaGetColor(_t, "ImGuiCol_TitleBg");
-	t->ImGuiCol_TitleBgCollapsed = luaGetColor(_t, "ImGuiCol_TitleBgCollapsed");
-	t->ImGuiCol_TitleBgActive = luaGetColor(_t, "ImGuiCol_TitleBgActive");
-	t->ImGuiCol_MenuBarBg = luaGetColor(_t, "ImGuiCol_MenuBarBg");
-	t->ImGuiCol_ScrollbarBg = luaGetColor(_t, "ImGuiCol_ScrollbarBg");
-	t->ImGuiCol_ScrollbarGrab = luaGetColor(_t, "ImGuiCol_ScrollbarGrab");
-	t->ImGuiCol_ScrollbarGrabHovered = luaGetColor(_t, "ImGuiCol_ScrollbarGrabHovered");
-	t->ImGuiCol_ScrollbarGrabActive = luaGetColor(_t, "ImGuiCol_ScrollbarGrabActive");
-	//t->ImGuiCol_ComboBg = luaGetColor(_t, "ImGuiCol_ComboBg");
-	t->ImGuiCol_CheckMark = luaGetColor(_t, "ImGuiCol_CheckMark");
-	t->ImGuiCol_SliderGrab = luaGetColor(_t, "ImGuiCol_SliderGrab");
-	t->ImGuiCol_SliderGrabActive = luaGetColor(_t, "ImGuiCol_SliderGrabActive");
-	t->ImGuiCol_Button = luaGetColor(_t, "ImGuiCol_Button");
-	t->ImGuiCol_ButtonHovered = luaGetColor(_t, "ImGuiCol_ButtonHovered");
-	t->ImGuiCol_ButtonActive = luaGetColor(_t, "ImGuiCol_ButtonActive");
-	t->ImGuiCol_Header = luaGetColor(_t, "ImGuiCol_Header");
-	t->ImGuiCol_HeaderHovered = luaGetColor(_t, "ImGuiCol_HeaderHovered");
-	t->ImGuiCol_HeaderActive = luaGetColor(_t, "ImGuiCol_HeaderActive");
-	t->ImGuiCol_Column = luaGetColor(_t, "ImGuiCol_Column");
-	t->ImGuiCol_ColumnHovered = luaGetColor(_t, "ImGuiCol_ColumnHovered");
-	t->ImGuiCol_ColumnActive = luaGetColor(_t, "ImGuiCol_ColumnActive");
-	t->ImGuiCol_ResizeGrip = luaGetColor(_t, "ImGuiCol_ResizeGrip");
-	t->ImGuiCol_ResizeGripHovered = luaGetColor(_t, "ImGuiCol_ResizeGripHovered");
-	t->ImGuiCol_ResizeGripActive = luaGetColor(_t, "ImGuiCol_ResizeGripActive");
-	//t->ImGuiCol_CloseButton = luaGetColor(_t, "ImGuiCol_CloseButton");
-	//t->ImGuiCol_CloseButtonHovered = luaGetColor(_t, "ImGuiCol_CloseButtonHovered");
-	//t->ImGuiCol_CloseButtonActive = luaGetColor(_t, "ImGuiCol_CloseButtonActive");
-	t->ImGuiCol_PlotLines = luaGetColor(_t, "ImGuiCol_PlotLines");
-	t->ImGuiCol_PlotLinesHovered = luaGetColor(_t, "ImGuiCol_PlotLinesHovered");
-	t->ImGuiCol_PlotHistogram = luaGetColor(_t, "ImGuiCol_PlotHistogram");
-	t->ImGuiCol_PlotHistogramHovered = luaGetColor(_t, "ImGuiCol_PlotHistogramHovered");
-	t->ImGuiCol_TextSelectedBg = luaGetColor(_t, "ImGuiCol_TextSelectedBg");
-	t->ImGuiCol_ModalWindowDarkening = luaGetColor(_t, "ImGuiCol_ModalWindowDarkening");
-
-	t->isLoaded = true;
+    t->isLoaded = true;
 }
 
-Config* Config::getSingleton() {
-	static Config instance;
-	instance.reload(&instance);
-	return &instance;
+Config* Config::getSingleton()
+{
+    static Config instance;
+    instance.reload(&instance);
+    return &instance;
 }
 
-void Config::reload(Config* instance) {
-	
-	Lua* lua = Lua::getSingleton();
-	bfs::path configDir("config");
-	bfs::path config("./config/main.lua");
-	if (!bfs::exists(configDir))
-		bfs::create_directory(configDir);
-	if (!bfs::exists(config))
-	{
-		cout << PREFIX_CONF << "Main config not found, create it please!" << endl;
-	}
-	boost::filesystem::recursive_directory_iterator iter(configDir), eod;
-	for (auto& p : iter)
-	{
-		cout << PREFIX_CONF << p.path().string().c_str() << endl;
-		lua->doFile(p.path().string().c_str());
-	}
-	/*lua_dump(lua->l, lua)*/
-	auto w = lb::getGlobal(lua->l, "window");
-	//cout << PREFIX_CONF << "Window ref: " << w.tostring() << endl;
-	if (!w.isNil()) {
-		instance->window = NukeWindow();
-		instance->window.h = w["height"].cast<int>();
-		instance->window.w = w["width"].cast<int>();
-		std::string fontName = w["mainFont"].cast<std::string>();
-		instance->window.mainFont = fontName;
-		cout << PREFIX_CONF << "Window size = [" << instance->window.w << "x" << instance->window.h << "]" << endl;
-		cout << PREFIX_CONF << "FONT IS " << instance->window.mainFont << endl;
-	}
+void Config::reload(Config* instance)
+{
+    bfs::path configDir("config");
+    if (!bfs::exists(configDir))
+        bfs::create_directory(configDir);
 
-	auto t = lb::getGlobal(lua->l, "theme");
-	if (!t.isNil()) {
-		loadTheme(&instance->theme, t);
-	}
+    bfs::path cfg("./config/main.json");
+    std::ifstream f(cfg.string());
+    if (!f)
+    {
+        cout << PREFIX_CONF << "config/main.json not found — using defaults." << endl;
+        return;
+    }
+
+    // allow_exceptions = false, ignore_comments = true (so // and /* */ are tolerated).
+    json root = json::parse(f, nullptr, false, true);
+    if (root.is_discarded())
+    {
+        cout << PREFIX_CONF << "config/main.json: parse error — using defaults." << endl;
+        return;
+    }
+
+    if (root.contains("window") && root["window"].is_object())
+    {
+        const json& w = root["window"];
+        NukeWindow& win = instance->window = NukeWindow();
+        win.w           = w.value("width",       win.w);
+        win.h           = w.value("height",      win.h);
+        win.mainFont    = w.value("mainFont",    win.mainFont);
+        win.title       = w.value("title",       win.title);
+        win.decorated   = w.value("decorated",   win.decorated);
+        win.resizable   = w.value("resizable",   win.resizable);
+        win.floating    = w.value("floating",    win.floating);
+        win.maximized   = w.value("maximized",   win.maximized);
+        win.fullscreen  = w.value("fullscreen",  win.fullscreen);
+        win.transparent = w.value("transparent", win.transparent);
+        win.opacity     = w.value("opacity",     win.opacity);
+        cout << PREFIX_CONF << "Window size = [" << win.w << "x" << win.h << "]" << endl;
+        cout << PREFIX_CONF << "FONT IS " << win.mainFont << endl;
+    }
+
+    if (root.contains("theme") && root["theme"].is_object())
+        loadTheme(&instance->theme, root["theme"]);
 }
 
-Config::Config() {
-	cout << PREFIX_CONF << "CWD: " << bfs::current_path() << endl;
-
-	//reload(this);
+Config::Config()
+{
+    cout << PREFIX_CONF << "CWD: " << bfs::current_path() << endl;
 }
+
 Config::~Config() {}
+
 }  // namespace nuke

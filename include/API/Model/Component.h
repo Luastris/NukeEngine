@@ -17,7 +17,7 @@ class NUKEENGINE_API Component
 public:
     bool enabled = true;
 	Transform* transform = nullptr;
-	Atom* gameobject = nullptr;
+	Atom* atom = nullptr;   // owning Atom (back-reference), set by the component's Init
     char* name;
     Component(const char* _name = "Component") : name((char*)_name){}
 	virtual void Init(Atom* parent) = 0;

@@ -28,6 +28,14 @@ TypeInfo* Registry_Find(const std::string& name)
     return (it != r.end()) ? it->second : nullptr;
 }
 
+std::vector<TypeInfo*> Registry_All()
+{
+    std::vector<TypeInfo*> out;
+    for (auto& kv : registry())
+        out.push_back(kv.second);
+    return out;
+}
+
 // --- single value <-> json by tag ---
 void SaveField(FT t, const void* a, json& j)
 {

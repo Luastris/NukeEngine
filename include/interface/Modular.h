@@ -22,7 +22,10 @@ namespace bc = boost::container;
 
 namespace nuke {
 
-static bc::vector<boost::shared_ptr<NUKEModule>> modules;
+// The loaded plugins live as a SINGLE instance inside the engine DLL. Access them via
+// GetModules() — a header-level `static` would give every TU (e.g. the editor) its own
+// empty copy, so the plugin manager would never see what InitModules loaded.
+NUKEENGINE_API bc::vector<boost::shared_ptr<NUKEModule>>& GetModules();
 
 NUKEENGINE_API void InitModules(AppInstance* instance);
 NUKEENGINE_API void UnloadModules();

@@ -51,6 +51,7 @@ struct TypeInfo {
 // Registry (defined in Reflect.cpp).
 NUKEENGINE_API TypeInfo& Registry_GetOrCreate(const std::string& name);
 NUKEENGINE_API TypeInfo* Registry_Find(const std::string& name);
+NUKEENGINE_API std::vector<TypeInfo*> Registry_All();   // every registered type (for "Add Component")
 
 // Defined in the generated Reflect.gen.cpp — registers every reflected type's schema +
 // factory. Call once (from World's ctor) so the generated .obj is linked and runs.

@@ -1,7 +1,6 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 #include "NukeAPI.h"
-#include <backend/lua.h>
 #include <string>
 
 namespace nuke {
@@ -97,11 +96,6 @@ struct NukeTheme{
     struct confColor ImGuiCol_TextSelectedBg;
     struct confColor ImGuiCol_ModalWindowDarkening;
 };
-
-NUKEENGINE_API struct confColor luaGetColor(lb::LuaRef ref, const char* name);
-NUKEENGINE_API struct confUiVec luaGetVector(lb::LuaRef ref, const char* name);
-
-NUKEENGINE_API void loadTheme(struct NukeTheme* t, lb::LuaRef _t);
 
 class NUKEENGINE_API Config
 {

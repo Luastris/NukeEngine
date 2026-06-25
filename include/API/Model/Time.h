@@ -17,6 +17,11 @@ public:
 		return &instance;
 	}
 	
+	// Real (wall-clock) frame timing — updated once per frame by NewFrame().
+	double delta = 0.0;     // seconds since the previous frame
+	double elapsed = 0.0;   // total real seconds since the first NewFrame()
+	void NewFrame();        // call once per rendered frame (from the host loop)
+
 	//Game to real time attitude
 	double gtr = 0.05;
 

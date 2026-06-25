@@ -1,6 +1,25 @@
 #include "API/Model/Time.h"
 
+#define BOOST_CHRONO_HEADER_ONLY
+#define BOOST_ERROR_CODE_HEADER_ONLY
+#include <boost/chrono.hpp>
+
 namespace nuke {
+
+void Time::NewFrame()
+{
+	using clock = boost::chrono::steady_clock;
+	static clock::time_point last;
+	static bool have = false;
+	clock::time_point now = clock::now();
+	if (have)
+	{
+		delta = boost::chrono::duration<double>(now - last).count();
+		elapsed += delta;
+	}
+	last = now;
+	have = true;
+}
 
 Time::Time() {}
 

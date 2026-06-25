@@ -98,7 +98,7 @@
       <Optimization>MinSpace</Optimization>
       <PreprocessorDefinitions>_DEBUG;NUKEENGINE_EXPORTS;_WINDOWS;_USRDLL;_CRT_SECURE_NO_WARNINGS;NOMINMAX;WIN32;GLM_ENABLE_EXPERIMENTAL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <AdditionalIncludeDirectories>./include;./deps/LuaBridge/Source/;./deps</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>./include;./deps</AdditionalIncludeDirectories>
       <ForcedIncludeFiles>NukeEngine.h;pch.h;algorithm</ForcedIncludeFiles>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
@@ -163,7 +163,7 @@
       <PreprocessorDefinitions>NDEBUG;NUKEENGINE_EXPORTS;_WINDOWS;_USRDLL;_CRT_SECURE_NO_WARNINGS;NOMINMAX;GLM_ENABLE_EXPERIMENTAL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <AdditionalIncludeDirectories>./include;./deps/LuaBridge/Source/;./deps</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>./include;./deps</AdditionalIncludeDirectories>
       <ForcedIncludeFiles>NukeEngine.h;pch.h;algorithm</ForcedIncludeFiles>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
     </ClCompile>
@@ -219,7 +219,6 @@
     <ClInclude Include="include\API\Model\Time.h" />
     <ClInclude Include="include\API\Model\Transform.h" />
     <ClInclude Include="include\API\Model\Vector.h" />
-    <ClInclude Include="include\backend\lua.h" />
     <ClInclude Include="include\config.h" />
     <ClInclude Include="include\gui\gui.h" />
     <ClInclude Include="include\import\assimporter.h" />
@@ -277,7 +276,6 @@
     <ClCompile Include="src\API\Model\Time.cpp" />
     <ClCompile Include="src\API\Model\Transform.cpp" />
     <ClCompile Include="src\API\Model\Vector.cpp" />
-    <ClCompile Include="src\backend\lua.cpp" />
     <ClCompile Include="src\config.cpp" />
     <ClCompile Include="src\import\assimporter.cpp" />
     <ClCompile Include="src\input\keyboard.cpp" />
