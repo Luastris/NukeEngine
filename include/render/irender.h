@@ -26,6 +26,23 @@ struct NukeCameraDesc
     float    farZ  = 1000.0f;
 };
 
+// Backend-neutral window description, filled by the app from its config and passed
+// to iRender::init. The renderer translates these into its windowing backend (GLFW
+// hints etc.) at creation time — so the game window can be borderless / sized /
+// transparent without the app or config knowing about GLFW.
+struct WindowDesc
+{
+    int         w = 1280, h = 720;
+    const char* title = "NukeEngine";
+    bool  decorated   = true;   // false => borderless
+    bool  resizable   = true;
+    bool  floating    = false;  // always-on-top
+    bool  maximized   = false;
+    bool  fullscreen  = false;
+    bool  transparent = false;  // per-pixel alpha to desktop (needs renderer DComp support)
+    float opacity     = 1.0f;   // whole-window opacity 0..1 (cheap, always works)
+};
+
 class iRender
 {
     friend class NukeOGL;
@@ -57,7 +74,7 @@ public:
     // (x,y,z,w) + scale passed as plain floats; the renderer builds the world matrix.
     virtual void renderObject(Mesh* mesh, Material* mat,
                               const float pos[3], const float quat[4], const float scale[3]) {}
-    virtual int init(int w, int h) = 0;
+    virtual int init(const WindowDesc& desc) = 0;
     virtual void loop() = 0;
     virtual void deinit() = 0;
     virtual void update() = 0;

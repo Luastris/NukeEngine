@@ -25,7 +25,7 @@ Camera::Camera(iRender* renderer) : Component("Camera")
 	// Secondary (render-target) cameras own their renderer and must init it.
 	// The main renderer is the one held by AppInstance and is initialized by the bootstrap.
 	if (renderer != AppInstance::GetSingleton()->render)
-		renderer->init(r_width, r_height);
+		{ WindowDesc _wd; _wd.w = r_width; _wd.h = r_height; renderer->init(_wd); }
 	else
 		cout << "[Camera]\t\t" << "[!] Camera of main renderer" << endl;
 }
@@ -235,7 +235,7 @@ void Camera::Init(Atom* parent)
 		this->renderer->transform = transform;
 	parent->components.push_back(this);
 	if (renderer != AppInstance::GetSingleton()->render)
-		renderer->init(r_width, r_height);
+		{ WindowDesc _wd; _wd.w = r_width; _wd.h = r_height; renderer->init(_wd); }
 	else
 		cout << "[Camera]\t\t" << "[!] Camera of main renderer" << endl;
 	//*KeyBoard::getSingleton() += bst::function<void(unsigned char, int, int)>(b::bind(&Camera::ProcessKeyboard, bst::ref(*this), _1, _2, _3));

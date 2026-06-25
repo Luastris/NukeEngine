@@ -8,6 +8,16 @@ namespace nuke {
 struct NukeWindow{
     int w = 1280, h = 720;
     std::string mainFont;
+    // OS window properties (applied by the renderer at window creation). Mostly for
+    // the game window; the editor leaves them at defaults (normal decorated window).
+    std::string title = "NukeEngine";
+    bool  decorated   = true;    // false => borderless
+    bool  resizable   = true;
+    bool  floating    = false;   // always-on-top
+    bool  maximized   = false;
+    bool  fullscreen  = false;
+    bool  transparent = false;   // per-pixel alpha (needs renderer DComp support)
+    float opacity     = 1.0f;    // whole-window opacity 0..1
     bool hierarchy = true,
             console = true,
             browser = true,
