@@ -289,14 +289,6 @@
     <ClCompile Include="src\interface\NUKEEInteface.cpp" />
     <ClCompile Include="src\render\irender.cpp" />
   </ItemGroup>
-  <ItemGroup>
-    <ProjectReference Include="deps\bgfx\.build\projects\vs2019\bgfx.vcxproj">
-      <Project>{6c90947c-58c7-950d-01b4-7b10edc9110f}</Project>
-    </ProjectReference>
-    <ProjectReference Include="deps\bgfx\.build\projects\vs2019\bimg.vcxproj">
-      <Project>{c499947c-b0d0-950d-59bd-7b1045d3110f}</Project>
-    </ProjectReference>
-  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
