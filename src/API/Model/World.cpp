@@ -3,6 +3,8 @@
 #include "API/Model/Camera.h"
 #include "API/Model/MeshRenderer.h"
 #include "API/Model/Mesh.h"
+#include "reflect/ReflectJson.h"
+#include <fstream>
 #include <iostream>
 #include <vector>
 #include <algorithm>
@@ -15,6 +17,7 @@
 namespace nuke {
 
 World::World() : name("Default scene"), hierarchy(new bc::list<Atom*>()) {
+	NukeReflectInit();   // ensure reflection schemas are registered (forces Reflect.gen.obj to link)
 	std::cout << "[World]\t\t\t" << "This:" << this << ", Hierarchy is " << hierarchy << ", Hierarchy size: " << hierarchy->size() << std::endl;
 }
 
@@ -183,5 +186,91 @@ void World::Render(iRender* r)
 		RenderMeshes(*hierarchy, r);
 		r->endCamera();
 	}
+}
+
+// --- scene serialization (.nuworld JSON via reflection) ---
+
+static void SaveAtom(Atom* go, json& j)
+{
+	j["name"] = go->GetName();
+	Transform& t = go->GetTransform();
+	if (TypeInfo* tti = t.GetType())
+		SaveObject(*tti, &t, j["transform"]);
+	for (Component* c : go->components)
+	{
+		TypeInfo* ti = c->GetType();
+		if (!ti) continue;                       // unreflected component — skip
+		json cj;
+		cj["type"] = ti->name;
+		SaveObject(*ti, c, cj["props"]);
+		j["components"].push_back(cj);
+	}
+	for (Atom* ch : go->children)
+	{
+		json chj;
+		SaveAtom(ch, chj);
+		j["children"].push_back(chj);
+	}
+}
+
+static Atom* LoadAtom(const json& j)
+{
+	Atom* go = new Atom(j.value("name", std::string("Atom")).c_str());
+	if (j.contains("transform"))
+	{
+		Transform& t = go->GetTransform();
+		if (TypeInfo* tti = t.GetType())
+			LoadObject(*tti, &t, j["transform"]);
+	}
+	if (j.contains("components"))
+		for (const json& cj : j["components"])
+		{
+			TypeInfo* ti = Registry_Find(cj.value("type", std::string()));
+			if (ti && ti->create)
+			{
+				Component* c = (Component*)ti->create();
+				if (cj.contains("props")) LoadObject(*ti, c, cj["props"]);
+				go->AddComponent(c);             // Init() wires transform/owner
+			}
+		}
+	if (j.contains("children"))
+		for (const json& chj : j["children"])
+			LoadAtom(chj)->SetParent(go);
+	return go;
+}
+
+void World::SaveToFile(const std::string& path)
+{
+	json j;
+	j["type"] = "World";
+	j["version"] = 1;
+	j["atoms"] = json::array();
+	for (Atom* go : *hierarchy)
+	{
+		if (go->GetName() == "Editor Camera") continue;   // editor infra, not part of the scene
+		json gj;
+		SaveAtom(go, gj);
+		j["atoms"].push_back(gj);
+	}
+	std::ofstream f(path);
+	if (f) f << j.dump(2);
+	std::cout << "[World]\t\t\t" << "Saved " << j["atoms"].size() << " atom(s) to " << path << std::endl;
+}
+
+void World::LoadFromFile(const std::string& path)
+{
+	std::ifstream f(path);
+	if (!f) { std::cout << "[World]\t\t\t" << "LoadFromFile: cannot open " << path << std::endl; return; }
+	json j; f >> j;
+	// drop the current scene but keep the editor camera (TODO: properly destroy atoms)
+	for (auto it = hierarchy->begin(); it != hierarchy->end(); )
+	{
+		if ((*it)->GetName() == "Editor Camera") ++it;
+		else it = hierarchy->erase(it);
+	}
+	if (j.contains("atoms"))
+		for (const json& gj : j["atoms"])
+			Add(LoadAtom(gj));
+	std::cout << "[World]\t\t\t" << "Loaded " << path << std::endl;
 }
 }  // namespace nuke

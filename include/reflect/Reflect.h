@@ -51,6 +51,10 @@ struct TypeInfo {
 TypeInfo& Registry_GetOrCreate(const std::string& name);
 TypeInfo* Registry_Find(const std::string& name);
 
+// Defined in the generated Reflect.gen.cpp — registers every reflected type's schema +
+// factory. Call once (from World's ctor) so the generated .obj is linked and runs.
+bool NukeReflectInit();
+
 // One TypeInfo per reflected type T (lazily created on first use).
 template<class T>
 TypeInfo& TypeOf() {

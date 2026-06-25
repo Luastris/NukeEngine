@@ -13,6 +13,7 @@ class MeshRenderer : public Component
 public:
     Mesh        *mesh;
     Material    *mat;
+    [[nuke::prop]] std::string primitive;   // procedural mesh tag ("cube"); empty = asset-ref (future GUID)
 
 	MeshRenderer();
 

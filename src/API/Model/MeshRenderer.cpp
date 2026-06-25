@@ -3,11 +3,13 @@
 
 namespace nuke {
 
-MeshRenderer::MeshRenderer() : Component("MeshRenderer") {}
+MeshRenderer::MeshRenderer() : Component("MeshRenderer"), mesh(nullptr), mat(nullptr) {}
 
 void MeshRenderer::Init(Atom* parent) {
 	transform = &parent->GetTransform();
 	parent->components.push_back(this);
+	// Rebuild a procedural mesh from its tag (e.g. when loaded from a scene).
+	if (!mesh && primitive == "cube") mesh = Mesh::CreateCube();
 }
 
 void MeshRenderer::Destroy() {

@@ -30,6 +30,11 @@ public:
 	// Ray-pick the nearest Atom (with a MeshRenderer) hit by a world-space ray.
 	// Returns nullptr on miss. Used by the editor viewport for click-to-select.
 	Atom* Pick(const Vector3& origin, const Vector3& dir);
+
+	// Text (.nuworld JSON) scene serialization via reflection. The editor camera is
+	// excluded from save and preserved across load (it is editor infrastructure).
+	void SaveToFile(const std::string& path);
+	void LoadFromFile(const std::string& path);
 };
 
 }  // namespace nuke

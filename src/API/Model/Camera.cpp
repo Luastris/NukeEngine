@@ -230,6 +230,7 @@ void Camera::ProcessKeyboard() {
 
 void Camera::Init(Atom* parent)
 {
+	if (!renderer) renderer = AppInstance::GetSingleton()->render;   // e.g. cameras loaded from a scene
 	transform = &parent->GetTransform();
 	if (this->renderer)
 		this->renderer->transform = transform;
