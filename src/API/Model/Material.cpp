@@ -1,5 +1,7 @@
 #include "API/Model/Material.h"
 
+namespace nuke {
+
 void Material::ImportAiMaterial(aiMaterial* m) {
 	aiString diffName;
 	m->GetTexture(aiTextureType::aiTextureType_DIFFUSE, 0, &diffName);
@@ -27,3 +29,4 @@ void Material::ImportAiMaterial(aiMaterial* m) {
 
 	aiMat = m;
 }
+}  // namespace nuke

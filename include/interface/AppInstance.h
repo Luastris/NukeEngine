@@ -6,11 +6,13 @@
 #include <boost/container/map.hpp>
 #include <config.h>
 #include "../API/Model/Camera.h"
-#include "../API/Model/Scene.h"
+#include "../API/Model/World.h"
 #include "../input/keyboard.h"
 #include "../input/mouse.h"
 #include "../render/irender.h"
 #include "./EditorMenu/MenuStrip.h"
+
+namespace nuke {
 
 namespace bc = boost::container;
 
@@ -23,7 +25,7 @@ protected:
 public:
 	
 	MenuStrip* menuStrip = nullptr;
-	GameObject* selectedInHieararchy = nullptr;
+	Atom* selectedInHieararchy = nullptr;
 	int manipulationMode = 0;   // 0=Select 1=Move 2=Rotate 3=Scale
 	int manipulationWorld = 0;
 	int playState = 0;          // PIE: 0=Stopped(Edit) 1=Playing 2=Paused
@@ -38,7 +40,7 @@ public:
 
 
 
-	Scene* currentScene = new Scene();
+	World* currentScene = new World();
     KeyBoard* keyboard = nullptr;
     Mouse* mouse = nullptr;
 	Config* config = nullptr;
@@ -56,5 +58,7 @@ public:
 	void UpdateThread();
 	void StartUpdateThread();
 };
+
+}  // namespace nuke
 
 #endif // !NUKEE_APPINSTANCE_H

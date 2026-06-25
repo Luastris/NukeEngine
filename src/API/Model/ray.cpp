@@ -1,6 +1,8 @@
 #include "API/Model/ray.h"
 #include <glm/glm.hpp>
 
+namespace nuke {
+
 Ray::Ray() {}
 bool Ray::Collide(Collider collider) {
 	glm::vec4 viewport = glm::vec4(0, 0, w, h);
@@ -8,3 +10,4 @@ bool Ray::Collide(Collider collider) {
 	//        glm::vec3 objcoord = glm::unProject(wincoord, view, projection, viewport);
 	return false;
 }
+}  // namespace nuke

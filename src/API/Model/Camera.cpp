@@ -1,13 +1,15 @@
 #include "API/Model/Camera.h"
 #include "API/Model/Layers.h"
-#include "API/Model/GameObject.h"
+#include "API/Model/Atom.h"
 #include "API/Model/Transform.h"
 #include "API/Model/Texture.h"
 #include "interface/AppInstance.h"
 
-Camera::Camera() : NukeComponent("Camera") {}
+namespace nuke {
 
-Camera::Camera(iRender* renderer) : NukeComponent("Camera")
+Camera::Camera() : Component("Camera") {}
+
+Camera::Camera(iRender* renderer) : Component("Camera")
 {
 	this->renderer = renderer;
 	this->renderer->transform = transform;
@@ -28,7 +30,7 @@ Camera::Camera(iRender* renderer) : NukeComponent("Camera")
 		cout << "[Camera]\t\t" << "[!] Camera of main renderer" << endl;
 }
 
-Camera::Camera(GameObject* parent, iRender* renderer) : NukeComponent("Camera")
+Camera::Camera(Atom* parent, iRender* renderer) : Component("Camera")
 {
 	this->renderer = renderer;
 	Init(parent);
@@ -226,7 +228,7 @@ void Camera::ProcessKeyboard() {
 }
 
 
-void Camera::Init(GameObject* parent)
+void Camera::Init(Atom* parent)
 {
 	transform = &parent->GetTransform();
 	if (this->renderer)
@@ -265,3 +267,4 @@ void Camera::Destroy()
 {
 	renderer->deinit();
 }
+}  // namespace nuke

@@ -6,6 +6,8 @@
 #include <API/Model/Mesh.h>
 #include "UIDrawData.h"
 
+namespace nuke {
+
 namespace b = boost;
 
 // Backend-neutral camera description for one render pass. The renderer builds the
@@ -81,7 +83,7 @@ public:
     // Render backend-neutral 2D draw lists for this frame.
     virtual void renderDrawLists(const NukeUIDrawData& data) {}
 
-    // --- Scene viewport / per-camera 3D seam ---------------------------------
+    // --- World viewport / per-camera 3D seam ---------------------------------
     // Render targets are off-screen surfaces a camera can draw into; their color
     // texture can also be shown by the UI (ImGui::Image). Identified by a stable
     // id (so resize keeps the same id). 0 == the backbuffer.
@@ -101,5 +103,7 @@ public:
 //    virtual ~iRender(){
 //    }
 };
+
+}  // namespace nuke
 
 #endif // IRENDER_H

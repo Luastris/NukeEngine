@@ -20,7 +20,7 @@
     <ClCompile Include="src\API\Model\Game.cpp">
       <Filter>src\API\Model</Filter>
     </ClCompile>
-    <ClCompile Include="src\API\Model\GameObject.cpp">
+    <ClCompile Include="src\API\Model\Atom.cpp">
       <Filter>src\API\Model</Filter>
     </ClCompile>
     <ClCompile Include="src\API\Model\Material.cpp">
@@ -56,7 +56,7 @@
     <ClCompile Include="src\API\Model\Module.cpp">
       <Filter>src\API\Model</Filter>
     </ClCompile>
-    <ClCompile Include="src\API\Model\Scene.cpp">
+    <ClCompile Include="src\API\Model\World.cpp">
       <Filter>src\API\Model</Filter>
     </ClCompile>
     <ClCompile Include="src\API\Model\Script.cpp">
@@ -190,7 +190,7 @@
     <ClInclude Include="include\API\Model\Game.h">
       <Filter>include\API\Model</Filter>
     </ClInclude>
-    <ClInclude Include="include\API\Model\GameObject.h">
+    <ClInclude Include="include\API\Model\Atom.h">
       <Filter>include\API\Model</Filter>
     </ClInclude>
     <ClInclude Include="include\API\Model\ID.h">
@@ -229,7 +229,7 @@
     <ClInclude Include="include\API\Model\Resource.h">
       <Filter>include\API\Model</Filter>
     </ClInclude>
-    <ClInclude Include="include\API\Model\Scene.h">
+    <ClInclude Include="include\API\Model\World.h">
       <Filter>include\API\Model</Filter>
     </ClInclude>
     <ClInclude Include="include\API\Model\Script.h">

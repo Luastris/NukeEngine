@@ -1,14 +1,16 @@
 #include "import/assimporter.h"
 
+namespace nuke {
+
 AssImporter::AssImporter() {}
 AssImporter::~AssImporter() {}
 
-GameObject* AssImporter::ImportObject(aiNode* node, const aiScene* scene) {
+Atom* AssImporter::ImportObject(aiNode* node, const aiScene* scene) {
 	ResDB* res = ResDB::getSingleton();
-	auto go = new GameObject(node->mName.C_Str());
+	auto go = new Atom(node->mName.C_Str());
 	for (int i = 0; i < node->mNumMeshes; i++) {
 		auto cmesh = node->mMeshes[i];
-		GameObject* ngo = new GameObject(scene->mMeshes[cmesh]->mName.C_Str());
+		Atom* ngo = new Atom(scene->mMeshes[cmesh]->mName.C_Str());
 		Mesh* m = new Mesh();
 		m->ImportAIMesh(scene->mMeshes[cmesh]);
 		res->meshes.push_back(m);
@@ -60,3 +62,4 @@ void AssImporter::Import(const char* path) {
 	res->prefabs.push_back(ImportObject(sc->mRootNode, sc));
 
 }
+}  // namespace nuke

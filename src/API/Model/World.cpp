@@ -1,4 +1,4 @@
-#include "API/Model/Scene.h"
+#include "API/Model/World.h"
 #include "render/irender.h"
 #include "API/Model/Camera.h"
 #include "API/Model/MeshRenderer.h"
@@ -6,11 +6,13 @@
 #include <vector>
 #include <algorithm>
 
-Scene::Scene() : name("Default scene"), hierarchy(new bc::list<GameObject*>()) {
-	std::cout << "[Scene]\t\t\t" << "This:" << this << ", Hierarchy is " << hierarchy << ", Hierarchy size: " << hierarchy->size() << std::endl;
+namespace nuke {
+
+World::World() : name("Default scene"), hierarchy(new bc::list<Atom*>()) {
+	std::cout << "[World]\t\t\t" << "This:" << this << ", Hierarchy is " << hierarchy << ", Hierarchy size: " << hierarchy->size() << std::endl;
 }
 
-GameObject* Scene::Get(const char* name)
+Atom* World::Get(const char* name)
 {
 	for (auto go : GetHierarchy())
 		if (go->GetName() == name)
@@ -18,24 +20,24 @@ GameObject* Scene::Get(const char* name)
 	return nullptr;
 }
 
-bc::list<GameObject*>& Scene::GetHierarchy()
+bc::list<Atom*>& World::GetHierarchy()
 {
 	return *hierarchy;
 }
 
-void Scene::Add(GameObject* go)
+void World::Add(Atom* go)
 {
 	hierarchy->push_back(go);
 }
 
-void Scene::Start()
+void World::Start()
 {
 
 }
 
-void Scene::Update()
+void World::Update()
 {
-	for (GameObject* go : *hierarchy)
+	for (Atom* go : *hierarchy)
 	{
 		go->Update();
 	}
@@ -43,7 +45,7 @@ void Scene::Update()
 
 // --- render pass (one render per camera) ---
 
-static void CollectCameras(bc::list<GameObject*>& gos, std::vector<Camera*>& out)
+static void CollectCameras(bc::list<Atom*>& gos, std::vector<Camera*>& out)
 {
 	for (auto go : gos)
 	{
@@ -54,7 +56,7 @@ static void CollectCameras(bc::list<GameObject*>& gos, std::vector<Camera*>& out
 	}
 }
 
-static void RenderMeshes(bc::list<GameObject*>& gos, iRender* r)
+static void RenderMeshes(bc::list<Atom*>& gos, iRender* r)
 {
 	for (auto go : gos)
 	{
@@ -77,7 +79,7 @@ static void RenderMeshes(bc::list<GameObject*>& gos, iRender* r)
 	}
 }
 
-void Scene::Render(iRender* r)
+void World::Render(iRender* r)
 {
 	if (!r) return;
 
@@ -108,3 +110,4 @@ void Scene::Render(iRender* r)
 		r->endCamera();
 	}
 }
+}  // namespace nuke

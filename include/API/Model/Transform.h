@@ -5,17 +5,19 @@
 #include "Component.h"
 #include "Vector.h"
 
-class Transform : public NukeComponent
+namespace nuke {
+
+class Transform : public Component
 {
 public:
 	Vector3 position;
     Quaternion rotation;            // stored as a quaternion (no gimbal lock)
     Vector3 eulerHint;              // last euler (deg) authored via SetEulerDeg — stable inspector display
     Vector3 scale = {1,1,1};
-    GameObject *go = nullptr;
+    Atom *go = nullptr;
 
-	Transform(GameObject* parent);
-	void Init(GameObject* parent);
+	Transform(Atom* parent);
+	void Init(Atom* parent);
 
 	Vector3 forward();
 	Vector3 right();
@@ -35,5 +37,7 @@ public:
 	void Pause();
 	void Reset();
 };
+
+}  // namespace nuke
 
 #endif // !NUKEE_TRANSFORM_H

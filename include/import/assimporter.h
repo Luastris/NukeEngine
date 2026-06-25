@@ -8,13 +8,15 @@
 #include <API/Model/resdb.h>
 #include <API/Model/MeshRenderer.h>
 
+namespace nuke {
+
 using namespace std;
 
 class AssImporter
 {
 	AssImporter();
 	~AssImporter();
-	GameObject* ImportObject(aiNode* node, const aiScene* scene);
+	Atom* ImportObject(aiNode* node, const aiScene* scene);
 
 public:
 	static AssImporter* getSingleton() {
@@ -24,4 +26,6 @@ public:
 	
 	void Import(const char* path);
 };
+}  // namespace nuke
+
 #endif // ASSIMPORTER_H

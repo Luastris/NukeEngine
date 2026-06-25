@@ -2,6 +2,8 @@
 #ifndef NUKEE_TIME_H
 #define NUKEE_TIME_H
 
+namespace nuke {
+
 class Time
 {
 private:
@@ -77,5 +79,7 @@ public:
 
 	void Run();
 };
+
+}  // namespace nuke
 
 #endif // !NUKEE_TIME_H

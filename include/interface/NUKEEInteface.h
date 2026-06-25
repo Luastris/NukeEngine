@@ -6,6 +6,8 @@ using namespace boost;
 
 #include "AppInstance.h"
 
+namespace nuke {
+
 
 class BOOST_SYMBOL_EXPORT NUKEModule {
 public:
@@ -45,5 +47,7 @@ public:
 	//Function that calls before plugin unloading. E.g. when app closes.
 	virtual void Shutdown() = 0;
 };
+
+}  // namespace nuke
 
 #endif

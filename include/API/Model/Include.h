@@ -29,12 +29,16 @@
 #include "Time.h"
 
 #include "Transform.h"
-#include "GameObject.h"
+#include "Atom.h"
 
 
-#include "Scene.h"
+#include "World.h"
 #include "Game.h"
 #include "Package.h"
 #include "Module.h"
 
+namespace nuke {
+
 // --------------Already defined troouble-----------------
+
+}  // namespace nuke

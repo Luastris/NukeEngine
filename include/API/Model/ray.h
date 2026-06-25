@@ -3,6 +3,8 @@
 #include "Vector.h"
 #include "Collider.h"
 
+namespace nuke {
+
 struct Ray
 {
     Vector3 start;
@@ -13,5 +15,7 @@ struct Ray
 	Ray();
 	bool Collide(Collider collider);
 };
+
+}  // namespace nuke
 
 #endif // RAY_H

@@ -1,5 +1,7 @@
 #include "API/Model/Time.h"
 
+namespace nuke {
+
 Time::Time() {}
 
 Time::~Time() {}
@@ -166,3 +168,4 @@ void Time::Run()
 {
 	Tick();
 }
+}  // namespace nuke

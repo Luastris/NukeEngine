@@ -1,5 +1,7 @@
 #include "backend/lua.h"
 
+namespace nuke {
+
 Lua::Lua() {
 	l = luaL_newstate();
 	bfs::path plugdir("plugins");
@@ -37,3 +39,4 @@ void Lua::doStr(const char* str) {
 lb::LuaRef Lua::getGlobal(const char* var) {
 	return lb::getGlobal(l, var);
 }
+}  // namespace nuke

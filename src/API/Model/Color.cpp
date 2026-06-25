@@ -1,6 +1,8 @@
 #include "API/Model/Color.h"
 #include "API/Model/Vector.h"
 
+namespace nuke {
+
 double r, g, b, a;
 
 Color::Color() {}
@@ -89,3 +91,4 @@ Vector4 Color::toVector4()
 {
 	return Vector4(r, g, b, a);
 }
+}  // namespace nuke

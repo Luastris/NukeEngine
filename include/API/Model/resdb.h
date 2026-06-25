@@ -4,9 +4,11 @@
 #include "Texture.h"
 #include "Material.h"
 #include "Shader.h"
-#include "GameObject.h"
+#include "Atom.h"
 #include <boost/container/list.hpp>
 #include <memory>
+
+namespace nuke {
 
 #ifdef WIN32
 #define uint unsigned int
@@ -23,7 +25,7 @@ public:
     bc::list<Texture*> textures;
     bc::list<Material*> materials;
     bc::list<Shader*> shaders;
-    bc::list<GameObject*> prefabs;
+    bc::list<Atom*> prefabs;
 
     static ResDB* getSingleton(){
         static ResDB instance;
@@ -32,4 +34,6 @@ public:
 
 	std::shared_ptr<uint> loadTexture(const std::string& name);
 };
+}  // namespace nuke
+
 #endif // RESDB_H

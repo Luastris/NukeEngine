@@ -7,6 +7,8 @@
 #include <boost/tuple/tuple.hpp>
 #include <boost/container/map.hpp>
 
+namespace nuke {
+
 namespace bc = boost::container;
 namespace bst = boost;
 namespace btups = boost::tuples;
@@ -25,11 +27,13 @@ public:
 	{
 		static EditorInstance instance;
 		/*if (!instance.currentScene)
-			instance.currentScene = new Scene();
+			instance.currentScene = new World();
 		if (!instance.currentScene->hierarchy)
-			instance.currentScene->hierarchy = new bc::list<GameObject*>();*/
+			instance.currentScene->hierarchy = new bc::list<Atom*>();*/
 		return &instance;
 	}
 };
+
+}  // namespace nuke
 
 #endif // !NUKEE_EDITOR_INSTANCE_H

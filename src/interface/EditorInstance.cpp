@@ -1,5 +1,7 @@
 #include "interface/EditorInstance.h"
 
+namespace nuke {
+
 EditorInstance::EditorInstance() {
 	
 }
@@ -17,3 +19,5 @@ bool EditorInstance::isEditor() { return true; }
 //	cout << "Pushing window \"" << key << "\"" << endl;
 //	//editorWindows->insert(bc::pair<string, bst::function<void()>>(key, fWindow));// make_pair(key, fWindow));
 //}
+
+}  // namespace nuke

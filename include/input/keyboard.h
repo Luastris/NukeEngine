@@ -3,6 +3,8 @@
 #include <boost/container/list.hpp>
 #include <boost/function.hpp>
 
+namespace nuke {
+
 namespace bst = boost;
 namespace bc = bst::container;
 
@@ -45,4 +47,6 @@ public:
     // On Special Key Up
 	KeyBoard* operator|=(bst::function<void(int key, int x, int y)> onSpecialKeyUp);
 };
+}  // namespace nuke
+
 #endif // KEYBOARD_H

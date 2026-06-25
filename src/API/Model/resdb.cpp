@@ -1,5 +1,7 @@
 #include "API/Model/resdb.h"
 
+namespace nuke {
+
 std::shared_ptr<uint> ResDB::loadTexture(const std::string& name)
 {
 	Texture* i = nullptr;
@@ -14,3 +16,4 @@ std::shared_ptr<uint> ResDB::loadTexture(const std::string& name)
 	// TODO: return not empty
 	return std::shared_ptr<uint>();
 }
+}  // namespace nuke

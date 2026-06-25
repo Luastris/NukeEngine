@@ -3,6 +3,8 @@
 #include <boost/container/list.hpp>
 #include <boost/function.hpp>
 
+namespace nuke {
+
 namespace bst = boost;
 namespace bc = boost::container;
 
@@ -37,4 +39,6 @@ public:
 	Mouse* operator&=(bst::function<void(int x, int y)> onMov);
 	Mouse* operator|=(bst::function<void(int x, int y)> onPMov);
 };
+}  // namespace nuke
+
 #endif // MOUSE_H

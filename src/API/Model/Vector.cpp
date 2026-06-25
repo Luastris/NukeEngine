@@ -2,6 +2,8 @@
 #include "API/Model/Color.h"
 #include <sstream>
 
+namespace nuke {
+
 
 Vector2::Vector2() { x = 0; y = 0; }
 Vector2::Vector2(double x, double y)
@@ -660,3 +662,5 @@ Color Vector4::toColor()
 {
 	return Color(x, y, z, w);
 }
+
+}  // namespace nuke

@@ -6,6 +6,8 @@
 #include <boost/tokenizer.hpp>
 #include <functional>
 
+namespace nuke {
+
  struct MenuItem
 {
 	std::string name;
@@ -121,4 +123,6 @@
 
 
 };
+}  // namespace nuke
+
 #endif // !GDK_EDITOR_MENU_ITEM_H

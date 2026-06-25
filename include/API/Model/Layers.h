@@ -2,6 +2,8 @@
 #ifndef NUKEE_LAYERS_H
 #define NUKEE_LAYERS_H
 
+namespace nuke {
+
 const unsigned int  	NUKEE_LAYER_DEFAULT	= 1,
                         NUKEE_LAYER_EDITOR	= 2,
                         NUKEE_LAYER_SKY		= 4,
@@ -25,4 +27,6 @@ enum Layer
     L_WATER = NUKEE_LAYER_WATER,
     L_CUSTOM = NUKEE_LAYER_CUSTOM
 };
+}  // namespace nuke
+
 #endif

@@ -1,5 +1,5 @@
 #include "API/Model/Transform.h"
-#include "API/Model/GameObject.h"
+#include "API/Model/Atom.h"
 #include "API/Model/Vector.h"
 
 #include <glm/glm.hpp>
@@ -13,18 +13,20 @@
 #include <math.h>
 
 #include <iostream>
+
+namespace nuke {
 using namespace std;
 
 // engine Quaternion (x,y,z,w) <-> glm::quat (w,x,y,z)
 static glm::quat ToGlm(const Quaternion& q) { return glm::quat((float)q.w, (float)q.x, (float)q.y, (float)q.z); }
 static Quaternion FromGlm(const glm::quat& g) { return Quaternion(g.x, g.y, g.z, g.w); }
 
-Transform::Transform(GameObject* parent)
+Transform::Transform(Atom* parent)
 {
 	Init(parent);
 }
 
-void Transform::Init(GameObject* parent)
+void Transform::Init(Atom* parent)
 {
 	go = parent;
 }
@@ -120,3 +122,4 @@ Quaternion Transform::globalRotation() {
 Vector3 Transform::globalScale() {
 	return Vector3((this->go->GetParent()) ? (this->scale * this->go->GetParent()->GetTransform().globalScale()) : (this->scale));
 }
+}  // namespace nuke

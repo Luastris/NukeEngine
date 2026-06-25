@@ -6,6 +6,8 @@
 #include <boost/dll.hpp>
 #include <iostream>
 
+namespace nuke {
+
 namespace bfs = boost::filesystem;
 using namespace std;
 
@@ -89,3 +91,5 @@ void UnloadRenderModule()
 		g_renderModule.reset();
 	}
 }
+
+}  // namespace nuke

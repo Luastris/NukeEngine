@@ -6,6 +6,8 @@
 #include <imgui/stb_rect_pack.h>
 #include "config.h"
 
+namespace nuke {
+
 class GUI
 {
 private:
@@ -23,4 +25,6 @@ public:
 	void setup(ImGuiContext* context);
 	void setupDefault(ImGuiContext* context);
 };
+}  // namespace nuke
+
 #endif // GUI_H

@@ -7,33 +7,35 @@ namespace bc = boost::container;
 #include "Transform.h"
 #include "Layers.h"
 #include "ID.h"
+
+namespace nuke {
 //
-//template class bc::list<NukeComponent*>;
-//template class bc::list<GameObject*>;
+//template class bc::list<Component*>;
+//template class bc::list<Atom*>;
 
 #pragma pack(push, 1)
-class GameObject
+class Atom
 {
 protected:
 	
 
 public:
 	
-	std::string name = "GameObject";
+	std::string name = "Atom";
 	std::string tag = "Untagged";
-	GameObject* parent = nullptr;
+	Atom* parent = nullptr;
 	Transform transform = Transform(this);
 	
 	ID id;
 	
 	int layer = Layer::L_DEFAULT;
 
-    bc::list<NukeComponent*> components = bc::list<NukeComponent*>();
-    bc::list<GameObject*> children = bc::list<GameObject*>();
+    bc::list<Component*> components = bc::list<Component*>();
+    bc::list<Atom*> children = bc::list<Atom*>();
 
-	GameObject();
-	GameObject(const char* name);
-	~GameObject();
+	Atom();
+	Atom(const char* name);
+	~Atom();
 
 
 	std::string GetName();
@@ -44,7 +46,7 @@ public:
 	
 	template<class T>
 	T* GetComponent(){
-		for (NukeComponent* cmp : this->components)
+		for (Component* cmp : this->components)
 		{
 			if (auto res = dynamic_cast<T*>(cmp))
 				return res;
@@ -62,16 +64,16 @@ public:
 		return lst;
 	}
 
-	void AddComponent(NukeComponent* cmp);
+	void AddComponent(Component* cmp);
 
-	void Init(GameObject* parent);
+	void Init(Atom* parent);
 	void FixedUpdate();
 	void Update();
 
-	void SetParent(GameObject* newparent);
-	GameObject* GetParent();
+	void SetParent(Atom* newparent);
+	Atom* GetParent();
 
-	void AddChild(GameObject* newChild);
+	void AddChild(Atom* newChild);
 
     template <class T>
 	void Update() {
@@ -89,4 +91,6 @@ private:
 
 };
 #pragma pack(pop)
+}  // namespace nuke
+
 #endif // !NUKEE_GAMEOBJECT_H

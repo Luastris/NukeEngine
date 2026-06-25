@@ -192,7 +192,7 @@
     <ClInclude Include="include\API\Model\Color.h" />
     <ClInclude Include="include\API\Model\Component.h" />
     <ClInclude Include="include\API\Model\Game.h" />
-    <ClInclude Include="include\API\Model\GameObject.h" />
+    <ClInclude Include="include\API\Model\Atom.h" />
     <ClInclude Include="include\API\Model\ID.h" />
     <ClInclude Include="include\API\Model\Include.h" />
     <ClInclude Include="include\API\Model\Layers.h" />
@@ -206,7 +206,7 @@
     <ClInclude Include="include\API\Model\ray.h" />
     <ClInclude Include="include\API\Model\resdb.h" />
     <ClInclude Include="include\API\Model\Resource.h" />
-    <ClInclude Include="include\API\Model\Scene.h" />
+    <ClInclude Include="include\API\Model\World.h" />
     <ClInclude Include="include\API\Model\Script.h" />
     <ClInclude Include="include\API\Model\Shader.h" />
     <ClInclude Include="include\API\Model\Texture.h" />
@@ -249,7 +249,7 @@
     <ClCompile Include="src\API\Model\Color.cpp" />
     <ClCompile Include="src\API\Model\Component.cpp" />
     <ClCompile Include="src\API\Model\Game.cpp" />
-    <ClCompile Include="src\API\Model\GameObject.cpp" />
+    <ClCompile Include="src\API\Model\Atom.cpp" />
     <ClCompile Include="src\API\Model\ID.cpp" />
     <ClCompile Include="src\API\Model\Layers.cpp" />
     <ClCompile Include="src\API\Model\Light.cpp" />
@@ -262,7 +262,7 @@
     <ClCompile Include="src\API\Model\ray.cpp" />
     <ClCompile Include="src\API\Model\resdb.cpp" />
     <ClCompile Include="src\API\Model\Resource.cpp" />
-    <ClCompile Include="src\API\Model\Scene.cpp" />
+    <ClCompile Include="src\API\Model\World.cpp" />
     <ClCompile Include="src\API\Model\Script.cpp" />
     <ClCompile Include="src\API\Model\Shader.cpp" />
     <ClCompile Include="src\API\Model\Texture.cpp" />

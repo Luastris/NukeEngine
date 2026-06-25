@@ -1,5 +1,7 @@
 #include "config.h"
 
+namespace nuke {
+
 #define PREFIX_CONF "[config]\t\t"
 struct confColor luaGetColor(lb::LuaRef ref, const char* name) {
 	auto col = ref[name];
@@ -129,3 +131,4 @@ Config::Config() {
 	//reload(this);
 }
 Config::~Config() {}
+}  // namespace nuke

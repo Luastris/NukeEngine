@@ -3,6 +3,8 @@
 #include <backend/lua.h>
 #include <string>
 
+namespace nuke {
+
 struct NukeWindow{
     int w = 1280, h = 720;
     std::string mainFont;
@@ -101,4 +103,6 @@ public:
 	void reload(Config* instance);
 	static Config* getSingleton();
 };
+}  // namespace nuke
+
 #endif // CONFIG_H

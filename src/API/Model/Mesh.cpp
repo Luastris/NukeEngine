@@ -1,5 +1,7 @@
 #include "API/Model/Mesh.h"
 
+namespace nuke {
+
 Mesh::Mesh() {
 	children.clear();
 }
@@ -68,3 +70,4 @@ Mesh* Mesh::CreateCube() {
 	strcpy(m->name, "Cube");
 	return m;
 }
+}  // namespace nuke

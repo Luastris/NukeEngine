@@ -19,9 +19,14 @@ namespace bc = boost::container;
 #include <Windows.h>
 #endif // USE_WINAPI
 
+namespace nuke {
+
 static bc::vector<boost::shared_ptr<NUKEModule>> modules;
 
 void InitModules(AppInstance* instance);
 void UnloadModules();
+
+}  // namespace nuke
+
 #endif // !NUKE_MODULAR_H
 

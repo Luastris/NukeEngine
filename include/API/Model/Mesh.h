@@ -8,6 +8,8 @@
 #include <memory>
 #include "../../../NukeEngine.h"
 
+namespace nuke {
+
 namespace bc = boost::container;
 //class Mesh;
 //template class bc::list<Mesh*>;
@@ -32,4 +34,6 @@ public:
 	// Primitive factories (procedural geometry, no asset needed).
 	static Mesh* CreateCube();
 };
+}  // namespace nuke
+
 #endif // !NUKEE_MESH_H

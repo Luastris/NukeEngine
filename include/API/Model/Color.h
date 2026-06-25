@@ -1,6 +1,8 @@
 #pragma once
 #ifndef NUKEE_COLOR_H
 #define NUKEE_COLOR_H
+
+namespace nuke {
 class Color
 {
 public:
@@ -36,4 +38,6 @@ public:
 
     class Vector4 toVector4();
 };
+}  // namespace nuke
+
 #endif // !NUKEE_COLOR_H

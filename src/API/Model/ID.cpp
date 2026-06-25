@@ -1,5 +1,7 @@
 #include "API/Model/ID.h"
 
+namespace nuke {
+
 ID::ID()
 {
 	generate();
@@ -14,3 +16,4 @@ void ID::generate()
 {
 	id = reinterpret_cast<long>(this);
 }
+}  // namespace nuke

@@ -1,5 +1,7 @@
 #include "input/keyboard.h"
 
+namespace nuke {
+
 KeyBoard::KeyBoard() {}
 KeyBoard::~KeyBoard() {}
 
@@ -69,3 +71,5 @@ KeyBoard* KeyBoard::operator|=(bst::function<void(int key, int x, int y)> onSpec
 	return this;
 }
 
+
+}  // namespace nuke

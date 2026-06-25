@@ -3,7 +3,9 @@
 #define NUKEE_LIGHT_H
 #include "Include.h"
 
-class Light : public NukeComponent
+namespace nuke {
+
+class Light : public Component
 {
 	enum LightType 
 	{
@@ -17,4 +19,6 @@ public:
 	Color color;
 	LightType lightType = LightType::directional;
 };
+}  // namespace nuke
+
 #endif // !NUKEE_LIGHT_H

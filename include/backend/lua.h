@@ -9,6 +9,8 @@
 #include <boost/filesystem.hpp>
 #include <iostream>
 
+namespace nuke {
+
 namespace bst = boost;
 namespace bfs = boost::filesystem;
 namespace lb = luabridge;
@@ -33,4 +35,6 @@ public:
 	void doStr(const char* str);
 	lb::LuaRef getGlobal(const char* var);
 };
+}  // namespace nuke
+
 #endif // LUA_H

@@ -2,4 +2,8 @@
 #ifndef NUKEE_MATH_H
 #define NUKEE_MATH_H
 
+namespace nuke {
+
+}  // namespace nuke
+
 #endif

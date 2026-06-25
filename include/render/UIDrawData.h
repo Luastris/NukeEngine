@@ -3,6 +3,8 @@
 #define NUKE_UIDRAWDATA_H
 #include <cstdint>
 
+namespace nuke {
+
 // Backend-neutral 2D draw data for immediate-mode UI.
 //
 // This is the ONLY thing that connects a UI module to a renderer module. It
@@ -45,5 +47,7 @@ struct NukeUIDrawData
 	float                 dispPos[2];   // top-left, framebuffer space
 	float                 dispSize[2];  // width, height (for ortho + scissor)
 };
+
+}  // namespace nuke
 
 #endif // !NUKE_UIDRAWDATA_H

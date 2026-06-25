@@ -3,7 +3,9 @@
 #define NUKEE_MESHRENDERER_H
 #include "API/Model/Include.h"
 
-class MeshRenderer : public NukeComponent
+namespace nuke {
+
+class MeshRenderer : public Component
 {
 
 public:
@@ -12,7 +14,7 @@ public:
 
 	MeshRenderer();
 
-	void Init(GameObject* parent);
+	void Init(Atom* parent);
 
 	void Destroy();
 
@@ -25,4 +27,6 @@ public:
 	void Reset();
 
 };
+}  // namespace nuke
+
 #endif // !NUKEE_MESHRENDERER_h

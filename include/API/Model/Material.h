@@ -6,6 +6,8 @@
 #include "Shader.h"
 #include <assimp/material.h>
 
+namespace nuke {
+
 using namespace std;
 
 class Material
@@ -21,4 +23,6 @@ public:
 
 	void ImportAiMaterial(aiMaterial* m);
 };
+}  // namespace nuke
+
 #endif // !NUKEE_MATERIAL_H

@@ -1,22 +1,24 @@
 #pragma once
 #ifndef NUKEE_COMPONENT_H
 #define NUKEE_COMPONENT_H
-class GameObject;
+
+namespace nuke {
+class Atom;
 class Transform;
 class Script;
 class Camera;
 class Light;
 
 
-class NukeComponent
+class Component
 {
 public:
     bool enabled = true;
 	Transform* transform = nullptr;
-	GameObject* gameobject = nullptr;
+	Atom* gameobject = nullptr;
     char* name;
-    NukeComponent(const char* _name = "NukeComponent") : name((char*)_name){}
-	virtual void Init(GameObject* parent) = 0;
+    Component(const char* _name = "Component") : name((char*)_name){}
+	virtual void Init(Atom* parent) = 0;
 	virtual void Destroy() = 0;
 	virtual void Update() = 0;
 	virtual void FixedUpdate() = 0;
@@ -24,4 +26,6 @@ public:
 	virtual void Reset() = 0;
 
 };
+}  // namespace nuke
+
 #endif

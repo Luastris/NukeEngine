@@ -1,5 +1,7 @@
 #include "interface/Modular.h"
 
+namespace nuke {
+
 void InitModules(AppInstance* instance)
 {
 	if (!bfs::exists(bfs::path(bfs::current_path().concat("/modules"))))
@@ -37,3 +39,4 @@ void UnloadModules()
 	}
 	modules.clear();
 }
+}  // namespace nuke

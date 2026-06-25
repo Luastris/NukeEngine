@@ -5,7 +5,9 @@
 #include "render/irender.h"
 #include <boost/bind.hpp>
 
-class Camera : public NukeComponent
+namespace nuke {
+
+class Camera : public Component
 {
 private:
 	boost::thread* renderThread;
@@ -20,7 +22,7 @@ public:
 	unsigned long int renderLayers;
     bool freeMode;
 
-    // Per-camera render contract (see Scene::Render).
+    // Per-camera render contract (see World::Render).
     uint64_t renderTarget = 0;                       // iRender RT id; 0 = backbuffer
     int      depth = 0;                              // render order (lower drawn first)
     float    clearColor[4] = {0.20f, 0.30f, 0.45f, 1.0f};
@@ -29,7 +31,7 @@ public:
 
 	Camera(iRender* renderer);
 
-	Camera(GameObject* parent, iRender* renderer);
+	Camera(Atom* parent, iRender* renderer);
 
 	Vector3 ScreenPosToWorldRay(
 		int mouseX, int mouseY,             // Mouse position, in pixels, from bottom-left corner of the window
@@ -51,11 +53,13 @@ public:
 	void ProcessKeyboard();
 
 
-	void Init(GameObject* parent);
+	void Init(Atom* parent);
 	void FixedUpdate();
 	void Update();
 	void Reset();
 	void Pause();
 	void Destroy();
 };
+}  // namespace nuke
+
 #endif // !NUKEE_CAMERA_H

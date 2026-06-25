@@ -3,6 +3,8 @@
 #define NUKEE_EDITOR_MENU_STRIP_H
 #include "MenuItem.h"
 
+namespace nuke {
+
 struct MenuStrip
 {
 	boost::container::list<MenuItem*> strip;
@@ -87,4 +89,6 @@ struct MenuStrip
 				}
 	}
 };
+}  // namespace nuke
+
 #endif // !NUKEE_EDITOR_MENU_STRIP_H

@@ -1,8 +1,10 @@
 #include "interface/AppInstance.h"
 
+namespace nuke {
+
 AppInstance::AppInstance()
 {
-	//currentScene = new Scene();
+	//currentScene = new World();
 	keyboard = KeyBoard::getSingleton();
 	mouse = Mouse::getSingleton();
 	//render = iRender::getSingleton();
@@ -57,3 +59,5 @@ void AppInstance::PushWindow(const char* key, boost::function<void()> fWindow) {
 void AppInstance::PopWindow(string key) {
 	editorWindows->erase(key);
 }
+
+}  // namespace nuke

@@ -2,6 +2,8 @@
 #ifndef NUKEE_ID_H
 #define NUKEE_ID_H
 
+namespace nuke {
+
 class ID {
 public:
     long id;
@@ -11,4 +13,6 @@ public:
 
 	void generate();
 };
+}  // namespace nuke
+
 #endif // !NUKEE_ID_H

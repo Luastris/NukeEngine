@@ -1,5 +1,7 @@
 #include "input/mouse.h"
 
+namespace nuke {
+
 Mouse::Mouse() {}
 Mouse::~Mouse() {}
 
@@ -59,3 +61,4 @@ Mouse* Mouse::operator|=(bst::function<void(int x, int y)> onPMov)
 	_onPMove.push_back(onPMov);
 	return this;
 }
+}  // namespace nuke

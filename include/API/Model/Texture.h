@@ -2,6 +2,8 @@
 #ifndef NUKEE_TEXTURE_H
 #define NUKEE_TEXTURE_H
 
+namespace nuke {
+
 class Texture
 {
 public:
@@ -13,4 +15,6 @@ public:
 
 	Texture();
 };
+}  // namespace nuke
+
 #endif // !NUKEE_TEXTURE_H

@@ -1,5 +1,7 @@
 #include "gui/gui.h"
 
+namespace nuke {
+
 GUI::GUI() {}
 GUI::~GUI() {}
 
@@ -138,3 +140,5 @@ void GUI::setupDefault(ImGuiContext* context) {
 	style->Colors[ImGuiCol_TextSelectedBg] = ImVec4(0.25f, 1.00f, 0.00f, 0.43f);
 	style->Colors[ImGuiCol_ModalWindowDarkening] = ImVec4(1.00f, 0.98f, 0.95f, 0.73f);
 }
+
+}  // namespace nuke

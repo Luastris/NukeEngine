@@ -21,6 +21,8 @@
 #include <boost/config.hpp>
 #include "../render/irender.h"
 
+namespace nuke {
+
 class BOOST_SYMBOL_EXPORT NUKERenderModule
 {
 public:
@@ -49,5 +51,7 @@ public:
 
 	virtual ~NUKERenderModule() {}
 };
+
+}  // namespace nuke
 
 #endif // !NUKE_RENDER_MODULE_H

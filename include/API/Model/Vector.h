@@ -9,6 +9,8 @@
 #include <glm/gtx/quaternion.hpp>
 #include <glm/gtc/quaternion.hpp>
 
+namespace nuke {
+
 class Vector2
 {
 public:
@@ -147,6 +149,8 @@ public:
 	Quaternion UnitQuaternion();
 };
 
+
+}  // namespace nuke
 
 #endif // !NUKEE_VECTOR_H
 
