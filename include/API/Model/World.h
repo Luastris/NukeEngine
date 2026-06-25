@@ -33,6 +33,8 @@ public:
 
 	// Text (.nuworld JSON) scene serialization via reflection. The editor camera is
 	// excluded from save and preserved across load (it is editor infrastructure).
+	std::string SaveToString();                  // serialize to JSON text (also used for PIE snapshots)
+	void        LoadFromString(const std::string& data);
 	void SaveToFile(const std::string& path);
 	void LoadFromFile(const std::string& path);
 };

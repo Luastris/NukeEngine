@@ -239,7 +239,7 @@ static Atom* LoadAtom(const json& j)
 	return go;
 }
 
-void World::SaveToFile(const std::string& path)
+std::string World::SaveToString()
 {
 	json j;
 	j["type"] = "World";
@@ -252,18 +252,14 @@ void World::SaveToFile(const std::string& path)
 		SaveAtom(go, gj);
 		j["atoms"].push_back(gj);
 	}
-	std::ofstream f(path);
-	if (f) f << j.dump(2);
-	std::cout << "[World]\t\t\t" << "Saved " << j["atoms"].size() << " atom(s) to " << path << std::endl;
+	return j.dump(2);
 }
 
-void World::LoadFromFile(const std::string& path)
+void World::LoadFromString(const std::string& data)
 {
-	std::ifstream f(path);
-	if (!f) { std::cout << "[World]\t\t\t" << "LoadFromFile: cannot open " << path << std::endl; return; }
-	json j; f >> j;
-	// drop the current scene but keep the editor camera (TODO: properly destroy atoms)
-	for (auto it = hierarchy->begin(); it != hierarchy->end(); )
+	json j = json::parse(data, nullptr, false);
+	if (j.is_discarded()) { std::cout << "[World]\t\t\t" << "LoadFromString: bad JSON" << std::endl; return; }
+	for (auto it = hierarchy->begin(); it != hierarchy->end(); )   // keep editor camera, drop the rest
 	{
 		if ((*it)->GetName() == "Editor Camera") ++it;
 		else it = hierarchy->erase(it);
@@ -271,6 +267,21 @@ void World::LoadFromFile(const std::string& path)
 	if (j.contains("atoms"))
 		for (const json& gj : j["atoms"])
 			Add(LoadAtom(gj));
+}
+
+void World::SaveToFile(const std::string& path)
+{
+	std::ofstream f(path);
+	if (f) f << SaveToString();
+	std::cout << "[World]\t\t\t" << "Saved to " << path << std::endl;
+}
+
+void World::LoadFromFile(const std::string& path)
+{
+	std::ifstream f(path);
+	if (!f) { std::cout << "[World]\t\t\t" << "LoadFromFile: cannot open " << path << std::endl; return; }
+	std::string data((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+	LoadFromString(data);
 	std::cout << "[World]\t\t\t" << "Loaded " << path << std::endl;
 }
 }  // namespace nuke
