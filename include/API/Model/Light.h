@@ -1,11 +1,12 @@
 #pragma once
 #ifndef NUKEE_LIGHT_H
 #define NUKEE_LIGHT_H
+#include "NukeAPI.h"
 #include "Include.h"
 
 namespace nuke {
 
-class Light : public Component
+class NUKEENGINE_API Light : public Component
 {
 	enum LightType 
 	{

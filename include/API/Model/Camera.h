@@ -1,6 +1,7 @@
 #pragma once
 #ifndef NUKEE_CAMERA_H
 #define NUKEE_CAMERA_H
+#include "NukeAPI.h"
 #include <boost/thread.hpp>
 #include "render/irender.h"
 #include <boost/bind.hpp>
@@ -8,7 +9,7 @@
 
 namespace nuke {
 
-class Camera : public Component
+class NUKEENGINE_API Camera : public Component
 {
 	NUKE_CLASS(Camera, Component)
 private:

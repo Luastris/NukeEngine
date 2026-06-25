@@ -1,6 +1,7 @@
 #pragma once
 #ifndef NUKEE_APPINSTANCE_H
 #define NUKEE_APPINSTANCE_H
+#include "NukeAPI.h"
 #include <boost/thread.hpp>
 #include <boost/container/list.hpp>
 #include <boost/container/map.hpp>
@@ -16,7 +17,7 @@ namespace nuke {
 
 namespace bc = boost::container;
 
-class AppInstance
+class NUKEENGINE_API AppInstance
 {
 protected:
 	AppInstance();

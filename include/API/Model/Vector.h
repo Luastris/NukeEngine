@@ -1,6 +1,7 @@
 #pragma once
 #ifndef NUKEE_VECTOR_H
 #define NUKEE_VECTOR_H
+#include "NukeAPI.h"
 #include <string>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -11,7 +12,7 @@
 
 namespace nuke {
 
-class Vector2
+class NUKEENGINE_API Vector2
 {
 public:
 	double x, y;
@@ -42,7 +43,7 @@ public:
     class Vector4 toVector4();
 };
 
-class Vector3 : public Vector2
+class NUKEENGINE_API Vector3 : public Vector2
 {
 public:
 	double z;
@@ -86,7 +87,7 @@ public:
 };
 
 
-class Vector4 : public Vector3
+class NUKEENGINE_API Vector4 : public Vector3
 {
 public:
 	double w;
@@ -124,7 +125,7 @@ public:
     class Color toColor();
 };
 
-class Quaternion : public Vector4
+class NUKEENGINE_API Quaternion : public Vector4
 {
 public:
 	Quaternion();

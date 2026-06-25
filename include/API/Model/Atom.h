@@ -1,6 +1,7 @@
 #pragma once
 #ifndef NUKEE_GAMEOBJECT_H
 #define NUKEE_GAMEOBJECT_H
+#include "NukeAPI.h"
 #include <boost/container/list.hpp>
 namespace bc = boost::container;
 
@@ -14,7 +15,7 @@ namespace nuke {
 //template class bc::list<Atom*>;
 
 #pragma pack(push, 1)
-class Atom
+class NUKEENGINE_API Atom
 {
 protected:
 	

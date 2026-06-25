@@ -1,6 +1,7 @@
 #pragma once
 #ifndef NUKEE_EDITOR_INSTANCE_H
 #define NUKEE_EDITOR_INSTANCE_H
+#include "NukeAPI.h"
 #include "AppInstance.h"
 #include "EditorMenu/MenuStrip.h"
 #include <boost/container/list.hpp>
@@ -13,7 +14,7 @@ namespace bc = boost::container;
 namespace bst = boost;
 namespace btups = boost::tuples;
 
-class EditorInstance
+class NUKEENGINE_API EditorInstance
 {
 protected:
 	EditorInstance();

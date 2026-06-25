@@ -1,6 +1,7 @@
 #pragma once
 #ifndef NUKEE_REFLECT_H
 #define NUKEE_REFLECT_H
+#include "NukeAPI.h"
 // Lightweight reflection: declare fields with NUKE_PROP and they auto-(de)serialize
 // (project + save) and auto-draw in the inspector. C++ has no built-in reflection,
 // so a per-type schema is built at static-init time from member pointers.
@@ -48,12 +49,12 @@ struct TypeInfo {
 };
 
 // Registry (defined in Reflect.cpp).
-TypeInfo& Registry_GetOrCreate(const std::string& name);
-TypeInfo* Registry_Find(const std::string& name);
+NUKEENGINE_API TypeInfo& Registry_GetOrCreate(const std::string& name);
+NUKEENGINE_API TypeInfo* Registry_Find(const std::string& name);
 
 // Defined in the generated Reflect.gen.cpp — registers every reflected type's schema +
 // factory. Call once (from World's ctor) so the generated .obj is linked and runs.
-bool NukeReflectInit();
+NUKEENGINE_API bool NukeReflectInit();
 
 // One TypeInfo per reflected type T (lazily created on first use).
 template<class T>

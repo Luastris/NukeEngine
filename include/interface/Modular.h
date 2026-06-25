@@ -1,6 +1,7 @@
 #pragma once
 #ifndef NUKE_MODULAR_H
 #define NUKE_MODULAR_H
+#include "NukeAPI.h"
 #include <interface/NUKEEInteface.h>
 
 #define BOOST_FILESYSTEM_VERSION 3
@@ -23,8 +24,8 @@ namespace nuke {
 
 static bc::vector<boost::shared_ptr<NUKEModule>> modules;
 
-void InitModules(AppInstance* instance);
-void UnloadModules();
+NUKEENGINE_API void InitModules(AppInstance* instance);
+NUKEENGINE_API void UnloadModules();
 
 }  // namespace nuke
 

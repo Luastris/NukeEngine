@@ -1,5 +1,6 @@
 #ifndef KEYBOARD_H
 #define KEYBOARD_H
+#include "NukeAPI.h"
 #include <boost/container/list.hpp>
 #include <boost/function.hpp>
 
@@ -8,7 +9,7 @@ namespace nuke {
 namespace bst = boost;
 namespace bc = bst::container;
 
-class KeyBoard
+class NUKEENGINE_API KeyBoard
 {
     friend class NukeOGL;
     friend class NukeBGFX;

@@ -6,7 +6,7 @@
 
 namespace nuke {
 
-class MeshRenderer : public Component
+class NUKEENGINE_API MeshRenderer : public Component
 {
 	NUKE_CLASS(MeshRenderer, Component)
 	// mesh/mat are asset references — serialized by GUID once the asset system exists.

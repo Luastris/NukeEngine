@@ -1,5 +1,6 @@
 #ifndef ASSIMPORTER_H
 #define ASSIMPORTER_H
+#include "NukeAPI.h"
 #include <iostream>
 #include <assimp/Importer.hpp>
 #include <assimp/mesh.h>
@@ -12,7 +13,7 @@ namespace nuke {
 
 using namespace std;
 
-class AssImporter
+class NUKEENGINE_API AssImporter
 {
 	AssImporter();
 	~AssImporter();

@@ -1,6 +1,7 @@
 #pragma once
 #ifndef NUKE_RENDER_MODULAR_H
 #define NUKE_RENDER_MODULAR_H
+#include "NukeAPI.h"
 #include "RenderModule.h"
 #include <string>
 
@@ -12,10 +13,10 @@ namespace nuke {
 // preferred id is not found but other render modules exist, falls back to the
 // first one. Returns the created iRender* (kept alive together with the loaded
 // module) or nullptr if no render module is available.
-iRender* LoadRenderModule(const std::string& preferredId = "");
+NUKEENGINE_API iRender* LoadRenderModule(const std::string& preferredId = "");
 
 // Destroys the renderer and releases the render module.
-void UnloadRenderModule();
+NUKEENGINE_API void UnloadRenderModule();
 
 }  // namespace nuke
 

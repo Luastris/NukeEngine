@@ -12,20 +12,30 @@ void InitModules(AppInstance* instance)
 
 	for (auto& p : boost::filesystem::directory_iterator(bfs::current_path().concat("/modules")))
 	{
-		if (!bfs::is_directory(p.path()))
+		if (bfs::is_directory(p.path()))
+			continue;
+		auto ext = p.path().extension().string();
+		if (ext != ".dll" && ext != ".so")
+			continue;
+		try
 		{
-			//cout << p.path().extension().concat("\n").generic_string().c_str() << endl;
-			if (p.path().extension() == ".so")
-			{
-				cout << p.path().filename().concat("\n").generic_string().c_str() << endl;
-				boost::shared_ptr<NUKEModule> plugin;
-				std::string s = "";
-				plugin = dll::import_symbol<NUKEModule>("modules/" + p.path().filename().generic_string(), "plugin");
-				cout << plugin << endl;
-				plugin.get()->modulePath = p.path().generic_string();
-				modules.push_back(plugin);
-				boost::thread(boost::bind(&NUKEModule::Run, plugin.get(), instance));
-			}
+			// Extension plugins export an unmangled "plugin" symbol; render modules export
+			// "renderModule" instead — skip those (and any other non-plugin DLL).
+			boost::dll::shared_library lib(p.path().string());
+			if (!lib.has("plugin"))
+				continue;
+
+			auto plugin = boost::dll::import_symbol<NUKEModule>(p.path().string(), "plugin");
+			plugin->modulePath = p.path().generic_string();
+			modules.push_back(plugin);
+			cout << "[Modular]\tloaded plugin '" << plugin->title << "' from "
+			     << p.path().filename().string() << endl;
+			boost::thread(boost::bind(&NUKEModule::Run, plugin.get(), instance));
+		}
+		catch (const std::exception& e)
+		{
+			cout << "[Modular]\tfailed to load " << p.path().filename().string()
+			     << ": " << e.what() << endl;
 		}
 	}
 }

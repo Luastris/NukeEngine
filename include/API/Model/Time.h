@@ -1,10 +1,11 @@
 #pragma once
 #ifndef NUKEE_TIME_H
 #define NUKEE_TIME_H
+#include "NukeAPI.h"
 
 namespace nuke {
 
-class Time
+class NUKEENGINE_API Time
 {
 private:
 	Time();

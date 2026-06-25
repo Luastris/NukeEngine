@@ -10,24 +10,7 @@
 namespace bst = boost;
 namespace bc = bst::container;
 
-#ifdef NUKEENGINE_EXPORTS
-#ifdef NUKEENGINE_API
-#undef NUKEENGINE_API
-#endif
-#define NUKEENGINE_API __declspec(dllexport)
-#include <boost/config.hpp>
-//
-//template<typename T> class
-//NUKEENGINE_API Func : bst::function<T> {};
-//template<typename T> class
-//NUKEENGINE_API List : public bc::list<T> {};
-//template class bst::function<void(int, int)>;
-//template class bst::function<void(int, int, int, int)>;
-//template class bst::function<void(int, int, int)>;
-//template class bst::function<void(unsigned char, int, int)>;
-#else
-#define NUKEENGINE_API __declspec(dllimport)
-#endif
+#include "NukeAPI.h"   // single source of truth for NUKEENGINE_API (keyed on NUKEENGINE_EXPORTS)
 
 #ifdef _WINDOWS
 #define strdup _strdup

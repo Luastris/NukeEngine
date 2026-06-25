@@ -1,6 +1,7 @@
 #pragma once
 #ifndef NUKEE_SCENE_H
 #define NUKEE_SCENE_H
+#include "NukeAPI.h"
 #include "Atom.h"
 #include <memory>
 
@@ -8,7 +9,7 @@ namespace nuke {
 
 class iRender;
 
-class World
+class NUKEENGINE_API World
 {
 protected:
 	bc::list<Atom*> *hierarchy = nullptr;

@@ -1,6 +1,7 @@
 #pragma once
 #ifndef NUKEE_COMPONENT_H
 #define NUKEE_COMPONENT_H
+#include "NukeAPI.h"
 
 namespace nuke {
 class Atom;
@@ -11,7 +12,7 @@ class Light;
 struct TypeInfo;   // reflection
 
 
-class Component
+class NUKEENGINE_API Component
 {
 public:
     bool enabled = true;

@@ -1,6 +1,7 @@
 #pragma once
 #ifndef NUKEE_MATERIAL_H
 #define NUKEE_MATERIAL_H
+#include "NukeAPI.h"
 #include <iostream>
 #include "Texture.h"
 #include "Shader.h"
@@ -10,7 +11,7 @@ namespace nuke {
 
 using namespace std;
 
-class Material
+class NUKEENGINE_API Material
 {
 public:
     char* name;

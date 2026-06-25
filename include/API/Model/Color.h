@@ -1,9 +1,10 @@
 #pragma once
 #ifndef NUKEE_COLOR_H
 #define NUKEE_COLOR_H
+#include "NukeAPI.h"
 
 namespace nuke {
-class Color
+class NUKEENGINE_API Color
 {
 public:
 	double r, g, b, a;

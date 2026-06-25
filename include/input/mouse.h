@@ -1,5 +1,6 @@
 #ifndef MOUSE_H
 #define MOUSE_H
+#include "NukeAPI.h"
 #include <boost/container/list.hpp>
 #include <boost/function.hpp>
 
@@ -8,7 +9,7 @@ namespace nuke {
 namespace bst = boost;
 namespace bc = boost::container;
 
-class Mouse
+class NUKEENGINE_API Mouse
 {
     friend class NukeOGL;
     friend class NukeBGFX;

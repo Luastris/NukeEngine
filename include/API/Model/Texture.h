@@ -1,10 +1,11 @@
 #pragma once
 #ifndef NUKEE_TEXTURE_H
 #define NUKEE_TEXTURE_H
+#include "NukeAPI.h"
 
 namespace nuke {
 
-class Texture
+class NUKEENGINE_API Texture
 {
 public:
     unsigned int id;

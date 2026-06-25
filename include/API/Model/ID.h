@@ -1,10 +1,11 @@
 #pragma once
 #ifndef NUKEE_ID_H
 #define NUKEE_ID_H
+#include "NukeAPI.h"
 
 namespace nuke {
 
-class ID {
+class NUKEENGINE_API ID {
 public:
     long id;
 

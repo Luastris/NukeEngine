@@ -1,6 +1,7 @@
 #pragma once
 #ifndef NUKEE_TRANSFORM_H
 #define NUKEE_TRANSFORM_H
+#include "NukeAPI.h"
 
 #include "Component.h"
 #include "Vector.h"
@@ -8,7 +9,7 @@
 
 namespace nuke {
 
-class Transform : public Component
+class NUKEENGINE_API Transform : public Component
 {
 	NUKE_CLASS_NOCREATE(Transform, Component)
 public:
