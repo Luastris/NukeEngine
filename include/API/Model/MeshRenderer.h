@@ -2,12 +2,14 @@
 #ifndef NUKEE_MESHRENDERER_H
 #define NUKEE_MESHRENDERER_H
 #include "API/Model/Include.h"
+#include "reflect/Reflect.h"
 
 namespace nuke {
 
 class MeshRenderer : public Component
 {
-
+	NUKE_CLASS(MeshRenderer, Component)
+	// mesh/mat are asset references — serialized by GUID once the asset system exists.
 public:
     Mesh        *mesh;
     Material    *mat;

@@ -26,4 +26,5 @@ void MeshRenderer::Pause() {}
 void MeshRenderer::Reset() {
 	mesh = nullptr;
 }
+
 }  // namespace nuke

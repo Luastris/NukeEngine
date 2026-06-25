@@ -122,4 +122,5 @@ Quaternion Transform::globalRotation() {
 Vector3 Transform::globalScale() {
 	return Vector3((this->go->GetParent()) ? (this->scale * this->go->GetParent()->GetTransform().globalScale()) : (this->scale));
 }
+
 }  // namespace nuke

@@ -4,17 +4,20 @@
 
 #include "Component.h"
 #include "Vector.h"
+#include "reflect/Reflect.h"
 
 namespace nuke {
 
 class Transform : public Component
 {
+	NUKE_CLASS_NOCREATE(Transform, Component)
 public:
-	Vector3 position;
-    Quaternion rotation;            // stored as a quaternion (no gimbal lock)
-    Vector3 eulerHint;              // last euler (deg) authored via SetEulerDeg — stable inspector display
-    Vector3 scale = {1,1,1};
+	[[nuke::prop]] Vector3 position;
+    [[nuke::prop]] Quaternion rotation;   // quaternion (no gimbal lock)
+    [[nuke::prop]] Vector3 eulerHint;     // last euler (deg), stable inspector display
+    [[nuke::prop]] Vector3 scale = {1,1,1};
     Atom *go = nullptr;
+
 
 	Transform(Atom* parent);
 	void Init(Atom* parent);

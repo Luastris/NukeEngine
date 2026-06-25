@@ -4,28 +4,34 @@
 #include <boost/thread.hpp>
 #include "render/irender.h"
 #include <boost/bind.hpp>
+#include "reflect/Reflect.h"
 
 namespace nuke {
 
 class Camera : public Component
 {
+	NUKE_CLASS(Camera, Component)
 private:
 	boost::thread* renderThread;
 
 
 public:
-    bool invertMouse = false;
+    [[nuke::prop]] bool invertMouse = false;
     iRender *renderer = nullptr;
 	Texture renderTex;
-	int r_width = 640, r_height = 480;
-    float fov = 90, _near = 0.3f, _far = 10000;
+	[[nuke::prop]] int r_width = 640;
+	[[nuke::prop]] int r_height = 480;
+    [[nuke::prop]] float fov = 90;
+    [[nuke::prop]] float _near = 0.3f;
+    [[nuke::prop]] float _far = 10000;
 	unsigned long int renderLayers;
-    bool freeMode;
+    [[nuke::prop]] bool freeMode = false;
 
     // Per-camera render contract (see World::Render).
     uint64_t renderTarget = 0;                       // iRender RT id; 0 = backbuffer
-    int      depth = 0;                              // render order (lower drawn first)
+    [[nuke::prop]] int depth = 0;                    // render order (lower drawn first)
     float    clearColor[4] = {0.20f, 0.30f, 0.45f, 1.0f};
+
 
 	Camera();
 

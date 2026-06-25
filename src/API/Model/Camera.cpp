@@ -267,4 +267,5 @@ void Camera::Destroy()
 {
 	renderer->deinit();
 }
+
 }  // namespace nuke

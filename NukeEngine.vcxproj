@@ -103,7 +103,12 @@
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
       <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+      <LanguageStandard>stdcpp20</LanguageStandard>
     </ClCompile>
+    <PreBuildEvent>
+      <Command>where python &gt;nul 2&gt;nul &amp;&amp; python "$(ProjectDir)..\tools\nukegen.py"</Command>
+      <Message>NukeEngine reflection codegen (nukegen.py)</Message>
+    </PreBuildEvent>
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
@@ -193,6 +198,7 @@
     <ClInclude Include="include\API\Model\Component.h" />
     <ClInclude Include="include\API\Model\Game.h" />
     <ClInclude Include="include\API\Model\Atom.h" />
+    <ClInclude Include="include\reflect\Reflect.h" />
     <ClInclude Include="include\API\Model\ID.h" />
     <ClInclude Include="include\API\Model\Include.h" />
     <ClInclude Include="include\API\Model\Layers.h" />
@@ -242,6 +248,8 @@
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
     </ClCompile>
+    <ClCompile Include="src\reflect\Reflect.cpp" />
+    <ClCompile Include="src\reflect\Reflect.gen.cpp" />
     <ClCompile Include="src\API\iGUI.cpp" />
     <ClCompile Include="src\API\Model\Camera.cpp" />
     <ClCompile Include="src\API\Model\Clock.cpp" />

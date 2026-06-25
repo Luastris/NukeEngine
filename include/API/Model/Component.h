@@ -8,6 +8,7 @@ class Transform;
 class Script;
 class Camera;
 class Light;
+struct TypeInfo;   // reflection
 
 
 class Component
@@ -24,6 +25,7 @@ public:
 	virtual void FixedUpdate() = 0;
 	virtual void Pause() = 0;
 	virtual void Reset() = 0;
+	virtual TypeInfo* GetType() { return nullptr; }   // reflection schema (NUKE_TYPE overrides)
 
 };
 }  // namespace nuke
