@@ -40,6 +40,11 @@ struct Field {
     FT type = FT::Unknown;
     std::function<void*(void*)> addr;   // returns &(obj->field)
     bool hidden = false;                // serialized, but not drawn in the auto-inspector
+    // Editor hint from [[nuke::prop(asset="...")]]: a String field that holds an asset GUID
+    // ("mesh"/"material"/"shader"/"texture"). The inspector draws an asset picker instead of a
+    // raw text box. Empty = plain field. Keeps asset wiring out of the editor's hardcode.
+    std::string asset;
+    std::string label;   // [[nuke::prop(label="...")]] display name in the inspector (else `name`)
 };
 
 struct TypeInfo {
@@ -67,11 +72,13 @@ TypeInfo& TypeOf() {
 
 // Build a Field from a member pointer (deduces the FT tag).
 template<class C, class T>
-Field MakeField(const char* name, T C::* p) {
+Field MakeField(const char* name, T C::* p, const char* asset = "", const char* label = "") {
     Field f;
     f.name = name;
     f.type = FieldTypeOf<T>();
     f.addr = [p](void* o) -> void* { return (void*)&(((C*)o)->*p); };
+    f.asset = asset;
+    f.label = label;
     return f;
 }
 

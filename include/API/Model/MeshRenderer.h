@@ -11,9 +11,10 @@ class NUKEENGINE_API MeshRenderer : public Component
 	NUKE_CLASS(MeshRenderer, Component)
 public:
     Mesh        *mesh;                       // resolved at load from meshGuid (runtime, not serialized)
-    Material    *mat;                        // resolved at load from matGuid (runtime, not serialized)
-    [[nuke::prop]] std::string meshGuid;     // mesh asset reference, e.g. "builtin:cube" (resolved via ResDB)
-    [[nuke::prop]] std::string matGuid;      // material asset reference (resolved via ResDB)
+    Material    *mat;                        // OWNED material INSTANCE (clone of the matGuid asset);
+                                             // scene edits live here + save with the world, not in the .numat
+    [[nuke::prop(asset="mesh", label="Mesh")]]         std::string meshGuid;   // mesh asset ref (ResDB)
+    [[nuke::prop(asset="material", label="Material")]] std::string matGuid;    // material asset ref (ResDB)
 
 	MeshRenderer();
 

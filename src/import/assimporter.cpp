@@ -35,7 +35,7 @@ Atom* AssImporter::ImportObject(aiNode* node, const aiScene* scene) {
 
 		MeshRenderer* mr = new MeshRenderer();
 		mr->mesh = m;
-		mr->mat = mat;
+		mr->mat = mat->Clone();   // owned instance; the asset `mat` stays the shared template in ResDB
 		ngo->AddComponent(mr);
 		go->AddChild(ngo);
 	}

@@ -22,13 +22,35 @@ void Material::ImportAiMaterial(aiMaterial* m) {
 	aiMat = m;   // textures are converted + assigned (as .nutex GUIDs) by the importer
 }
 
+Material* Material::Clone() const
+{
+	Material* m = new Material();
+	m->guid        = guid;
+	m->matName     = matName;
+	for (int i = 0; i < 4; ++i) m->color[i] = color[i];
+	m->diffuseGuid = diffuseGuid;
+	m->normalGuid  = normalGuid;
+	m->specularGuid= specularGuid;
+	m->shaderGuid  = shaderGuid;
+	m->props       = props;
+	m->Resolve();   // bind diff/norm/spec/shader pointers from ResDB
+	return m;
+}
+
 void Material::Resolve()
 {
 	ResDB* db = ResDB::getSingleton();
-	if (!diff && !diffuseGuid.empty())  diff = db->GetTexture(diffuseGuid);
-	if (!norm && !normalGuid.empty())   norm = db->GetTexture(normalGuid);
-	if (!spec && !specularGuid.empty()) spec = db->GetTexture(specularGuid);
-	if (!shader && !shaderGuid.empty()) shader = db->GetShader(shaderGuid);
+	// Re-bind when the pointer is missing OR no longer matches the guid (e.g. a material instance
+	// whose shaderGuid/texture was overridden after the clone). A stale guard here caused the
+	// shader override to be ignored on world load (Player + PIE stop) — kept rendering "world".
+	if (diffuseGuid.empty())                              diff = nullptr;
+	else if (!diff   || diff->guid   != diffuseGuid)     diff   = db->GetTexture(diffuseGuid);
+	if (normalGuid.empty())                              norm = nullptr;
+	else if (!norm   || norm->guid   != normalGuid)     norm   = db->GetTexture(normalGuid);
+	if (specularGuid.empty())                            spec = nullptr;
+	else if (!spec   || spec->guid   != specularGuid)   spec   = db->GetTexture(specularGuid);
+	if (shaderGuid.empty())                              shader = nullptr;
+	else if (!shader || shader->guid != shaderGuid)     shader = db->GetShader(shaderGuid);
 }
 
 bool Material::SaveToFile(const std::string& path) const

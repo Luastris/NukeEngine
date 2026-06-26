@@ -104,6 +104,7 @@ void ResDB::HotReloadShaders(iRender* r)
 		if (!fresh) continue;
 		s->vsSource = fresh->vsSource; s->psSource = fresh->psSource;
 		s->vsTime   = fresh->vsTime;   s->psTime   = fresh->psTime;
+		s->props    = fresh->props;    // re-parsed MatCB params (a prop may have been added/removed)
 		delete fresh;
 		uint64_t h = r->createShaderPipeline(s->vsSource.c_str(), s->psSource.c_str());
 		if (h) { s->rendererHandle = h; std::cout << "[ResDB]\thot-reloaded shader '" << s->name << "' -> handle " << h << std::endl; }
@@ -131,7 +132,7 @@ void ResDB::LoadShadersDir(const std::string& dir)
 		if (!s) { std::cout << "[ResDB]\tfailed to load shader '" << name << "'" << std::endl; continue; }
 		RegisterShader(s);
 		std::cout << "[ResDB]\tloaded shader '" << name << "' (vs " << s->vsSource.size()
-		          << " / ps " << s->psSource.size() << " bytes)" << std::endl;
+		          << " / ps " << s->psSource.size() << " bytes, " << s->props.size() << " props)" << std::endl;
 	}
 }
 

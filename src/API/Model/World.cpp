@@ -2,6 +2,7 @@
 #include "render/irender.h"
 #include "API/Model/Camera.h"
 #include "API/Model/MeshRenderer.h"
+#include "API/Model/Material.h"   // material instance (mr->mat) save/load
 #include "API/Model/Mesh.h"
 #include "API/Model/UnknownComponent.h"
 #include "API/Model/Prefab.h"
@@ -10,6 +11,7 @@
 #include <boost/filesystem/fstream.hpp>
 #include <iostream>
 #include <vector>
+#include <cstring>
 #include <algorithm>
 #include <cmath>
 #include <glm/glm.hpp>
@@ -151,7 +153,7 @@ static void RenderMeshes(bc::list<Atom*>& gos, iRender* r)
 				float pos[3]   = { (float)p.x, (float)p.y, (float)p.z };
 				float quat[4]  = { (float)q.x, (float)q.y, (float)q.z, (float)q.w };
 				float scale[3] = { (float)s.x, (float)s.y, (float)s.z };
-				r->renderObject(mr->mesh, mr->mat, pos, quat, scale);
+				r->renderObject(mr->mesh, mr->mat, pos, quat, scale);   // mr->mat is the instance
 			}
 		}
 		if (go->children.size() > 0)
@@ -223,6 +225,23 @@ static void SaveAtom(Atom* go, json& j)
 		json cj;
 		cj["type"] = ti->name;
 		SaveObject(*ti, c, cj["props"]);
+		// Material INSTANCE overrides (color/shader/props) — these live on the per-object instance and
+		// save with the world; the referenced .numat asset (matGuid) is never modified by scene edits.
+		if (MeshRenderer* mr = dynamic_cast<MeshRenderer*>(c))
+			if (mr->mat)
+			{
+				json jm;
+				jm["color"]  = { mr->mat->color[0], mr->mat->color[1], mr->mat->color[2], mr->mat->color[3] };
+				jm["shader"] = mr->mat->shaderGuid;
+				if (!mr->mat->props.empty())
+				{
+					json jp = json::object();
+					for (const auto& kv : mr->mat->props)
+						jp[kv.first] = { kv.second[0], kv.second[1], kv.second[2], kv.second[3] };
+					jm["props"] = jp;
+				}
+				cj["material"] = jm;
+			}
 		const char* pl = PluginForType(ti->name);   // tag which plugin a component requires
 		if (pl && pl[0]) cj["plugin"] = pl;
 		j["components"].push_back(cj);
@@ -253,7 +272,26 @@ static Atom* LoadAtom(const json& j)
 			{
 				Component* c = (Component*)ti->create();
 				if (cj.contains("props")) LoadObject(*ti, c, cj["props"]);
-				go->AddComponent(c);             // Init() wires transform/owner
+				go->AddComponent(c);             // Init() wires transform/owner + clones the material instance
+				// Apply saved material-instance overrides onto the cloned instance (after Init).
+				if (MeshRenderer* mr = dynamic_cast<MeshRenderer*>(c))
+					if (cj.contains("material") && cj["material"].is_object())
+					{
+						const json& jm = cj["material"];
+						if (!mr->mat) mr->mat = new Material();   // matGuid empty / asset missing -> bare instance
+						if (jm.contains("color") && jm["color"].is_array() && jm["color"].size() == 4)
+							for (int i = 0; i < 4; ++i) mr->mat->color[i] = jm["color"][i].get<float>();
+						if (jm.contains("shader")) mr->mat->shaderGuid = jm.value("shader", std::string("world"));
+						if (jm.contains("props") && jm["props"].is_object())
+							for (auto it = jm["props"].begin(); it != jm["props"].end(); ++it)
+								if (it.value().is_array())
+								{
+									std::array<float, 4> a = { 0, 0, 0, 0 };
+									for (int i = 0; i < 4 && i < (int)it.value().size(); ++i) a[i] = it.value()[i].get<float>();
+									mr->mat->props[it.key()] = a;
+								}
+						mr->mat->Resolve();   // re-bind shader/textures (shaderGuid may differ from the asset)
+					}
 			}
 			else
 			{

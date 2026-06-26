@@ -9,14 +9,18 @@ MeshRenderer::MeshRenderer() : Component("MeshRenderer"), mesh(nullptr), mat(nul
 void MeshRenderer::Init(Atom* parent) {
 	transform = &parent->GetTransform();
 	parent->components.push_back(this);
-	// Resolve the mesh + material assets by GUID (e.g. when loaded from a world/prefab).
+	// Resolve the mesh by GUID; clone the material asset into an owned INSTANCE (scene edits go on
+	// the instance, the .numat stays untouched). World load applies saved overrides after this.
 	if (!mesh && !meshGuid.empty()) mesh = ResDB::getSingleton()->GetMesh(meshGuid);
-	if (!mat  && !matGuid.empty())  mat  = ResDB::getSingleton()->GetMaterial(matGuid);
-	if (mat) mat->Resolve();   // bind the material's textures from ResDB
+	if (!mat && !matGuid.empty())
+	{
+		Material* asset = ResDB::getSingleton()->GetMaterial(matGuid);
+		if (asset) mat = asset->Clone();
+	}
 }
 
 void MeshRenderer::Destroy() {
-
+	if (mat) { delete mat; mat = nullptr; }   // the instance is owned
 }
 
 // MeshRenderer is now pure data (mesh + material + enabled). Drawing is done by
