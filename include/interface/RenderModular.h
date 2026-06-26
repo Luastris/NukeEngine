@@ -18,6 +18,12 @@ NUKEENGINE_API iRender* LoadRenderModule(const std::string& preferredId = "");
 // Destroys the renderer and releases the render module.
 NUKEENGINE_API void UnloadRenderModule();
 
+// Load the engine's built-in shader files from `dir` (e.g. "shaders") and push their source
+// into the renderer (render->setShaderSource) BEFORE render->init(). Each "<name>.hlsl" is
+// registered under "<name>" (so "world.vs.hlsl" -> "world.vs"). The ENGINE does the file IO;
+// the render module stays free of file/boost dependencies.
+NUKEENGINE_API void LoadBuiltinShaders(iRender* render, const std::string& dir);
+
 }  // namespace nuke
 
 #endif // !NUKE_RENDER_MODULAR_H

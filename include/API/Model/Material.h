@@ -31,6 +31,10 @@ public:
     Shader*      shader = nullptr;
     aiMaterial*  aiMat  = nullptr;
 
+    // Appended at the END to keep the existing member layout stable (so the renderer, which
+    // reads color/diff, doesn't need a rebuild). Shader asset ref; default = engine "world".
+    std::string  shaderGuid = "world";
+
     Material();
 
     void ImportAiMaterial(aiMaterial* m);   // name + color only (textures handled by the importer)

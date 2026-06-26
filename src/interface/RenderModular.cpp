@@ -3,9 +3,11 @@
 #define BOOST_FILESYSTEM_VERSION 3
 #define BOOST_FILESYSTEM_NO_DEPRECATED
 #include <boost/filesystem.hpp>
+#include <boost/filesystem/fstream.hpp>
 #include <boost/dll.hpp>
 #include <memory>                 // boost.dll (1.91+) returns std::shared_ptr from import_symbol
 #include <iostream>
+#include <iterator>
 
 namespace nuke {
 
@@ -90,6 +92,33 @@ void UnloadRenderModule()
 		}
 		g_renderModule->Shutdown();
 		g_renderModule.reset();
+	}
+}
+
+void LoadBuiltinShaders(iRender* render, const std::string& dir)
+{
+	if (!render) return;
+	boost::system::error_code ec;
+
+	// Resolve relative to the EXE, not the cwd (the VS debugger's working dir may differ).
+	bfs::path shaderDir = boost::dll::program_location(ec).parent_path() / dir;
+	if (ec || !bfs::exists(shaderDir, ec)) shaderDir = bfs::path(dir);   // fallback: cwd-relative
+	if (!bfs::exists(shaderDir, ec))
+	{
+		cout << "[RenderModular]\tbuilt-in shaders dir not found: " << shaderDir.string() << endl;
+		return;
+	}
+	cout << "[RenderModular]\tloading shaders from " << shaderDir.string() << endl;
+	for (bfs::directory_iterator it(shaderDir, ec), end; it != end; it.increment(ec))
+	{
+		if (ec) break;
+		if (bfs::is_directory(it->path()) || it->path().extension() != ".hlsl") continue;
+		bfs::ifstream f(it->path(), std::ios::binary);
+		if (!f) continue;
+		std::string src((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+		std::string name = it->path().stem().string();   // "world.vs.hlsl" -> "world.vs"
+		render->setShaderSource(name.c_str(), src.c_str());
+		cout << "[RenderModular]\tshader '" << name << "' (" << src.size() << " bytes)" << endl;
 	}
 }
 

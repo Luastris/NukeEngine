@@ -1,6 +1,23 @@
 #include "interface/AppInstance.h"
+#include <boost/filesystem.hpp>
 
 namespace nuke {
+
+std::string AppInstance::ResolveContent(const std::string& path) const
+{
+	if (path.empty()) return path;
+	boost::filesystem::path p(path);
+	if (p.is_absolute()) return path;
+	boost::system::error_code ec;
+	if (!contentRoot.empty())
+	{
+		boost::filesystem::path cand = boost::filesystem::path(contentRoot) / p;
+		if (boost::filesystem::exists(cand, ec)) return cand.string();   // prefer the project
+	}
+	if (boost::filesystem::exists(p, ec)) return path;                   // cwd/root fallback
+	if (!contentRoot.empty()) return (boost::filesystem::path(contentRoot) / p).string();
+	return path;
+}
 
 AppInstance::AppInstance()
 {

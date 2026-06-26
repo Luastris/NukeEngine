@@ -13,6 +13,8 @@
 
 namespace nuke {
 
+class iRender;   // fwd (BuildShaderPipelines / HotReloadShaders take it)
+
 #ifdef WIN32
 #define uint unsigned int
 #endif
@@ -36,6 +38,7 @@ public:
     std::map<std::string, Mesh*>     meshByGuid;   // GUID -> mesh asset
     std::map<std::string, Material*> matByGuid;    // GUID -> material asset
     std::map<std::string, Texture*>  texByGuid;    // GUID -> texture asset
+    std::map<std::string, Shader*>   shaderByGuid; // GUID -> shader asset
 
     static ResDB* getSingleton();              // single instance (engine DLL)
 
@@ -47,6 +50,16 @@ public:
 
     Texture* GetTexture(const std::string& guid);     // nullptr if unknown
     void     RegisterTexture(Texture* t);             // add to textures + index by t->guid
+
+    Shader*  GetShader(const std::string& guid);      // nullptr if unknown
+    void     RegisterShader(Shader* s);               // add to shaders + index by s->guid
+    // Scan a dir (recursively) for "<name>.vs.hlsl" + "<name>.ps.hlsl" pairs -> Shader assets.
+    // Used for both roots: the engine's built-in `shaders/` and the project content folder.
+    void     LoadShadersDir(const std::string& dir);
+    // Build a renderer pipeline for each loaded shader (sets Shader::rendererHandle). Call once
+    // after render init. HotReloadShaders re-reads changed shader files + rebuilds their pipeline.
+    void     BuildShaderPipelines(iRender* r);
+    void     HotReloadShaders(iRender* r);
 
     // Scan a content folder (recursively) and load every native asset (.numesh) into the DB,
     // indexed by the GUID stored in the file. Skips GUIDs already registered. Call at startup

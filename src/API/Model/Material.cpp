@@ -28,6 +28,7 @@ void Material::Resolve()
 	if (!diff && !diffuseGuid.empty())  diff = db->GetTexture(diffuseGuid);
 	if (!norm && !normalGuid.empty())   norm = db->GetTexture(normalGuid);
 	if (!spec && !specularGuid.empty()) spec = db->GetTexture(specularGuid);
+	if (!shader && !shaderGuid.empty()) shader = db->GetShader(shaderGuid);
 }
 
 bool Material::SaveToFile(const std::string& path) const
@@ -35,6 +36,7 @@ bool Material::SaveToFile(const std::string& path) const
 	json j;
 	j["guid"]     = guid;
 	j["name"]     = matName;
+	j["shader"]   = shaderGuid;
 	j["color"]    = { color[0], color[1], color[2], color[3] };
 	j["diffuse"]  = diffuseGuid;
 	j["normal"]   = normalGuid;
@@ -57,6 +59,7 @@ Material* Material::LoadFromFile(const std::string& path)
 	Material* m = new Material();
 	m->guid         = j.value("guid", std::string());
 	m->matName      = j.value("name", std::string());
+	m->shaderGuid   = j.value("shader", std::string("world"));
 	m->diffuseGuid  = j.value("diffuse", std::string());
 	m->normalGuid   = j.value("normal", std::string());
 	m->specularGuid = j.value("specular", std::string());

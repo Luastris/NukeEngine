@@ -1,4 +1,5 @@
 #include "API/Model/resdb.h"
+#include "render/irender.h"
 #include <boost/filesystem.hpp>
 #include <iostream>
 
@@ -63,6 +64,75 @@ Texture* ResDB::GetTexture(const std::string& guid)
 {
 	auto it = texByGuid.find(guid);
 	return (it != texByGuid.end()) ? it->second : nullptr;
+}
+
+void ResDB::RegisterShader(Shader* s)
+{
+	if (!s) return;
+	shaders.push_back(s);
+	if (!s->guid.empty()) shaderByGuid[s->guid] = s;
+}
+
+Shader* ResDB::GetShader(const std::string& guid)
+{
+	auto it = shaderByGuid.find(guid);
+	return (it != shaderByGuid.end()) ? it->second : nullptr;
+}
+
+void ResDB::BuildShaderPipelines(iRender* r)
+{
+	if (!r) return;
+	for (Shader* s : shaders)
+		if (s && s->rendererHandle == 0)
+		{
+			s->rendererHandle = r->createShaderPipeline(s->vsSource.c_str(), s->psSource.c_str());
+			std::cout << "[ResDB]\tshader pipeline '" << s->name << "' -> handle " << s->rendererHandle << std::endl;
+		}
+}
+
+void ResDB::HotReloadShaders(iRender* r)
+{
+	if (!r) return;
+	boost::system::error_code ec;
+	for (Shader* s : shaders)
+	{
+		if (!s || s->vsPath.empty()) continue;
+		std::time_t vt = bfs::last_write_time(bfs::path(s->vsPath), ec); if (ec) { ec.clear(); continue; }
+		std::time_t pt = bfs::last_write_time(bfs::path(s->psPath), ec); if (ec) { ec.clear(); continue; }
+		if (vt == s->vsTime && pt == s->psTime) continue;   // unchanged
+		Shader* fresh = Shader::LoadPair(s->name, s->vsPath, s->psPath);
+		if (!fresh) continue;
+		s->vsSource = fresh->vsSource; s->psSource = fresh->psSource;
+		s->vsTime   = fresh->vsTime;   s->psTime   = fresh->psTime;
+		delete fresh;
+		uint64_t h = r->createShaderPipeline(s->vsSource.c_str(), s->psSource.c_str());
+		if (h) { s->rendererHandle = h; std::cout << "[ResDB]\thot-reloaded shader '" << s->name << "' -> handle " << h << std::endl; }
+	}
+}
+
+void ResDB::LoadShadersDir(const std::string& dir)
+{
+	boost::system::error_code ec;
+	if (!bfs::exists(dir, ec)) return;
+	const std::string vsuf = ".vs.hlsl";
+	for (bfs::recursive_directory_iterator it(dir, ec), end; it != end; it.increment(ec))
+	{
+		if (ec) break;
+		if (bfs::is_directory(it->path())) continue;
+		std::string fn = it->path().filename().string();
+		if (fn.size() <= vsuf.size() || fn.compare(fn.size() - vsuf.size(), vsuf.size(), vsuf) != 0)
+			continue;                                   // not a "*.vs.hlsl"
+		std::string name = fn.substr(0, fn.size() - vsuf.size());
+		if (name == "ui") continue;                     // renderer-internal UI pass, not a material shader
+		bfs::path psPath = it->path().parent_path() / (name + ".ps.hlsl");
+		if (!bfs::exists(psPath, ec)) continue;         // no matching pixel shader
+		if (shaderByGuid.count(name)) continue;         // first one wins (engine before project)
+		Shader* s = Shader::LoadPair(name, it->path().string(), psPath.string());
+		if (!s) { std::cout << "[ResDB]\tfailed to load shader '" << name << "'" << std::endl; continue; }
+		RegisterShader(s);
+		std::cout << "[ResDB]\tloaded shader '" << name << "' (vs " << s->vsSource.size()
+		          << " / ps " << s->psSource.size() << " bytes)" << std::endl;
+	}
 }
 
 std::string ResDB::NewGuid()

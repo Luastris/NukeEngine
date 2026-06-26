@@ -1,22 +1,25 @@
 {
   "name": "nukeengine",
   "version-string": "0.0.1",
-	"dependencies": [
-		"assimp",
-		"glfw3",
-		"glm",
-		"lua",
-		"freeglut",
-		"glew",
-		"boost-thread",
-		"boost-filesystem",
-		"boost-dll",
-		"boost-container",
-		"boost-function",
-		"boost-bind",
-		"boost-smart-ptr",
-		"boost-tokenizer",
-		"boost-tuple",
-		"boost-config"
-	]
+  "builtin-baseline": "6da16a9600492fbcb7713560d993ac76823290de",
+  "dependencies": [
+    "assimp",
+    "glfw3",
+    "glm",
+    "lua",
+    "nlohmann-json",
+    "stb",
+    "boost-thread",
+    "boost-filesystem",
+    "boost-system",
+    "boost-chrono",
+    "boost-dll",
+    "boost-container",
+    "boost-function",
+    "boost-bind",
+    "boost-smart-ptr",
+    "boost-tokenizer",
+    "boost-tuple",
+    "boost-config"
+  ]
 }

@@ -167,9 +167,15 @@ void World::Render(iRender* r)
 	CollectCameras(*hierarchy, cams);
 	std::sort(cams.begin(), cams.end(), [](Camera* a, Camera* b) { return a->depth < b->depth; });
 
+	const bool editor = AppInstance::GetSingleton()->isEditor();
 	for (Camera* cam : cams)
 	{
 		if (!cam->transform) continue;
+		// In the editor the world is drawn ONLY into off-screen RTs (the viewport panel + the
+		// selected-camera preview). A world camera with target 0 would paint the backbuffer
+		// full-window — i.e. make the editor look like the Player. Skip those here; they render
+		// normally in the Player (isEditor() == false).
+		if (editor && cam->renderTarget == 0) continue;
 		NukeCameraDesc d;
 		d.target = cam->renderTarget;
 		d.vpW = 0; d.vpH = 0; // renderer uses the target's full size

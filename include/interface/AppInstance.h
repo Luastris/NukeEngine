@@ -53,6 +53,15 @@ public:
     iRender* render = nullptr;
 	std::map<std::string, bool> windowOpen;   // window id -> open flag (persisted by the editor)
 
+	// Root for CONTENT relative paths (scripts, assets referenced by path) — the project's
+	// content folder. Engine resources (config/fonts/shaders/modules) stay relative to the
+	// EXE/cwd; only content resolves here, so a script "scripts/spin.lua" is found in the
+	// project, not the exe root. Set by the host (editor/player) at startup.
+	std::string contentRoot;
+	// Resolve a content path: absolute -> as-is; else prefer <contentRoot>/path, falling back
+	// to a cwd-relative path if that exists (so nothing root-relative breaks).
+	std::string ResolveContent(const std::string& path) const;
+
 	bool isEditor();
 	void setEditor(bool editor);
 
