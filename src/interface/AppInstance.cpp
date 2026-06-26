@@ -19,6 +19,48 @@ std::string AppInstance::ResolveContent(const std::string& path) const
 	return path;
 }
 
+// The canonical on-disk path for a world: ALWAYS under the project content root (worlds live in
+// the project content, never "wherever"). Absolute paths pass through unchanged.
+std::string AppInstance::WorldFullPath(const std::string& relPath) const
+{
+	boost::filesystem::path rp(relPath);
+	if (rp.is_absolute() || contentRoot.empty()) return relPath;
+	return (boost::filesystem::path(contentRoot) / rp).string();
+}
+
+bool AppInstance::OpenWorld(const std::string& relPath)
+{
+	if (relPath.empty() || !currentScene) return false;
+	boost::system::error_code ec;
+	std::string full = WorldFullPath(relPath);
+	if (!boost::filesystem::exists(boost::filesystem::path(full), ec))
+		full = ResolveContent(relPath);   // legacy fallback (e.g. a world next to the exe)
+	if (!boost::filesystem::exists(boost::filesystem::path(full), ec)) return false;
+	selectedInHieararchy = nullptr;
+	currentScene->LoadFromFile(full);
+	currentWorldPath = relPath;
+	return true;
+}
+
+bool AppInstance::SaveWorld(const std::string& relPath)
+{
+	if (relPath.empty() || !currentScene) return false;
+	std::string full = WorldFullPath(relPath);   // forced into content (no cwd fallback on save)
+	boost::system::error_code ec;
+	boost::filesystem::path p(full);
+	if (p.has_parent_path()) boost::filesystem::create_directories(p.parent_path(), ec);
+	currentScene->SaveToFile(full);
+	currentWorldPath = relPath;
+	return true;
+}
+
+void AppInstance::NewWorld()
+{
+	if (currentScene) currentScene->Clear();   // empties the world but keeps the editor camera
+	currentWorldPath.clear();
+	selectedInHieararchy = nullptr;
+}
+
 AppInstance::AppInstance()
 {
 	//currentScene = new World();

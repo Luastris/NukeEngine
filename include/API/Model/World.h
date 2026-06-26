@@ -38,6 +38,7 @@ public:
 	void        LoadFromString(const std::string& data);
 	void SaveToFile(const std::string& path);
 	void LoadFromFile(const std::string& path);
+	void Clear();   // drop all atoms except the Editor Camera (for "New World")
 
 	// Live plugin (un)load support. ConvertPluginToUnknown turns every component owned by the
 	// given plugin into an inert UnknownComponent placeholder (called when it's disabled);

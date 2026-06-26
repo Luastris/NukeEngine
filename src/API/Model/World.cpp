@@ -419,6 +419,15 @@ void World::LoadFromString(const std::string& data)
 			Add(LoadAtom(gj));
 }
 
+void World::Clear()
+{
+	for (auto it = hierarchy->begin(); it != hierarchy->end(); )   // keep editor camera, drop the rest
+	{
+		if ((*it)->GetName() == "Editor Camera") ++it;
+		else it = hierarchy->erase(it);
+	}
+}
+
 void World::SaveToFile(const std::string& path)
 {
 	boost::filesystem::path p(path);

@@ -62,6 +62,15 @@ public:
 	// to a cwd-relative path if that exists (so nothing root-relative breaks).
 	std::string ResolveContent(const std::string& path) const;
 
+	// --- World (a.k.a. "level") load/save API. Paths are relative to the project content root
+	// (resolved via ResolveContent), so worlds always live IN the project content, not "wherever".
+	// Shared by the editor (New/Open/Save) and the game (loads the project's default world).
+	std::string currentWorldPath;                     // content-relative path of the open world ("" = unsaved)
+	std::string WorldFullPath(const std::string& relPath) const;   // canonical content path for a world
+	bool        OpenWorld(const std::string& relPath); // load a world from content into currentScene
+	bool        SaveWorld(const std::string& relPath); // save currentScene to content (creates dirs)
+	void        NewWorld();                            // replace currentScene with a fresh empty world
+
 	bool isEditor();
 	void setEditor(bool editor);
 
