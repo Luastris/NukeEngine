@@ -5,6 +5,7 @@
 #include <boost/thread.hpp>
 #include <boost/container/list.hpp>
 #include <boost/container/map.hpp>
+#include <map>
 #include <config.h>
 #include "../API/Model/Camera.h"
 #include "../API/Model/World.h"
@@ -39,6 +40,10 @@ public:
 	//void PushWindow(string &key, boost::function<void()> fWindow);
 	void PopWindow(string key);
 
+	// Per-window open/closed flag, owned by the host and keyed by window id (created open on
+	// first access). Plugins/panels use it for ImGui::Begin p_open so the editor can persist it.
+	bool* WindowOpen(const char* key);
+
 
 
 	World* currentScene = new World();
@@ -46,6 +51,7 @@ public:
     Mouse* mouse = nullptr;
 	Config* config = nullptr;
     iRender* render = nullptr;
+	std::map<std::string, bool> windowOpen;   // window id -> open flag (persisted by the editor)
 
 	bool isEditor();
 	void setEditor(bool editor);

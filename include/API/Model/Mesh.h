@@ -7,6 +7,7 @@
 #include <assimp/mesh.h>
 #include <boost/container/list.hpp>
 #include <memory>
+#include <string>
 #include "../../../NukeEngine.h"
 
 namespace nuke {
@@ -19,6 +20,7 @@ class NUKEENGINE_API Mesh
 {
 public:
     char name[256];
+    std::string guid;   // asset id ("builtin:cube" for primitives, generated for imports)
     float *vertexArray;
     float *normalArray;
     float *uvArray;
@@ -32,8 +34,16 @@ public:
 
 	void ImportAIMesh(aiMesh* mesh);
 
-	// Primitive factories (procedural geometry, no asset needed).
+	// Primitive factories (procedural geometry). Registered in ResDB under "builtin:<name>".
 	static Mesh* CreateCube();
+	static Mesh* CreatePlane();
+	static Mesh* CreateSphere();
+
+	// Native asset format (.numesh): binary header + interleaved-free vertex/normal/uv arrays.
+	// Import converts external files (OBJ/FBX/...) into these so nothing references the source
+	// at runtime. The GUID is stored inside the file; ResDB indexes by it.
+	bool         SaveToFile(const std::string& path) const;
+	static Mesh* LoadFromFile(const std::string& path);
 };
 }  // namespace nuke
 

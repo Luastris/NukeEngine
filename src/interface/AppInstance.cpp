@@ -18,7 +18,15 @@ AppInstance::AppInstance()
 }
 AppInstance::~AppInstance() {}
 
-bool AppInstance::isEditor() { 
+bool* AppInstance::WindowOpen(const char* key)
+{
+	auto it = windowOpen.find(key);
+	if (it == windowOpen.end())
+		it = windowOpen.emplace(key, true).first;   // default: open
+	return &it->second;
+}
+
+bool AppInstance::isEditor() {
 	return _isEditor;
 }
 

@@ -28,7 +28,8 @@ bool NukeReflectInit() {
 	{
 		TypeInfo& t = TypeOf<MeshRenderer>();
 		t.base = "Component";
-		t.fields.push_back(MakeField("primitive", &MeshRenderer::primitive));
+		t.fields.push_back(MakeField("meshGuid", &MeshRenderer::meshGuid));
+		t.fields.push_back(MakeField("matGuid", &MeshRenderer::matGuid));
 		t.create = []() -> void* { return new MeshRenderer(); };
 	}
 	{

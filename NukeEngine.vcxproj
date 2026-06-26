@@ -211,6 +211,8 @@
     <ClInclude Include="include\API\Model\Package.h" />
     <ClInclude Include="include\API\Model\ray.h" />
     <ClInclude Include="include\API\Model\resdb.h" />
+    <ClInclude Include="include\API\Model\UnknownComponent.h" />
+    <ClInclude Include="include\API\Model\Prefab.h" />
     <ClInclude Include="include\API\Model\Resource.h" />
     <ClInclude Include="include\API\Model\World.h" />
     <ClInclude Include="include\API\Model\Script.h" />
@@ -268,6 +270,7 @@
     <ClCompile Include="src\API\Model\Package.cpp" />
     <ClCompile Include="src\API\Model\ray.cpp" />
     <ClCompile Include="src\API\Model\resdb.cpp" />
+    <ClCompile Include="src\API\Model\UnknownComponent.cpp" />
     <ClCompile Include="src\API\Model\Resource.cpp" />
     <ClCompile Include="src\API\Model\World.cpp" />
     <ClCompile Include="src\API\Model\Script.cpp" />

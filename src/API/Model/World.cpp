@@ -3,8 +3,11 @@
 #include "API/Model/Camera.h"
 #include "API/Model/MeshRenderer.h"
 #include "API/Model/Mesh.h"
+#include "API/Model/UnknownComponent.h"
+#include "API/Model/Prefab.h"
+#include "interface/Modular.h"
 #include "reflect/ReflectJson.h"
-#include <fstream>
+#include <boost/filesystem/fstream.hpp>
 #include <iostream>
 #include <vector>
 #include <algorithm>
@@ -198,11 +201,24 @@ static void SaveAtom(Atom* go, json& j)
 		SaveObject(*tti, &t, j["transform"]);
 	for (Component* c : go->components)
 	{
+		if (UnknownComponent* uc = dynamic_cast<UnknownComponent*>(c))
+		{
+			// Plugin type not loaded — write the preserved type + props back verbatim.
+			json cj;
+			cj["type"]  = uc->typeName;
+			cj["props"] = uc->rawProps.empty() ? json::object()
+			                                   : json::parse(uc->rawProps, nullptr, false);
+			if (!uc->requiredPlugin.empty()) cj["plugin"] = uc->requiredPlugin;
+			j["components"].push_back(cj);
+			continue;
+		}
 		TypeInfo* ti = c->GetType();
 		if (!ti) continue;                       // unreflected component — skip
 		json cj;
 		cj["type"] = ti->name;
 		SaveObject(*ti, c, cj["props"]);
+		const char* pl = PluginForType(ti->name);   // tag which plugin a component requires
+		if (pl && pl[0]) cj["plugin"] = pl;
 		j["components"].push_back(cj);
 	}
 	for (Atom* ch : go->children)
@@ -225,18 +241,108 @@ static Atom* LoadAtom(const json& j)
 	if (j.contains("components"))
 		for (const json& cj : j["components"])
 		{
-			TypeInfo* ti = Registry_Find(cj.value("type", std::string()));
-			if (ti && ti->create)
+			std::string type = cj.value("type", std::string());
+			TypeInfo* ti = Registry_Find(type);
+			if (ti && ti->create && IsTypeActive(type))
 			{
 				Component* c = (Component*)ti->create();
 				if (cj.contains("props")) LoadObject(*ti, c, cj["props"]);
 				go->AddComponent(c);             // Init() wires transform/owner
+			}
+			else
+			{
+				// Type inactive (its plugin isn't loaded) — keep it inert + preserve its data,
+				// and remember which plugin it needs so the editor can show that.
+				UnknownComponent* uc = new UnknownComponent();
+				uc->typeName = type;
+				if (cj.contains("props")) uc->rawProps = cj["props"].dump();
+				uc->requiredPlugin = cj.value("plugin", std::string(PluginForType(type)));
+				go->AddComponent(uc);
 			}
 		}
 	if (j.contains("children"))
 		for (const json& chj : j["children"])
 			LoadAtom(chj)->SetParent(go);
 	return go;
+}
+
+// --- live plugin (un)load: swap an atom's components between real <-> inert placeholder ---
+static void DowngradeAtom(Atom* a, const std::string& dll)
+{
+	for (auto it = a->components.begin(); it != a->components.end(); ++it)
+	{
+		Component* c = *it;
+		if (dynamic_cast<UnknownComponent*>(c)) continue;
+		TypeInfo* ti = c->GetType();
+		if (!ti) continue;
+		if (std::string(PluginForType(ti->name)) != dll) continue;
+		json props; SaveObject(*ti, c, props);
+		UnknownComponent* uc = new UnknownComponent();
+		uc->typeName       = ti->name;
+		uc->rawProps       = props.dump();
+		uc->requiredPlugin = dll;
+		uc->atom           = a;
+		uc->transform      = &a->GetTransform();
+		*it = uc;            // replace in place (preserves order)
+		delete c;
+	}
+	for (Atom* ch : a->children) DowngradeAtom(ch, dll);
+}
+
+static void UpgradeAtom(Atom* a, const std::string& dll)
+{
+	std::vector<UnknownComponent*> todo;
+	for (Component* c : a->components)
+	{
+		UnknownComponent* uc = dynamic_cast<UnknownComponent*>(c);
+		if (!uc || uc->requiredPlugin != dll) continue;
+		TypeInfo* ti = Registry_Find(uc->typeName);
+		if (ti && ti->create) todo.push_back(uc);
+	}
+	for (UnknownComponent* uc : todo)
+	{
+		TypeInfo* ti = Registry_Find(uc->typeName);
+		json props = uc->rawProps.empty() ? json::object()
+		                                  : json::parse(uc->rawProps, nullptr, false);
+		a->components.remove(uc);
+		Component* c = (Component*)ti->create();
+		LoadObject(*ti, c, props);
+		a->AddComponent(c);   // Init wires transform/owner + side effects (e.g. Lua compile)
+		delete uc;
+	}
+	for (Atom* ch : a->children) UpgradeAtom(ch, dll);
+}
+
+// --- prefabs: a saved Atom subtree, reusing the world's atom (de)serialization ---
+bool SavePrefab(Atom* root, const std::string& path)
+{
+	if (!root) return false;
+	json j;
+	SaveAtom(root, j);
+	boost::filesystem::path p(path);
+	boost::filesystem::ofstream f(p);
+	if (!f) return false;
+	f << j.dump(2);
+	return (bool)f;
+}
+
+Atom* LoadPrefab(const std::string& path)
+{
+	boost::filesystem::path p(path);
+	boost::filesystem::ifstream f(p);
+	if (!f) return nullptr;
+	json j = json::parse(f, nullptr, false);
+	if (j.is_discarded()) return nullptr;
+	return LoadAtom(j);
+}
+
+void World::ConvertPluginToUnknown(const std::string& moduleFile)
+{
+	for (Atom* a : GetHierarchy()) DowngradeAtom(a, moduleFile);
+}
+void World::RestorePluginComponents(const std::string& moduleFile)
+{
+	for (Atom* a : GetHierarchy()) UpgradeAtom(a, moduleFile);
 }
 
 std::string World::SaveToString()
@@ -271,14 +377,16 @@ void World::LoadFromString(const std::string& data)
 
 void World::SaveToFile(const std::string& path)
 {
-	std::ofstream f(path);
+	boost::filesystem::path p(path);
+	boost::filesystem::ofstream f(p);
 	if (f) f << SaveToString();
 	std::cout << "[World]\t\t\t" << "Saved to " << path << std::endl;
 }
 
 void World::LoadFromFile(const std::string& path)
 {
-	std::ifstream f(path);
+	boost::filesystem::path p(path);
+	boost::filesystem::ifstream f(p);
 	if (!f) { std::cout << "[World]\t\t\t" << "LoadFromFile: cannot open " << path << std::endl; return; }
 	std::string data((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
 	LoadFromString(data);

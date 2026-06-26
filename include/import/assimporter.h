@@ -26,6 +26,11 @@ public:
 	}
 	
 	void Import(const char* path);
+
+	// Full conversion: read an external file (OBJ/FBX/glTF/...) via assimp and write each mesh
+	// as a native .numesh asset into destDir, each with a fresh GUID, registered in ResDB.
+	// Returns the number of meshes converted. Nothing references the source file afterwards.
+	int ImportToContent(const char* srcPath, const char* destDir);
 };
 }  // namespace nuke
 

@@ -4,6 +4,7 @@
 #define BOOST_FILESYSTEM_NO_DEPRECATED
 #include <boost/filesystem.hpp>
 #include <boost/dll.hpp>
+#include <memory>                 // boost.dll (1.91+) returns std::shared_ptr from import_symbol
 #include <iostream>
 
 namespace nuke {
@@ -15,7 +16,7 @@ using namespace std;
 // (unmangled, extern "C") symbol name. Extension plugins use "plugin" instead.
 static const char* kRenderSymbol = "renderModule";
 
-static boost::shared_ptr<NUKERenderModule> g_renderModule;
+static std::shared_ptr<NUKERenderModule> g_renderModule;
 static iRender* g_renderer = nullptr;
 
 iRender* LoadRenderModule(const std::string& preferredId)
@@ -27,7 +28,7 @@ iRender* LoadRenderModule(const std::string& preferredId)
 		cout << "[RenderModular]\tcreated modules directory" << endl;
 	}
 
-	boost::shared_ptr<NUKERenderModule> fallback; // first render module found, if no id match
+	std::shared_ptr<NUKERenderModule> fallback; // first render module found, if no id match
 
 	for (auto& p : bfs::directory_iterator(modulesDir))
 	{

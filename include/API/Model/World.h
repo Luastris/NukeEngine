@@ -38,6 +38,13 @@ public:
 	void        LoadFromString(const std::string& data);
 	void SaveToFile(const std::string& path);
 	void LoadFromFile(const std::string& path);
+
+	// Live plugin (un)load support. ConvertPluginToUnknown turns every component owned by the
+	// given plugin into an inert UnknownComponent placeholder (called when it's disabled);
+	// RestorePluginComponents does the reverse — placeholders for that plugin's now-available
+	// types become real components again (called when it's enabled).
+	void ConvertPluginToUnknown(const std::string& moduleFile);
+	void RestorePluginComponents(const std::string& moduleFile);
 };
 
 }  // namespace nuke

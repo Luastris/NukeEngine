@@ -2,7 +2,7 @@
 
 #include <nlohmann/json.hpp>
 #include <boost/filesystem.hpp>
-#include <fstream>
+#include <boost/filesystem/fstream.hpp>
 #include <iostream>
 
 namespace nuke {
@@ -112,7 +112,7 @@ void Config::reload(Config* instance)
         bfs::create_directory(configDir);
 
     bfs::path cfg("./config/main.json");
-    std::ifstream f(cfg.string());
+    bfs::ifstream f(cfg);
     if (!f)
     {
         cout << PREFIX_CONF << "config/main.json not found — using defaults." << endl;
