@@ -135,6 +135,11 @@ public:
     // (0 on failure). Materials carry this handle (via their Shader) and renderObject selects
     // the pipeline by it; 0 / unknown falls back to the built-in default. Call after init().
     virtual uint64_t createShaderPipeline(const char* vs, const char* ps) { return 0; }
+
+    // Draw a selection outline (editor highlight) around one mesh, using the same world transform as
+    // renderObject. Call within the camera pass, after the objects. No-op if the renderer has no
+    // outline pipeline. The renderer owns the look (inverted-hull silhouette).
+    virtual void renderSelectionOutline(Mesh* mesh, const float pos[3], const float quat[4], const float scale[3]) {}
 //    virtual ~iRender(){
 //    }
 };

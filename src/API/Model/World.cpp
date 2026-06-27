@@ -195,6 +195,21 @@ void World::Render(iRender* r)
 
 		r->beginCamera(d);
 		RenderMeshes(*hierarchy, r);
+		// Selection highlight (editor only): outline the selected object after the scene.
+		if (editor)
+			if (Atom* sel = AppInstance::GetSingleton()->selectedInHieararchy)
+				if (auto* mr = sel->GetComponent<MeshRenderer>())
+					if (mr->mesh)
+					{
+						Transform& t = sel->GetTransform();
+						Vector3    p = t.globalPosition();
+						Quaternion q = t.globalRotation();
+						Vector3    s = t.globalScale();
+						float pos[3]   = { (float)p.x, (float)p.y, (float)p.z };
+						float quat[4]  = { (float)q.x, (float)q.y, (float)q.z, (float)q.w };
+						float scale[3] = { (float)s.x, (float)s.y, (float)s.z };
+						r->renderSelectionOutline(mr->mesh, pos, quat, scale);
+					}
 		r->endCamera();
 	}
 }

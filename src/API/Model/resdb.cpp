@@ -124,7 +124,7 @@ void ResDB::LoadShadersDir(const std::string& dir)
 		if (fn.size() <= vsuf.size() || fn.compare(fn.size() - vsuf.size(), vsuf.size(), vsuf) != 0)
 			continue;                                   // not a "*.vs.hlsl"
 		std::string name = fn.substr(0, fn.size() - vsuf.size());
-		if (name == "ui") continue;                     // renderer-internal UI pass, not a material shader
+		if (name == "ui" || name.rfind("outline", 0) == 0) continue;  // renderer-internal passes, not material shaders
 		bfs::path psPath = it->path().parent_path() / (name + ".ps.hlsl");
 		if (!bfs::exists(psPath, ec)) continue;         // no matching pixel shader
 		if (shaderByGuid.count(name)) continue;         // first one wins (engine before project)
