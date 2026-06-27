@@ -131,9 +131,36 @@ void ResDB::LoadShadersDir(const std::string& dir)
 		Shader* s = Shader::LoadPair(name, it->path().string(), psPath.string());
 		if (!s) { std::cout << "[ResDB]\tfailed to load shader '" << name << "'" << std::endl; continue; }
 		RegisterShader(s);
+		SetAssetPath(name, it->path().string());   // .vs.hlsl path (for locate/DnD)
 		std::cout << "[ResDB]\tloaded shader '" << name << "' (vs " << s->vsSource.size()
 		          << " / ps " << s->psSource.size() << " bytes, " << s->props.size() << " props)" << std::endl;
 	}
+}
+
+void ResDB::SetAssetPath(const std::string& guid, const std::string& path)
+{
+	if (guid.empty() || path.empty()) return;
+	pathByGuid[guid] = path;
+	guidByPath[path] = guid;
+}
+void ResDB::MoveAssetPath(const std::string& oldPath, const std::string& newPath)
+{
+	auto it = guidByPath.find(oldPath);
+	if (it == guidByPath.end()) return;          // not a tracked asset file
+	std::string g = it->second;
+	guidByPath.erase(it);
+	pathByGuid[g]      = newPath;
+	guidByPath[newPath] = g;
+}
+std::string ResDB::PathForGuid(const std::string& guid) const
+{
+	auto it = pathByGuid.find(guid);
+	return it != pathByGuid.end() ? it->second : std::string();
+}
+std::string ResDB::GuidForPath(const std::string& path) const
+{
+	auto it = guidByPath.find(path);
+	return it != guidByPath.end() ? it->second : std::string();
 }
 
 std::string ResDB::NewGuid()
@@ -157,6 +184,7 @@ void ResDB::LoadContentDir(const std::string& dir)
 			if (!m) { std::cout << "[ResDB]\tfailed to load " << it->path().filename().string() << std::endl; continue; }
 			if (m->guid.empty() || meshByGuid.count(m->guid)) { delete m; continue; }   // skip dups
 			RegisterMesh(m);
+			SetAssetPath(m->guid, it->path().string());
 			std::cout << "[ResDB]\tloaded mesh '" << m->name << "' (" << m->guid << ")" << std::endl;
 		}
 		else if (ext == ".numat")
@@ -165,6 +193,7 @@ void ResDB::LoadContentDir(const std::string& dir)
 			if (!mt) { std::cout << "[ResDB]\tfailed to load " << it->path().filename().string() << std::endl; continue; }
 			if (mt->guid.empty() || matByGuid.count(mt->guid)) { delete mt; continue; }
 			RegisterMaterial(mt);
+			SetAssetPath(mt->guid, it->path().string());
 			std::cout << "[ResDB]\tloaded material '" << mt->matName << "' (" << mt->guid << ")" << std::endl;
 		}
 		else if (ext == ".nutex")
@@ -173,6 +202,7 @@ void ResDB::LoadContentDir(const std::string& dir)
 			if (!tx) { std::cout << "[ResDB]\tfailed to load " << it->path().filename().string() << std::endl; continue; }
 			if (tx->guid.empty() || texByGuid.count(tx->guid)) { delete tx; continue; }
 			RegisterTexture(tx);
+			SetAssetPath(tx->guid, it->path().string());
 			std::cout << "[ResDB]\tloaded texture '" << tx->guid << "' (" << tx->width << "x" << tx->height << ")" << std::endl;
 		}
 	}

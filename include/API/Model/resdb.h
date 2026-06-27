@@ -39,6 +39,8 @@ public:
     std::map<std::string, Material*> matByGuid;    // GUID -> material asset
     std::map<std::string, Texture*>  texByGuid;    // GUID -> texture asset
     std::map<std::string, Shader*>   shaderByGuid; // GUID -> shader asset
+    std::map<std::string, std::string> pathByGuid; // GUID -> source file path (for "locate"/DnD)
+    std::map<std::string, std::string> guidByPath; // source file path -> GUID
 
     static ResDB* getSingleton();              // single instance (engine DLL)
 
@@ -67,6 +69,12 @@ public:
     void  LoadContentDir(const std::string& dir);
 
     static std::string NewGuid();              // fresh opaque asset id (for imports)
+
+    // Asset source paths (for the inspector's "locate original" + browser drag&drop -> guid).
+    void        SetAssetPath(const std::string& guid, const std::string& path);
+    void        MoveAssetPath(const std::string& oldPath, const std::string& newPath);  // on file rename/move
+    std::string PathForGuid(const std::string& guid) const;   // "" if unknown
+    std::string GuidForPath(const std::string& path) const;   // "" if unknown
 
 	std::shared_ptr<uint> loadTexture(const std::string& name);
 };
