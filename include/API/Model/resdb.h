@@ -76,6 +76,12 @@ public:
     std::string PathForGuid(const std::string& guid) const;   // "" if unknown
     std::string GuidForPath(const std::string& path) const;   // "" if unknown
 
+    // Live cleanup when a resource is deleted: drop it from the DB so it vanishes from pickers; and
+    // reset any LOADED material that references a guid back to defaults + re-Resolve (so the running
+    // session updates without a project reload).
+    void RemoveByGuid(const std::string& guid);
+    void UnlinkGuid(const std::string& guid);
+
 	std::shared_ptr<uint> loadTexture(const std::string& name);
 };
 }  // namespace nuke

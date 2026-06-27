@@ -164,6 +164,31 @@ std::string ResDB::GuidForPath(const std::string& path) const
 	return it != guidByPath.end() ? it->second : std::string();
 }
 
+void ResDB::RemoveByGuid(const std::string& guid)
+{
+	if (guid.empty()) return;
+	if (auto it = meshByGuid.find(guid);   it != meshByGuid.end())   { meshes.remove(it->second);    meshByGuid.erase(it); }
+	if (auto it = matByGuid.find(guid);    it != matByGuid.end())    { materials.remove(it->second);  matByGuid.erase(it); }
+	if (auto it = texByGuid.find(guid);    it != texByGuid.end())    { textures.remove(it->second);   texByGuid.erase(it); }
+	if (auto it = shaderByGuid.find(guid); it != shaderByGuid.end()) { shaders.remove(it->second);    shaderByGuid.erase(it); }
+	if (auto it = pathByGuid.find(guid);   it != pathByGuid.end())   { guidByPath.erase(it->second);  pathByGuid.erase(it); }
+}
+
+void ResDB::UnlinkGuid(const std::string& guid)
+{
+	if (guid.empty()) return;
+	for (Material* m : materials)   // only materials hold guid refs (shader + textures)
+	{
+		if (!m) continue;
+		bool ch = false;
+		if (m->shaderGuid   == guid) { m->shaderGuid = "world"; ch = true; }
+		if (m->diffuseGuid  == guid) { m->diffuseGuid.clear();  ch = true; }
+		if (m->normalGuid   == guid) { m->normalGuid.clear();   ch = true; }
+		if (m->specularGuid == guid) { m->specularGuid.clear(); ch = true; }
+		if (ch) m->Resolve();
+	}
+}
+
 std::string ResDB::NewGuid()
 {
 	// Random uuid-like id via boost::filesystem (boost-uuid isn't in the vcpkg set).

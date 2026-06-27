@@ -140,6 +140,9 @@ public:
     // renderObject. Call within the camera pass, after the objects. No-op if the renderer has no
     // outline pipeline. The renderer owns the look (inverted-hull silhouette).
     virtual void renderSelectionOutline(Mesh* mesh, const float pos[3], const float quat[4], const float scale[3]) {}
+
+    // Set the OS window title (editor shows "NukeEngine Editor — <project> — <world>").
+    virtual void setWindowTitle(const char* title) {}
 //    virtual ~iRender(){
 //    }
 };
