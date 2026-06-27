@@ -232,6 +232,7 @@ static void SaveAtom(Atom* go, json& j)
 			cj["props"] = uc->rawProps.empty() ? json::object()
 			                                   : json::parse(uc->rawProps, nullptr, false);
 			if (!uc->requiredPlugin.empty()) cj["plugin"] = uc->requiredPlugin;
+			cj["enabled"] = uc->enabled;
 			j["components"].push_back(cj);
 			continue;
 		}
@@ -259,6 +260,7 @@ static void SaveAtom(Atom* go, json& j)
 			}
 		const char* pl = PluginForType(ti->name);   // tag which plugin a component requires
 		if (pl && pl[0]) cj["plugin"] = pl;
+		cj["enabled"] = c->enabled;
 		j["components"].push_back(cj);
 	}
 	for (Atom* ch : go->children)
@@ -286,6 +288,7 @@ static Atom* LoadAtom(const json& j)
 			if (ti && ti->create && IsTypeActive(type))
 			{
 				Component* c = (Component*)ti->create();
+				c->enabled = cj.value("enabled", true);
 				if (cj.contains("props")) LoadObject(*ti, c, cj["props"]);
 				go->AddComponent(c);             // Init() wires transform/owner + clones the material instance
 				// Apply saved material-instance overrides onto the cloned instance (after Init).
@@ -314,6 +317,7 @@ static Atom* LoadAtom(const json& j)
 				// and remember which plugin it needs so the editor can show that.
 				UnknownComponent* uc = new UnknownComponent();
 				uc->typeName = type;
+				uc->enabled = cj.value("enabled", true);
 				if (cj.contains("props")) uc->rawProps = cj["props"].dump();
 				uc->requiredPlugin = cj.value("plugin", std::string(PluginForType(type)));
 				go->AddComponent(uc);
