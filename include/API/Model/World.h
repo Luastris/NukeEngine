@@ -20,6 +20,7 @@ public:
 	World();
 
 	Atom* Get(const char* name);
+	Atom* GetById(long id);     // recursive lookup by stable atom id
 	bc::list<Atom*>& GetHierarchy();
 	void Add(Atom* go);
 
@@ -45,6 +46,9 @@ public:
 	// Like Reparent, but insert `a` directly BEFORE `sibling` in `sibling`'s parent (for reordering /
 	// moving an atom up between siblings). nullptr sibling is ignored.
 	void ReparentBefore(Atom* a, Atom* sibling);
+	// Undo helpers: delete an atom subtree by id; insert one at a placement (parentId 0 = root).
+	void RemoveAtomById(long id);
+	void InsertAtom(Atom* a, long parentId, int index);
 
 	// Live plugin (un)load support. ConvertPluginToUnknown turns every component owned by the
 	// given plugin into an inert UnknownComponent placeholder (called when it's disabled);

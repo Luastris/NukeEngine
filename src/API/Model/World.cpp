@@ -102,6 +102,22 @@ Atom* World::Get(const char* name)
 	return nullptr;
 }
 
+static Atom* FindById(Atom* node, long id)
+{
+	if (!node) return nullptr;
+	if (node->id.id == id) return node;
+	for (Atom* c : node->children)
+		if (Atom* r = FindById(c, id)) return r;
+	return nullptr;
+}
+
+Atom* World::GetById(long id)
+{
+	for (Atom* go : GetHierarchy())
+		if (Atom* r = FindById(go, id)) return r;
+	return nullptr;
+}
+
 bc::list<Atom*>& World::GetHierarchy()
 {
 	return *hierarchy;
@@ -219,6 +235,7 @@ void World::Render(iRender* r)
 static void SaveAtom(Atom* go, json& j)
 {
 	j["name"] = go->GetName();
+	j["id"]   = go->id.id;   // stable identity (survives the scene rebuild on PIE stop / reload)
 	Transform& t = go->GetTransform();
 	if (TypeInfo* tti = t.GetType())
 		SaveObject(*tti, &t, j["transform"]);
@@ -274,6 +291,7 @@ static void SaveAtom(Atom* go, json& j)
 static Atom* LoadAtom(const json& j)
 {
 	Atom* go = new Atom(j.value("name", std::string("Atom")).c_str());
+	if (j.contains("id")) go->id.id = j["id"].get<long>();   // keep the saved identity
 	if (j.contains("transform"))
 	{
 		Transform& t = go->GetTransform();
@@ -397,6 +415,51 @@ Atom* LoadPrefab(const std::string& path)
 	json j = json::parse(f, nullptr, false);
 	if (j.is_discarded()) return nullptr;
 	return LoadAtom(j);
+}
+
+std::string SaveAtomToString(Atom* root)
+{
+	if (!root) return std::string();
+	json j;
+	SaveAtom(root, j);
+	return j.dump();
+}
+
+Atom* LoadAtomFromString(const std::string& data)
+{
+	if (data.empty()) return nullptr;
+	json j = json::parse(data, nullptr, false);
+	if (j.is_discarded()) return nullptr;
+	return LoadAtom(j);
+}
+
+// --- undo support: remove an atom subtree by id; insert one at a placement (parentId 0 = root) ---
+static void DeleteSubtree(Atom* a)
+{
+	if (!a) return;
+	for (Atom* c : a->children) DeleteSubtree(c);
+	delete a;
+}
+
+void World::RemoveAtomById(long id)
+{
+	Atom* a = GetById(id);
+	if (!a) return;
+	if (a->parent) a->parent->children.remove(a);
+	else           hierarchy->remove(a);
+	DeleteSubtree(a);
+}
+
+void World::InsertAtom(Atom* a, long parentId, int index)
+{
+	if (!a) return;
+	Atom* parent = parentId ? GetById(parentId) : nullptr;
+	a->parent = parent;
+	bc::list<Atom*>& lst = parent ? parent->children : *hierarchy;
+	if (index < 0 || index >= (int)lst.size()) { lst.push_back(a); return; }
+	auto it = lst.begin();
+	std::advance(it, index);
+	lst.insert(it, a);
 }
 
 void World::ConvertPluginToUnknown(const std::string& moduleFile)

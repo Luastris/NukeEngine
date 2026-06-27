@@ -7,7 +7,7 @@ namespace nuke {
 
 class NUKEENGINE_API ID {
 public:
-    long id;
+    unsigned long id;
 
 	ID();
 	ID(long id);

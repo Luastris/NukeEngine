@@ -15,6 +15,10 @@ class Atom;
 NUKEENGINE_API bool  SavePrefab(Atom* root, const std::string& path);
 NUKEENGINE_API Atom* LoadPrefab(const std::string& path);   // nullptr on failure
 
+// In-memory variants of the same atom-subtree (de)serialization (used by editor undo deltas).
+NUKEENGINE_API std::string SaveAtomToString(Atom* root);
+NUKEENGINE_API Atom*       LoadAtomFromString(const std::string& json);   // nullptr on failure
+
 }  // namespace nuke
 
 #endif // !NUKEE_PREFAB_H
