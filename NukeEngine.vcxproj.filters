@@ -92,11 +92,7 @@
     <ClCompile Include="src\config.cpp">
       <Filter>src</Filter>
     </ClCompile>
-    <ClCompile Include="deps\lodepng\lodepng.cpp">
-      <Filter>deps\lodepng</Filter>
     </ClCompile>
-    <ClCompile Include="deps\lodepng\lodepng_util.cpp">
-      <Filter>deps\lodepng</Filter>
     </ClCompile>
     <ClCompile Include="src\interface\EditorMenu\MenuItem.cpp">
       <Filter>src\interface\EditorMenu</Filter>
@@ -257,11 +253,7 @@
     <ClInclude Include="deps\ImGuizmo\ImSequencer.h">
       <Filter>deps\ImGuizmo</Filter>
     </ClInclude>
-    <ClInclude Include="deps\lodepng\lodepng.h">
-      <Filter>deps\lodepng</Filter>
     </ClInclude>
-    <ClInclude Include="deps\lodepng\lodepng_util.h">
-      <Filter>deps\lodepng</Filter>
     </ClInclude>
     <ClInclude Include="include\input\keyboard.h">
       <Filter>include\input</Filter>
@@ -387,7 +379,6 @@
     <Filter Include="deps\ImGuizmo">
       <UniqueIdentifier>{a125849c-6b98-4b06-9a4c-343accd92fac}</UniqueIdentifier>
     </Filter>
-    <Filter Include="deps\lodepng">
       <UniqueIdentifier>{ab7e0302-e4ad-4d31-99e8-8ebe4bdd2709}</UniqueIdentifier>
     </Filter>
   </ItemGroup>

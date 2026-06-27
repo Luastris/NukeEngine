@@ -187,8 +187,6 @@
     <ClInclude Include="deps\imgui\stb_rect_pack.h" />
     <ClInclude Include="deps\imgui\stb_textedit.h" />
     <ClInclude Include="deps\imgui\stb_truetype.h" />
-    <ClInclude Include="deps\lodepng\lodepng.h" />
-    <ClInclude Include="deps\lodepng\lodepng_util.h" />
     <ClInclude Include="framework.h" />
     <ClInclude Include="include\API\iGUI.h" />
     <ClInclude Include="include\API\Model\Camera.h" />
@@ -240,8 +238,6 @@
     <ClInclude Include="pch.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="deps\lodepng\lodepng.cpp" />
-    <ClCompile Include="deps\lodepng\lodepng_util.cpp" />
     <ClCompile Include="dllmain.cpp" />
     <ClCompile Include="NukeEngine.cpp" />
     <ClCompile Include="pch.cpp">
