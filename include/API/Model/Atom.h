@@ -28,7 +28,8 @@ public:
 	Transform transform = Transform(this);
 	
 	ID id;
-	
+	std::string prefabGuid;   // if set, this atom is an INSTANCE of that prefab (manual apply/reset only)
+
 	int layer = Layer::L_DEFAULT;
 
     bc::list<Component*> components = bc::list<Component*>();

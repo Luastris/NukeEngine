@@ -1,4 +1,5 @@
 #include "API/Model/resdb.h"
+#include "API/Model/Prefab.h"   // PrefabGuid (register prefab guid<->path)
 #include "render/irender.h"
 #include <boost/filesystem.hpp>
 #include <iostream>
@@ -204,6 +205,11 @@ void ResDB::LoadContentDir(const std::string& dir)
 			RegisterTexture(tx);
 			SetAssetPath(tx->guid, it->path().string());
 			std::cout << "[ResDB]\tloaded texture '" << tx->guid << "' (" << tx->width << "x" << tx->height << ")" << std::endl;
+		}
+		else if (ext == ".nuprefab")
+		{
+			std::string g = PrefabGuid(it->path().string());   // guid<->path so instances can resolve their prefab
+			if (!g.empty()) SetAssetPath(g, it->path().string());
 		}
 	}
 }

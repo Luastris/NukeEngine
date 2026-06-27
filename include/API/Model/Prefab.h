@@ -19,6 +19,9 @@ NUKEENGINE_API Atom* LoadPrefab(const std::string& path);   // nullptr on failur
 NUKEENGINE_API std::string SaveAtomToString(Atom* root);
 NUKEENGINE_API Atom*       LoadAtomFromString(const std::string& json);   // nullptr on failure
 
+// The prefab file's own GUID (its root "prefab" field), or "" for pre-link prefabs.
+NUKEENGINE_API std::string PrefabGuid(const std::string& path);
+
 }  // namespace nuke
 
 #endif // !NUKEE_PREFAB_H

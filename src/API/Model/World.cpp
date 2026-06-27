@@ -236,6 +236,7 @@ static void SaveAtom(Atom* go, json& j)
 {
 	j["name"] = go->GetName();
 	j["id"]   = go->id.id;   // stable identity (survives the scene rebuild on PIE stop / reload)
+	if (!go->prefabGuid.empty()) j["prefab"] = go->prefabGuid;   // instance link to a .nuprefab
 	Transform& t = go->GetTransform();
 	if (TypeInfo* tti = t.GetType())
 		SaveObject(*tti, &t, j["transform"]);
@@ -292,6 +293,7 @@ static Atom* LoadAtom(const json& j)
 {
 	Atom* go = new Atom(j.value("name", std::string("Atom")).c_str());
 	if (j.contains("id")) go->id.id = j["id"].get<long>();   // keep the saved identity
+	go->prefabGuid = j.value("prefab", std::string());       // instance link (if any)
 	if (j.contains("transform"))
 	{
 		Transform& t = go->GetTransform();
@@ -407,6 +409,13 @@ bool SavePrefab(Atom* root, const std::string& path)
 	return (bool)f;
 }
 
+static void RegenIds(Atom* a)
+{
+	if (!a) return;
+	a->id.generate();                    // each instantiated atom gets a fresh unique id
+	for (Atom* c : a->children) RegenIds(c);
+}
+
 Atom* LoadPrefab(const std::string& path)
 {
 	boost::filesystem::path p(path);
@@ -414,7 +423,20 @@ Atom* LoadPrefab(const std::string& path)
 	if (!f) return nullptr;
 	json j = json::parse(f, nullptr, false);
 	if (j.is_discarded()) return nullptr;
-	return LoadAtom(j);
+	Atom* a = LoadAtom(j);
+	RegenIds(a);                         // instances are unique — don't share the prefab's saved ids
+	return a;
+}
+
+// The prefab's own GUID (the "prefab" field of its root), or "" if it predates prefab linking.
+std::string PrefabGuid(const std::string& path)
+{
+	boost::filesystem::path p(path);
+	boost::filesystem::ifstream f(p);
+	if (!f) return std::string();
+	json j = json::parse(f, nullptr, false);
+	if (j.is_discarded()) return std::string();
+	return j.value("prefab", std::string());
 }
 
 std::string SaveAtomToString(Atom* root)
