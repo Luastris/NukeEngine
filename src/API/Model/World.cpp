@@ -443,6 +443,40 @@ void World::Clear()
 	}
 }
 
+static bool IsDescendantOf(Atom* node, Atom* maybeAncestor)
+{
+	for (Atom* p = node ? node->parent : nullptr; p; p = p->parent)
+		if (p == maybeAncestor) return true;
+	return false;
+}
+
+void World::Reparent(Atom* a, Atom* newParent)
+{
+	if (!a || a == newParent) return;
+	if (newParent && (newParent == a || IsDescendantOf(newParent, a))) return;   // would create a cycle
+	// detach from current location
+	if (a->parent) a->parent->children.remove(a);
+	else           hierarchy->remove(a);
+	// attach to the new location
+	if (newParent) { newParent->children.push_back(a); a->parent = newParent; }
+	else           { hierarchy->push_back(a);          a->parent = nullptr;   }
+}
+
+void World::ReparentBefore(Atom* a, Atom* sibling)
+{
+	if (!a || !sibling || a == sibling) return;
+	Atom* newParent = sibling->parent;
+	if (newParent && (newParent == a || IsDescendantOf(newParent, a))) return;   // cycle
+	// detach a from its current location
+	if (a->parent) a->parent->children.remove(a);
+	else           hierarchy->remove(a);
+	// insert before `sibling` in the target list (sibling's parent, or the root list)
+	bc::list<Atom*>& lst = newParent ? newParent->children : *hierarchy;
+	auto it = std::find(lst.begin(), lst.end(), sibling);
+	lst.insert(it, a);
+	a->parent = newParent;
+}
+
 void World::SaveToFile(const std::string& path)
 {
 	boost::filesystem::path p(path);

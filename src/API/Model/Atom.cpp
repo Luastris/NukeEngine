@@ -1,4 +1,5 @@
 #include "API/Model/Atom.h"
+#include "interface/AppInstance.h"   // SetParent delegates to the active world's Reparent
 #include <iostream>
 
 namespace nuke {
@@ -64,8 +65,9 @@ void Atom::Update()
 }
 
 void Atom::SetParent(Atom* newparent) {
-	newparent->children.push_back(this);
-	parent = newparent;
+	// Detach from the old location + attach to the new one (nullptr = scene root), via the active
+	// world's Reparent — which also guards against cycles.
+	AppInstance::GetSingleton()->currentScene->Reparent(this, newparent);
 }
 
 Atom* Atom::GetParent()

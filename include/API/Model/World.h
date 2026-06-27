@@ -39,6 +39,12 @@ public:
 	void SaveToFile(const std::string& path);
 	void LoadFromFile(const std::string& path);
 	void Clear();   // drop all atoms except the Editor Camera (for "New World")
+	// Move an atom under a new parent (nullptr = scene root). Detaches from its current location
+	// (old parent's children or the root list) first; ignores cycles (parenting under a descendant).
+	void Reparent(Atom* a, Atom* newParent);
+	// Like Reparent, but insert `a` directly BEFORE `sibling` in `sibling`'s parent (for reordering /
+	// moving an atom up between siblings). nullptr sibling is ignored.
+	void ReparentBefore(Atom* a, Atom* sibling);
 
 	// Live plugin (un)load support. ConvertPluginToUnknown turns every component owned by the
 	// given plugin into an inert UnknownComponent placeholder (called when it's disabled);
