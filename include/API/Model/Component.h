@@ -2,6 +2,7 @@
 #ifndef NUKEE_COMPONENT_H
 #define NUKEE_COMPONENT_H
 #include "NukeAPI.h"
+#include "ID.h"
 #include <string>
 #include <vector>
 
@@ -34,6 +35,7 @@ struct DynProp
 class NUKEENGINE_API Component
 {
 public:
+    ID id;                  // per-component identity (multiple components of one type per atom, e.g. scripts)
     bool enabled = true;
 	Transform* transform = nullptr;
 	Atom* atom = nullptr;   // owning Atom (back-reference), set by the component's Init

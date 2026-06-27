@@ -143,6 +143,9 @@ public:
 
     // Set the OS window title (editor shows "NukeEngine Editor — <project> — <world>").
     virtual void setWindowTitle(const char* title) {}
+
+    // Is the OS window currently focused/foreground? Editor uses focus-gain to re-check disk changes.
+    virtual bool isWindowFocused() { return true; }
 //    virtual ~iRender(){
 //    }
 };
