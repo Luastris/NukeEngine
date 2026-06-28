@@ -231,6 +231,17 @@ public:
     // device support). Rebuilds the affected pipelines + targets; safe to call before init (applied at setup).
     virtual void setMSAA(int samples) {}
     virtual int  getMSAA() { return 1; }
+
+    // HDR rendering: on = scene in float (RGBA16F) + tonemap in the post pass (real dynamic range, enables
+    // bloom); off = LDR (RGBA8) + tonemap inline (cheaper). Rebuilds pipelines/targets; safe before init.
+    virtual void setHDR(bool on) {}
+    virtual bool getHDR() { return false; }
+
+    // HDR DISPLAY output (distinct from setHDR's internal HDR rendering): create an HDR10 (RGB10A2 + PQ)
+    // swap chain so the backbuffer drives a real HDR monitor. Must be called BEFORE init. The Player enables
+    // it; the editor does not (its viewport is an SDR preview). No-op / SDR fallback if the display isn't HDR.
+    virtual void setHDROutput(bool on) {}
+    virtual bool getHDROutput() { return false; }   // true only if an HDR10 swap chain is actually active
 //    virtual ~iRender(){
 //    }
 };

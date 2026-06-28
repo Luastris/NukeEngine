@@ -75,9 +75,12 @@ float4 main(in PSIn i) : SV_Target
     {
         float sd   = dot(dir, normalize(-g_SunDir.xyz));   // 1 = looking straight at the sun
         float disk = smoothstep(0.9991, 0.9997, sd);       // sharp solar disk
-        float halo = pow(saturate(sd), 250.0) * 0.45       // tight glow around it
-                   + pow(saturate(sd), 8.0)   * 0.05;       // faint wide brightening of the sky near the sun
+        float halo = pow(saturate(sd), 350.0) * 0.35       // tight glow around it
+                   + pow(saturate(sd), 18.0)  * 0.025;      // faint wide brightening of the sky near the sun
         sky += g_SunCol.rgb * g_Params.y * (disk * 2.5 + halo);
     }
+
+    // The sky is authored in display space — output it RAW (no tonemap/gamma), exactly as before. In HDR-off
+    // mode the RGBA8 buffer stores it directly; in HDR mode the post pass will tonemap it along with the scene.
     return float4(sky, 1.0);
 }

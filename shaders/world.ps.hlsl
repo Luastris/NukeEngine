@@ -185,7 +185,11 @@ float4 main(in PSIn i) : SV_Target
     if (g_Params2.z > 0.5) emissive *= g_Emissive.Sample(g_Tex_sampler, i.uv).rgb;
     float3 color = ambient + Lo + emissive;
 
-    color = color / (color + 1.0);          // Reinhard tonemap
-    color = pow(max(color, 0.0), 1.0 / 2.2); // linear -> sRGB
+    // HDR on (g_SkyParams.z == 0): output LINEAR HDR; the post pass tonemaps. HDR off (== 1): tonemap here.
+    if (g_SkyParams.z > 0.5)
+    {
+        color = color / (color + 1.0);          // Reinhard tonemap
+        color = pow(max(color, 0.0), 1.0 / 2.2); // linear -> sRGB
+    }
     return float4(color, base.a);
 }
