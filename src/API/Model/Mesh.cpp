@@ -67,6 +67,7 @@ Mesh* Mesh::CreateCube() {
 	const int   F[6][4] = { {4,5,6,7},{1,0,3,2},{5,1,2,6},{0,4,7,3},{7,6,2,3},{0,1,5,4} };
 	const float N[6][3] = { {0,0,1},{0,0,-1},{1,0,0},{-1,0,0},{0,1,0},{0,-1,0} };
 	const int   tri[6]  = { 0,1,2, 0,2,3 };
+	const float UV[4][2] = { {1,1}, {0,1}, {0,0}, {1,0} };   // per-face corner UVs (U flipped: no mirroring)
 
 	m->numVerts   = 36;
 	m->vertexArray = new float[36 * 3];
@@ -79,7 +80,7 @@ Mesh* Mesh::CreateCube() {
 			const float* p = C[F[f][tri[t]]];
 			m->vertexArray[vi * 3 + 0] = p[0]; m->vertexArray[vi * 3 + 1] = p[1]; m->vertexArray[vi * 3 + 2] = p[2];
 			m->normalArray[vi * 3 + 0] = N[f][0]; m->normalArray[vi * 3 + 1] = N[f][1]; m->normalArray[vi * 3 + 2] = N[f][2];
-			m->uvArray[vi * 2 + 0] = 0.0f; m->uvArray[vi * 2 + 1] = 0.0f;
+			m->uvArray[vi * 2 + 0] = UV[tri[t]][0]; m->uvArray[vi * 2 + 1] = UV[tri[t]][1];
 			++vi;
 		}
 	strcpy(m->name, "Cube");
@@ -101,6 +102,7 @@ Mesh* Mesh::CreatePlane() {
 	{
 		m->vertexArray[i*3+0] = P[i][0]; m->vertexArray[i*3+1] = P[i][1]; m->vertexArray[i*3+2] = P[i][2];
 		m->normalArray[i*3+0] = 0; m->normalArray[i*3+1] = 1; m->normalArray[i*3+2] = 0;
+		m->uvArray[i*2+0] = h - P[i][0]; m->uvArray[i*2+1] = P[i][2] + h;   // [-h,h] -> [0,1] (U flipped)
 	}
 	strcpy(m->name, "Plane");
 	return m;
@@ -111,7 +113,7 @@ Mesh* Mesh::CreateSphere() {
 	const int   ST = 16, SE = 24;     // stacks, sectors
 	const float R = 0.5f;
 	const float PI = 3.14159265358979f;
-	std::vector<float> v, n;
+	std::vector<float> v, n, uv;
 	auto at = [&](int st, int se, float out[3]) {
 		float phi = PI * (float)st / ST;
 		float th  = 2.0f * PI * (float)se / SE;
@@ -119,23 +121,24 @@ Mesh* Mesh::CreateSphere() {
 		out[1] = R * cosf(phi);
 		out[2] = R * sinf(phi) * sinf(th);
 	};
-	auto push = [&](const float p[3]) {
+	auto push = [&](const float p[3], int st, int se) {
 		v.push_back(p[0]); v.push_back(p[1]); v.push_back(p[2]);
 		float l = sqrtf(p[0]*p[0] + p[1]*p[1] + p[2]*p[2]); if (l < 1e-6f) l = 1.0f;
 		n.push_back(p[0]/l); n.push_back(p[1]/l); n.push_back(p[2]/l);
+		uv.push_back(1.0f - (float)se / SE); uv.push_back((float)st / ST);   // equirectangular (U flipped)
 	};
 	for (int st = 0; st < ST; ++st)
 		for (int se = 0; se < SE; ++se)
 		{
 			float a[3], b[3], c[3], d[3];
 			at(st, se, a); at(st+1, se, b); at(st+1, se+1, c); at(st, se+1, d);
-			push(a); push(b); push(c);   // tri 1
-			push(a); push(c); push(d);   // tri 2
+			push(a, st, se); push(b, st+1, se); push(c, st+1, se+1);   // tri 1
+			push(a, st, se); push(c, st+1, se+1); push(d, st, se+1);   // tri 2
 		}
 	m->numVerts    = (int)(v.size() / 3);
 	m->vertexArray = new float[v.size()];  memcpy(m->vertexArray, v.data(), v.size() * sizeof(float));
 	m->normalArray = new float[n.size()];  memcpy(m->normalArray, n.data(), n.size() * sizeof(float));
-	m->uvArray     = new float[m->numVerts * 2]();
+	m->uvArray     = new float[uv.size()]; memcpy(m->uvArray, uv.data(), uv.size() * sizeof(float));
 	strcpy(m->name, "Sphere");
 	return m;
 }
