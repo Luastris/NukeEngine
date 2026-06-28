@@ -13,7 +13,7 @@ class NUKEENGINE_API Light : public Component
 {
 	NUKE_CLASS(Light, Component)
 public:
-	[[nuke::prop(label="Type (0=Dir 1=Point 2=Spot)")]] int type = 0;   // 0 directional, 1 point, 2 spot
+	[[nuke::prop(label="Type", enum="Directional,Point,Spot")]] int type = 0;   // 0 dir, 1 point, 2 spot
 	[[nuke::prop(label="Color")]]      Color color = Color(1, 1, 1, 1);
 	[[nuke::prop(label="Intensity")]]  float intensity = 3.0f;
 	[[nuke::prop(label="Range")]]      float range     = 10.0f;          // point/spot falloff distance

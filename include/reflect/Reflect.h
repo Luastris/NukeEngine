@@ -50,6 +50,8 @@ struct Field {
     // [[nuke::prop(min=..,max=..)]] on a numeric field -> the inspector draws a slider in [fmin,fmax]
     // instead of a drag box. fmax > fmin means "has a range".
     float fmin = 0.0f, fmax = 0.0f;
+    // [[nuke::prop(enum="A,B,C")]] on an int field -> the inspector draws a dropdown; the int is the index.
+    std::vector<std::string> enumLabels;
 };
 
 struct TypeInfo {
@@ -78,7 +80,7 @@ TypeInfo& TypeOf() {
 // Build a Field from a member pointer (deduces the FT tag).
 template<class C, class T>
 Field MakeField(const char* name, T C::* p, const char* asset = "", const char* label = "",
-                float fmin = 0.0f, float fmax = 0.0f) {
+                float fmin = 0.0f, float fmax = 0.0f, const char* enumCsv = "") {
     Field f;
     f.name = name;
     f.type = FieldTypeOf<T>();
@@ -87,6 +89,11 @@ Field MakeField(const char* name, T C::* p, const char* asset = "", const char* 
     f.label = label;
     f.fmin = fmin;
     f.fmax = fmax;
+    if (enumCsv && *enumCsv) {            // split "A,B,C" -> dropdown labels
+        std::string s(enumCsv), cur;
+        for (char c : s) { if (c == ',') { f.enumLabels.push_back(cur); cur.clear(); } else cur += c; }
+        f.enumLabels.push_back(cur);
+    }
     return f;
 }
 

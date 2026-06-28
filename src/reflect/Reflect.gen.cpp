@@ -31,7 +31,7 @@ bool NukeReflectInit() {
 	{
 		TypeInfo& t = TypeOf<Light>();
 		t.base = "Component";
-		t.fields.push_back(MakeField("type", &Light::type, "", "Type (0=Dir 1=Point 2=Spot)"));
+		t.fields.push_back(MakeField("type", &Light::type, "", "Type", 0.0f, 0.0f, "Directional,Point,Spot"));
 		t.fields.push_back(MakeField("color", &Light::color, "", "Color"));
 		t.fields.push_back(MakeField("intensity", &Light::intensity, "", "Intensity"));
 		t.fields.push_back(MakeField("range", &Light::range, "", "Range"));
