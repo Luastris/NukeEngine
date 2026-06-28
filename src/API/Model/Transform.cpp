@@ -107,10 +107,18 @@ void Transform::Reset()
 
 
 
+// Standard hierarchical transform: a child's world transform = parent world * local.
+// World position = parentPos + parentRot * (parentScale ⊙ localPos) — so children orbit/scale with the
+// parent (the old version just ADDED positions, ignoring parent rotation/scale).
 Vector3 Transform::globalPosition() {
-	return Vector3((this->go != nullptr && this->go->GetParent() != nullptr)
-		? (this->position + this->go->GetParent()->GetTransform().globalPosition())
-		: (this->position));
+	Atom* p = this->go ? this->go->GetParent() : nullptr;
+	if (!p) return this->position;
+	Transform& pt = p->GetTransform();
+	Vector3   ps = pt.globalScale();
+	glm::vec3 scaled((float)(this->position.x * ps.x), (float)(this->position.y * ps.y), (float)(this->position.z * ps.z));
+	glm::vec3 rot = ToGlm(pt.globalRotation()) * scaled;
+	Vector3   pp = pt.globalPosition();
+	return Vector3(pp.x + rot.x, pp.y + rot.y, pp.z + rot.z);
 }
 
 Quaternion Transform::globalRotation() {
@@ -120,7 +128,21 @@ Quaternion Transform::globalRotation() {
 }
 
 Vector3 Transform::globalScale() {
-	return Vector3((this->go->GetParent()) ? (this->scale * this->go->GetParent()->GetTransform().globalScale()) : (this->scale));
+	return Vector3((this->go && this->go->GetParent()) ? (this->scale * this->go->GetParent()->GetTransform().globalScale()) : (this->scale));
+}
+
+// Set this transform so its WORLD pose equals (wp, wr, ws), computing the local values relative to the
+// current parent (exact inverse of globalPosition/Rotation/Scale). Used by the gizmo + reparent-keep-world.
+void Transform::SetGlobal(const Vector3& wp, const Quaternion& wr, const Vector3& ws) {
+	Atom* p = this->go ? this->go->GetParent() : nullptr;
+	if (!p) { this->position = wp; this->rotation = wr; this->scale = ws; return; }
+	Transform& pt = p->GetTransform();
+	Vector3    pp = pt.globalPosition(); Quaternion pr = pt.globalRotation(); Vector3 ps = pt.globalScale();
+	glm::quat  ipr = glm::inverse(ToGlm(pr));
+	glm::vec3  rel = ipr * glm::vec3((float)(wp.x - pp.x), (float)(wp.y - pp.y), (float)(wp.z - pp.z));
+	this->position = Vector3(ps.x != 0 ? rel.x / ps.x : rel.x, ps.y != 0 ? rel.y / ps.y : rel.y, ps.z != 0 ? rel.z / ps.z : rel.z);
+	this->rotation = FromGlm(ipr * ToGlm(wr));
+	this->scale    = Vector3(ps.x != 0 ? ws.x / ps.x : ws.x, ps.y != 0 ? ws.y / ps.y : ws.y, ps.z != 0 ? ws.z / ps.z : ws.z);
 }
 
 }  // namespace nuke

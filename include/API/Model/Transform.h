@@ -30,6 +30,9 @@ public:
     Vector3 globalPosition();
 	Quaternion globalRotation();
 	Vector3 globalScale();
+	// Set local values so the WORLD pose equals these (inverse of the global* getters, relative to the
+	// current parent). Keeps an object in place when reparented / drives gizmo write-back.
+	void    SetGlobal(const Vector3& pos, const Quaternion& rot, const Vector3& scale);
 
 	// Euler helpers (degrees) for the inspector / authoring. Internally quaternion.
 	void    SetEulerDeg(const Vector3& deg);
