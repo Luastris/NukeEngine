@@ -227,6 +227,7 @@
     <ClInclude Include="include\input\Hotkeys.h" />
     <ClInclude Include="include\interface\AppInstance.h" />
     <ClInclude Include="include\interface\AssetCreators.h" />
+    <ClInclude Include="include\interface\iGUI.h" />
     <ClInclude Include="include\interface\EditorInstance.h" />
     <ClInclude Include="include\interface\EditorMenu\MenuItem.h" />
     <ClInclude Include="include\interface\EditorMenu\MenuStrip.h" />
@@ -284,6 +285,7 @@
     <ClCompile Include="src\input\Hotkeys.cpp" />
     <ClCompile Include="src\interface\AppInstance.cpp" />
     <ClCompile Include="src\interface\AssetCreators.cpp" />
+    <ClCompile Include="src\interface\GUI.cpp" />
     <ClCompile Include="src\interface\EditorInstance.cpp" />
     <ClCompile Include="src\interface\EditorMenu\MenuItem.cpp" />
     <ClCompile Include="src\interface\EditorMenu\MenuStrip.cpp" />

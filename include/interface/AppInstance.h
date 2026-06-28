@@ -2,6 +2,7 @@
 #ifndef NUKEE_APPINSTANCE_H
 #define NUKEE_APPINSTANCE_H
 #include "NukeAPI.h"
+#include <cstdint>
 #include <boost/thread.hpp>
 #include <boost/container/list.hpp>
 #include <boost/container/map.hpp>
@@ -82,6 +83,13 @@ public:
 	
 	void UpdateThread();
 	void StartUpdateThread();
+
+	// Where the runtime GUI (NukeGUI) draws + the on-screen rect to map input into. The host sets this
+	// each frame: editor -> the viewport RT + its screen rect; Player -> 0 (backbuffer) + full window.
+	// (ABI: new members at the END to keep existing offsets for non-rebuilt modules.)
+	uint64_t uiTarget = 0;            // render-target id (0 = backbuffer)
+	int      uiX = 0, uiY = 0;        // target top-left in window pixels (input offset)
+	int      uiW = 0, uiH = 0;        // target size in pixels
 };
 
 }  // namespace nuke

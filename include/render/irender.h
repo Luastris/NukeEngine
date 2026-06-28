@@ -150,6 +150,15 @@ public:
     // OS window maximized state (persisted in editor_state.json).
     virtual bool isWindowMaximized() { return false; }
     virtual void setWindowMaximized(bool maximized) {}
+
+    // Pull-style input (so a runtime UI can read input without owning the push callbacks). Cursor in
+    // window pixels; button 0/1/2 = left/right/middle.
+    virtual void getCursorPos(double& x, double& y) { x = 0; y = 0; }
+    virtual bool isMouseButtonDown(int button) { return false; }
+
+    // Target the next renderDrawLists at a render target (id from createRenderTarget; 0 = backbuffer),
+    // WITHOUT clearing it — so a runtime UI can composite into the camera/viewport RT. Pass 0 to reset.
+    virtual void bindRenderTarget(uint64_t rtId) {}
 //    virtual ~iRender(){
 //    }
 };

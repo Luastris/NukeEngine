@@ -55,6 +55,9 @@ public:
 	virtual std::vector<DynProp> DynamicProps() { return {}; }
 	virtual void SetDynamicProp(const std::string& /*name*/, const NukeVar& /*v*/) {}
 
+	// Runtime immediate-mode UI hook. Called each frame by the GUI backend (NukeGUI) while playing;
+	// draw with nuke::GUI()->... (see interface/iGUI.h). ABI: keep this LAST virtual.
+	virtual void OnGUI() {}
 };
 }  // namespace nuke
 
