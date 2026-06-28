@@ -5,6 +5,7 @@
 #include "API/Model/Material.h"   // material instance (mr->mat) save/load
 #include "API/Model/Light.h"      // scene lights -> iRender::setLights (PBR)
 #include <cmath>
+#include <set>
 #include "API/Model/Mesh.h"
 #include "API/Model/Texture.h"
 #include "API/Model/resdb.h"
@@ -192,6 +193,31 @@ static void RenderMeshes(bc::list<Atom*>& gos, iRender* r)
 	}
 }
 
+// Depth-only traversal for the shadow pass: every enabled mesh whose material casts shadows
+// (null material = casts by default). Transparency is handled in the renderer (alpha-dither).
+static void RenderShadowMeshes(bc::list<Atom*>& gos, iRender* r)
+{
+	for (auto go : gos)
+	{
+		if (auto* mr = go->GetComponent<MeshRenderer>())
+		{
+			if (mr->enabled && mr->mesh && (!mr->mat || mr->mat->castShadows))
+			{
+				Transform& t = go->GetTransform();
+				Vector3    p = t.globalPosition();
+				Quaternion q = t.globalRotation();
+				Vector3    s = t.globalScale();
+				float pos[3]   = { (float)p.x, (float)p.y, (float)p.z };
+				float quat[4]  = { (float)q.x, (float)q.y, (float)q.z, (float)q.w };
+				float scale[3] = { (float)s.x, (float)s.y, (float)s.z };
+				r->renderShadowObject(mr->mesh, pos, quat, scale, mr->mat);
+			}
+		}
+		if (go->children.size() > 0)
+			RenderShadowMeshes(go->children, r);
+	}
+}
+
 void World::Render(iRender* r)
 {
 	if (!r) return;
@@ -214,12 +240,22 @@ void World::Render(iRender* r)
 		n.dir[0] = (float)d.x; n.dir[1] = (float)d.y; n.dir[2] = (float)d.z;
 		n.color[0] = (float)L->color.r; n.color[1] = (float)L->color.g; n.color[2] = (float)L->color.b;
 		n.intensity = L->intensity; n.range = L->range;
+		n.castShadows = L->castShadows ? 1 : 0;
 		float outer = L->spotAngle * 0.01745329252f;
 		float inner = outer * (1.0f - (L->spotBlend < 0 ? 0 : (L->spotBlend > 1 ? 1 : L->spotBlend)));
 		n.spotOuter = std::cos(outer); n.spotInner = std::cos(inner);
 		gpuLights.push_back(n);
 	}
 	r->setLights(gpuLights.empty() ? nullptr : gpuLights.data(), (int)gpuLights.size());
+
+	// Shadow depth passes (one per shadow-casting dir/spot light) before any camera pass — the renderer
+	// samples them during the world pass. Only shadow-casting surfaces (Material::castShadows) contribute.
+	for (int sp = 0, spc = r->shadowPassCount(); sp < spc; ++sp)
+	{
+		r->beginShadowPass(sp);
+		RenderShadowMeshes(*hierarchy, r);
+		r->endShadowPass();
+	}
 
 	const bool editor = AppInstance::GetSingleton()->isEditor();
 	for (Camera* cam : cams)
@@ -320,6 +356,7 @@ static void SaveAtom(Atom* go, json& j)
 				jm["roughness"]  = mr->mat->roughness;
 				jm["emissive"]   = { mr->mat->emissive.r, mr->mat->emissive.g, mr->mat->emissive.b };
 				jm["emissiveIntensity"] = mr->mat->emissiveIntensity;
+				jm["castShadows"] = mr->mat->castShadows;
 				if (!mr->mat->props.empty())
 				{
 					json jp = json::object();
@@ -346,7 +383,7 @@ static void SaveAtom(Atom* go, json& j)
 static Atom* LoadAtom(const json& j)
 {
 	Atom* go = new Atom(j.value("name", std::string("Atom")).c_str());
-	if (j.contains("id")) go->id.id = j["id"].get<long>();   // keep the saved identity
+	if (j.contains("id")) { go->id.id = j["id"].get<long>(); ID::observe(go->id.id); }   // keep the saved identity
 	go->prefabGuid = j.value("prefab", std::string());       // instance link (if any)
 	if (j.contains("transform"))
 	{
@@ -363,7 +400,7 @@ static Atom* LoadAtom(const json& j)
 			{
 				Component* c = (Component*)ti->create();
 				c->enabled = cj.value("enabled", true);
-				c->id.id   = cj.value("cid", c->id.id);
+				c->id.id   = cj.value("cid", c->id.id); ID::observe(c->id.id);
 				if (cj.contains("props")) LoadObject(*ti, c, cj["props"]);
 				go->AddComponent(c);             // Init() wires transform/owner + clones the material instance
 				// Apply saved material-instance overrides onto the cloned instance (after Init).
@@ -387,6 +424,7 @@ static Atom* LoadAtom(const json& j)
 						if (jm.contains("metallic"))    mr->mat->metallic       = jm.value("metallic", 0.0f);
 						if (jm.contains("roughness"))   mr->mat->roughness      = jm.value("roughness", 0.6f);
 						if (jm.contains("emissiveIntensity")) mr->mat->emissiveIntensity = jm.value("emissiveIntensity", 0.0f);
+						if (jm.contains("castShadows"))    mr->mat->castShadows    = jm.value("castShadows", true);
 						if (jm.contains("emissive") && jm["emissive"].is_array() && jm["emissive"].size() == 3)
 						{
 							mr->mat->emissive.r = jm["emissive"][0]; mr->mat->emissive.g = jm["emissive"][1];
@@ -410,7 +448,7 @@ static Atom* LoadAtom(const json& j)
 				UnknownComponent* uc = new UnknownComponent();
 				uc->typeName = type;
 				uc->enabled = cj.value("enabled", true);
-				uc->id.id   = cj.value("cid", uc->id.id);
+				uc->id.id   = cj.value("cid", uc->id.id); ID::observe(uc->id.id);
 				if (cj.contains("props")) uc->rawProps = cj["props"].dump();
 				uc->requiredPlugin = cj.value("plugin", std::string(PluginForType(type)));
 				go->AddComponent(uc);
@@ -583,6 +621,24 @@ std::string World::SaveToString()
 	return j.dump(2);
 }
 
+// Repair duplicate ids (e.g. worlds saved by the old address-based ID::generate, or prefab/duplicate
+// round-trips before the fix): atom ids must be globally unique; component ids unique within their atom.
+static void FixDuplicateIds(bc::list<Atom*>& gos, std::set<unsigned long>& seenAtoms)
+{
+	for (Atom* go : gos)
+	{
+		if (go->id.id == 0 || seenAtoms.count(go->id.id)) go->id.generate();
+		seenAtoms.insert(go->id.id);
+		std::set<unsigned long> seenComps;
+		for (Component* c : go->components)
+		{
+			if (c->id.id == 0 || seenComps.count(c->id.id)) c->id.generate();
+			seenComps.insert(c->id.id);
+		}
+		FixDuplicateIds(go->children, seenAtoms);
+	}
+}
+
 void World::LoadFromString(const std::string& data)
 {
 	json j = json::parse(data, nullptr, false);
@@ -595,6 +651,8 @@ void World::LoadFromString(const std::string& data)
 	if (j.contains("atoms"))
 		for (const json& gj : j["atoms"])
 			Add(LoadAtom(gj));
+	std::set<unsigned long> seen;
+	FixDuplicateIds(*hierarchy, seen);   // heal any colliding ids from old saves / duplicates
 }
 
 void World::Clear()

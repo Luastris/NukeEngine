@@ -37,6 +37,7 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("range", &Light::range, "", "Range"));
 		t.fields.push_back(MakeField("spotAngle", &Light::spotAngle, "", "Spot Angle"));
 		t.fields.push_back(MakeField("spotBlend", &Light::spotBlend, "", "Spot Blend"));
+		t.fields.push_back(MakeField("castShadows", &Light::castShadows, "", "Cast Shadows"));
 		t.create = []() -> void* { return new Light(); };
 	}
 	{
@@ -52,6 +53,7 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("roughness", &Material::roughness, "", "Roughness", 0.0f, 1.0f));
 		t.fields.push_back(MakeField("emissive", &Material::emissive, "", "Emissive"));
 		t.fields.push_back(MakeField("emissiveIntensity", &Material::emissiveIntensity, "", "Emissive Intensity"));
+		t.fields.push_back(MakeField("castShadows", &Material::castShadows, "", "Cast Shadows"));
 		t.fields.push_back(MakeField("shaderGuid", &Material::shaderGuid, "shader", "Shader"));
 		t.create = []() -> void* { return new Material(); };
 	}

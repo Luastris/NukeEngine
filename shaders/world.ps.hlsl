@@ -9,8 +9,50 @@ cbuffer MatCB { float4 g_Color; float4 g_Params; float4 g_Params2; float4 g_Emis
 
 #define MAX_LIGHTS 16
 struct Light { float4 posType; float4 dirRange; float4 colorIntensity; float4 spot; };
+#define MAX_SHADOWS 4
 // FrameCB: per-camera lighting. g_CamPos.xyz; g_Ambient = (rgb, intensity); g_LightCount.x = count.
-cbuffer FrameCB { float4 g_CamPos; float4 g_Ambient; float4 g_LightCount; Light g_Lights[MAX_LIGHTS]; };
+// g_ShadowVP[slot] = world->light-clip per shadow map; g_ShadowParams = (slotCount, _, texelSize, bias).
+// A light carries its shadow slot (or -1) in Light.spot.z.
+cbuffer FrameCB
+{
+    float4 g_CamPos; float4 g_Ambient; float4 g_LightCount; Light g_Lights[MAX_LIGHTS];
+    float4x4 g_ShadowVP[MAX_SHADOWS]; float4 g_ShadowParams;
+};
+Texture2DArray          g_Shadow;
+SamplerComparisonState  g_Shadow_sampler;
+
+// Shadow factor (1 = lit, 0 = fully shadowed) for a light's shadow-map slot, with 3x3 PCF.
+float SampleShadow(float3 wpos, int slot)
+{
+    if (slot < 0) return 1.0;
+    float4 lp = mul(g_ShadowVP[slot], float4(wpos, 1.0));
+    lp.xyz /= lp.w;
+    float2 uv = lp.xy * float2(0.5, -0.5) + 0.5;   // NDC -> UV (Diligent: flip Y)
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || lp.z > 1.0) return 1.0;
+    float depth = lp.z - g_ShadowParams.w;          // depth bias to kill acne
+    float t = g_ShadowParams.z, s = 0.0;
+    [unroll] for (int y = -1; y <= 1; ++y)
+    [unroll] for (int x = -1; x <= 1; ++x)
+        s += g_Shadow.SampleCmpLevelZero(g_Shadow_sampler, float3(uv + float2(x, y) * t, (float)slot), depth);
+    return s / 9.0;
+}
+
+TextureCubeArray        g_ShadowCube;
+SamplerComparisonState  g_ShadowCube_sampler;
+
+// Point-light shadow: sample the cube by world->light direction; reconstruct the perspective ZO depth
+// from the major-axis distance (the depth the cube face actually stored).
+float SamplePointShadow(float3 wpos, float3 lpos, int cube, float farZ)
+{
+    if (cube < 0) return 1.0;
+    float3 dir = wpos - lpos;
+    float3 ad  = abs(dir);
+    float  z   = max(ad.x, max(ad.y, ad.z));
+    float  n   = 0.1;
+    float  ndc = (farZ / (farZ - n)) * (1.0 - n / max(z, 1e-4));
+    ndc -= g_ShadowParams.w;
+    return g_ShadowCube.SampleCmpLevelZero(g_ShadowCube_sampler, float4(dir, (float)cube), ndc);
+}
 
 // One shared sampler for every map (g_Tex_sampler). FXC merges identical samplers anyway, and a single
 // combined sampler keeps Diligent's combined-texture-sampler reflection happy (no "unassigned" warnings).
@@ -102,6 +144,8 @@ float4 main(in PSIn i) : SV_Target
         if (ndl <= 0.0) continue;
         float3 H = normalize(V + L);
         float3 radiance = lt.colorIntensity.rgb * lt.colorIntensity.w * atten;
+        if (type > 0.5 && type < 1.5) radiance *= SamplePointShadow(i.wpos, lt.posType.xyz, (int)lt.spot.w, lt.dirRange.w);
+        else                          radiance *= SampleShadow(i.wpos, (int)lt.spot.z);   // dir/spot 2D slot
 
         float  D = DistributionGGX(N, H, rough);
         float  G = GeometrySmith(N, V, L, rough);

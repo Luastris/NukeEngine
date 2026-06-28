@@ -26,6 +26,7 @@ struct NukeLight
     float range      = 10.0f;       // point/spot falloff distance
     float spotInner  = 0.9f;        // cos(inner cone half-angle)
     float spotOuter  = 0.8f;        // cos(outer cone half-angle)
+    int   castShadows = 0;          // this light casts shadows (engine: Light::castShadows)
 };
 
 // Backend-neutral camera description for one render pass. The renderer builds the
@@ -185,6 +186,15 @@ public:
     // pushes them here before drawing; the renderer packs them into its PBR lighting buffer. Passing
     // count 0 lets the renderer fall back to a default directional sun.
     virtual void setLights(const NukeLight* lights, int count) {}
+
+    // --- Shadows (directional + spot 2D shadow maps; point cube maps are a later phase) --------
+    // After setLights the renderer assigns a shadow-map slot to each shadow-casting dir/spot light and
+    // returns the number of depth passes to run. The engine runs each pass (beginShadowPass(p) ->
+    // renderShadowObject per caster -> endShadowPass) BEFORE the camera pass; the world pass samples them.
+    virtual int  shadowPassCount() { return 0; }
+    virtual void beginShadowPass(int pass) {}
+    virtual void renderShadowObject(Mesh* mesh, const float pos[3], const float quat[4], const float scale[3], Material* mat) {}
+    virtual void endShadowPass() {}
 //    virtual ~iRender(){
 //    }
 };

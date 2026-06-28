@@ -12,7 +12,11 @@ public:
 	ID();
 	ID(long id);
 
-	void generate();
+	void generate();   // assign a fresh process-unique id (monotonic counter)
+
+	// Keep the global counter ahead of an id restored from disk, so newly generated ids never
+	// collide with loaded ones. Call after deserializing an id.
+	static void observe(unsigned long seen);
 };
 }  // namespace nuke
 

@@ -19,6 +19,7 @@ public:
 	[[nuke::prop(label="Range")]]      float range     = 10.0f;          // point/spot falloff distance
 	[[nuke::prop(label="Spot Angle")]] float spotAngle = 35.0f;          // spot outer cone half-angle (deg)
 	[[nuke::prop(label="Spot Blend")]] float spotBlend = 0.15f;          // 0..1 inner/outer cone softness
+	[[nuke::prop(label="Cast Shadows")]] bool castShadows = true;        // this light projects shadows
 
 	Light();
 	void Init(Atom* parent) override;

@@ -49,6 +49,7 @@ Material* Material::Clone() const
 	m->roughness   = roughness;
 	m->emissive = emissive;
 	m->emissiveIntensity = emissiveIntensity;
+	m->castShadows = castShadows;
 	m->shaderGuid  = shaderGuid;
 	m->props       = props;
 	m->Resolve();   // bind diff/norm/spec/mr/ao/em/shader pointers from ResDB
@@ -94,6 +95,7 @@ bool Material::SaveToFile(const std::string& path) const
 	j["roughness"]  = roughness;
 	j["emissive"]   = { emissive.r, emissive.g, emissive.b };
 	j["emissiveIntensity"] = emissiveIntensity;
+	j["castShadows"] = castShadows;
 	boost::filesystem::path p(path);
 	boost::filesystem::ofstream f(p);
 	if (!f) return false;
@@ -122,6 +124,7 @@ Material* Material::LoadFromFile(const std::string& path)
 	m->metallic     = j.value("metallic", 0.0f);
 	m->roughness    = j.value("roughness", 0.6f);
 	m->emissiveIntensity = j.value("emissiveIntensity", 0.0f);
+	m->castShadows = j.value("castShadows", true);
 	if (j.contains("color") && j["color"].is_array() && j["color"].size() == 4)
 	{
 		m->color.r = j["color"][0]; m->color.g = j["color"][1];

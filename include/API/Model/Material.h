@@ -39,6 +39,9 @@ public:
     [[nuke::prop(label="Roughness", min=0, max=1)]] float roughness = 0.6f;
     [[nuke::prop(label="Emissive")]]  Color emissive = Color(0, 0, 0, 1);
     [[nuke::prop(label="Emissive Intensity")]] float emissiveIntensity = 0.0f;
+    // Whether this surface casts shadows. Default on; turn on for transparent surfaces too — the
+    // shadow pass alpha-dithers by the material's alpha so see-through surfaces cast lighter shadows.
+    [[nuke::prop(label="Cast Shadows")]] bool castShadows = true;
 
     Texture* diff = nullptr;       // runtime-resolved textures (via Resolve())
     Texture* norm = nullptr;
