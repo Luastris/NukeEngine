@@ -77,6 +77,7 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("emissive", &Material::emissive, "", "Emissive"));
 		t.fields.push_back(MakeField("emissiveIntensity", &Material::emissiveIntensity, "", "Emissive Intensity"));
 		t.fields.push_back(MakeField("castShadows", &Material::castShadows, "", "Cast Shadows"));
+		t.fields.push_back(MakeField("blendMode", &Material::blendMode, "", "Blend", 0.0f, 0.0f, "Opaque,Transparent,Additive"));
 		t.fields.push_back(MakeField("shaderGuid", &Material::shaderGuid, "shader", "Shader"));
 		t.create = []() -> void* { return new Material(); };
 	}

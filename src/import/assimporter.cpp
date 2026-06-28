@@ -17,49 +17,70 @@
 
 namespace nuke {
 
-// Compress an RGBA image into a BC texture WITH a precomputed mip chain (BC can't auto-gen mips on GPU).
-// BC1 for opaque, BC3 when any pixel has alpha. Concatenates every mip's blocks into tex->pixels.
+// BC-compress one RGBA level (any size; partial edge blocks clamp) -> appended to `out`. 8=BC1, 16=BC3.
+static void BCLevel(std::vector<unsigned char>& out, const unsigned char* rgba, int w, int h, int blockBytes, int alpha)
+{
+	const int bx = (w + 3) / 4, by = (h + 3) / 4;
+	size_t base = out.size();
+	out.resize(base + (size_t)bx * by * blockBytes);
+	unsigned char* dst = out.data() + base;
+	for (int byi = 0; byi < by; ++byi)
+		for (int bxi = 0; bxi < bx; ++bxi)
+		{
+			unsigned char block[64];
+			for (int py = 0; py < 4; ++py)
+				for (int px = 0; px < 4; ++px)
+				{
+					int sx = bxi * 4 + px; if (sx >= w) sx = w - 1;
+					int sy = byi * 4 + py; if (sy >= h) sy = h - 1;
+					const unsigned char* s = &rgba[((size_t)sy * w + sx) * 4];
+					unsigned char* d = &block[(py * 4 + px) * 4];
+					d[0] = s[0]; d[1] = s[1]; d[2] = s[2]; d[3] = s[3];
+				}
+			stb_compress_dxt_block(dst, block, alpha, STB_DXT_NORMAL);
+			dst += blockBytes;
+		}
+}
+
+// Edge-replicate pad an RGBA image up to a multiple of 4 (so any size can be BC-compressed). Returns the
+// padded buffer + the padded dims; if already aligned, returns a copy at the same size.
+static std::vector<unsigned char> PadTo4(const std::vector<unsigned char>& rgba0, int w0, int h0, int& wOut, int& hOut)
+{
+	wOut = (w0 + 3) & ~3; hOut = (h0 + 3) & ~3;
+	if (wOut == w0 && hOut == h0) return rgba0;
+	std::vector<unsigned char> p((size_t)wOut * hOut * 4);
+	for (int y = 0; y < hOut; ++y)
+	{
+		int sy = y < h0 ? y : h0 - 1;
+		for (int x = 0; x < wOut; ++x)
+		{
+			int sx = x < w0 ? x : w0 - 1;
+			const unsigned char* s = &rgba0[((size_t)sy * w0 + sx) * 4];
+			unsigned char* d = &p[((size_t)y * wOut + x) * 4];
+			d[0] = s[0]; d[1] = s[1]; d[2] = s[2]; d[3] = s[3];
+		}
+	}
+	return p;
+}
+
+// Compress an RGBA image into a BC texture + precomputed mip chain. BC1 (opaque) / BC3 (alpha). ANY size:
+// non-multiple-of-4 images are edge-padded to a multiple of 4 (BC needs it) instead of stored raw RGBA.
 static void CompressToBC(Texture* tex, const std::vector<unsigned char>& rgba0, int w0, int h0)
 {
-	// BC needs the top level to be a multiple of 4 (D3D11). Odd sizes stay raw RGBA8 (GPU-mipped).
-	if (w0 <= 0 || h0 <= 0 || (w0 % 4) != 0 || (h0 % 4) != 0)
-	{
-		tex->format = Texture::FMT_RGBA8; tex->mipCount = 1;
-		tex->width = w0; tex->height = h0; tex->pixels = rgba0;
-		return;
-	}
+	if (w0 <= 0 || h0 <= 0) { tex->format = Texture::FMT_RGBA8; tex->mipCount = 1; tex->width = w0; tex->height = h0; tex->pixels = rgba0; return; }
 	bool hasA = false;
 	for (size_t i = 3; i < rgba0.size(); i += 4) if (rgba0[i] < 255) { hasA = true; break; }
-	const int blockBytes = hasA ? 16 : 8;
-	const int alpha = hasA ? 1 : 0;
+	const int blockBytes = hasA ? 16 : 8, alpha = hasA ? 1 : 0;
 	tex->format = hasA ? Texture::FMT_BC3 : Texture::FMT_BC1;
-	tex->width = w0; tex->height = h0;
 	tex->pixels.clear();
 
-	std::vector<unsigned char> cur = rgba0;
-	int w = w0, h = h0, mips = 0;
+	int w, h;
+	std::vector<unsigned char> cur = PadTo4(rgba0, w0, h0, w, h);   // top level padded to a multiple of 4
+	tex->width = w; tex->height = h;
+	int mips = 0;
 	while (true)
 	{
-		const int bx = (w + 3) / 4, by = (h + 3) / 4;
-		size_t base = tex->pixels.size();
-		tex->pixels.resize(base + (size_t)bx * by * blockBytes);
-		unsigned char* dst = tex->pixels.data() + base;
-		for (int byi = 0; byi < by; ++byi)
-			for (int bxi = 0; bxi < bx; ++bxi)
-			{
-				unsigned char block[64];
-				for (int py = 0; py < 4; ++py)
-					for (int px = 0; px < 4; ++px)
-					{
-						int sx = bxi * 4 + px; if (sx >= w) sx = w - 1;
-						int sy = byi * 4 + py; if (sy >= h) sy = h - 1;
-						const unsigned char* s = &cur[((size_t)sy * w + sx) * 4];
-						unsigned char* d = &block[(py * 4 + px) * 4];
-						d[0] = s[0]; d[1] = s[1]; d[2] = s[2]; d[3] = s[3];
-					}
-				stb_compress_dxt_block(dst, block, alpha, STB_DXT_NORMAL);
-				dst += blockBytes;
-			}
+		BCLevel(tex->pixels, cur.data(), w, h, blockBytes, alpha);
 		++mips;
 		if (w == 1 && h == 1) break;
 		const int nw = w > 1 ? w / 2 : 1, nh = h > 1 ? h / 2 : 1;
@@ -379,12 +400,22 @@ std::string AssImporter::ImportImage(const char* srcPath, const char* destDir)
 			for (size_t p = 0; p < (size_t)w * h; ++p)
 				if (cur[p * 4 + 3] == 0) { cur[p*4] = prev[p*4]; cur[p*4+1] = prev[p*4+1]; cur[p*4+2] = prev[p*4+2]; cur[p*4+3] = prev[p*4+3]; }
 		}
-		for (int k = 0; k < frames; ++k) { unsigned char* f = px + (size_t)k * fb; for (size_t p = 0; p < (size_t)w * h; ++p) f[p*4+3] = 255; }
-		tex->width = w; tex->height = h; tex->format = Texture::FMT_RGBA8; tex->mipCount = 1;
 		tex->frameCount = frames;
 		tex->frameDelaysMs.resize(frames);
 		for (int k = 0; k < frames; ++k) tex->frameDelaysMs[k] = (delays && delays[k] > 0) ? delays[k] : 100;
-		tex->pixels.assign(px, px + (size_t)w * h * frames * 4);
+		// Keep real transparency: BC3 if ANY frame has alpha < 255 (animated sprites with holes), else BC1.
+		bool hasA = false;
+		for (size_t p = 0; p < (size_t)w * h * frames && !hasA; ++p) if (px[p * 4 + 3] < 255) hasA = true;
+		const int gbb = hasA ? 16 : 8, galpha = hasA ? 1 : 0;
+		tex->format = hasA ? Texture::FMT_BC3 : Texture::FMT_BC1; tex->mipCount = 1; tex->pixels.clear();
+		int pw = 0, ph = 0;
+		for (int k = 0; k < frames; ++k)
+		{
+			std::vector<unsigned char> frame(px + (size_t)k * fb, px + (size_t)(k + 1) * fb);
+			std::vector<unsigned char> padded = PadTo4(frame, w, h, pw, ph);
+			BCLevel(tex->pixels, padded.data(), pw, ph, gbb, galpha);
+		}
+		tex->width = pw; tex->height = ph;
 		stbi_image_free(px);
 		if (delays) STBI_FREE(delays);
 	}

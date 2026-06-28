@@ -226,6 +226,11 @@ public:
     // Files dropped onto the OS window from the desktop/Explorer. The editor hooks this to import dropped
     // models/images into the current browser folder. Called once per dropped path (on the main thread).
     virtual void setOnFileDrop(bst::function<void(const char* path)> cb) {}
+
+    // Hardware anti-aliasing sample count for the world passes (1 = off, else 2/4/8 snapped + clamped to
+    // device support). Rebuilds the affected pipelines + targets; safe to call before init (applied at setup).
+    virtual void setMSAA(int samples) {}
+    virtual int  getMSAA() { return 1; }
 //    virtual ~iRender(){
 //    }
 };

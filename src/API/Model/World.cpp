@@ -185,26 +185,52 @@ static Environment* FindEnvironment(bc::list<Atom*>& gos)
 	return nullptr;
 }
 
-static void RenderMeshes(bc::list<Atom*>& gos, iRender* r)
+// One queued draw (gathered before drawing so transparent objects can be sorted back-to-front).
+struct DrawItem { Mesh* mesh; Material* mat; float pos[3], quat[4], scale[3]; Vector3 wpos; int blend; };
+
+static void CollectMeshes(bc::list<Atom*>& gos, std::vector<DrawItem>& out)
 {
 	for (auto go : gos)
 	{
 		if (auto* mr = go->GetComponent<MeshRenderer>())
-		{
 			if (mr->enabled && mr->mesh)
 			{
 				Transform& t = go->GetTransform();
 				Vector3    p = t.globalPosition();
 				Quaternion q = t.globalRotation();
 				Vector3    s = t.globalScale();
-				float pos[3]   = { (float)p.x, (float)p.y, (float)p.z };
-				float quat[4]  = { (float)q.x, (float)q.y, (float)q.z, (float)q.w };
-				float scale[3] = { (float)s.x, (float)s.y, (float)s.z };
-				r->renderObject(mr->mesh, mr->mat, pos, quat, scale);   // mr->mat is the instance
+				DrawItem it;
+				it.mesh = mr->mesh; it.mat = mr->mat;
+				it.pos[0]=(float)p.x; it.pos[1]=(float)p.y; it.pos[2]=(float)p.z;
+				it.quat[0]=(float)q.x; it.quat[1]=(float)q.y; it.quat[2]=(float)q.z; it.quat[3]=(float)q.w;
+				it.scale[0]=(float)s.x; it.scale[1]=(float)s.y; it.scale[2]=(float)s.z;
+				it.wpos = p;
+				it.blend = mr->mat ? mr->mat->blendMode : 0;   // 0 = opaque, 1/2 = transparent/additive
+				out.push_back(it);
 			}
-		}
 		if (go->children.size() > 0)
-			RenderMeshes(go->children, r);
+			CollectMeshes(go->children, out);
+	}
+}
+
+// Draw a gathered scene for one camera: opaque first (depth write on), then transparent/additive sorted
+// back-to-front by distance from the camera (the renderer disables depth write for those).
+static void DrawCollected(std::vector<DrawItem>& items, const Vector3& camPos, iRender* r)
+{
+	for (auto& it : items)
+		if (it.blend == 0)
+			r->renderObject(it.mesh, it.mat, it.pos, it.quat, it.scale);
+
+	std::vector<DrawItem*> tr;
+	for (auto& it : items) if (it.blend != 0) tr.push_back(&it);
+	if (!tr.empty())
+	{
+		auto dist2 = [&](const DrawItem* it) {
+			double dx = it->wpos.x - camPos.x, dy = it->wpos.y - camPos.y, dz = it->wpos.z - camPos.z;
+			return dx*dx + dy*dy + dz*dz;
+		};
+		std::sort(tr.begin(), tr.end(), [&](const DrawItem* a, const DrawItem* b) { return dist2(a) > dist2(b); });
+		for (auto* it : tr) r->renderObject(it->mesh, it->mat, it->pos, it->quat, it->scale);
 	}
 }
 
@@ -412,7 +438,11 @@ void World::Render(iRender* r)
 		d.farZ  = cam->_far;
 
 		r->beginCamera(d);
-		RenderMeshes(*hierarchy, r);
+		{
+			std::vector<DrawItem> items;
+			CollectMeshes(*hierarchy, items);
+			DrawCollected(items, cp, r);
+		}
 		// Selection highlight (editor only): outline the selected object after the scene.
 		if (editor)
 			if (Atom* sel = AppInstance::GetSingleton()->selectedInHieararchy)

@@ -42,6 +42,9 @@ public:
     // Whether this surface casts shadows. Default on; turn on for transparent surfaces too — the
     // shadow pass alpha-dithers by the material's alpha so see-through surfaces cast lighter shadows.
     [[nuke::prop(label="Cast Shadows")]] bool castShadows = true;
+    // Blend mode: Opaque writes depth + no blend; Transparent/Additive blend and DON'T write depth (so the
+    // engine sorts them back-to-front per camera). 0 = Opaque, 1 = Transparent (alpha), 2 = Additive.
+    [[nuke::prop(label="Blend", enum="Opaque,Transparent,Additive")]] int blendMode = 0;
 
     Texture* diff = nullptr;       // runtime-resolved textures (via Resolve())
     Texture* norm = nullptr;
