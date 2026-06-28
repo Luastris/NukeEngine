@@ -8,6 +8,7 @@
 #include <map>
 #include <cctype>
 #include <cstdlib>
+#include <boost/filesystem/fstream.hpp>
 
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
@@ -347,5 +348,76 @@ int AssImporter::ImportToContent(const char* srcPath, const char* destDir)
 	cout << "[Import]\tconverted " << count << " mesh(es) + prefab from "
 	     << bfs::path(srcPath).filename().string() << endl;
 	return count;
+}
+
+std::string AssImporter::ImportImage(const char* srcPath, const char* destDir)
+{
+	std::string ext = bfs::path(srcPath).extension().string();
+	for (char& c : ext) c = (char)std::tolower((unsigned char)c);
+
+	Texture* tex = new Texture();
+	tex->guid = ResDB::NewGuid();
+	int w = 0, h = 0;
+
+	if (ext == ".gif")
+	{
+		// Animated GIF: load ALL frames + per-frame delays (frames stacked w*h*frames*4, RGBA8, no BC/mips).
+		bfs::ifstream gf(bfs::path(srcPath), std::ios::binary);
+		std::vector<unsigned char> buf((std::istreambuf_iterator<char>(gf)), std::istreambuf_iterator<char>());
+		if (buf.empty()) { delete tex; cout << "[Import]\tgif read failed: " << srcPath << endl; return std::string(); }
+		int frames = 0, comp = 0; int* delays = nullptr;
+		unsigned char* px = stbi_load_gif_from_memory(buf.data(), (int)buf.size(), &delays, &w, &h, &frames, &comp, 4);
+		if (!px || frames < 1) { delete tex; cout << "[Import]\tgif decode failed: " << srcPath << endl; return std::string(); }
+		// stb returns DELTA frames (transparent where a frame didn't change). Composite forward so every
+		// frame is a full image (a transparent pixel inherits the previous composited frame), then make
+		// fully opaque — otherwise frames 1..N render mostly empty.
+		const size_t fb = (size_t)w * h * 4;
+		for (int k = 1; k < frames; ++k)
+		{
+			unsigned char* prev = px + (size_t)(k - 1) * fb;
+			unsigned char* cur  = px + (size_t)k * fb;
+			for (size_t p = 0; p < (size_t)w * h; ++p)
+				if (cur[p * 4 + 3] == 0) { cur[p*4] = prev[p*4]; cur[p*4+1] = prev[p*4+1]; cur[p*4+2] = prev[p*4+2]; cur[p*4+3] = prev[p*4+3]; }
+		}
+		for (int k = 0; k < frames; ++k) { unsigned char* f = px + (size_t)k * fb; for (size_t p = 0; p < (size_t)w * h; ++p) f[p*4+3] = 255; }
+		tex->width = w; tex->height = h; tex->format = Texture::FMT_RGBA8; tex->mipCount = 1;
+		tex->frameCount = frames;
+		tex->frameDelaysMs.resize(frames);
+		for (int k = 0; k < frames; ++k) tex->frameDelaysMs[k] = (delays && delays[k] > 0) ? delays[k] : 100;
+		tex->pixels.assign(px, px + (size_t)w * h * frames * 4);
+		stbi_image_free(px);
+		if (delays) STBI_FREE(delays);
+	}
+	else
+	{
+		int n = 0;
+		unsigned char* px = stbi_load(srcPath, &w, &h, &n, 4);
+		if (!px) { delete tex; cout << "[Import]\timage load failed: " << srcPath << endl; return std::string(); }
+		std::vector<unsigned char> rgba(px, px + (size_t)w * h * 4);
+		stbi_image_free(px);
+		CompressToBC(tex, rgba, w, h);   // BC1/BC3 + mip chain (static images)
+	}
+
+	std::string stem = SafeStem(bfs::path(srcPath).stem().string().c_str());
+	boost::system::error_code ec;
+	bfs::path out = bfs::path(destDir) / (stem + ".nutex");
+	for (int k = 1; bfs::exists(out, ec); ++k)
+		out = bfs::path(destDir) / (stem + "_" + std::to_string(k) + ".nutex");
+	if (!tex->SaveToFile(out.string())) { delete tex; return std::string(); }
+	ResDB::getSingleton()->RegisterTexture(tex);
+	ResDB::getSingleton()->SetAssetPath(tex->guid, out.string());
+	cout << "[Import]\twrote " << out.filename().string() << " (" << w << "x" << h << ")" << endl;
+	return tex->guid;
+}
+
+bool AssImporter::ImportAny(const char* srcPath, const char* destDir)
+{
+	if (!srcPath || !*srcPath) return false;
+	std::string ext = bfs::path(srcPath).extension().string();
+	for (char& c : ext) c = (char)std::tolower((unsigned char)c);
+	static const char* kImg[] = { ".png", ".jpg", ".jpeg", ".tga", ".bmp", ".psd", ".gif", ".hdr", ".pic", ".ppm", ".pgm" };
+	for (const char* e : kImg)
+		if (ext == e) return !ImportImage(srcPath, destDir).empty();
+	return ImportToContent(srcPath, destDir) > 0;
 }
 }  // namespace nuke

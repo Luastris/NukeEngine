@@ -195,6 +195,10 @@ public:
     virtual void beginShadowPass(int pass) {}
     virtual void renderShadowObject(Mesh* mesh, const float pos[3], const float quat[4], const float scale[3], Material* mat) {}
     virtual void endShadowPass() {}
+
+    // Files dropped onto the OS window from the desktop/Explorer. The editor hooks this to import dropped
+    // models/images into the current browser folder. Called once per dropped path (on the main thread).
+    virtual void setOnFileDrop(bst::function<void(const char* path)> cb) {}
 //    virtual ~iRender(){
 //    }
 };

@@ -4,6 +4,7 @@
 #include "API/Model/MeshRenderer.h"
 #include "API/Model/Material.h"   // material instance (mr->mat) save/load
 #include "API/Model/Light.h"      // scene lights -> iRender::setLights (PBR)
+#include "API/Model/Time.h"       // animated-texture (GIF) frame advance
 #include <cmath>
 #include <set>
 #include "API/Model/Mesh.h"
@@ -221,6 +222,24 @@ static void RenderShadowMeshes(bc::list<Atom*>& gos, iRender* r)
 void World::Render(iRender* r)
 {
 	if (!r) return;
+
+	// Advance animated textures (GIF) by real frame time — the renderer samples Texture::curFrame.
+	{
+		double dtMs = Time::getSingleton()->delta * 1000.0;
+		for (Texture* t : ResDB::getSingleton()->textures)
+		{
+			if (!t || t->frameCount <= 1) continue;
+			t->animTimeMs += dtMs;
+			for (int guard = 0; guard < t->frameCount; ++guard)
+			{
+				int d = (t->curFrame < (int)t->frameDelaysMs.size() && t->frameDelaysMs[t->curFrame] > 0)
+				        ? t->frameDelaysMs[t->curFrame] : 100;
+				if (t->animTimeMs < d) break;
+				t->animTimeMs -= d;
+				t->curFrame = (t->curFrame + 1) % t->frameCount;
+			}
+		}
+	}
 
 	std::vector<Camera*> cams;
 	CollectCameras(*hierarchy, cams);

@@ -24,6 +24,12 @@ public:
     int format   = FMT_RGBA8;              // texel format (BC1 = opaque, BC3 = alpha)
     int mipCount = 1;                       // number of mip levels stored in `pixels`
 
+    // Animation (GIF): pixels holds `frameCount` frames back-to-back (RGBA8, w*h*4 each, no mips/BC).
+    int              frameCount = 1;
+    std::vector<int> frameDelaysMs;        // per-frame delay (ms); size == frameCount (empty => 100ms)
+    int    curFrame   = 0;                  // runtime: current frame, advanced by World (time-based)
+    double animTimeMs = 0.0;                // runtime: time accumulator within the current frame
+
     // RenderTexture: a GPU render target a Camera draws into + materials sample. No CPU pixels.
     bool     renderTexture = false;        // serialized in the .nutex
     uint64_t rtId = 0;                      // runtime iRender render-target id (created on load)

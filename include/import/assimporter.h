@@ -31,6 +31,14 @@ public:
 	// as a native .numesh asset into destDir, each with a fresh GUID, registered in ResDB.
 	// Returns the number of meshes converted. Nothing references the source file afterwards.
 	int ImportToContent(const char* srcPath, const char* destDir);
+
+	// Import a standalone image (png/jpg/tga/bmp/...) -> a native .nutex (BC-compressed, mipped),
+	// registered in ResDB. Returns the new texture GUID ("" on failure).
+	std::string ImportImage(const char* srcPath, const char* destDir);
+
+	// Dispatch by file extension: image -> ImportImage, otherwise -> ImportToContent. Returns true on
+	// any success. Used by the browser Import button + Explorer drag&drop.
+	bool ImportAny(const char* srcPath, const char* destDir);
 };
 }  // namespace nuke
 
