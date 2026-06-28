@@ -164,6 +164,59 @@ std::string ResDB::GuidForPath(const std::string& path) const
 	return it != guidByPath.end() ? it->second : std::string();
 }
 
+void ResDB::HotReloadAssets(iRender* r)
+{
+	boost::system::error_code ec;
+	// Textures: same Texture* is shared by every material that resolves it, so reloading pixels +
+	// dropping the GPU cache refreshes the image EVERYWHERE (templates + live instances). Skip RTs.
+	for (auto& kv : texByGuid)
+	{
+		Texture* t = kv.second; if (!t || t->renderTexture) continue;
+		std::string p = PathForGuid(kv.first); if (p.empty() || !bfs::exists(p, ec)) continue;
+		long long mt = (long long)bfs::last_write_time(p, ec); if (ec) continue;
+		auto mit = assetMtime.find(p);
+		if (mit == assetMtime.end()) { assetMtime[p] = mt; continue; }   // first sight: record only
+		if (mit->second == mt) continue;
+		assetMtime[p] = mt;
+		if (Texture* fresh = Texture::LoadFromFile(p))
+		{
+			t->width = fresh->width; t->height = fresh->height; t->format = fresh->format;
+			t->mipCount = fresh->mipCount; t->pixels = std::move(fresh->pixels);
+			delete fresh;
+			if (r) r->invalidateTexture(t);
+			std::cout << "[ResDB]\thot-reloaded texture " << bfs::path(p).filename().string() << std::endl;
+		}
+	}
+	// Materials: reload the ResDB template + re-Resolve (binds shader/textures). Instances are clones.
+	for (auto& kv : matByGuid)
+	{
+		Material* m = kv.second; if (!m) continue;
+		std::string p = PathForGuid(kv.first); if (p.empty() || !bfs::exists(p, ec)) continue;
+		long long mt = (long long)bfs::last_write_time(p, ec); if (ec) continue;
+		auto mit = assetMtime.find(p);
+		if (mit == assetMtime.end()) { assetMtime[p] = mt; continue; }
+		if (mit->second == mt) continue;
+		assetMtime[p] = mt;
+		if (Material* fresh = Material::LoadFromFile(p))
+		{
+			for (int i = 0; i < 4; ++i) m->color[i] = fresh->color[i];
+			m->shaderGuid   = fresh->shaderGuid;
+			m->diffuseGuid  = fresh->diffuseGuid; m->normalGuid = fresh->normalGuid; m->specularGuid = fresh->specularGuid;
+			delete fresh;
+			m->Resolve();
+			std::cout << "[ResDB]\thot-reloaded material " << bfs::path(p).filename().string() << std::endl;
+		}
+	}
+}
+
+void ResDB::CreateRenderTextures(iRender* r)
+{
+	if (!r) return;
+	for (Texture* t : textures)
+		if (t && t->renderTexture && t->rtId == 0 && t->width > 0 && t->height > 0)
+			t->rtId = r->createRenderTarget(t->width, t->height);
+}
+
 void ResDB::RemoveByGuid(const std::string& guid)
 {
 	if (guid.empty()) return;

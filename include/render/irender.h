@@ -8,6 +8,9 @@
 
 namespace nuke {
 
+class Material;   // forward (used by pointer below)
+class Texture;
+
 namespace b = boost;
 
 // Backend-neutral camera description for one render pass. The renderer builds the
@@ -159,6 +162,9 @@ public:
     // Target the next renderDrawLists at a render target (id from createRenderTarget; 0 = backbuffer),
     // WITHOUT clearing it — so a runtime UI can composite into the camera/viewport RT. Pass 0 to reset.
     virtual void bindRenderTarget(uint64_t rtId) {}
+
+    // Drop the cached GPU texture for this engine Texture (e.g. after a hot-reload) so it re-uploads.
+    virtual void invalidateTexture(Texture* t) {}
 //    virtual ~iRender(){
 //    }
 };

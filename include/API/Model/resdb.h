@@ -41,6 +41,7 @@ public:
     std::map<std::string, Shader*>   shaderByGuid; // GUID -> shader asset
     std::map<std::string, std::string> pathByGuid; // GUID -> source file path (for "locate"/DnD)
     std::map<std::string, std::string> guidByPath; // source file path -> GUID
+    std::map<std::string, long long>   assetMtime; // asset path -> last-seen mtime (hot-reload)
 
     static ResDB* getSingleton();              // single instance (engine DLL)
 
@@ -62,6 +63,10 @@ public:
     // after render init. HotReloadShaders re-reads changed shader files + rebuilds their pipeline.
     void     BuildShaderPipelines(iRender* r);
     void     HotReloadShaders(iRender* r);
+    // Create an iRender render target for every loaded RenderTexture (sets Texture::rtId). After init.
+    void     CreateRenderTextures(iRender* r);
+    // Hot-reload edited .numat/.nutex into their LIVE ResDB objects + re-Resolve / re-upload (no restart).
+    void     HotReloadAssets(iRender* r);
 
     // Scan a content folder (recursively) and load every native asset (.numesh) into the DB,
     // indexed by the GUID stored in the file. Skips GUIDs already registered. Call at startup

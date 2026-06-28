@@ -23,6 +23,7 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("_far", &Camera::_far));
 		t.fields.push_back(MakeField("freeMode", &Camera::freeMode));
 		t.fields.push_back(MakeField("depth", &Camera::depth));
+		t.fields.push_back(MakeField("targetTexGuid", &Camera::targetTexGuid, "texture", "Target Texture"));
 		t.create = []() -> void* { return new Camera(); };
 	}
 	{

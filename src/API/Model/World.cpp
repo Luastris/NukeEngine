@@ -4,6 +4,8 @@
 #include "API/Model/MeshRenderer.h"
 #include "API/Model/Material.h"   // material instance (mr->mat) save/load
 #include "API/Model/Mesh.h"
+#include "API/Model/Texture.h"
+#include "API/Model/resdb.h"
 #include "API/Model/UnknownComponent.h"
 #include "API/Model/Prefab.h"
 #include "interface/Modular.h"
@@ -189,6 +191,12 @@ void World::Render(iRender* r)
 	for (Camera* cam : cams)
 	{
 		if (!cam->transform) continue;
+		// A camera with a RenderTexture target renders into that texture's RT (resolved live).
+		if (!cam->targetTexGuid.empty())
+		{
+			Texture* rt = ResDB::getSingleton()->GetTexture(cam->targetTexGuid);
+			if (rt && rt->renderTexture && rt->rtId) cam->renderTarget = rt->rtId;
+		}
 		// In the editor the world is drawn ONLY into off-screen RTs (the viewport panel + the
 		// selected-camera preview). A world camera with target 0 would paint the backbuffer
 		// full-window — i.e. make the editor look like the Player. Skip those here; they render

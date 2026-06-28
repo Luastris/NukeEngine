@@ -2,6 +2,7 @@
 #ifndef NUKEE_CAMERA_H
 #define NUKEE_CAMERA_H
 #include "NukeAPI.h"
+#include <string>
 #include <boost/thread.hpp>
 #include "render/irender.h"
 #include <boost/bind.hpp>
@@ -32,6 +33,8 @@ public:
     uint64_t renderTarget = 0;                       // iRender RT id; 0 = backbuffer
     [[nuke::prop]] int depth = 0;                    // render order (lower drawn first)
     float    clearColor[4] = {0.20f, 0.30f, 0.45f, 1.0f};
+    // If set, the camera renders into this RenderTexture asset (World::Render resolves it -> renderTarget).
+    [[nuke::prop(asset="texture", label="Target Texture")]] std::string targetTexGuid;
 
 
 	Camera();

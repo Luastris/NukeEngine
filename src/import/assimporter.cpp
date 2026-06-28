@@ -11,8 +11,73 @@
 
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
+#define STB_DXT_IMPLEMENTATION
+#include <stb_dxt.h>
 
 namespace nuke {
+
+// Compress an RGBA image into a BC texture WITH a precomputed mip chain (BC can't auto-gen mips on GPU).
+// BC1 for opaque, BC3 when any pixel has alpha. Concatenates every mip's blocks into tex->pixels.
+static void CompressToBC(Texture* tex, const std::vector<unsigned char>& rgba0, int w0, int h0)
+{
+	// BC needs the top level to be a multiple of 4 (D3D11). Odd sizes stay raw RGBA8 (GPU-mipped).
+	if (w0 <= 0 || h0 <= 0 || (w0 % 4) != 0 || (h0 % 4) != 0)
+	{
+		tex->format = Texture::FMT_RGBA8; tex->mipCount = 1;
+		tex->width = w0; tex->height = h0; tex->pixels = rgba0;
+		return;
+	}
+	bool hasA = false;
+	for (size_t i = 3; i < rgba0.size(); i += 4) if (rgba0[i] < 255) { hasA = true; break; }
+	const int blockBytes = hasA ? 16 : 8;
+	const int alpha = hasA ? 1 : 0;
+	tex->format = hasA ? Texture::FMT_BC3 : Texture::FMT_BC1;
+	tex->width = w0; tex->height = h0;
+	tex->pixels.clear();
+
+	std::vector<unsigned char> cur = rgba0;
+	int w = w0, h = h0, mips = 0;
+	while (true)
+	{
+		const int bx = (w + 3) / 4, by = (h + 3) / 4;
+		size_t base = tex->pixels.size();
+		tex->pixels.resize(base + (size_t)bx * by * blockBytes);
+		unsigned char* dst = tex->pixels.data() + base;
+		for (int byi = 0; byi < by; ++byi)
+			for (int bxi = 0; bxi < bx; ++bxi)
+			{
+				unsigned char block[64];
+				for (int py = 0; py < 4; ++py)
+					for (int px = 0; px < 4; ++px)
+					{
+						int sx = bxi * 4 + px; if (sx >= w) sx = w - 1;
+						int sy = byi * 4 + py; if (sy >= h) sy = h - 1;
+						const unsigned char* s = &cur[((size_t)sy * w + sx) * 4];
+						unsigned char* d = &block[(py * 4 + px) * 4];
+						d[0] = s[0]; d[1] = s[1]; d[2] = s[2]; d[3] = s[3];
+					}
+				stb_compress_dxt_block(dst, block, alpha, STB_DXT_NORMAL);
+				dst += blockBytes;
+			}
+		++mips;
+		if (w == 1 && h == 1) break;
+		const int nw = w > 1 ? w / 2 : 1, nh = h > 1 ? h / 2 : 1;
+		std::vector<unsigned char> nx((size_t)nw * nh * 4);
+		for (int y = 0; y < nh; ++y)
+			for (int x = 0; x < nw; ++x)
+			{
+				int x0 = x * 2, y0 = y * 2, x1 = (x * 2 + 1 < w) ? x * 2 + 1 : x0, y1 = (y * 2 + 1 < h) ? y * 2 + 1 : y0;
+				for (int c = 0; c < 4; ++c)
+				{
+					int a = cur[((size_t)y0 * w + x0) * 4 + c], b = cur[((size_t)y0 * w + x1) * 4 + c];
+					int e = cur[((size_t)y1 * w + x0) * 4 + c], f = cur[((size_t)y1 * w + x1) * 4 + c];
+					nx[((size_t)y * nw + x) * 4 + c] = (unsigned char)((a + b + e + f) / 4);
+				}
+			}
+		cur.swap(nx); w = nw; h = nh;
+	}
+	tex->mipCount = mips;
+}
 
 namespace bfs = boost::filesystem;
 
@@ -168,8 +233,7 @@ static std::string ConvertTexture(const aiScene* sc, const std::string& texRef,
 
 	Texture* tex = new Texture();
 	tex->guid   = ResDB::NewGuid();
-	tex->width  = w; tex->height = h;
-	tex->pixels = std::move(rgba);
+	CompressToBC(tex, rgba, w, h);   // BC1/BC3 + mip chain
 
 	std::string stem = SafeStem(bfs::path(texRef).stem().string().c_str());
 	boost::system::error_code ec;
