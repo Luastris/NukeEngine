@@ -146,6 +146,10 @@ public:
 
     // Is the OS window currently focused/foreground? Editor uses focus-gain to re-check disk changes.
     virtual bool isWindowFocused() { return true; }
+
+    // OS window maximized state (persisted in editor_state.json).
+    virtual bool isWindowMaximized() { return false; }
+    virtual void setWindowMaximized(bool maximized) {}
 //    virtual ~iRender(){
 //    }
 };
