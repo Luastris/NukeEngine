@@ -199,9 +199,11 @@ void ResDB::HotReloadAssets(iRender* r)
 		assetMtime[p] = mt;
 		if (Material* fresh = Material::LoadFromFile(p))
 		{
-			for (int i = 0; i < 4; ++i) m->color[i] = fresh->color[i];
+			m->color = fresh->color; m->emissive = fresh->emissive;
+			m->metallic = fresh->metallic; m->roughness = fresh->roughness; m->emissiveIntensity = fresh->emissiveIntensity;
 			m->shaderGuid   = fresh->shaderGuid;
 			m->diffuseGuid  = fresh->diffuseGuid; m->normalGuid = fresh->normalGuid; m->specularGuid = fresh->specularGuid;
+			m->metalRoughGuid = fresh->metalRoughGuid; m->occlusionGuid = fresh->occlusionGuid; m->emissiveGuid = fresh->emissiveGuid;
 			delete fresh;
 			m->Resolve();
 			std::cout << "[ResDB]\thot-reloaded material " << bfs::path(p).filename().string() << std::endl;

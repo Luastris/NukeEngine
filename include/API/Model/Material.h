@@ -8,6 +8,7 @@
 #include <array>
 #include "Texture.h"
 #include "Shader.h"
+#include "reflect/Reflect.h"
 #include <assimp/material.h>
 
 namespace nuke {
@@ -16,26 +17,41 @@ using namespace std;
 
 class NUKEENGINE_API Material
 {
+    // Reflected so the inspector auto-draws every field (asset pickers for maps, color swatch, sliders).
+    // Base "Object" (not "Component") keeps it OUT of the Add-Component menu.
+    NUKE_CLASS(Material, Object)
 public:
     char* name = nullptr;          // legacy raw name (kept for old call sites)
 
     std::string guid;              // asset id (generated on import; "builtin:default" for the default)
     std::string matName;           // display name
-    float       color[4] = { 1, 1, 1, 1 };   // base/diffuse color RGBA
+    [[nuke::prop(label="Base Color")]] Color color = Color(1, 1, 1, 1);   // base color RGBA
 
-    // Texture asset references (.nutex GUIDs).
-    std::string diffuseGuid, normalGuid, specularGuid;
+    // Texture asset references (.nutex GUIDs). diffuse = base color; specular is legacy/unused (PBR).
+    [[nuke::prop(asset="texture", label="Base Color Map")]] std::string diffuseGuid;
+    [[nuke::prop(asset="texture", label="Normal Map")]]     std::string normalGuid;
+    std::string specularGuid;
+    // PBR (metallic-roughness, UE/Unity-Lit) maps + scalar params.
+    [[nuke::prop(asset="texture", label="Metallic-Roughness Map")]] std::string metalRoughGuid; // G=rough,B=metal
+    [[nuke::prop(asset="texture", label="Occlusion Map")]]          std::string occlusionGuid;  // R = AO
+    [[nuke::prop(asset="texture", label="Emissive Map")]]           std::string emissiveGuid;
+    [[nuke::prop(label="Metallic", min=0, max=1)]]  float metallic  = 0.0f;
+    [[nuke::prop(label="Roughness", min=0, max=1)]] float roughness = 0.6f;
+    [[nuke::prop(label="Emissive")]]  Color emissive = Color(0, 0, 0, 1);
+    [[nuke::prop(label="Emissive Intensity")]] float emissiveIntensity = 0.0f;
 
     Texture* diff = nullptr;       // runtime-resolved textures (via Resolve())
     Texture* norm = nullptr;
     Texture* spec = nullptr;
+    Texture* mr   = nullptr;       // metallic-roughness
+    Texture* ao   = nullptr;       // occlusion
+    Texture* em   = nullptr;       // emissive
 
     Shader*      shader = nullptr;
     aiMaterial*  aiMat  = nullptr;
 
-    // Appended at the END to keep the existing member layout stable (so the renderer, which
-    // reads color/diff, doesn't need a rebuild). Shader asset ref; default = engine "world".
-    std::string  shaderGuid = "world";
+    // Shader asset ref; default = engine "world".
+    [[nuke::prop(asset="shader", label="Shader")]] std::string shaderGuid = "world";
 
     // Custom shader-parameter VALUES, keyed by the param name from the shader's MatCB (Shader::props).
     // Only meaningful on a material INSTANCE (mr->mat); the shared asset leaves this empty.

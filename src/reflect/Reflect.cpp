@@ -50,6 +50,7 @@ void SaveField(FT t, const void* a, json& j)
         case FT::Vec3: { auto v = (const Vector3*)a;    j = { v->x, v->y, v->z }; } break;
         case FT::Vec4: { auto v = (const Vector4*)a;    j = { v->x, v->y, v->z, v->w }; } break;
         case FT::Quat: { auto v = (const Quaternion*)a; j = { v->x, v->y, v->z, v->w }; } break;
+        case FT::Color:{ auto v = (const Color*)a;      j = { v->r, v->g, v->b, v->a }; } break;
         default: break;
     }
 }
@@ -67,6 +68,7 @@ void LoadField(FT t, void* a, const json& j)
         case FT::Vec3: { auto v = (Vector3*)a;    v->x = j.at(0); v->y = j.at(1); v->z = j.at(2); } break;
         case FT::Vec4: { auto v = (Vector4*)a;    v->x = j.at(0); v->y = j.at(1); v->z = j.at(2); v->w = j.at(3); } break;
         case FT::Quat: { auto v = (Quaternion*)a; v->x = j.at(0); v->y = j.at(1); v->z = j.at(2); v->w = j.at(3); } break;
+        case FT::Color:{ auto v = (Color*)a;      v->r = j.at(0); v->g = j.at(1); v->b = j.at(2); v->a = j.at(3); } break;
         default: break;
     }
 }

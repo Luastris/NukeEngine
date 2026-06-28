@@ -14,6 +14,7 @@
 #include <vector>
 #include <functional>
 #include "API/Model/Vector.h"
+#include "API/Model/Color.h"
 // NOTE: no <nlohmann/json.hpp> here on purpose — this header is pulled in by widely
 // included component headers (and the render/UI modules). JSON (de)serialization lives
 // in ReflectJson.h, included only where serialization actually happens.
@@ -21,7 +22,7 @@
 namespace nuke {
 
 // Supported field types. Extend as needed (Color/asset-refs/etc. added later).
-enum class FT { Unknown, Bool, Int, Float, Double, String, Vec2, Vec3, Vec4, Quat };
+enum class FT { Unknown, Bool, Int, Float, Double, String, Vec2, Vec3, Vec4, Quat, Color };
 
 // Map a C++ type -> FT tag. Primary = Unknown; specializations for supported types.
 template<class T> constexpr FT FieldTypeOf() { return FT::Unknown; }
@@ -34,6 +35,7 @@ template<> constexpr FT FieldTypeOf<Vector2>()     { return FT::Vec2; }
 template<> constexpr FT FieldTypeOf<Vector3>()     { return FT::Vec3; }
 template<> constexpr FT FieldTypeOf<Vector4>()     { return FT::Vec4; }
 template<> constexpr FT FieldTypeOf<Quaternion>()  { return FT::Quat; }
+template<> constexpr FT FieldTypeOf<Color>()       { return FT::Color; }
 
 struct Field {
     std::string name;
@@ -45,6 +47,9 @@ struct Field {
     // raw text box. Empty = plain field. Keeps asset wiring out of the editor's hardcode.
     std::string asset;
     std::string label;   // [[nuke::prop(label="...")]] display name in the inspector (else `name`)
+    // [[nuke::prop(min=..,max=..)]] on a numeric field -> the inspector draws a slider in [fmin,fmax]
+    // instead of a drag box. fmax > fmin means "has a range".
+    float fmin = 0.0f, fmax = 0.0f;
 };
 
 struct TypeInfo {
@@ -72,13 +77,16 @@ TypeInfo& TypeOf() {
 
 // Build a Field from a member pointer (deduces the FT tag).
 template<class C, class T>
-Field MakeField(const char* name, T C::* p, const char* asset = "", const char* label = "") {
+Field MakeField(const char* name, T C::* p, const char* asset = "", const char* label = "",
+                float fmin = 0.0f, float fmax = 0.0f) {
     Field f;
     f.name = name;
     f.type = FieldTypeOf<T>();
     f.addr = [p](void* o) -> void* { return (void*)&(((C*)o)->*p); };
     f.asset = asset;
     f.label = label;
+    f.fmin = fmin;
+    f.fmax = fmax;
     return f;
 }
 

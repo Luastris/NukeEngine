@@ -282,6 +282,19 @@ int AssImporter::ImportToContent(const char* srcPath, const char* destDir)
 		tp.Clear();
 		if (am->GetTexture(aiTextureType_SPECULAR, 0, &tp) == AI_SUCCESS)
 			mt->specularGuid = ConvertTexture(sc, tp.C_Str(), modelDir, destDir, texCache);
+		// PBR maps (metallic-roughness, occlusion, emissive).
+		tp.Clear();
+		if (am->GetTexture(aiTextureType_METALNESS, 0, &tp) == AI_SUCCESS ||
+		    am->GetTexture(aiTextureType_DIFFUSE_ROUGHNESS, 0, &tp) == AI_SUCCESS ||
+		    am->GetTexture(aiTextureType_UNKNOWN, 0, &tp) == AI_SUCCESS)   // glTF packs MR under UNKNOWN
+			mt->metalRoughGuid = ConvertTexture(sc, tp.C_Str(), modelDir, destDir, texCache);
+		tp.Clear();
+		if (am->GetTexture(aiTextureType_AMBIENT_OCCLUSION, 0, &tp) == AI_SUCCESS ||
+		    am->GetTexture(aiTextureType_LIGHTMAP, 0, &tp) == AI_SUCCESS)
+			mt->occlusionGuid = ConvertTexture(sc, tp.C_Str(), modelDir, destDir, texCache);
+		tp.Clear();
+		if (am->GetTexture(aiTextureType_EMISSIVE, 0, &tp) == AI_SUCCESS)
+			mt->emissiveGuid = ConvertTexture(sc, tp.C_Str(), modelDir, destDir, texCache);
 		std::string mstem = SafeStem(mt->matName.empty() ? "material" : mt->matName.c_str());
 		bfs::path mout = bfs::path(destDir) / (mstem + ".numat");
 		for (int n = 1; bfs::exists(mout, ec); ++n)

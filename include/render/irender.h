@@ -13,6 +13,21 @@ class Texture;
 
 namespace b = boost;
 
+// Backend-neutral light description for the world (PBR) pass. The engine gathers Light
+// components each frame and pushes an array via iRender::setLights; the renderer packs
+// them into its lighting constant buffer. POD, no engine/Diligent types across the seam.
+struct NukeLight
+{
+    int   type = 0;                 // 0 = directional, 1 = point, 2 = spot
+    float pos[3]   = {0, 0, 0};     // world position (point/spot)
+    float dir[3]   = {0, -1, 0};    // world direction (directional/spot)
+    float color[3] = {1, 1, 1};     // linear RGB
+    float intensity = 1.0f;
+    float range      = 10.0f;       // point/spot falloff distance
+    float spotInner  = 0.9f;        // cos(inner cone half-angle)
+    float spotOuter  = 0.8f;        // cos(outer cone half-angle)
+};
+
 // Backend-neutral camera description for one render pass. The renderer builds the
 // view/projection matrices itself (from these POD fields) so no glm/Diligent math
 // convention leaks across the seam.
@@ -165,6 +180,11 @@ public:
 
     // Drop the cached GPU texture for this engine Texture (e.g. after a hot-reload) so it re-uploads.
     virtual void invalidateTexture(Texture* t) {}
+
+    // Set the scene lights for the next camera pass(es). The engine gathers Light components and
+    // pushes them here before drawing; the renderer packs them into its PBR lighting buffer. Passing
+    // count 0 lets the renderer fall back to a default directional sun.
+    virtual void setLights(const NukeLight* lights, int count) {}
 //    virtual ~iRender(){
 //    }
 };

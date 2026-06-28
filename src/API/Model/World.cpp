@@ -3,6 +3,8 @@
 #include "API/Model/Camera.h"
 #include "API/Model/MeshRenderer.h"
 #include "API/Model/Material.h"   // material instance (mr->mat) save/load
+#include "API/Model/Light.h"      // scene lights -> iRender::setLights (PBR)
+#include <cmath>
 #include "API/Model/Mesh.h"
 #include "API/Model/Texture.h"
 #include "API/Model/resdb.h"
@@ -156,6 +158,17 @@ static void CollectCameras(bc::list<Atom*>& gos, std::vector<Camera*>& out)
 	}
 }
 
+static void CollectLights(bc::list<Atom*>& gos, std::vector<Light*>& out)
+{
+	for (auto go : gos)
+	{
+		if (auto* l = go->GetComponent<Light>())
+			if (l->enabled) out.push_back(l);
+		if (go->children.size() > 0)
+			CollectLights(go->children, out);
+	}
+}
+
 static void RenderMeshes(bc::list<Atom*>& gos, iRender* r)
 {
 	for (auto go : gos)
@@ -186,6 +199,27 @@ void World::Render(iRender* r)
 	std::vector<Camera*> cams;
 	CollectCameras(*hierarchy, cams);
 	std::sort(cams.begin(), cams.end(), [](Camera* a, Camera* b) { return a->depth < b->depth; });
+
+	// Gather scene lights once for this frame (the renderer keeps them for every camera pass).
+	std::vector<Light*> lights;
+	CollectLights(*hierarchy, lights);
+	std::vector<NukeLight> gpuLights;
+	for (Light* L : lights)
+	{
+		if (!L->transform) continue;
+		NukeLight n; n.type = L->type;
+		Vector3 p = L->transform->globalPosition();
+		Vector3 d = L->transform->direction();
+		n.pos[0] = (float)p.x; n.pos[1] = (float)p.y; n.pos[2] = (float)p.z;
+		n.dir[0] = (float)d.x; n.dir[1] = (float)d.y; n.dir[2] = (float)d.z;
+		n.color[0] = (float)L->color.r; n.color[1] = (float)L->color.g; n.color[2] = (float)L->color.b;
+		n.intensity = L->intensity; n.range = L->range;
+		float outer = L->spotAngle * 0.01745329252f;
+		float inner = outer * (1.0f - (L->spotBlend < 0 ? 0 : (L->spotBlend > 1 ? 1 : L->spotBlend)));
+		n.spotOuter = std::cos(outer); n.spotInner = std::cos(inner);
+		gpuLights.push_back(n);
+	}
+	r->setLights(gpuLights.empty() ? nullptr : gpuLights.data(), (int)gpuLights.size());
 
 	const bool editor = AppInstance::GetSingleton()->isEditor();
 	for (Camera* cam : cams)
@@ -274,8 +308,18 @@ static void SaveAtom(Atom* go, json& j)
 			if (mr->mat)
 			{
 				json jm;
-				jm["color"]  = { mr->mat->color[0], mr->mat->color[1], mr->mat->color[2], mr->mat->color[3] };
+				jm["color"]  = { mr->mat->color.r, mr->mat->color.g, mr->mat->color.b, mr->mat->color.a };
 				jm["shader"] = mr->mat->shaderGuid;
+				// PBR instance overrides (maps + scalar params).
+				jm["diffuse"]    = mr->mat->diffuseGuid;
+				jm["normal"]     = mr->mat->normalGuid;
+				jm["metalRough"] = mr->mat->metalRoughGuid;
+				jm["occlusion"]  = mr->mat->occlusionGuid;
+				jm["emissiveMap"]= mr->mat->emissiveGuid;
+				jm["metallic"]   = mr->mat->metallic;
+				jm["roughness"]  = mr->mat->roughness;
+				jm["emissive"]   = { mr->mat->emissive.r, mr->mat->emissive.g, mr->mat->emissive.b };
+				jm["emissiveIntensity"] = mr->mat->emissiveIntensity;
 				if (!mr->mat->props.empty())
 				{
 					json jp = json::object();
@@ -329,8 +373,25 @@ static Atom* LoadAtom(const json& j)
 						const json& jm = cj["material"];
 						if (!mr->mat) mr->mat = new Material();   // matGuid empty / asset missing -> bare instance
 						if (jm.contains("color") && jm["color"].is_array() && jm["color"].size() == 4)
-							for (int i = 0; i < 4; ++i) mr->mat->color[i] = jm["color"][i].get<float>();
+						{
+							mr->mat->color.r = jm["color"][0]; mr->mat->color.g = jm["color"][1];
+							mr->mat->color.b = jm["color"][2]; mr->mat->color.a = jm["color"][3];
+						}
 						if (jm.contains("shader")) mr->mat->shaderGuid = jm.value("shader", std::string("world"));
+						// PBR instance overrides (only when present, so older worlds keep the cloned asset maps).
+						if (jm.contains("diffuse"))     mr->mat->diffuseGuid    = jm.value("diffuse", std::string());
+						if (jm.contains("normal"))      mr->mat->normalGuid     = jm.value("normal", std::string());
+						if (jm.contains("metalRough"))  mr->mat->metalRoughGuid = jm.value("metalRough", std::string());
+						if (jm.contains("occlusion"))   mr->mat->occlusionGuid  = jm.value("occlusion", std::string());
+						if (jm.contains("emissiveMap")) mr->mat->emissiveGuid   = jm.value("emissiveMap", std::string());
+						if (jm.contains("metallic"))    mr->mat->metallic       = jm.value("metallic", 0.0f);
+						if (jm.contains("roughness"))   mr->mat->roughness      = jm.value("roughness", 0.6f);
+						if (jm.contains("emissiveIntensity")) mr->mat->emissiveIntensity = jm.value("emissiveIntensity", 0.0f);
+						if (jm.contains("emissive") && jm["emissive"].is_array() && jm["emissive"].size() == 3)
+						{
+							mr->mat->emissive.r = jm["emissive"][0]; mr->mat->emissive.g = jm["emissive"][1];
+							mr->mat->emissive.b = jm["emissive"][2];
+						}
 						if (jm.contains("props") && jm["props"].is_object())
 							for (auto it = jm["props"].begin(); it != jm["props"].end(); ++it)
 								if (it.value().is_array())
