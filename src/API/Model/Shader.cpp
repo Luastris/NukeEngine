@@ -76,7 +76,9 @@ void Shader::ParseMatCBProps(const std::string& src, std::vector<ShaderProp>& ou
 			float f; int di = 0;
 			while (di < 4 && (ns >> f)) sp.def[di++] = f;
 		}
-		if (ident != "g_Color" && ident != "g_Params")         // standard fields are not editable props
+		// Standard lit-shader fields are driven by the renderer (material params), NOT editable custom props
+		// — otherwise the prop loop overwrites them with 0 and kills emissive / metal-rough / AO maps.
+		if (ident != "g_Color" && ident != "g_Params" && ident != "g_Params2" && ident != "g_Emissive2")
 			out.push_back(sp);
 	}
 }
