@@ -4,9 +4,13 @@
 #include "API/Model/MeshRenderer.h"
 #include "API/Model/Material.h"   // material instance (mr->mat) save/load
 #include "API/Model/Light.h"      // scene lights -> iRender::setLights (PBR)
+#include "API/Model/Environment.h"// world sky/ambient -> iRender::setSky
 #include "API/Model/Time.h"       // animated-texture (GIF) frame advance
 #include <cmath>
 #include <set>
+#define GLM_ENABLE_EXPERIMENTAL
+#include <glm/glm.hpp>
+#include <glm/gtx/quaternion.hpp>  // glm::rotation (sun look-rotation for time-of-day)
 #include "API/Model/Mesh.h"
 #include "API/Model/Texture.h"
 #include "API/Model/resdb.h"
@@ -171,6 +175,16 @@ static void CollectLights(bc::list<Atom*>& gos, std::vector<Light*>& out)
 	}
 }
 
+static Environment* FindEnvironment(bc::list<Atom*>& gos)
+{
+	for (auto go : gos)
+	{
+		if (auto* e = go->GetComponent<Environment>()) if (e->enabled) return e;
+		if (go->children.size() > 0) if (Environment* e = FindEnvironment(go->children)) return e;
+	}
+	return nullptr;
+}
+
 static void RenderMeshes(bc::list<Atom*>& gos, iRender* r)
 {
 	for (auto go : gos)
@@ -248,6 +262,37 @@ void World::Render(iRender* r)
 	// Gather scene lights once for this frame (the renderer keeps them for every camera pass).
 	std::vector<Light*> lights;
 	CollectLights(*hierarchy, lights);
+
+	// Time of day: drive the FIRST directional light (rotation/color/intensity) from the Environment's hour.
+	// The sky colours follow below. todElev: sun elevation (-1..1), used by the sky build.
+	float todElev = 0.0f;
+	Environment* todEnv = FindEnvironment(*hierarchy);
+	const bool todOn = (todEnv && todEnv->useTimeOfDay);
+	if (todOn)
+	{
+		if (todEnv->daySpeed > 0.0f)
+		{
+			todEnv->hour += (float)(todEnv->daySpeed * Time::getSingleton()->delta);
+			todEnv->hour = std::fmod(todEnv->hour, 24.0f); if (todEnv->hour < 0) todEnv->hour += 24.0f;
+		}
+		float ang = (todEnv->hour - 6.0f) / 12.0f * 3.14159265f;   // 0 at 06:00, PI at 18:00
+		todElev = std::sin(ang);
+		float sx = -std::cos(ang), sy = todElev, sz = 0.25f;        // direction TOWARD the sun
+		float sl = std::sqrt(sx*sx + sy*sy + sz*sz); if (sl > 1e-6f) { sx/=sl; sy/=sl; sz/=sl; }
+		// Daylight ramps up quickly once the sun clears the horizon (so the sky isn't black at dawn/dusk
+		// while the sun is still visible). Full day a little above the horizon; night only when well below.
+		float day = (todElev + 0.1f) / 0.3f; day = day < 0 ? 0.0f : (day > 1 ? 1.0f : day);
+		for (Light* L : lights)
+			if (L->type == 0 && L->transform)   // the first directional light = the sun
+			{
+				glm::quat q = glm::rotation(glm::vec3(0, 0, 1), glm::vec3(-sx, -sy, -sz));   // forward = travel dir
+				L->transform->rotation = Quaternion(q.x, q.y, q.z, q.w);
+				L->color = Color(1.0, 0.55 + 0.45 * day, 0.25 + 0.75 * day, 1.0);            // warm -> white
+				L->intensity = day * 4.0f;
+				break;
+			}
+	}
+
 	std::vector<NukeLight> gpuLights;
 	for (Light* L : lights)
 	{
@@ -266,6 +311,66 @@ void World::Render(iRender* r)
 		gpuLights.push_back(n);
 	}
 	r->setLights(gpuLights.empty() ? nullptr : gpuLights.data(), (int)gpuLights.size());
+
+	// Environment (sky + ambient) — first Environment component; default sky if none (keeps old ambient).
+	{
+		NukeSky sky;   // defaults match the renderer's old hardcoded ambient
+		if (Environment* env = FindEnvironment(*hierarchy))
+		{
+			sky.mode = env->mode;
+			sky.top[0]=(float)env->skyTop.r; sky.top[1]=(float)env->skyTop.g; sky.top[2]=(float)env->skyTop.b;
+			sky.horizon[0]=(float)env->skyHorizon.r; sky.horizon[1]=(float)env->skyHorizon.g; sky.horizon[2]=(float)env->skyHorizon.b;
+			sky.ground[0]=(float)env->skyGround.r; sky.ground[1]=(float)env->skyGround.g; sky.ground[2]=(float)env->skyGround.b;
+			sky.skyIntensity = env->skyIntensity;
+			sky.ambient[0]=(float)env->ambient.r; sky.ambient[1]=(float)env->ambient.g; sky.ambient[2]=(float)env->ambient.b;
+			sky.ambientIntensity = env->ambientIntensity;
+			if (env->useTimeOfDay)   // override sky colours from the time of day (day=blue, dusk=orange, night=dark)
+			{
+				auto sat = [](float v){ return v < 0 ? 0.0f : (v > 1 ? 1.0f : v); };
+				auto lrp = [](float a, float b, float t){ return a + (b - a) * t; };
+				float el = todElev, day = sat((el + 0.1f) / 0.3f);
+				float glow = sat(1.0f - std::fabs(el) * 4.0f) * sat(el * 3.0f + 0.3f);   // dawn/dusk orange band
+				sky.top[0]=lrp(0.02f,0.30f,day); sky.top[1]=lrp(0.02f,0.50f,day); sky.top[2]=lrp(0.06f,0.90f,day);
+				float h0=lrp(0.04f,0.70f,day), h1=lrp(0.04f,0.80f,day), h2=lrp(0.08f,0.95f,day);
+				sky.horizon[0]=lrp(h0,0.95f,glow); sky.horizon[1]=lrp(h1,0.55f,glow); sky.horizon[2]=lrp(h2,0.30f,glow);
+				sky.ground[0]=lrp(0.01f,0.20f,day); sky.ground[1]=lrp(0.01f,0.20f,day); sky.ground[2]=lrp(0.02f,0.22f,day);
+				sky.skyIntensity = lrp(0.15f, 1.0f, day);
+				sky.ambientIntensity = env->ambientIntensity * (0.15f + 0.85f * day);   // dark at night
+			}
+			if (env->stars)   // fade stars in as the sky darkens (ToD), or always-on when ToD is off
+			{
+				float night = 0.4f;
+				if (env->useTimeOfDay) { float d = (todElev + 0.1f) / 0.3f; d = d < 0 ? 0 : (d > 1 ? 1 : d); night = 1.0f - d; }
+				sky.stars = night < 0 ? 0 : night;
+				if (!env->starsTexGuid.empty()) sky.starsTex = ResDB::getSingleton()->GetTexture(env->starsTexGuid);
+			}
+			if (env->moon && !env->moonTexGuid.empty())   // textured moon opposite the sun, visible at night
+			{
+				sky.moonTex  = ResDB::getSingleton()->GetTexture(env->moonTexGuid);
+				sky.moonSize = env->moonSize * 0.01745329252f;   // deg -> radians
+				float mx = 0, my = 1, mz = 0;
+				for (Light* L : lights)
+					if (L->type == 0 && L->transform) { Vector3 d = L->transform->direction(); mx=(float)d.x; my=(float)d.y; mz=(float)d.z; break; }
+				float ml = std::sqrt(mx*mx + my*my + mz*mz); if (ml > 1e-6f) { mx/=ml; my/=ml; mz/=ml; }
+				sky.moonDir[0] = mx; sky.moonDir[1] = my; sky.moonDir[2] = mz;   // sun travel dir = opposite the sun
+				sky.moonPhase = env->moonPhase;
+				float vis = 0.8f;
+				if (env->useTimeOfDay) { float d = (todElev + 0.1f) / 0.3f; d = d < 0 ? 0 : (d > 1 ? 1 : d); vis = 1.0f - d; }
+				sky.moonAmount = vis < 0 ? 0 : vis;
+			}
+			if (env->sunDisk)
+				for (Light* L : lights)
+					if (L->type == 0 && L->transform)   // first directional light = the sky's sun
+					{
+						Vector3 d = L->transform->direction();
+						sky.sunDir[0]=(float)d.x; sky.sunDir[1]=(float)d.y; sky.sunDir[2]=(float)d.z;
+						sky.sunColor[0]=(float)L->color.r; sky.sunColor[1]=(float)L->color.g; sky.sunColor[2]=(float)L->color.b;
+						sky.sunIntensity = L->intensity;
+						break;
+					}
+		}
+		r->setSky(sky);
+	}
 
 	// Shadow depth passes (one per shadow-casting dir/spot light) before any camera pass — the renderer
 	// samples them during the world pass. Only shadow-casting surfaces (Material::castShadows) contribute.

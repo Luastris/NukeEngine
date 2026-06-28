@@ -29,6 +29,29 @@ struct NukeLight
     int   castShadows = 0;          // this light casts shadows (engine: Light::castShadows)
 };
 
+// Backend-neutral environment/sky description. The engine fills it from the World's Environment
+// component each frame; the renderer draws a procedural sky behind the scene + uses `ambient` for IBL.
+struct NukeSky
+{
+    int   mode = 0;                 // 0 = none (clear color only), 1 = procedural gradient
+    float top[3]     = {0.30f, 0.50f, 0.90f};
+    float horizon[3] = {0.70f, 0.80f, 0.95f};
+    float ground[3]  = {0.20f, 0.20f, 0.22f};
+    float skyIntensity = 1.0f;
+    float ambient[3]   = {0.50f, 0.55f, 0.60f};
+    float ambientIntensity = 0.35f;
+    float sunDir[3]   = {0.0f, -1.0f, 0.0f};   // direction the sun light travels (first directional light)
+    float sunColor[3] = {1.0f, 1.0f, 1.0f};
+    float sunIntensity = 0.0f;                 // 0 = no sun disk in the sky
+    float stars = 0.0f;                        // star intensity (0 = none)
+    Texture* starsTex = nullptr;               // optional equirect star panorama (else procedural)
+    Texture* moonTex = nullptr;                // optional moon disk texture (null = no moon)
+    float moonDir[3] = {0.0f, 1.0f, 0.0f};     // direction toward the moon
+    float moonSize = 0.05f;                     // moon angular radius (radians)
+    float moonAmount = 0.0f;                     // moon visibility (0 = hidden)
+    float moonPhase = 0.5f;                      // 0/1 = new, 0.5 = full (procedural terminator)
+};
+
 // Backend-neutral camera description for one render pass. The renderer builds the
 // view/projection matrices itself (from these POD fields) so no glm/Diligent math
 // convention leaks across the seam.
@@ -195,6 +218,10 @@ public:
     virtual void beginShadowPass(int pass) {}
     virtual void renderShadowObject(Mesh* mesh, const float pos[3], const float quat[4], const float scale[3], Material* mat) {}
     virtual void endShadowPass() {}
+
+    // Set the world environment/sky for the next camera pass(es): the renderer draws a procedural sky
+    // behind the scene and uses the ambient term. Engine pushes it from the Environment component.
+    virtual void setSky(const NukeSky& sky) {}
 
     // Files dropped onto the OS window from the desktop/Explorer. The editor hooks this to import dropped
     // models/images into the current browser folder. Called once per dropped path (on the main thread).

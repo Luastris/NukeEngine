@@ -17,7 +17,18 @@ cbuffer FrameCB
 {
     float4 g_CamPos; float4 g_Ambient; float4 g_LightCount; Light g_Lights[MAX_LIGHTS];
     float4x4 g_ShadowVP[MAX_SHADOWS]; float4 g_ShadowParams;
+    // Procedural-sky IBL: gradient colours + g_SkyParams = (skyIntensity, hasSky, _, _).
+    float4 g_SkyTop; float4 g_SkyHorizon; float4 g_SkyGround; float4 g_SkyParams;
 };
+
+// Procedural sky colour for a world direction (matches sky.ps) — used for image-based lighting.
+float3 SkyColor(float3 dir)
+{
+    float up = dir.y;
+    float3 c = (up >= 0.0) ? lerp(g_SkyHorizon.rgb, g_SkyTop.rgb, pow(saturate(up), 0.5))
+                           : lerp(g_SkyHorizon.rgb, g_SkyGround.rgb, saturate(-up));
+    return c * g_SkyParams.x;
+}
 Texture2DArray          g_Shadow;
 SamplerComparisonState  g_Shadow_sampler;
 
@@ -156,7 +167,20 @@ float4 main(in PSIn i) : SV_Target
     }
 
     float ao = (g_Params2.y > 0.5) ? g_Occlusion.Sample(g_Tex_sampler, i.uv).r : 1.0;
-    float3 ambient = g_Ambient.rgb * g_Ambient.w * albedo * ao;
+    float3 ambient;
+    if (g_SkyParams.y > 0.5)   // image-based lighting from the procedural sky
+    {
+        float  ndv = max(dot(N, V), 0.0);
+        float3 R   = reflect(-V, N);
+        float3 irr = SkyColor(N);                                              // diffuse environment
+        float3 avg = (g_SkyTop.rgb + 2.0 * g_SkyHorizon.rgb + g_SkyGround.rgb) * 0.25 * g_SkyParams.x;
+        float3 env = lerp(SkyColor(R), avg, rough);                            // specular env (rough = duller)
+        float3 Fr  = F0 + (max(float3(1.0 - rough, 1.0 - rough, 1.0 - rough), F0) - F0) * pow(1.0 - ndv, 5.0);
+        float3 kd  = (1.0 - Fr) * (1.0 - metallic);
+        ambient = (kd * irr * albedo + env * Fr) * g_Ambient.w * ao;
+    }
+    else
+        ambient = g_Ambient.rgb * g_Ambient.w * albedo * ao;                   // flat ambient (no sky)
     float3 emissive = g_Emissive2.rgb * g_Emissive2.w;
     if (g_Params2.z > 0.5) emissive *= g_Emissive.Sample(g_Tex_sampler, i.uv).rgb;
     float3 color = ambient + Lo + emissive;

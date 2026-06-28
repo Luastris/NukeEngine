@@ -201,6 +201,7 @@
     <ClInclude Include="include\API\Model\Include.h" />
     <ClInclude Include="include\API\Model\Layers.h" />
     <ClInclude Include="include\API\Model\Light.h" />
+    <ClInclude Include="include\API\Model\Environment.h" />
     <ClInclude Include="include\API\Model\Material.h" />
     <ClInclude Include="include\API\Model\Math.h" />
     <ClInclude Include="include\API\Model\Mesh.h" />
@@ -261,6 +262,7 @@
     <ClCompile Include="src\API\Model\ID.cpp" />
     <ClCompile Include="src\API\Model\Layers.cpp" />
     <ClCompile Include="src\API\Model\Light.cpp" />
+    <ClCompile Include="src\API\Model\Environment.cpp" />
     <ClCompile Include="src\API\Model\Material.cpp" />
     <ClCompile Include="src\API\Model\Math.cpp" />
     <ClCompile Include="src\API\Model\Mesh.cpp" />
