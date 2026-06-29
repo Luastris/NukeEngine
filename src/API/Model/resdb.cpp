@@ -99,7 +99,22 @@ void ResDB::HotReloadShaders(iRender* r)
 	boost::system::error_code ec;
 	for (Shader* s : shaders)
 	{
-		if (!s || s->vsPath.empty()) continue;
+		if (!s) continue;
+		if (s->isPost)   // post-process effect shader (single ".post.hlsl"; no VS pair)
+		{
+			if (s->psPath.empty()) continue;
+			std::time_t pt = bfs::last_write_time(bfs::path(s->psPath), ec); if (ec) { ec.clear(); continue; }
+			if (pt == s->psTime) continue;   // unchanged
+			Shader* fresh = Shader::LoadPostShader(s->name, s->psPath);
+			if (!fresh) continue;
+			s->psSource = fresh->psSource; s->psTime = fresh->psTime;
+			s->props    = fresh->props;    // re-parsed PostParams (a param may have been added/removed)
+			delete fresh;
+			uint64_t h = r->createPostPipeline(s->name.c_str(), s->psSource.c_str());
+			if (h) { s->rendererHandle = h; std::cout << "[ResDB]\thot-reloaded post shader '" << s->name << "' -> handle " << h << std::endl; }
+			continue;
+		}
+		if (s->vsPath.empty()) continue;
 		std::time_t vt = bfs::last_write_time(bfs::path(s->vsPath), ec); if (ec) { ec.clear(); continue; }
 		std::time_t pt = bfs::last_write_time(bfs::path(s->psPath), ec); if (ec) { ec.clear(); continue; }
 		if (vt == s->vsTime && pt == s->psTime) continue;   // unchanged
