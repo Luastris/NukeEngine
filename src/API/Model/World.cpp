@@ -7,6 +7,7 @@
 #include "API/Model/Environment.h"// world sky/ambient -> iRender::setSky
 #include "API/Model/PostProcess.h"// per-camera post-process -> iRender::setPostChain
 #include "API/Model/Shader.h"     // post-effect shader props (pack PostParams per stage)
+#include "API/Model/ReflectionProbe.h" // scene-captured reflection cubemap
 #include "API/Model/Time.h"       // animated-texture (GIF) frame advance
 #include <cmath>
 #include <set>
@@ -187,6 +188,16 @@ static void CollectPostProcess(bc::list<Atom*>& gos, std::vector<PostProcess*>& 
 		if (go->children.size() > 0)
 			CollectPostProcess(go->children, out);
 	}
+}
+
+static ReflectionProbe* FindReflectionProbe(bc::list<Atom*>& gos)
+{
+	for (auto go : gos)
+	{
+		if (auto* p = go->GetComponent<ReflectionProbe>()) if (p->enabled) return p;
+		if (go->children.size() > 0) if (ReflectionProbe* p = FindReflectionProbe(go->children)) return p;
+	}
+	return nullptr;
 }
 
 static Environment* FindEnvironment(bc::list<Atom*>& gos)
@@ -463,6 +474,31 @@ void World::Render(iRender* r)
 		RenderShadowMeshes(*hierarchy, r);
 		r->endShadowPass();
 	}
+
+	// Reflection probe: capture the scene into its cubemap (after shadows so reflections are lit/shadowed),
+	// then bind it for the camera passes. Static probes capture once; realtime / Bake re-capture.
+	ReflectionProbe* probe = FindReflectionProbe(*hierarchy);
+	if (probe && probe->transform)
+	{
+		int res = probe->Res();
+		if (probe->cubeId == 0 || probe->builtRes != res)
+		{ probe->cubeId = r->createReflectionCube(res); probe->builtRes = res; probe->captured = false; }
+		Vector3 pp = probe->transform->globalPosition();
+		float pos[3] = { (float)pp.x, (float)pp.y, (float)pp.z };
+		if (probe->cubeId && (!probe->captured || probe->realtime || probe->bake))
+		{
+			std::vector<DrawItem> items; CollectMeshes(*hierarchy, items);   // no cull for capture
+			for (int f = 0; f < 6; ++f)
+			{
+				r->beginCubeFace(probe->cubeId, f, pos, probe->nearZ, probe->farZ);
+				for (auto& it : items) if (it.blend == 0) r->renderObject(it.mesh, it.mat, it.pos, it.quat, it.scale);
+				r->endCubeFace(probe->cubeId, f);
+			}
+			probe->captured = true; probe->bake = false;
+		}
+		r->setReflectionProbe(probe->cubeId, pos, probe->intensity, probe->farZ);
+	}
+	else { float z[3] = { 0, 0, 0 }; r->setReflectionProbe(0, z, 0.0f, 0.0f); }
 
 	const bool editor = AppInstance::GetSingleton()->isEditor();
 	for (Camera* cam : cams)

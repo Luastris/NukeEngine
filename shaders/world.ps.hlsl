@@ -17,9 +17,13 @@ cbuffer FrameCB
 {
     float4 g_CamPos; float4 g_Ambient; float4 g_LightCount; Light g_Lights[MAX_LIGHTS];
     float4x4 g_ShadowVP[MAX_SHADOWS]; float4 g_ShadowParams;
-    // Procedural-sky IBL: gradient colours + g_SkyParams = (skyIntensity, hasSky, _, _).
+    // Procedural-sky IBL: gradient colours + g_SkyParams = (skyIntensity, hasSky, tonemapInShader, _).
     float4 g_SkyTop; float4 g_SkyHorizon; float4 g_SkyGround; float4 g_SkyParams;
+    // Reflection probe: g_ProbePos = (pos.xyz, active); g_ProbeParams = (intensity, maxMip, _, _).
+    float4 g_ProbePos; float4 g_ProbeParams;
 };
+TextureCube  g_Probe;          // scene-captured reflection cubemap (when g_ProbePos.w > 0.5)
+SamplerState g_Probe_sampler;
 
 // Procedural sky colour for a world direction (matches sky.ps) — used for image-based lighting.
 float3 SkyColor(float3 dir)
@@ -173,9 +177,19 @@ float4 main(in PSIn i) : SV_Target
     {
         float  ndv = max(dot(N, V), 0.0);
         float3 R   = reflect(-V, N);
-        float3 irr = SkyColor(N);                                              // diffuse environment
         float3 avg = (g_SkyTop.rgb + 2.0 * g_SkyHorizon.rgb + g_SkyGround.rgb) * 0.25 * g_SkyParams.x;
-        float3 env = lerp(SkyColor(R), avg, rough);                            // specular env (rough = duller)
+        float3 irr, env;
+        if (g_ProbePos.w > 0.5)   // reflection probe captured the actual scene -> sample it
+        {
+            float mm = g_ProbeParams.y;
+            env = g_Probe.SampleLevel(g_Probe_sampler, R, saturate(rough) * mm).rgb * g_ProbeParams.x;  // specular (rough -> higher mip)
+            irr = g_Probe.SampleLevel(g_Probe_sampler, N, mm).rgb * g_ProbeParams.x;                    // diffuse (top mip)
+        }
+        else
+        {
+            irr = SkyColor(N);                                                 // analytic diffuse environment
+            env = lerp(SkyColor(R), avg, rough);                              // analytic specular env
+        }
         float3 Fr  = F0 + (max(float3(1.0 - rough, 1.0 - rough, 1.0 - rough), F0) - F0) * pow(1.0 - ndv, 5.0);
         float3 kd  = (1.0 - Fr) * (1.0 - metallic);
         ambient = (kd * irr * albedo + env * Fr) * g_Ambient.w * ao;

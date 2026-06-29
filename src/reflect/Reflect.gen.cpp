@@ -6,6 +6,7 @@
 #include "API/Model/Material.h"
 #include "API/Model/MeshRenderer.h"
 #include "API/Model/PostProcess.h"
+#include "API/Model/ReflectionProbe.h"
 #include "API/Model/Transform.h"
 
 namespace nuke {
@@ -95,6 +96,17 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("effectsData", &PostProcess::effectsData));
 		t.fields.back().hidden = true;
 		t.create = []() -> void* { return new PostProcess(); };
+	}
+	{
+		TypeInfo& t = TypeOf<ReflectionProbe>();
+		t.base = "Component";
+		t.fields.push_back(MakeField("resolution", &ReflectionProbe::resolution, "", "Resolution", 0.0f, 0.0f, "64,128,256,512"));
+		t.fields.push_back(MakeField("nearZ", &ReflectionProbe::nearZ, "", "Near", 0.01f, 10.0f));
+		t.fields.push_back(MakeField("farZ", &ReflectionProbe::farZ, "", "Far", 1.0f, 2000.0f));
+		t.fields.push_back(MakeField("intensity", &ReflectionProbe::intensity, "", "Intensity", 0.0f, 4.0f));
+		t.fields.push_back(MakeField("realtime", &ReflectionProbe::realtime, "", "Realtime"));
+		t.fields.push_back(MakeField("bake", &ReflectionProbe::bake, "", "Bake"));
+		t.create = []() -> void* { return new ReflectionProbe(); };
 	}
 	{
 		TypeInfo& t = TypeOf<Transform>();

@@ -267,6 +267,18 @@ public:
     // Set the ordered post-process effect chain for the NEXT camera pass. The renderer ping-pongs the camera's
     // HDR result through each stage (fullscreen), then tonemaps/encodes. Empty = no effects (just tonemap).
     virtual void setPostChain(const NukePostStage* stages, int count) {}
+
+    // --- Reflection probe (scene-captured cubemap) ----------------------------------------------------
+    // Create a cube color target (HDR, mipped) for a probe; returns a stable id (0 on failure).
+    virtual uint64_t createReflectionCube(int resolution) { return 0; }
+    // Begin/end ONE cube-face capture pass: the renderer builds the face view/proj from pos + face 0..5, binds
+    // that face, clears, draws the sky. The engine draws the scene between them via renderObject. The probe is
+    // NOT sampled during capture (analytic IBL) so there's no feedback; endCubeFace on face 5 builds the mips.
+    virtual void beginCubeFace(uint64_t cube, int face, const float pos[3], float nearZ, float farZ) {}
+    virtual void endCubeFace(uint64_t cube, int face) {}
+    // Bind a probe cubemap for the upcoming camera pass(es) (world shader samples it for reflections).
+    // cube == 0 disables probe reflections (analytic-sky fallback).
+    virtual void setReflectionProbe(uint64_t cube, const float pos[3], float intensity, float farZ) {}
 //    virtual ~iRender(){
 //    }
 };
