@@ -142,7 +142,8 @@ void Config::reload(Config* instance)
         win.fullscreen  = w.value("fullscreen",  win.fullscreen);
         win.transparent = w.value("transparent", win.transparent);
         win.opacity     = w.value("opacity",     win.opacity);
-        cout << PREFIX_CONF << "Window size = [" << win.w << "x" << win.h << "]" << endl;
+        win.backend     = w.value("backend",     win.backend);
+        cout << PREFIX_CONF << "Window size = [" << win.w << "x" << win.h << "]  backend=" << (win.backend == 1 ? "D3D12" : "D3D11") << endl;
         cout << PREFIX_CONF << "FONT IS " << win.mainFont << endl;
     }
 

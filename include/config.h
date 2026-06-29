@@ -18,6 +18,7 @@ struct NukeWindow{
     bool  fullscreen  = false;
     bool  transparent = false;   // per-pixel alpha (needs renderer DComp support)
     float opacity     = 1.0f;    // whole-window opacity 0..1
+    int   backend     = 0;       // render backend: 0 = D3D11, 1 = D3D12 (D3D12 enables ray tracing; restart to apply)
     bool hierarchy = true,
             console = true,
             browser = true,

@@ -2,8 +2,8 @@
 // octahedral world-space normal (.xy), roughness (.z), metalness (.w). Reuses world.vs (PSIn below). Vertex
 // normals only (no normal-map perturbation) — plenty for SSR ray reflection, and avoids needing the view vector.
 cbuffer MatCB { float4 g_Color; float4 g_Params; float4 g_Params2; float4 g_Emissive2; };
-SamplerState g_Tex_sampler;
 Texture2D    g_MetalRough;   // G = roughness, B = metallic (glTF)
+SamplerState g_MetalRough_sampler;   // combined-texture-samplers: name must pair with the texture (strict on D3D12)
 
 struct PSIn { float4 pos : SV_POSITION; float3 wpos : TEXCOORD0; float3 nrm : TEXCOORD1; float2 uv : TEXCOORD2; };
 
@@ -21,7 +21,7 @@ float4 main(PSIn i) : SV_TARGET
     float rough    = clamp(g_Params.w, 0.04, 1.0);
     if (g_Params2.x > 0.5)
     {
-        float3 m = g_MetalRough.Sample(g_Tex_sampler, i.uv).rgb;
+        float3 m = g_MetalRough.Sample(g_MetalRough_sampler, i.uv).rgb;
         rough = clamp(m.g, 0.04, 1.0); metallic = saturate(m.b);
     }
     float3 N = normalize(i.nrm);

@@ -93,6 +93,7 @@ struct WindowDesc
     bool  fullscreen  = false;
     bool  transparent = false;  // per-pixel alpha to desktop (needs renderer DComp support)
     float opacity     = 1.0f;   // whole-window opacity 0..1 (cheap, always works)
+    int   backend     = 0;      // 0 = D3D11, 1 = D3D12 (chosen at launch; D3D12 enables ray tracing)
 };
 
 class iRender
