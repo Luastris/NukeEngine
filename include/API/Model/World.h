@@ -15,7 +15,18 @@ protected:
 	bc::list<Atom*> *hierarchy = nullptr;
 public:
 	std::string name = "Default scene";
-    
+
+	// World-level render settings (edited in the World Settings window, saved in .nuworld -> "settings").
+	// Shadow GLOBALS (which lights cast is per-Light); pushed to the renderer each frame in Render().
+	struct Settings
+	{
+		int   shadowRes        = 2048;    // shadow map resolution (1024/2048/4096)
+		float shadowDistance   = 60.0f;   // directional ortho extent / range
+		float shadowDepthBias  = 0.0015f;
+		float shadowNormalBias = 0.0f;
+		float shadowSoftness   = 1.0f;    // PCF kernel scale
+	};
+	Settings settings;
 
 	World();
 

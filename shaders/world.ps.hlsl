@@ -122,6 +122,7 @@ float4 main(in PSIn i) : SV_Target
     float3 V = normalize(g_CamPos.xyz - i.wpos);
     float3 N = normalize(i.nrm);
     if (g_Params.y > 0.5) N = PerturbNormal(N, V, i.uv);
+    float3 swpos = i.wpos + N * g_ShadowParams.y;   // normal-offset bias: sample shadows slightly off the surface
 
     float3 F0 = lerp(float3(0.04, 0.04, 0.04), albedo, metallic);
     float3 Lo = 0.0;
@@ -155,8 +156,8 @@ float4 main(in PSIn i) : SV_Target
         if (ndl <= 0.0) continue;
         float3 H = normalize(V + L);
         float3 radiance = lt.colorIntensity.rgb * lt.colorIntensity.w * atten;
-        if (type > 0.5 && type < 1.5) radiance *= SamplePointShadow(i.wpos, lt.posType.xyz, (int)lt.spot.w, lt.dirRange.w);
-        else                          radiance *= SampleShadow(i.wpos, (int)lt.spot.z);   // dir/spot 2D slot
+        if (type > 0.5 && type < 1.5) radiance *= SamplePointShadow(swpos, lt.posType.xyz, (int)lt.spot.w, lt.dirRange.w);
+        else                          radiance *= SampleShadow(swpos, (int)lt.spot.z);   // dir/spot 2D slot
 
         float  D = DistributionGGX(N, H, rough);
         float  G = GeometrySmith(N, V, L, rough);

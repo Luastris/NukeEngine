@@ -354,6 +354,9 @@ void World::Render(iRender* r)
 		n.spotOuter = std::cos(outer); n.spotInner = std::cos(inner);
 		gpuLights.push_back(n);
 	}
+	// Global shadow settings BEFORE setLights (the directional ortho extent uses shadowDistance).
+	r->setShadowSettings(settings.shadowRes, settings.shadowDistance, settings.shadowDepthBias,
+	                     settings.shadowNormalBias, settings.shadowSoftness);
 	r->setLights(gpuLights.empty() ? nullptr : gpuLights.data(), (int)gpuLights.size());
 
 	// Environment (sky + ambient) — first Environment component; default sky if none (keeps old ambient).
@@ -812,6 +815,10 @@ std::string World::SaveToString()
 	json j;
 	j["type"] = "World";
 	j["version"] = 1;
+	j["settings"] = {                                     // world-level render settings (shadow globals, ...)
+		{"shadowRes", settings.shadowRes}, {"shadowDistance", settings.shadowDistance},
+		{"shadowDepthBias", settings.shadowDepthBias}, {"shadowNormalBias", settings.shadowNormalBias},
+		{"shadowSoftness", settings.shadowSoftness} };
 	j["atoms"] = json::array();
 	for (Atom* go : *hierarchy)
 	{
@@ -845,6 +852,16 @@ void World::LoadFromString(const std::string& data)
 {
 	json j = json::parse(data, nullptr, false);
 	if (j.is_discarded()) { std::cout << "[World]\t\t\t" << "LoadFromString: bad JSON" << std::endl; return; }
+	settings = Settings{};   // defaults, then override from file
+	if (j.contains("settings") && j["settings"].is_object())
+	{
+		const json& s = j["settings"];
+		settings.shadowRes        = s.value("shadowRes", settings.shadowRes);
+		settings.shadowDistance   = s.value("shadowDistance", settings.shadowDistance);
+		settings.shadowDepthBias  = s.value("shadowDepthBias", settings.shadowDepthBias);
+		settings.shadowNormalBias = s.value("shadowNormalBias", settings.shadowNormalBias);
+		settings.shadowSoftness   = s.value("shadowSoftness", settings.shadowSoftness);
+	}
 	for (auto it = hierarchy->begin(); it != hierarchy->end(); )   // keep editor camera, drop the rest
 	{
 		if ((*it)->GetName() == "Editor Camera") ++it;
