@@ -227,16 +227,52 @@ static void CollectMeshes(bc::list<Atom*>& gos, std::vector<DrawItem>& out)
 	}
 }
 
-// Draw a gathered scene for one camera: opaque first (depth write on), then transparent/additive sorted
-// back-to-front by distance from the camera (the renderer disables depth write for those).
-static void DrawCollected(std::vector<DrawItem>& items, const Vector3& camPos, iRender* r)
+// Frustum cull: transform the mesh's 8 local-AABB corners to clip space (via the renderer's view*proj) and
+// drop the object when all 8 are outside the same frustum plane (D3D clip: x/y in [-w,w], z in [0,w]).
+static bool FrustumCull(const DrawItem& it, const float vp[16])
 {
+	if (!it.mesh) return false;
+	it.mesh->EnsureBounds();
+	if (!it.mesh->boundsValid) return false;   // unknown bounds -> never cull
+	const float* mn = it.mesh->aabbMin; const float* mx = it.mesh->aabbMax;
+	glm::quat Q(it.quat[3], it.quat[0], it.quat[1], it.quat[2]);
+	glm::vec3 P(it.pos[0], it.pos[1], it.pos[2]), S(it.scale[0], it.scale[1], it.scale[2]);
+	int oL = 0, oR = 0, oB = 0, oT = 0, oN = 0, oF = 0;
+	for (int c = 0; c < 8; ++c)
+	{
+		glm::vec3 lc((c & 1) ? mx[0] : mn[0], (c & 2) ? mx[1] : mn[1], (c & 4) ? mx[2] : mn[2]);
+		glm::vec3 w = P + Q * (lc * S);                         // local -> world
+		float x  = w.x*vp[0] + w.y*vp[4] + w.z*vp[8]  + vp[12]; // world -> clip (row-vector * row-major VP)
+		float y  = w.x*vp[1] + w.y*vp[5] + w.z*vp[9]  + vp[13];
+		float z  = w.x*vp[2] + w.y*vp[6] + w.z*vp[10] + vp[14];
+		float ww = w.x*vp[3] + w.y*vp[7] + w.z*vp[11] + vp[15];
+		if (x < -ww) ++oL; if (x > ww) ++oR;
+		if (y < -ww) ++oB; if (y > ww) ++oT;
+		if (z < 0.0f) ++oN; if (z > ww) ++oF;
+	}
+	return oL == 8 || oR == 8 || oB == 8 || oT == 8 || oN == 8 || oF == 8;
+}
+
+// Draw a gathered scene for one camera: opaque first (depth write on), then transparent/additive sorted
+// back-to-front by distance from the camera (the renderer disables depth write for those). Frustum-culled.
+static void DrawCollected(std::vector<DrawItem>& items, const Vector3& camPos, iRender* r, bool cull)
+{
+	float view[16], proj[16], vp[16];
+	if (cull)
+	{
+		r->getViewProj(view, proj);
+		for (int i = 0; i < 4; ++i)
+			for (int j = 0; j < 4; ++j)
+			{ float s = 0; for (int k = 0; k < 4; ++k) s += view[i*4+k] * proj[k*4+j]; vp[i*4+j] = s; }
+	}
+	auto culled = [&](const DrawItem& it) { return cull && FrustumCull(it, vp); };
+
 	for (auto& it : items)
-		if (it.blend == 0)
+		if (it.blend == 0 && !culled(it))
 			r->renderObject(it.mesh, it.mat, it.pos, it.quat, it.scale);
 
 	std::vector<DrawItem*> tr;
-	for (auto& it : items) if (it.blend != 0) tr.push_back(&it);
+	for (auto& it : items) if (it.blend != 0 && !culled(it)) tr.push_back(&it);
 	if (!tr.empty())
 	{
 		auto dist2 = [&](const DrawItem* it) {
@@ -492,7 +528,7 @@ void World::Render(iRender* r)
 		{
 			std::vector<DrawItem> items;
 			CollectMeshes(*hierarchy, items);
-			DrawCollected(items, cp, r);
+			DrawCollected(items, cp, r, settings.frustumCull);
 		}
 		// Selection highlight (editor only): outline the selected object after the scene.
 		if (editor)
@@ -818,7 +854,7 @@ std::string World::SaveToString()
 	j["settings"] = {                                     // world-level render settings (shadow globals, ...)
 		{"shadowRes", settings.shadowRes}, {"shadowDistance", settings.shadowDistance},
 		{"shadowDepthBias", settings.shadowDepthBias}, {"shadowNormalBias", settings.shadowNormalBias},
-		{"shadowSoftness", settings.shadowSoftness} };
+		{"shadowSoftness", settings.shadowSoftness}, {"frustumCull", settings.frustumCull} };
 	j["atoms"] = json::array();
 	for (Atom* go : *hierarchy)
 	{
@@ -861,6 +897,7 @@ void World::LoadFromString(const std::string& data)
 		settings.shadowDepthBias  = s.value("shadowDepthBias", settings.shadowDepthBias);
 		settings.shadowNormalBias = s.value("shadowNormalBias", settings.shadowNormalBias);
 		settings.shadowSoftness   = s.value("shadowSoftness", settings.shadowSoftness);
+		settings.frustumCull      = s.value("frustumCull", settings.frustumCull);
 	}
 	for (auto it = hierarchy->begin(); it != hierarchy->end(); )   // keep editor camera, drop the rest
 	{

@@ -25,6 +25,7 @@ public:
 		float shadowDepthBias  = 0.0015f;
 		float shadowNormalBias = 0.0f;
 		float shadowSoftness   = 1.0f;    // PCF kernel scale
+		bool  frustumCull      = true;    // skip drawing objects outside the camera frustum (toggle)
 	};
 	Settings settings;
 

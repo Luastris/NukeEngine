@@ -17,6 +17,22 @@ Mesh::Mesh() {
 	children.clear();
 }
 
+// Compute the local-space AABB from vertexArray once (cached). Used for frustum culling.
+void Mesh::EnsureBounds() {
+	if (boundsValid) return;
+	if (!vertexArray || numVerts <= 0) return;
+	float mn[3] = { vertexArray[0], vertexArray[1], vertexArray[2] };
+	float mx[3] = { mn[0], mn[1], mn[2] };
+	for (int i = 0; i < numVerts; ++i)
+		for (int c = 0; c < 3; ++c) {
+			float v = vertexArray[i * 3 + c];
+			if (v < mn[c]) mn[c] = v;
+			if (v > mx[c]) mx[c] = v;
+		}
+	for (int c = 0; c < 3; ++c) { aabbMin[c] = mn[c]; aabbMax[c] = mx[c]; }
+	boundsValid = true;
+}
+
 void Mesh::ImportAIMesh(aiMesh* mesh) {
 	numVerts = mesh->mNumFaces * 3;
 

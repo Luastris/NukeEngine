@@ -27,6 +27,12 @@ public:
 
     int numVerts;
 
+	// Local-space bounds (for frustum culling). Lazily computed from vertexArray on first use.
+	float aabbMin[3] = { 0, 0, 0 };
+	float aabbMax[3] = { 0, 0, 0 };
+	bool  boundsValid = false;
+	void  EnsureBounds();
+
 	bc::list<Mesh*>  children;
 
 
