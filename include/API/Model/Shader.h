@@ -33,13 +33,18 @@ public:
 	std::string vsPath, psPath;// source file paths (for hot-reload)
 	std::time_t vsTime = 0, psTime = 0;   // last-write times (hot-reload change detection)
 	uint64_t    rendererHandle = 0;   // renderer pipeline handle (0 until built)
-	std::vector<ShaderProp> props;    // custom MatCB params parsed from psSource (for material inspector)
+	bool        isPost = false;       // post-process effect shader (fullscreen PS over a "PostParams" cbuffer)
+	std::vector<ShaderProp> props;    // custom params parsed from psSource (MatCB for materials, PostParams for post)
 
 	// Build a Shader from a VS/PS file pair. Returns nullptr if either file can't be read.
 	static Shader* LoadPair(const std::string& name, const std::string& vsPath, const std::string& psPath);
-	// Parse the `cbuffer MatCB { ... }` block of a pixel shader into ShaderProp entries (engine-side
-	// reflection from source text; the renderer never reads shader files). Excludes g_Color/g_Params.
-	static void ParseMatCBProps(const std::string& psSource, std::vector<ShaderProp>& out);
+	// Build a POST-process effect shader from a single fullscreen ".post.hlsl" pixel shader (the renderer
+	// pairs it with the built-in post.vs). Params come from its `cbuffer PostParams { ... }`.
+	static Shader* LoadPostShader(const std::string& name, const std::string& psPath);
+	// Parse a named `cbuffer` block of a pixel shader into ShaderProp entries (engine-side reflection from
+	// source text). For MatCB the standard lit fields (g_Color/g_Params/...) are excluded.
+	static void ParseCBProps(const std::string& psSource, const char* cbName, std::vector<ShaderProp>& out);
+	static void ParseMatCBProps(const std::string& psSource, std::vector<ShaderProp>& out) { ParseCBProps(psSource, "MatCB", out); }
 };
 }  // namespace nuke
 

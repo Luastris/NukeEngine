@@ -52,6 +52,16 @@ struct NukeSky
     float moonPhase = 0.5f;                      // 0/1 = new, 0.5 = full (procedural terminator)
 };
 
+// One post-process effect in a camera's chain: a custom fullscreen post shader pipeline + its packed
+// parameter bytes (laid out by the shader's PostParams cbuffer, exactly like a material's MatCB). The
+// engine resolves the shader GUID -> pipeline handle and packs the params; the renderer just binds + runs.
+struct NukePostStage
+{
+    uint64_t     pipeline = 0;     // handle from iRender::createPostPipeline
+    const float* params   = nullptr;
+    int          paramFloats = 0;  // number of floats in `params` (PostParams cbuffer, /4 = float4 count)
+};
+
 // Backend-neutral camera description for one render pass. The renderer builds the
 // view/projection matrices itself (from these POD fields) so no glm/Diligent math
 // convention leaks across the seam.
@@ -242,6 +252,14 @@ public:
     // it; the editor does not (its viewport is an SDR preview). No-op / SDR fallback if the display isn't HDR.
     virtual void setHDROutput(bool on) {}
     virtual bool getHDROutput() { return false; }   // true only if an HDR10 swap chain is actually active
+
+    // Build a post-process effect pipeline from a fullscreen pixel shader (sampling `g_Source`, params in a
+    // `PostParams` cbuffer). Returns an opaque handle (0 on failure). Call after init; one per post shader asset.
+    virtual uint64_t createPostPipeline(const char* name, const char* ps) { return 0; }
+
+    // Set the ordered post-process effect chain for the NEXT camera pass. The renderer ping-pongs the camera's
+    // HDR result through each stage (fullscreen), then tonemaps/encodes. Empty = no effects (just tonemap).
+    virtual void setPostChain(const NukePostStage* stages, int count) {}
 //    virtual ~iRender(){
 //    }
 };

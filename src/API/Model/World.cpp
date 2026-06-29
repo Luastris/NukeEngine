@@ -5,6 +5,8 @@
 #include "API/Model/Material.h"   // material instance (mr->mat) save/load
 #include "API/Model/Light.h"      // scene lights -> iRender::setLights (PBR)
 #include "API/Model/Environment.h"// world sky/ambient -> iRender::setSky
+#include "API/Model/PostProcess.h"// per-camera post-process -> iRender::setPostChain
+#include "API/Model/Shader.h"     // post-effect shader props (pack PostParams per stage)
 #include "API/Model/Time.h"       // animated-texture (GIF) frame advance
 #include <cmath>
 #include <set>
@@ -175,6 +177,18 @@ static void CollectLights(bc::list<Atom*>& gos, std::vector<Light*>& out)
 	}
 }
 
+// Post-process components (one may sit beside each Camera on the same atom — matched by shared transform).
+static void CollectPostProcess(bc::list<Atom*>& gos, std::vector<PostProcess*>& out)
+{
+	for (auto go : gos)
+	{
+		if (auto* p = go->GetComponent<PostProcess>())
+			if (p->enabled) out.push_back(p);
+		if (go->children.size() > 0)
+			CollectPostProcess(go->children, out);
+	}
+}
+
 static Environment* FindEnvironment(bc::list<Atom*>& gos)
 {
 	for (auto go : gos)
@@ -288,6 +302,10 @@ void World::Render(iRender* r)
 	// Gather scene lights once for this frame (the renderer keeps them for every camera pass).
 	std::vector<Light*> lights;
 	CollectLights(*hierarchy, lights);
+
+	// Post-process components (each applies only to its own camera = the Camera on the same atom).
+	std::vector<PostProcess*> pps;
+	CollectPostProcess(*hierarchy, pps);
 
 	// Time of day: drive the FIRST directional light (rotation/color/intensity) from the Environment's hour.
 	// The sky colours follow below. todElev: sun elevation (-1..1), used by the sky build.
@@ -436,6 +454,36 @@ void World::Render(iRender* r)
 		d.fov   = (float)cam->fov * 0.01745329252f; // degrees -> radians
 		d.nearZ = cam->_near;
 		d.farZ  = cam->_far;
+
+		// This camera's post-process chain: the effects on the PostProcess component sitting on the same atom
+		// (shared transform). Each effect = a custom post-shader pipeline + its packed PostParams bytes.
+		std::vector<std::vector<float>> ppBlobs; std::vector<uint64_t> ppHandles;
+		for (PostProcess* pp : pps)
+			if (pp->transform == cam->transform)
+			{
+				pp->EnsureParsed();
+				for (PostEffect& e : pp->effects)
+				{
+					if (!e.enabled) continue;
+					Shader* sh = ResDB::getSingleton()->GetShader(e.shaderGuid);
+					if (!sh || !sh->isPost || sh->rendererHandle == 0) continue;
+					std::vector<float> blob(64, 0.0f);   // 256-byte PostParams
+					for (const ShaderProp& sp : sh->props)
+					{
+						const float* v = sp.def;
+						auto pit = e.props.find(sp.name);
+						if (pit != e.props.end()) v = pit->second.data();
+						for (int c = 0; c < sp.components && (sp.offset / 4 + c) < 64; ++c)
+							blob[sp.offset / 4 + c] = v[c];
+					}
+					ppHandles.push_back(sh->rendererHandle); ppBlobs.push_back(std::move(blob));
+				}
+				break;
+			}
+		std::vector<NukePostStage> ppStages(ppHandles.size());
+		for (size_t k = 0; k < ppHandles.size(); ++k)   // blobs are stable now -> safe to take .data()
+		{ ppStages[k].pipeline = ppHandles[k]; ppStages[k].params = ppBlobs[k].data(); ppStages[k].paramFloats = 64; }
+		r->setPostChain(ppStages.empty() ? nullptr : ppStages.data(), (int)ppStages.size());
 
 		r->beginCamera(d);
 		{

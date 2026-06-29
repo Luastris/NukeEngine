@@ -5,6 +5,7 @@
 #include "API/Model/Light.h"
 #include "API/Model/Material.h"
 #include "API/Model/MeshRenderer.h"
+#include "API/Model/PostProcess.h"
 #include "API/Model/Transform.h"
 
 namespace nuke {
@@ -87,6 +88,13 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("meshGuid", &MeshRenderer::meshGuid, "mesh", "Mesh"));
 		t.fields.push_back(MakeField("matGuid", &MeshRenderer::matGuid, "material", "Material"));
 		t.create = []() -> void* { return new MeshRenderer(); };
+	}
+	{
+		TypeInfo& t = TypeOf<PostProcess>();
+		t.base = "Component";
+		t.fields.push_back(MakeField("effectsData", &PostProcess::effectsData));
+		t.fields.back().hidden = true;
+		t.create = []() -> void* { return new PostProcess(); };
 	}
 	{
 		TypeInfo& t = TypeOf<Transform>();

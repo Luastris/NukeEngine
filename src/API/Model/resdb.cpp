@@ -86,8 +86,10 @@ void ResDB::BuildShaderPipelines(iRender* r)
 	for (Shader* s : shaders)
 		if (s && s->rendererHandle == 0)
 		{
-			s->rendererHandle = r->createShaderPipeline(s->vsSource.c_str(), s->psSource.c_str());
-			std::cout << "[ResDB]\tshader pipeline '" << s->name << "' -> handle " << s->rendererHandle << std::endl;
+			s->rendererHandle = s->isPost ? r->createPostPipeline(s->name.c_str(), s->psSource.c_str())
+			                              : r->createShaderPipeline(s->vsSource.c_str(), s->psSource.c_str());
+			std::cout << "[ResDB]\t" << (s->isPost ? "post" : "shader") << " pipeline '" << s->name
+			          << "' -> handle " << s->rendererHandle << std::endl;
 		}
 }
 
@@ -122,6 +124,18 @@ void ResDB::LoadShadersDir(const std::string& dir)
 		if (ec) break;
 		if (bfs::is_directory(it->path())) continue;
 		std::string fn = it->path().filename().string();
+		// Post-process effect shader: a single "<name>.post.hlsl" (fullscreen PS; paired with the built-in
+		// post.vs by the renderer). Registered as a Shader asset with isPost = true.
+		const std::string posuf = ".post.hlsl";
+		if (fn.size() > posuf.size() && fn.compare(fn.size() - posuf.size(), posuf.size(), posuf) == 0)
+		{
+			std::string pname = fn.substr(0, fn.size() - posuf.size());
+			if (shaderByGuid.count(pname)) continue;
+			Shader* ps = Shader::LoadPostShader(pname, it->path().string());
+			if (ps) { RegisterShader(ps); SetAssetPath(pname, it->path().string());
+				std::cout << "[ResDB]\tloaded post shader '" << pname << "' (" << ps->props.size() << " params)" << std::endl; }
+			continue;
+		}
 		if (fn.size() <= vsuf.size() || fn.compare(fn.size() - vsuf.size(), vsuf.size(), vsuf) != 0)
 			continue;                                   // not a "*.vs.hlsl"
 		std::string name = fn.substr(0, fn.size() - vsuf.size());

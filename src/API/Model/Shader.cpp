@@ -26,10 +26,11 @@ static int CompsOf(const std::string& t)
 	return 0;
 }
 
-void Shader::ParseMatCBProps(const std::string& src, std::vector<ShaderProp>& out)
+void Shader::ParseCBProps(const std::string& src, const char* cbName, std::vector<ShaderProp>& out)
 {
 	out.clear();
-	size_t cb = src.find("cbuffer MatCB");
+	const bool isMat = std::string(cbName) == "MatCB";
+	size_t cb = src.find(std::string("cbuffer ") + cbName);
 	if (cb == std::string::npos) return;
 	size_t open = src.find('{', cb);
 	size_t close = (open == std::string::npos) ? std::string::npos : src.find('}', open);
@@ -76,9 +77,10 @@ void Shader::ParseMatCBProps(const std::string& src, std::vector<ShaderProp>& ou
 			float f; int di = 0;
 			while (di < 4 && (ns >> f)) sp.def[di++] = f;
 		}
-		// Standard lit-shader fields are driven by the renderer (material params), NOT editable custom props
-		// — otherwise the prop loop overwrites them with 0 and kills emissive / metal-rough / AO maps.
-		if (ident != "g_Color" && ident != "g_Params" && ident != "g_Params2" && ident != "g_Emissive2")
+		// In MatCB the standard lit fields are renderer-driven (material params), NOT editable custom props —
+		// else the prop loop overwrites them with 0 and kills emissive / metal-rough / AO maps. PostParams has
+		// no such reserved fields (every member is a user param).
+		if (!isMat || (ident != "g_Color" && ident != "g_Params" && ident != "g_Params2" && ident != "g_Emissive2"))
 			out.push_back(sp);
 	}
 }
@@ -99,6 +101,19 @@ Shader* Shader::LoadPair(const std::string& name, const std::string& vsPath, con
 	s->vsTime = bfs::last_write_time(bfs::path(vsPath), ec);
 	s->psTime = bfs::last_write_time(bfs::path(psPath), ec);
 	ParseMatCBProps(s->psSource, s->props);   // engine-side reflection from the source text
+	return s;
+}
+
+Shader* Shader::LoadPostShader(const std::string& name, const std::string& psPath)
+{
+	std::string ps = ReadAll(psPath);
+	if (ps.empty()) return nullptr;
+	Shader* s = new Shader();
+	s->guid = name; s->name = name; s->isPost = true;
+	s->psSource = ps; s->psPath = psPath;          // vsSource stays empty: the renderer uses the built-in post.vs
+	boost::system::error_code ec;
+	s->psTime = bfs::last_write_time(bfs::path(psPath), ec);
+	ParseCBProps(s->psSource, "PostParams", s->props);
 	return s;
 }
 }  // namespace nuke
