@@ -26,6 +26,19 @@ cbuffer FrameCB
 TextureCube  g_Probe;          // scene-captured reflection cubemap (when g_ProbePos.w > 0.5)
 SamplerState g_Probe_sampler;
 
+#ifdef RT_ENABLED   // D3D12 + DXR: inline ray-traced shadows (RayQuery, SM6.5) — replaces the shadow maps
+RaytracingAccelerationStructure g_TLAS;
+// 1 = lit, 0 = occluded. Traces from the (biased) surface point toward the light; first opaque hit = shadowed.
+float RTShadow(float3 origin, float3 L, float maxDist)
+{
+    RayDesc ray; ray.Origin = origin; ray.Direction = L; ray.TMin = 0.02; ray.TMax = maxDist;
+    RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_CULL_NON_OPAQUE | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> q;
+    q.TraceRayInline(g_TLAS, RAY_FLAG_NONE, 0xFF, ray);
+    q.Proceed();
+    return (q.CommittedStatus() == COMMITTED_TRIANGLE_HIT) ? 0.0 : 1.0;
+}
+#endif
+
 // Procedural sky colour for a world direction (matches sky.ps) — used for image-based lighting.
 float3 SkyColor(float3 dir)
 {
@@ -161,8 +174,18 @@ float4 main(in PSIn i) : SV_Target
         if (ndl <= 0.0) continue;
         float3 H = normalize(V + L);
         float3 radiance = lt.colorIntensity.rgb * lt.colorIntensity.w * atten;
+#ifdef RT_ENABLED
+        // RT shadows: ray-query toward the light (only for lights that cast — same gate as the shadow-map slot).
+        bool casts = (type > 0.5 && type < 1.5) ? ((int)lt.spot.w >= 0) : ((int)lt.spot.z >= 0);
+        if (casts)
+        {
+            float maxD = (type < 0.5) ? 1e4 : length(lt.posType.xyz - i.wpos);
+            radiance *= RTShadow(swpos, L, maxD);
+        }
+#else
         if (type > 0.5 && type < 1.5) radiance *= SamplePointShadow(swpos, lt.posType.xyz, (int)lt.spot.w, lt.dirRange.w);
         else                          radiance *= SampleShadow(swpos, (int)lt.spot.z);   // dir/spot 2D slot
+#endif
 
         float  D = DistributionGGX(N, H, rough);
         float  G = GeometrySmith(N, V, L, rough);

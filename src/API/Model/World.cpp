@@ -479,6 +479,16 @@ void World::Render(iRender* r)
 		r->setSky(sky);
 	}
 
+	// Ray tracing (D3D12): build the scene TLAS from opaque meshes FIRST — before the probe capture and camera
+	// passes, both of which draw with the world PSO and ray-query g_TLAS (RT shadows). Must exist before any draw.
+	if (r->rtAvailable())
+	{
+		r->beginRTScene();
+		std::vector<DrawItem> rtItems; CollectMeshes(*hierarchy, rtItems);
+		for (auto& it : rtItems) if (it.blend == 0) r->addRTInstance(it.mesh, it.mat, it.pos, it.quat, it.scale);
+		r->buildRTScene();
+	}
+
 	// Shadow depth passes (one per shadow-casting dir/spot light) before any camera pass — the renderer
 	// samples them during the world pass. Only shadow-casting surfaces (Material::castShadows) contribute.
 	for (int sp = 0, spc = r->shadowPassCount(); sp < spc; ++sp)

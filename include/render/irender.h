@@ -288,6 +288,14 @@ public:
     virtual void beginGBufferPass(const NukeCameraDesc& cam) {}
     virtual void renderGBufferObject(Mesh* mesh, Material* mat, const float pos[3], const float quat[4], const float scale[3]) {}
     virtual void endGBufferPass() {}
+
+    // Ray tracing (D3D12 + DXR-capable GPU). rtAvailable() gates all of it. Per frame, before the camera passes:
+    // beginRTScene() -> addRTInstance() per mesh -> buildRTScene() builds the BLAS-per-mesh + a fresh TLAS the
+    // world shader ray-queries (RT shadows, later RT reflections). No-op / false on D3D11 or unsupported GPUs.
+    virtual bool rtAvailable() { return false; }
+    virtual void beginRTScene() {}
+    virtual void addRTInstance(Mesh* mesh, Material* mat, const float pos[3], const float quat[4], const float scale[3]) {}
+    virtual void buildRTScene() {}
 //    virtual ~iRender(){
 //    }
 };
