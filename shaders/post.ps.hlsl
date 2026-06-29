@@ -26,7 +26,8 @@ float4 main(in PSIn i) : SV_Target
 
     if (mode > 1.5)   // HDR10: linear HDR -> nits -> Rec2020 -> PQ
     {
-        const float paperWhite = 200.0, peak = 1000.0;
+        float paperWhite = g_Post.z > 1.0 ? g_Post.z : 200.0;   // diffuse-white nits (project setting)
+        float peak       = g_Post.w > paperWhite ? g_Post.w : 1000.0;
         float3 nits = min(c * paperWhite, peak);
         nits = mul(Rec709toRec2020, nits);
         return float4(LinearToPQ(nits / 10000.0), 1.0);

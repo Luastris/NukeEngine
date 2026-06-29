@@ -253,6 +253,9 @@ public:
     virtual void setHDROutput(bool on) {}
     virtual bool getHDROutput() { return false; }   // true only if an HDR10 swap chain is actually active
 
+    // HDR10 display mapping: diffuse-white luminance + highlight peak (nits). Used by the final PQ encode.
+    virtual void setHDRNits(float paperWhite, float peak) {}
+
     // Build a post-process effect pipeline from a fullscreen pixel shader (sampling `g_Source`, params in a
     // `PostParams` cbuffer). Returns an opaque handle (0 on failure). Call after init; one per post shader asset.
     virtual uint64_t createPostPipeline(const char* name, const char* ps) { return 0; }
