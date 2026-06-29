@@ -106,6 +106,8 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("intensity", &ReflectionProbe::intensity, "", "Intensity", 0.0f, 4.0f));
 		t.fields.push_back(MakeField("realtime", &ReflectionProbe::realtime, "", "Realtime"));
 		t.fields.push_back(MakeField("bake", &ReflectionProbe::bake, "", "Bake"));
+		t.fields.push_back(MakeField("boxProjection", &ReflectionProbe::boxProjection, "", "Box Projection"));
+		t.fields.push_back(MakeField("boxSize", &ReflectionProbe::boxSize, "", "Box Size", 0.0f, 500.0f));
 		t.create = []() -> void* { return new ReflectionProbe(); };
 	}
 	{

@@ -19,8 +19,9 @@ cbuffer FrameCB
     float4x4 g_ShadowVP[MAX_SHADOWS]; float4 g_ShadowParams;
     // Procedural-sky IBL: gradient colours + g_SkyParams = (skyIntensity, hasSky, tonemapInShader, _).
     float4 g_SkyTop; float4 g_SkyHorizon; float4 g_SkyGround; float4 g_SkyParams;
-    // Reflection probe: g_ProbePos = (pos.xyz, active); g_ProbeParams = (intensity, maxMip, _, _).
-    float4 g_ProbePos; float4 g_ProbeParams;
+    // Reflection probe: g_ProbePos = (pos.xyz, active); g_ProbeParams = (intensity, maxMip, _, _);
+    // g_ProbeBox = (boxHalf.xyz, parallaxValid) — parallax-correct the cubemap to a box centred on g_ProbePos.
+    float4 g_ProbePos; float4 g_ProbeParams; float4 g_ProbeBox;
 };
 TextureCube  g_Probe;          // scene-captured reflection cubemap (when g_ProbePos.w > 0.5)
 SamplerState g_Probe_sampler;
@@ -182,8 +183,22 @@ float4 main(in PSIn i) : SV_Target
         if (g_ProbePos.w > 0.5)   // reflection probe captured the actual scene -> sample it
         {
             float mm = g_ProbeParams.y;
-            env = g_Probe.SampleLevel(g_Probe_sampler, R, saturate(rough) * mm).rgb * g_ProbeParams.x;  // specular (rough -> higher mip)
-            irr = g_Probe.SampleLevel(g_Probe_sampler, N, mm).rgb * g_ProbeParams.x;                    // diffuse (top mip)
+            // Parallax (box) correction: intersect the reflection ray with the probe's box volume and sample by the
+            // direction from the probe centre to that hit -> reflections anchor to the geometry (match SSR), instead
+            // of "reflection at infinity" that slides with the probe position.
+            float3 Rp = R;
+            if (g_ProbeBox.w > 0.5)
+            {
+                float3 c = g_ProbePos.xyz;
+                float3 invR = 1.0 / R;                       // inf on axis-aligned rays is fine (min/max picks the finite plane)
+                float3 t1 = (c + g_ProbeBox.xyz - i.wpos) * invR;
+                float3 t2 = (c - g_ProbeBox.xyz - i.wpos) * invR;
+                float3 tmax = max(t1, t2);
+                float  t = min(min(tmax.x, tmax.y), tmax.z);
+                Rp = (i.wpos + R * t) - c;
+            }
+            env = g_Probe.SampleLevel(g_Probe_sampler, Rp, saturate(rough) * mm).rgb * g_ProbeParams.x;  // specular (rough -> higher mip)
+            irr = g_Probe.SampleLevel(g_Probe_sampler, N, mm).rgb * g_ProbeParams.x;                     // diffuse (top mip)
         }
         else
         {

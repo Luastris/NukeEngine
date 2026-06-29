@@ -264,18 +264,31 @@ static bool FrustumCull(const DrawItem& it, const float vp[16])
 	return oL == 8 || oR == 8 || oB == 8 || oT == 8 || oN == 8 || oF == 8;
 }
 
+// Combined view*proj for the current camera (renderer's row-major matrices), for frustum culling.
+static void CameraVP(iRender* r, float vp[16])
+{
+	float view[16], proj[16];
+	r->getViewProj(view, proj);
+	for (int i = 0; i < 4; ++i)
+		for (int j = 0; j < 4; ++j)
+		{ float s = 0; for (int k = 0; k < 4; ++k) s += view[i*4+k] * proj[k*4+j]; vp[i*4+j] = s; }
+}
+
+// SSR G-buffer prepass: opaque geometry only (transparent doesn't occlude / write the colour-pass depth).
+// Same cull setting as the colour pass so depths line up.
+static void DrawGBuffer(std::vector<DrawItem>& items, iRender* r, bool cull)
+{
+	float vp[16]; if (cull) CameraVP(r, vp);
+	for (auto& it : items)
+		if (it.blend == 0 && !(cull && FrustumCull(it, vp)))
+			r->renderGBufferObject(it.mesh, it.mat, it.pos, it.quat, it.scale);
+}
+
 // Draw a gathered scene for one camera: opaque first (depth write on), then transparent/additive sorted
 // back-to-front by distance from the camera (the renderer disables depth write for those). Frustum-culled.
 static void DrawCollected(std::vector<DrawItem>& items, const Vector3& camPos, iRender* r, bool cull)
 {
-	float view[16], proj[16], vp[16];
-	if (cull)
-	{
-		r->getViewProj(view, proj);
-		for (int i = 0; i < 4; ++i)
-			for (int j = 0; j < 4; ++j)
-			{ float s = 0; for (int k = 0; k < 4; ++k) s += view[i*4+k] * proj[k*4+j]; vp[i*4+j] = s; }
-	}
+	float vp[16]; if (cull) CameraVP(r, vp);
 	auto culled = [&](const DrawItem& it) { return cull && FrustumCull(it, vp); };
 
 	for (auto& it : items)
@@ -496,9 +509,12 @@ void World::Render(iRender* r)
 			}
 			probe->captured = true; probe->bake = false;
 		}
-		r->setReflectionProbe(probe->cubeId, pos, probe->intensity, probe->farZ);
+		float boxHalf[3] = { 0, 0, 0 };
+		if (probe->boxProjection)
+		{ boxHalf[0] = (float)probe->boxSize.x * 0.5f; boxHalf[1] = (float)probe->boxSize.y * 0.5f; boxHalf[2] = (float)probe->boxSize.z * 0.5f; }
+		r->setReflectionProbe(probe->cubeId, pos, probe->intensity, probe->farZ, boxHalf);
 	}
-	else { float z[3] = { 0, 0, 0 }; r->setReflectionProbe(0, z, 0.0f, 0.0f); }
+	else { float z[3] = { 0, 0, 0 }; r->setReflectionProbe(0, z, 0.0f, 0.0f, z); }
 
 	const bool editor = AppInstance::GetSingleton()->isEditor();
 	for (Camera* cam : cams)
@@ -533,6 +549,7 @@ void World::Render(iRender* r)
 		// This camera's post-process chain: the effects on the PostProcess component sitting on the same atom
 		// (shared transform). Each effect = a custom post-shader pipeline + its packed PostParams bytes.
 		std::vector<std::vector<float>> ppBlobs; std::vector<uint64_t> ppHandles;
+		bool hasSSR = false;   // an SSR effect in this camera's chain -> run the G-buffer prepass first
 		for (PostProcess* pp : pps)
 			if (pp->transform == cam->transform)
 			{
@@ -542,6 +559,7 @@ void World::Render(iRender* r)
 					if (!e.enabled) continue;
 					Shader* sh = ResDB::getSingleton()->GetShader(e.shaderGuid);
 					if (!sh || !sh->isPost || sh->rendererHandle == 0) continue;
+					if (sh->name == "ssr") hasSSR = true;
 					std::vector<float> blob(64, 0.0f);   // 256-byte PostParams
 					for (const ShaderProp& sp : sh->props)
 					{
@@ -559,6 +577,15 @@ void World::Render(iRender* r)
 		for (size_t k = 0; k < ppHandles.size(); ++k)   // blobs are stable now -> safe to take .data()
 		{ ppStages[k].pipeline = ppHandles[k]; ppStages[k].params = ppBlobs[k].data(); ppStages[k].paramFloats = 64; }
 		r->setPostChain(ppStages.empty() ? nullptr : ppStages.data(), (int)ppStages.size());
+
+		// SSR needs scene normals/roughness/depth — capture them in a single-sample prepass before the colour pass.
+		if (hasSSR)
+		{
+			r->beginGBufferPass(d);
+			std::vector<DrawItem> gitems; CollectMeshes(*hierarchy, gitems);
+			DrawGBuffer(gitems, r, settings.frustumCull);
+			r->endGBufferPass();
+		}
 
 		r->beginCamera(d);
 		{

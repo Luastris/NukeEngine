@@ -20,6 +20,10 @@ public:
 	[[nuke::prop(label="Intensity", min=0, max=4)]]   float intensity = 1.0f;
 	[[nuke::prop(label="Realtime")]]                  bool  realtime  = false;   // re-capture every frame (dynamic)
 	[[nuke::prop(label="Bake")]]                      bool  bake      = false;   // tick to force a one-off re-capture
+	// Parallax correction: anchor the cubemap to a box volume centred on the probe (instead of "reflection at
+	// infinity"), so reflections line up with the actual geometry and agree with SSR. Size it to the room.
+	[[nuke::prop(label="Box Projection")]]            bool    boxProjection = true;
+	[[nuke::prop(label="Box Size", min=0, max=500)]]  Vector3 boxSize       = { 20.0f, 20.0f, 20.0f };
 
 	// Runtime state (not serialized): the renderer cube handle + whether it has been captured.
 	uint64_t cubeId   = 0;

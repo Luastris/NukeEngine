@@ -278,7 +278,15 @@ public:
     virtual void endCubeFace(uint64_t cube, int face) {}
     // Bind a probe cubemap for the upcoming camera pass(es) (world shader samples it for reflections).
     // cube == 0 disables probe reflections (analytic-sky fallback).
-    virtual void setReflectionProbe(uint64_t cube, const float pos[3], float intensity, float farZ) {}
+    // boxHalf = parallax box half-extents (world units) centred on pos; {0,0,0} disables parallax correction.
+    virtual void setReflectionProbe(uint64_t cube, const float pos[3], float intensity, float farZ, const float boxHalf[3]) {}
+
+    // G-buffer prepass for screen-space reflections. A single-sample pass (run BEFORE beginCamera, same camera)
+    // that captures normal + roughness + metalness + depth into the renderer's G-buffer; the built-in "ssr"
+    // post effect samples it. Driven only when the camera's post chain contains an SSR effect.
+    virtual void beginGBufferPass(const NukeCameraDesc& cam) {}
+    virtual void renderGBufferObject(Mesh* mesh, Material* mat, const float pos[3], const float quat[4], const float scale[3]) {}
+    virtual void endGBufferPass() {}
 //    virtual ~iRender(){
 //    }
 };
