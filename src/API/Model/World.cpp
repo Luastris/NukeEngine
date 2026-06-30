@@ -431,6 +431,7 @@ void World::Render(iRender* r)
 			sky.skyIntensity = env->skyIntensity;
 			sky.ambient[0]=(float)env->ambient.r; sky.ambient[1]=(float)env->ambient.g; sky.ambient[2]=(float)env->ambient.b;
 			sky.ambientIntensity = env->ambientIntensity;
+			sky.exposure = env->exposure; sky.whitePoint = env->whitePoint;   // SDR tonemap (post.ps + world.ps)
 			if (env->useTimeOfDay)   // override sky colours from the time of day (day=blue, dusk=orange, night=dark)
 			{
 				auto sat = [](float v){ return v < 0 ? 0.0f : (v > 1 ? 1.0f : v); };

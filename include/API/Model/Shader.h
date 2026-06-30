@@ -17,6 +17,7 @@ struct ShaderProp
 	int         components = 1;
 	uint32_t    offset     = 0;
 	float       def[4]     = { 0, 0, 0, 0 };   // default values (parsed from the HLSL initializer)
+	bool        isColor    = false;            // `// @color` annotation -> inspector shows a (HDR) color picker, not a vector
 };
 
 // A shader asset: a VS + PS source pair (HLSL). Loaded from "<name>.vs.hlsl" + "<name>.ps.hlsl"

@@ -87,7 +87,7 @@ void ResDB::BuildShaderPipelines(iRender* r)
 		if (s && s->rendererHandle == 0)
 		{
 			s->rendererHandle = s->isPost ? r->createPostPipeline(s->name.c_str(), s->psSource.c_str())
-			                              : r->createShaderPipeline(s->vsSource.c_str(), s->psSource.c_str());
+			                              : r->createShaderPipeline(s->name.c_str(), s->vsSource.c_str(), s->psSource.c_str());
 			std::cout << "[ResDB]\t" << (s->isPost ? "post" : "shader") << " pipeline '" << s->name
 			          << "' -> handle " << s->rendererHandle << std::endl;
 		}
@@ -124,7 +124,7 @@ void ResDB::HotReloadShaders(iRender* r)
 		s->vsTime   = fresh->vsTime;   s->psTime   = fresh->psTime;
 		s->props    = fresh->props;    // re-parsed MatCB params (a prop may have been added/removed)
 		delete fresh;
-		uint64_t h = r->createShaderPipeline(s->vsSource.c_str(), s->psSource.c_str());
+		uint64_t h = r->createShaderPipeline(s->name.c_str(), s->vsSource.c_str(), s->psSource.c_str());
 		if (h) { s->rendererHandle = h; std::cout << "[ResDB]\thot-reloaded shader '" << s->name << "' -> handle " << h << std::endl; }
 	}
 }

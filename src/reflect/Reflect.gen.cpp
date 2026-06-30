@@ -41,6 +41,8 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("skyIntensity", &Environment::skyIntensity, "", "Sky Intensity", 0.0f, 4.0f));
 		t.fields.push_back(MakeField("ambient", &Environment::ambient, "", "Ambient"));
 		t.fields.push_back(MakeField("ambientIntensity", &Environment::ambientIntensity, "", "Ambient Intensity", 0.0f, 2.0f));
+		t.fields.push_back(MakeField("exposure", &Environment::exposure, "", "Exposure", 0.0f, 8.0f));
+		t.fields.push_back(MakeField("whitePoint", &Environment::whitePoint, "", "White Point", 0.1f, 8.0f));
 		t.fields.push_back(MakeField("sunDisk", &Environment::sunDisk, "", "Sun Disk"));
 		t.fields.push_back(MakeField("useTimeOfDay", &Environment::useTimeOfDay, "", "Time of Day"));
 		t.fields.push_back(MakeField("hour", &Environment::hour, "", "Hour", 0.0f, 24.0f));

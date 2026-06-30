@@ -241,8 +241,9 @@ float4 main(in PSIn i) : SV_Target
     // HDR on (g_SkyParams.z == 0): output LINEAR HDR; the post pass tonemaps. HDR off (== 1): tonemap here.
     if (g_SkyParams.z > 0.5)
     {
-        color = color / (color + 1.0);          // Reinhard tonemap
-        color = pow(max(color, 0.0), 1.0 / 2.2); // linear -> sRGB
+        float W = (g_SkyParams.w > 1e-3) ? g_SkyParams.w : 1.0;   // tonemap white point (g_SkyParams.w) -> fully-lit white reads white
+        color = color * (1.0 + color / (W * W)) / (1.0 + color);  // extended Reinhard: REACHES 1.0 at color==W (plain Reinhard never did)
+        color = pow(max(color, 0.0), 1.0 / 2.2);                  // linear -> sRGB
     }
     return float4(color, base.a);
 }

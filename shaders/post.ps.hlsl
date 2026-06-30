@@ -32,9 +32,11 @@ float4 main(in PSIn i) : SV_Target
         nits = mul(Rec709toRec2020, nits);
         return float4(LinearToPQ(nits / 10000.0), 1.0);
     }
-    if (mode > 0.5)   // SDR: Reinhard + sRGB gamma
+    if (mode > 0.5)   // SDR: exposure -> white-point Reinhard -> sRGB
     {
-        c = c / (c + 1.0);
+        c *= max(g_Grade.x, 0.0);                                  // exposure (g_Grade.x)
+        float W = (g_Grade.y > 1e-3) ? g_Grade.y : 1.0;           // tonemap white point: linear value that maps to pure white
+        c = c * (1.0 + c / (W * W)) / (1.0 + c);                  // extended Reinhard — REACHES 1.0 at c==W (plain Reinhard never did -> washed grey)
         c = pow(max(c, 0.0), 1.0 / 2.2);
         return float4(c, 1.0);
     }

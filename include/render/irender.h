@@ -50,6 +50,8 @@ struct NukeSky
     float moonSize = 0.05f;                     // moon angular radius (radians)
     float moonAmount = 0.0f;                     // moon visibility (0 = hidden)
     float moonPhase = 0.5f;                      // 0/1 = new, 0.5 = full (procedural terminator)
+    float exposure   = 1.0f;                      // SDR tonemap exposure multiplier
+    float whitePoint = 1.0f;                      // SDR tonemap white point: linear value mapped to pure white (Reinhard reaches 1.0)
 };
 
 // One post-process effect in a camera's chain: a custom fullscreen post shader pipeline + its packed
@@ -187,7 +189,9 @@ public:
     // Build a world-type pipeline from a shader asset's VS+PS source; returns an opaque handle
     // (0 on failure). Materials carry this handle (via their Shader) and renderObject selects
     // the pipeline by it; 0 / unknown falls back to the built-in default. Call after init().
-    virtual uint64_t createShaderPipeline(const char* vs, const char* ps) { return 0; }
+    // `name` is the shader asset's guid/name: the renderer uses it to auto-build an RT closest-hit
+    // for ray-traced reflections when a "<name>.surf.hlsl" surface file exists (no manual .rchit).
+    virtual uint64_t createShaderPipeline(const char* name, const char* vs, const char* ps) { return 0; }
 
     // Draw a selection outline (editor highlight) around one mesh, using the same world transform as
     // renderObject. Call within the camera pass, after the objects. No-op if the renderer has no

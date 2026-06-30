@@ -83,6 +83,20 @@ void Shader::ParseCBProps(const std::string& src, const char* cbName, std::vecto
 		if (!isMat || (ident != "g_Color" && ident != "g_Params" && ident != "g_Params2" && ident != "g_Emissive2"))
 			out.push_back(sp);
 	}
+
+	// Color annotation: a 3/4-component prop whose declaration line carries `// @color` is shown as an
+	// (HDR-capable) colour picker in the inspector instead of a raw vector. Scanned from the un-stripped
+	// source so the comment is still present.
+	for (ShaderProp& sp : out)
+	{
+		if (sp.components < 3) continue;
+		for (size_t pos = raw.find(sp.name); pos != std::string::npos; pos = raw.find(sp.name, pos + 1))
+		{
+			size_t eol = raw.find('\n', pos);
+			std::string line = raw.substr(pos, (eol == std::string::npos ? raw.size() : eol) - pos);
+			if (line.find("@color") != std::string::npos) { sp.isColor = true; break; }
+		}
+	}
 }
 
 Shader* Shader::LoadPair(const std::string& name, const std::string& vsPath, const std::string& psPath)
