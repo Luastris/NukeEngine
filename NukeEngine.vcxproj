@@ -181,12 +181,6 @@
     <ClInclude Include="deps\ImGuizmo\ImGradient.h" />
     <ClInclude Include="deps\ImGuizmo\ImGuizmo.h" />
     <ClInclude Include="deps\ImGuizmo\ImSequencer.h" />
-    <ClInclude Include="deps\imgui\imconfig.h" />
-    <ClInclude Include="deps\imgui\imgui.h" />
-    <ClInclude Include="deps\imgui\imgui_internal.h" />
-    <ClInclude Include="deps\imgui\stb_rect_pack.h" />
-    <ClInclude Include="deps\imgui\stb_textedit.h" />
-    <ClInclude Include="deps\imgui\stb_truetype.h" />
     <ClInclude Include="framework.h" />
     <ClInclude Include="include\API\iGUI.h" />
     <ClInclude Include="include\API\Model\Camera.h" />
