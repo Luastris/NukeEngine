@@ -265,6 +265,11 @@ public:
     // ortho extent; depthBias/normalBias fight acne/peter-panning; softness scales the PCF kernel.
     virtual void setShadowSettings(int resolution, float distance, float depthBias, float normalBias, float softness) {}
 
+    // Global RTX reflection quality (from Project Settings). The per-camera "rtreflect" post effect is the on/off
+    // switch; these control how it traces. intensity = strength; maxDist = ray length; bounces = recursion depth;
+    // roughCutoff = roughness past which reflections fade.
+    virtual void setRTReflection(float intensity, float maxDist, int bounces, float roughCutoff) {}
+
     // Build a post-process effect pipeline from a fullscreen pixel shader (sampling `g_Source`, params in a
     // `PostParams` cbuffer). Returns an opaque handle (0 on failure). Call after init; one per post shader asset.
     virtual uint64_t createPostPipeline(const char* name, const char* ps) { return 0; }

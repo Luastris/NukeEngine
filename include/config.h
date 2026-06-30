@@ -28,6 +28,16 @@ struct NukeWindow{
             render = true;
 };
 
+// Global ray-tracing (RTX) reflection settings — engine-wide quality knobs, edited in Project Settings,
+// persisted to config/main.json ["raytracing"]. The per-camera PostProcess "rtreflect" effect is just the
+// on/off switch (which camera traces); these control HOW it traces.
+struct NukeRT{
+    float intensity   = 1.0f;     // reflection strength
+    float maxDist     = 100.0f;   // max ray distance (world units)
+    int   bounces     = 3;        // recursion depth (mirror-in-mirror; 1 = single reflection)
+    float roughCutoff = 0.6f;     // reflections fade out toward this roughness (sharp RT = smooth surfaces)
+};
+
 struct confUiVec{
       int x,y;
 };
@@ -106,6 +116,7 @@ private:
 public:
     NukeWindow window {};
     NukeTheme theme{};
+    NukeRT    rt{};
 	void reload(Config* instance);
 	static Config* getSingleton();
 };

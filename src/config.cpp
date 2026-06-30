@@ -101,7 +101,8 @@ static void loadTheme(NukeTheme* t, const json& j)
 Config* Config::getSingleton()
 {
     static Config instance;
-    instance.reload(&instance);
+    static bool   loaded = false;
+    if (!loaded) { instance.reload(&instance); loaded = true; }   // load once — NOT every call (was re-reading the file + log-spamming per frame)
     return &instance;
 }
 
@@ -149,6 +150,16 @@ void Config::reload(Config* instance)
 
     if (root.contains("theme") && root["theme"].is_object())
         loadTheme(&instance->theme, root["theme"]);
+
+    if (root.contains("raytracing") && root["raytracing"].is_object())
+    {
+        const json& rt = root["raytracing"];
+        NukeRT& r = instance->rt = NukeRT();
+        r.intensity   = rt.value("intensity",   r.intensity);
+        r.maxDist     = rt.value("maxDist",     r.maxDist);
+        r.bounces     = rt.value("bounces",     r.bounces);
+        r.roughCutoff = rt.value("roughCutoff", r.roughCutoff);
+    }
 }
 
 Config::Config()
