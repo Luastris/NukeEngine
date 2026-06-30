@@ -559,7 +559,7 @@ void World::Render(iRender* r)
 		// This camera's post-process chain: the effects on the PostProcess component sitting on the same atom
 		// (shared transform). Each effect = a custom post-shader pipeline + its packed PostParams bytes.
 		std::vector<std::vector<float>> ppBlobs; std::vector<uint64_t> ppHandles;
-		bool hasSSR = false;   // an SSR effect in this camera's chain -> run the G-buffer prepass first
+		bool hasSSR = false;   // an SSR or RT-reflection effect in this camera's chain -> run the G-buffer prepass first
 		for (PostProcess* pp : pps)
 			if (pp->transform == cam->transform)
 			{
@@ -569,7 +569,7 @@ void World::Render(iRender* r)
 					if (!e.enabled) continue;
 					Shader* sh = ResDB::getSingleton()->GetShader(e.shaderGuid);
 					if (!sh || !sh->isPost || sh->rendererHandle == 0) continue;
-					if (sh->name == "ssr") hasSSR = true;
+					if (sh->name == "ssr" || sh->name == "rtreflect") hasSSR = true;   // both need the G-buffer prepass
 					std::vector<float> blob(64, 0.0f);   // 256-byte PostParams
 					for (const ShaderProp& sp : sh->props)
 					{
