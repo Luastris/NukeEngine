@@ -166,7 +166,12 @@
       <AdditionalIncludeDirectories>./include;./deps</AdditionalIncludeDirectories>
       <ForcedIncludeFiles>NukeEngine.h;pch.h;algorithm</ForcedIncludeFiles>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <LanguageStandard>stdcpp20</LanguageStandard>
     </ClCompile>
+    <PreBuildEvent>
+      <Command>where python &gt;nul 2&gt;nul &amp;&amp; python "$(ProjectDir)..\tools\nukegen.py"</Command>
+      <Message>NukeEngine reflection codegen (nukegen.py)</Message>
+    </PreBuildEvent>
     <Link>
       <SubSystem>Windows</SubSystem>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
