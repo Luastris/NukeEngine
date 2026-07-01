@@ -208,10 +208,11 @@ static Atom* BuildPrefabNode(aiNode* node, const aiScene* sc,
 // Returns the new texture GUID, or "" if it couldn't be loaded. Dedups within one import.
 static std::string ConvertTexture(const aiScene* sc, const std::string& texRef,
                                   const bfs::path& modelDir, const std::string& destDir,
-                                  std::map<std::string, std::string>& cache)
+                                  std::map<std::string, std::string>& cache, int usage = Texture::UsageColor)
 {
 	if (texRef.empty()) return std::string();
-	auto cit = cache.find(texRef);
+	std::string key = texRef + "|" + std::to_string(usage);   // same image in two roles -> distinct assets/treatment
+	auto cit = cache.find(key);
 	if (cit != cache.end()) return cit->second;
 
 	int w = 0, h = 0, n = 0;
@@ -255,6 +256,7 @@ static std::string ConvertTexture(const aiScene* sc, const std::string& texRef,
 
 	Texture* tex = new Texture();
 	tex->guid   = ResDB::NewGuid();
+	tex->usage  = usage;             // authoritative from the assimp texture type
 	CompressToBC(tex, rgba, w, h);   // BC1/BC3 + mip chain
 
 	std::string stem = SafeStem(bfs::path(texRef).stem().string().c_str());
@@ -265,7 +267,7 @@ static std::string ConvertTexture(const aiScene* sc, const std::string& texRef,
 
 	if (!tex->SaveToFile(out.string())) { delete tex; return std::string(); }
 	ResDB::getSingleton()->RegisterTexture(tex);
-	cache[texRef] = tex->guid;
+	cache[key] = tex->guid;
 	cout << "[Import]\twrote " << out.filename().string() << " (" << w << "x" << h << ")" << endl;
 	return tex->guid;
 }
@@ -297,26 +299,26 @@ int AssImporter::ImportToContent(const char* srcPath, const char* destDir)
 
 		aiString tp;
 		if (am->GetTexture(aiTextureType_DIFFUSE, 0, &tp) == AI_SUCCESS)
-			mt->diffuseGuid = ConvertTexture(sc, tp.C_Str(), modelDir, destDir, texCache);
+			mt->diffuseGuid = ConvertTexture(sc, tp.C_Str(), modelDir, destDir, texCache, Texture::UsageColor);
 		tp.Clear();
 		if (am->GetTexture(aiTextureType_NORMALS, 0, &tp) == AI_SUCCESS)
-			mt->normalGuid = ConvertTexture(sc, tp.C_Str(), modelDir, destDir, texCache);
+			mt->normalGuid = ConvertTexture(sc, tp.C_Str(), modelDir, destDir, texCache, Texture::UsageNormal);
 		tp.Clear();
 		if (am->GetTexture(aiTextureType_SPECULAR, 0, &tp) == AI_SUCCESS)
-			mt->specularGuid = ConvertTexture(sc, tp.C_Str(), modelDir, destDir, texCache);
+			mt->specularGuid = ConvertTexture(sc, tp.C_Str(), modelDir, destDir, texCache, Texture::UsageColor);
 		// PBR maps (metallic-roughness, occlusion, emissive).
 		tp.Clear();
 		if (am->GetTexture(aiTextureType_METALNESS, 0, &tp) == AI_SUCCESS ||
 		    am->GetTexture(aiTextureType_DIFFUSE_ROUGHNESS, 0, &tp) == AI_SUCCESS ||
 		    am->GetTexture(aiTextureType_UNKNOWN, 0, &tp) == AI_SUCCESS)   // glTF packs MR under UNKNOWN
-			mt->metalRoughGuid = ConvertTexture(sc, tp.C_Str(), modelDir, destDir, texCache);
+			mt->metalRoughGuid = ConvertTexture(sc, tp.C_Str(), modelDir, destDir, texCache, Texture::UsageData);
 		tp.Clear();
 		if (am->GetTexture(aiTextureType_AMBIENT_OCCLUSION, 0, &tp) == AI_SUCCESS ||
 		    am->GetTexture(aiTextureType_LIGHTMAP, 0, &tp) == AI_SUCCESS)
-			mt->occlusionGuid = ConvertTexture(sc, tp.C_Str(), modelDir, destDir, texCache);
+			mt->occlusionGuid = ConvertTexture(sc, tp.C_Str(), modelDir, destDir, texCache, Texture::UsageData);
 		tp.Clear();
 		if (am->GetTexture(aiTextureType_EMISSIVE, 0, &tp) == AI_SUCCESS)
-			mt->emissiveGuid = ConvertTexture(sc, tp.C_Str(), modelDir, destDir, texCache);
+			mt->emissiveGuid = ConvertTexture(sc, tp.C_Str(), modelDir, destDir, texCache, Texture::UsageEmissive);
 		std::string mstem = SafeStem(mt->matName.empty() ? "material" : mt->matName.c_str());
 		bfs::path mout = bfs::path(destDir) / (mstem + ".numat");
 		for (int n = 1; bfs::exists(mout, ec); ++n)
@@ -378,6 +380,7 @@ std::string AssImporter::ImportImage(const char* srcPath, const char* destDir)
 
 	Texture* tex = new Texture();
 	tex->guid = ResDB::NewGuid();
+	tex->usage = Texture::GuessUsage(srcPath);   // bare image: guess role from filename suffix (overridable in inspector)
 	int w = 0, h = 0;
 
 	if (ext == ".gif")

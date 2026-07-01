@@ -24,6 +24,13 @@ public:
     int format   = FMT_RGBA8;              // texel format (BC1 = opaque, BC3 = alpha)
     int mipCount = 1;                       // number of mip levels stored in `pixels`
 
+    // Semantic usage (drives color-space, compression choice, normal green-flip). Set at import — from the assimp
+    // texture type (model import) or a filename-suffix heuristic (bare image drop/picker); overridable in the asset
+    // inspector. Color/Emissive = sRGB source; Normal/Data = linear.
+    enum Usage { UsageColor = 0, UsageNormal = 1, UsageData = 2, UsageEmissive = 3 };
+    int usage = UsageColor;                 // serialized in the .nutex (v5)
+    static int GuessUsage(const std::string& filename);   // filename-suffix heuristic -> Usage
+
     // Animation (GIF): pixels holds `frameCount` frames back-to-back (RGBA8, w*h*4 each, no mips/BC).
     int              frameCount = 1;
     std::vector<int> frameDelaysMs;        // per-frame delay (ms); size == frameCount (empty => 100ms)
