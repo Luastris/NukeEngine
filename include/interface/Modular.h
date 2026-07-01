@@ -34,10 +34,31 @@ NUKEENGINE_API void InitModules(AppInstance* instance);
 NUKEENGINE_API void UnloadModules();
 
 // Activate / deactivate a discovered plugin at any time (the manager's checkboxes + the
-// per-project load list drive these). Enable = OnLoad() (sync, registers types) + Run()
-// (background). Disable = Shutdown(). Idempotent.
+// per-project load list drive these). Enable = OnLoad() (sync, registers types) +
+// service registration (queryService -> Services_Provide) + Run() (background).
+// Disable = service revoke + Shutdown(). Idempotent.
+// Mutual exclusion: enabling a service provider first disables the current provider of
+// that service — EXCEPT when either side is PHASE_BOOT (the renderer): boot providers
+// can't be torn down mid-run, so EnablePlugin refuses and the UI persists the choice as
+// "applies after restart".
 NUKEENGINE_API void EnablePlugin(NUKEModule* m);
 NUKEENGINE_API void DisablePlugin(NUKEModule* m);
+
+// The currently LOADED provider of a service, or null if the service is off.
+NUKEENGINE_API NUKEModule* ActiveServiceProvider(const char* service);
+
+// Pick a provider of `service` from the discovered pool: the one whose moduleFile equals
+// preferredFile if present, else the first provider found (fallback, logged). Null if the
+// pool has no provider of that service. Does NOT enable it.
+NUKEENGINE_API NUKEModule* FindServiceProvider(const char* service,
+                                               const std::string& preferredFile = "");
+
+// Load the engine's built-in shader files from `dir` (e.g. "shaders") and push their source
+// into the renderer (render->setShaderSource) BEFORE render->init(). Each "<name>.hlsl" is
+// registered under "<name>" (so "world.vs.hlsl" -> "world.vs"). The ENGINE does the file IO;
+// the render module stays free of file/boost dependencies.
+class iRender;
+NUKEENGINE_API void LoadBuiltinShaders(iRender* render, const std::string& dir);
 
 // Which plugin (dll name) provides a component type, "" for engine built-ins. Learned by
 // diffing the reflection registry around each plugin's OnLoad().

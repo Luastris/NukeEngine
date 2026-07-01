@@ -1,13 +1,18 @@
 #pragma once
 #ifndef NUKEE_INTERFACE_H
 #define NUKEE_INTERFACE_H
-#include <boost/dll.hpp>
-using namespace boost;
+#include <boost/config.hpp>   // BOOST_SYMBOL_EXPORT (the loader side pulls boost/dll itself)
 
+#include <string>
+#include <vector>
 #include "AppInstance.h"
 
 namespace nuke {
 
+// When a plugin must be brought up. PHASE_BOOT providers (e.g. the renderer) are enabled
+// during engine bootstrap, BEFORE the window/UI exist; PHASE_RUNTIME plugins are enabled
+// after the host is up and can be toggled live.
+enum PluginPhase { PHASE_BOOT = 0, PHASE_RUNTIME = 1 };
 
 class BOOST_SYMBOL_EXPORT NUKEModule {
 public:
@@ -59,6 +64,29 @@ public:
 
 	//Function that calls before plugin unloading. E.g. when app closes.
 	virtual void Shutdown() = 0;
+
+	// ---- Service metadata (unified plugin model) ----------------------------------------
+	// New virtuals live at the END of the class so the vtable prefix stays stable for
+	// modules that haven't been rebuilt yet. (All in-tree plugins rebuild together anyway.)
+
+	//Search/filter labels shown in the plugin window (e.g. {"lua", "scripting"}).
+	std::vector<std::string> tags;
+
+	//Which engine service this plugin provides: "render" | "physics" | "audio" | "scripting"
+	//| ... — or "" for an ordinary utility plugin. At most ONE provider per service is active;
+	//enabling a provider disables the current sibling (radio behavior in the plugin window).
+	virtual const char* provides() { return ""; }
+
+	//When the plugin must come up. Service providers the host cannot run without (the
+	//renderer: window/device) return PHASE_BOOT and are enabled during bootstrap; they can
+	//NOT be hot-swapped — switching persists the choice and applies after restart.
+	virtual int phase() { return PHASE_RUNTIME; }
+
+	//For service providers: the interface instance to register under provides() — e.g. a
+	//render plugin returns its iRender*. Called by the loader AFTER OnLoad() (registered via
+	//Services_Provide) and revoked BEFORE Shutdown(), so the lifecycle is loader-bound and a
+	//provider can't forget to revoke. Utility plugins keep the nullptr default.
+	virtual void* queryService() { return nullptr; }
 };
 
 }  // namespace nuke

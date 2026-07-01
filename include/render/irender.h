@@ -105,6 +105,10 @@ class iRender
 private:
     static iRender* _instance;
 public:
+    // Service name this interface is registered under in the plugin service registry
+    // (interface/Services.h): GetService<iRender>() resolves through it.
+    static constexpr const char* kServiceName = "render";
+
     static iRender* getSingleton(){
         return _instance;
     }

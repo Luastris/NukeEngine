@@ -127,7 +127,7 @@
     <ClCompile Include="src\reflect\Reflect.cpp" />
     <ClCompile Include="src\reflect\Reflect.gen.cpp" />
     <ClCompile Include="src\API\Model\UnknownComponent.cpp" />
-    <ClCompile Include="src\interface\RenderModular.cpp" />
+    <ClCompile Include="src\interface\Services.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\config.h">
@@ -294,8 +294,7 @@
     <ClInclude Include="include\reflect\Reflect.h" />
     <ClInclude Include="include\API\Model\UnknownComponent.h" />
     <ClInclude Include="include\API\Model\Prefab.h" />
-    <ClInclude Include="include\interface\RenderModule.h" />
-    <ClInclude Include="include\interface\RenderModular.h" />
+    <ClInclude Include="include\interface\Services.h" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="src">

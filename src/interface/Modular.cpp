@@ -1,6 +1,9 @@
 #include "interface/Modular.h"
+#include "interface/Services.h"
 #include "reflect/Reflect.h"
 #include "API/Model/World.h"
+#include <boost/filesystem/fstream.hpp>
+#include <iterator>
 #include <map>
 #include <set>
 
@@ -80,9 +83,53 @@ void InitModules(AppInstance* instance)
 	}
 }
 
+NUKEModule* ActiveServiceProvider(const char* service)
+{
+	if (!service || !*service) return nullptr;
+	for (auto& m : g_modules)
+		if (m && m->loaded && std::string(m->provides()) == service) return m.get();
+	return nullptr;
+}
+
+NUKEModule* FindServiceProvider(const char* service, const std::string& preferredFile)
+{
+	if (!service || !*service) return nullptr;
+	NUKEModule* first = nullptr;
+	for (auto& m : g_modules)
+	{
+		if (!m || std::string(m->provides()) != service) continue;
+		if (m->moduleFile == preferredFile) return m.get();
+		if (!first) first = m.get();
+	}
+	if (first && !preferredFile.empty())
+		cout << "[Modular]\t'" << service << "' provider '" << preferredFile
+		     << "' not found, falling back to '" << first->moduleFile << "'" << endl;
+	return first;
+}
+
 void EnablePlugin(NUKEModule* m)
 {
 	if (!m || m->loaded) return;
+
+	// One active provider per service. A PHASE_BOOT provider (the renderer: it owns the
+	// window/device) cannot be swapped live in either direction — the UI persists the new
+	// choice, which takes effect on the next start.
+	const std::string service = m->provides();
+	if (!service.empty())
+	{
+		if (NUKEModule* cur = ActiveServiceProvider(service.c_str()))
+		{
+			if (m->phase() == PHASE_BOOT || cur->phase() == PHASE_BOOT)
+			{
+				cout << "[Modular]\t'" << m->title << "' provides '" << service
+				     << "' (boot phase) — current provider '" << cur->title
+				     << "' stays; the change applies after restart" << endl;
+				return;
+			}
+			DisablePlugin(cur);
+		}
+	}
+
 	m->loaded  = true;
 	m->stopped = false;
 
@@ -98,6 +145,13 @@ void EnablePlugin(NUKEModule* m)
 	if (g_instance && g_instance->currentScene)
 		g_instance->currentScene->RestorePluginComponents(m->moduleFile);
 
+	// Service providers register their interface instance under the service name. Loader-
+	// bound (not done by the plugin itself) so provide/revoke can never get out of sync
+	// with the plugin lifecycle.
+	if (!service.empty())
+		if (void* iface = m->queryService())
+			Services_Provide(service.c_str(), iface);
+
 	cout << "[Modular]\tenabled '" << m->title << "'" << endl;
 	boost::thread(boost::bind(&NUKEModule::Run, m, g_instance));
 }
@@ -105,6 +159,10 @@ void EnablePlugin(NUKEModule* m)
 void DisablePlugin(NUKEModule* m)
 {
 	if (!m || !m->loaded) return;
+
+	// Revoke the service FIRST so no consumer can grab the interface while it's dying.
+	if (*m->provides())
+		Services_Revoke(m->provides());
 
 	// Live downgrade FIRST (while the type's reflection + vtable are still valid): convert this
 	// plugin's live components into inert placeholders so nothing dangles after it goes away.
@@ -118,11 +176,44 @@ void DisablePlugin(NUKEModule* m)
 
 void UnloadModules()
 {
-	for (auto i : g_modules)
-	{
-		if (i && i->loaded)
+	// Two passes: runtime plugins first, boot providers (the renderer) LAST — a scripting
+	// or GUI plugin's Shutdown may still touch the renderer; the reverse can't happen.
+	for (int phase : { PHASE_RUNTIME, PHASE_BOOT })
+		for (auto i : g_modules)
+		{
+			if (!i || !i->loaded || i->phase() != phase) continue;
+			if (*i->provides())
+				Services_Revoke(i->provides());
 			i->Shutdown();
-	}
+			i->loaded = false;
+		}
 	g_modules.clear();
+}
+
+void LoadBuiltinShaders(iRender* render, const std::string& dir)
+{
+	if (!render) return;
+	boost::system::error_code ec;
+
+	// Resolve relative to the EXE, not the cwd (the VS debugger's working dir may differ).
+	bfs::path shaderDir = boost::dll::program_location(ec).parent_path() / dir;
+	if (ec || !bfs::exists(shaderDir, ec)) shaderDir = bfs::path(dir);   // fallback: cwd-relative
+	if (!bfs::exists(shaderDir, ec))
+	{
+		cout << "[Modular]\tbuilt-in shaders dir not found: " << shaderDir.string() << endl;
+		return;
+	}
+	cout << "[Modular]\tloading shaders from " << shaderDir.string() << endl;
+	for (bfs::directory_iterator it(shaderDir, ec), end; it != end; it.increment(ec))
+	{
+		if (ec) break;
+		if (bfs::is_directory(it->path()) || it->path().extension() != ".hlsl") continue;
+		bfs::ifstream f(it->path(), std::ios::binary);
+		if (!f) continue;
+		std::string src((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+		std::string name = it->path().stem().string();   // "world.vs.hlsl" -> "world.vs"
+		render->setShaderSource(name.c_str(), src.c_str());
+		cout << "[Modular]\tshader '" << name << "' (" << src.size() << " bytes)" << endl;
+	}
 }
 }  // namespace nuke

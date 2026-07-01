@@ -234,8 +234,7 @@
     <ClInclude Include="include\interface\EditorMenu\MenuItem.h" />
     <ClInclude Include="include\interface\EditorMenu\MenuStrip.h" />
     <ClInclude Include="include\interface\Modular.h" />
-    <ClInclude Include="include\interface\RenderModule.h" />
-    <ClInclude Include="include\interface\RenderModular.h" />
+    <ClInclude Include="include\interface\Services.h" />
     <ClInclude Include="include\interface\NUKEEInteface.h" />
     <ClInclude Include="include\render\irender.h" />
     <ClInclude Include="NukeEngine.h" />
@@ -295,7 +294,7 @@
     <ClCompile Include="src\interface\EditorMenu\MenuItem.cpp" />
     <ClCompile Include="src\interface\EditorMenu\MenuStrip.cpp" />
     <ClCompile Include="src\interface\Modular.cpp" />
-    <ClCompile Include="src\interface\RenderModular.cpp" />
+    <ClCompile Include="src\interface\Services.cpp" />
     <ClCompile Include="src\interface\NUKEEInteface.cpp" />
     <ClCompile Include="src\render\irender.cpp" />
   </ItemGroup>
