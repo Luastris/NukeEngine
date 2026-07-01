@@ -4,9 +4,10 @@
 
 struct RTPayload { float3 color; uint depth; };   // color = reflected radiance; depth = current recursion depth
 
-// TLAS instance inclusion masks. Reflection (color) rays use RT_REFLECT_MASK so objects excluded from reflections
-// (MeshRenderer.inReflections == false, instance Mask bit cleared) are skipped — yet still cast shadows (shadow
-// rays trace with 0xFF). Default instance Mask = 0xFF; excluded = 0xFF & ~RT_REFLECT_BIT.
+// TLAS instance inclusion masks. Reflection rays — both COLOR and the SHADOW rays cast while shading a reflection —
+// use RT_REFLECT_MASK, so an object excluded from reflections (MeshRenderer.inReflections == false, instance Mask
+// bit cleared) is fully absent from reflections: no surface AND no shadow. It still casts shadows in the direct view
+// (world.ps RTShadow traces 0xFF). Default instance Mask = 0xFF; excluded = 0xFF & ~RT_REFLECT_BIT.
 #define RT_REFLECT_BIT  0x01
 #define RT_REFLECT_MASK 0x01
 
@@ -136,7 +137,9 @@ float RTShadow(float3 origin, float3 L, float maxD)
 {
     RayDesc r; r.Origin = origin; r.Direction = L; r.TMin = 0.02; r.TMax = maxD;
     RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_CULL_NON_OPAQUE | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> q;
-    q.TraceRayInline(g_TLAS, RAY_FLAG_NONE, 0xFF, r);
+    // Shadow rays DURING REFLECTION shading use the reflect mask too: an object excluded from reflections must not
+    // cast a shadow visible in the reflection either. Direct-view shadows (world.ps RTShadow) still use 0xFF.
+    q.TraceRayInline(g_TLAS, RAY_FLAG_NONE, RT_REFLECT_MASK, r);
     q.Proceed();
     return (q.CommittedStatus() == COMMITTED_TRIANGLE_HIT) ? 0.0 : 1.0;
 }
