@@ -4,6 +4,12 @@
 
 struct RTPayload { float3 color; uint depth; };   // color = reflected radiance; depth = current recursion depth
 
+// TLAS instance inclusion masks. Reflection (color) rays use RT_REFLECT_MASK so objects excluded from reflections
+// (MeshRenderer.inReflections == false, instance Mask bit cleared) are skipped — yet still cast shadows (shadow
+// rays trace with 0xFF). Default instance Mask = 0xFF; excluded = 0xFF & ~RT_REFLECT_BIT.
+#define RT_REFLECT_BIT  0x01
+#define RT_REFLECT_MASK 0x01
+
 RaytracingAccelerationStructure g_TLAS;
 RWTexture2D<float4>             g_Output;          // ray-gen writes the final composited reflection here
 Texture2D                      g_GBuffer;         // (octN.xy world normal, roughness, metalness)
@@ -12,8 +18,18 @@ Texture2D                      g_Source;          // current HDR chain colour (b
 TextureCube                    g_Probe;           SamplerState g_Probe_sampler;
 ByteAddressBuffer              g_AllNrm;          // concatenated mesh normals (float3/vertex)
 ByteAddressBuffer              g_AllUV;           // concatenated mesh uvs (float2/vertex)
-Texture2D                      g_MatTex[64];      SamplerState g_MatTex_sampler;   // bindless albedo
-struct RTInstanceData { uint nrmOffset; uint uvOffset; uint texIndex; uint matByteOffset; float4 albedoMetal; float4 emissiveRough; };
+ByteAddressBuffer              g_AllPos;          // concatenated mesh positions (float3/vertex) — analytic TBN
+Texture2D                      g_MatTex[256];     SamplerState g_MatTex_sampler;   // bindless material maps (all types)
+// Per-instance geometry offsets + bindless map indices (0xFFFFFFFF = no map) + PBR factors. Mirrors the C++
+// Impl::RTInstanceData byte-for-byte (StructuredBuffer; 16-byte aligned rows).
+struct RTInstanceData
+{
+    uint  nrmOffset, uvOffset, posOffset, matByteOffset;   // byte offsets into g_AllNrm/g_AllUV/g_AllPos
+    uint  texIndex, nrmTexIndex, mrTexIndex, aoTexIndex;    // bindless slots: albedo, normal, metal-rough, occlusion
+    uint  emTexIndex, specTexIndex; float specularFactor; uint _pad;
+    float4 albedoMetal;     // rgb albedo factor, a = metallic factor
+    float4 emissiveRough;   // rgb emissive (pre-multiplied), a = roughness factor
+};
 StructuredBuffer<RTInstanceData> g_Instances;
 ByteAddressBuffer g_MatBytes;   // per-instance MatCB block (same packing as the raster MatCB); auto-gen chits load from here
 
@@ -75,6 +91,45 @@ float3 SampleAlbedo(RTInstanceData inst, float2 uv)
     if (inst.texIndex != 0xFFFFFFFFu) a *= g_MatTex[NonUniformResourceIndex(inst.texIndex)].SampleLevel(g_MatTex_sampler, uv, 0).rgb;
     return a;
 }
+// Generic bindless map fetch (returns `dflt` when the instance has no such map). LOD 0: no ray-cone yet.
+float4 SampleMap(uint idx, float2 uv, float4 dflt)
+{
+    if (idx == 0xFFFFFFFFu) return dflt;
+    return g_MatTex[NonUniformResourceIndex(idx)].SampleLevel(g_MatTex_sampler, uv, 0);
+}
+// Metallic-roughness map (glTF: G=roughness, B=metalness). Overrides the scalar factors when present.
+void SampleMR(RTInstanceData inst, float2 uv, inout float metal, inout float rough)
+{
+    if (inst.mrTexIndex == 0xFFFFFFFFu) return;
+    float3 m = g_MatTex[NonUniformResourceIndex(inst.mrTexIndex)].SampleLevel(g_MatTex_sampler, uv, 0).rgb;
+    rough = m.g; metal = m.b;
+}
+float  SampleAO(RTInstanceData inst, float2 uv)        { return SampleMap(inst.aoTexIndex,   uv, float4(1,1,1,1)).r; }
+float3 SampleEmissiveMap(RTInstanceData inst, float2 uv){ return SampleMap(inst.emTexIndex,   uv, float4(1,1,1,1)).rgb; }
+// Specular reflectance multiplier (KHR_materials_specular): factor × specular(color) map. Scales dielectric F0.
+float3 SampleSpec(RTInstanceData inst, float2 uv)      { return inst.specularFactor * SampleMap(inst.specTexIndex, uv, float4(1,1,1,1)).rgb; }
+
+// Analytic tangent-space → world normal for a normal-mapped hit. Builds the TBN from the hit triangle's object-space
+// positions + UVs (no per-vertex tangents needed; works for any imported mesh). `geomN` = interpolated world normal.
+float3 ApplyNormalMap(RTInstanceData inst, uint prim, float2 uv, float3 geomN, float3x4 o2w)
+{
+    if (inst.nrmTexIndex == 0xFFFFFFFFu) return geomN;
+    uint pb = inst.posOffset + prim * 36u;                 // 3 verts * 12 bytes
+    float3 p0 = asfloat(g_AllPos.Load3(pb)), p1 = asfloat(g_AllPos.Load3(pb + 12u)), p2 = asfloat(g_AllPos.Load3(pb + 24u));
+    uint ub = inst.uvOffset + prim * 24u;                  // 3 verts * 8 bytes
+    float2 u0 = asfloat(g_AllUV.Load2(ub)), u1 = asfloat(g_AllUV.Load2(ub + 8u)), u2 = asfloat(g_AllUV.Load2(ub + 16u));
+    float3 e1 = p1 - p0, e2 = p2 - p0; float2 d1 = u1 - u0, d2 = u2 - u0;
+    float det = d1.x * d2.y - d2.x * d1.y;
+    if (abs(det) < 1e-12) return geomN;                    // degenerate UVs -> geometric normal
+    float3 Tobj = (d2.y * e1 - d1.y * e2) / det;
+    float3 T = normalize(mul((float3x3)o2w, Tobj));
+    float3 N = normalize(geomN);
+    T = normalize(T - N * dot(N, T));                      // Gram-Schmidt orthonormalize
+    float3 B = cross(N, T);
+    float3 nTS = g_MatTex[NonUniformResourceIndex(inst.nrmTexIndex)].SampleLevel(g_MatTex_sampler, uv, 0).xyz * 2.0 - 1.0;
+    nTS.y = -nTS.y;   // green-channel convention: normal maps are OpenGL (+Y up); match the raster path (world.ps)
+    return normalize(nTS.x * T + nTS.y * B + nTS.z * N);
+}
 
 // Shadow ray: 1 = lit, 0 = occluded (inline query, cheap; no separate hit group needed for visibility).
 float RTShadow(float3 origin, float3 L, float maxD)
@@ -98,10 +153,10 @@ float RT_GSch(float ndv, float k) { return ndv / (ndv * (1.0 - k) + k); }
 float RT_GSm(float3 N, float3 V, float3 L, float rough)
 { float k = (rough + 1.0); k = k * k / 8.0; return RT_GSch(max(dot(N, V), 0.0), k) * RT_GSch(max(dot(N, L), 0.0), k); }
 
-float3 ShadeSurface(float3 pos, float3 N, float3 V, float3 albedo, float metal, float rough, float3 emissive)
+float3 ShadeSurface(float3 pos, float3 N, float3 V, float3 albedo, float metal, float rough, float3 emissive, float ao, float3 spec)
 {
     metal = saturate(metal); rough = clamp(rough, 0.04, 1.0);
-    float3 F0 = lerp(float3(0.04, 0.04, 0.04), albedo, metal);
+    float3 F0 = lerp(0.04 * spec, albedo, metal);   // dielectric F0 scaled by KHR specular; conductor uses albedo
     float3 Lo = 0.0;
     int cnt = (int)g_LightCount.x;
     [loop] for (int li = 0; li < cnt; ++li)
@@ -139,13 +194,13 @@ float3 ShadeSurface(float3 pos, float3 N, float3 V, float3 albedo, float metal, 
     }
     else ambient = g_Ambient.rgb * g_Ambient.w * albedo;          // flat ambient (sky off)
 
-    return ambient + Lo + emissive;
+    return ambient * ao + Lo + emissive;                          // occlusion attenuates ambient only (like world.ps)
 }
 
 // Fresnel-roughness reflectance for weighting a reflection (NO ambient scaling — a reflection is real radiance).
-float3 SpecFr(float3 N, float3 V, float rough, float3 albedo, float metal)
+float3 SpecFr(float3 N, float3 V, float rough, float3 albedo, float metal, float3 spec)
 {
-    float3 F0 = lerp(float3(0.04, 0.04, 0.04), albedo, metal);
+    float3 F0 = lerp(0.04 * spec, albedo, metal);
     float  ndv = max(dot(N, V), 0.0);
     return F0 + (max(float3(1.0 - rough, 1.0 - rough, 1.0 - rough), F0) - F0) * pow(1.0 - ndv, 5.0);
 }

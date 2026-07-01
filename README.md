@@ -2,6 +2,26 @@
 
 NukeEngine is a free, cross-platform modular engine. This project is an engine shared library.
 
+## Shaders & ray-traced reflections
+
+The RT reflection pass (`rtreflect` post effect) traces the real scene and shades each hit with the **same**
+material model the raster pass uses. To stay correct for arbitrary materials it auto-generates a per-shader
+closest-hit shader at load time.
+
+**Convention — opt in with `<name>.surf.hlsl`:** a shader gets its own auto-generated RT closest-hit **only** if it
+ships a `shaders/<name>.surf.hlsl` file defining `void Surface(SurfaceIn IN, inout SurfaceOut O)` (see
+`unlit.surf.hlsl`). The renderer concatenates `rt_common.hlsl` + the material's `cbuffer MatCB` field loads +
+your `Surface()` + the lighting/recursion harness. Materials **without** a `.surf.hlsl` fall back to the standard
+metallic-roughness closest-hit (`rt_rchit.hlsl`).
+
+This is deliberately **not** applied to every shader: post-process shaders (and other non-surface shaders) have no
+surface to shade in a reflection, so they must not get an RT hit group. Provide a `.surf.hlsl` for a lit/world-type
+shader you want reflected faithfully; otherwise the standard PBR hit shader is used.
+
+Material maps (base color, normal, metallic-roughness, occlusion, emissive, specular) are honoured in **both** the
+raster pass and RT reflections (bindless), including analytic tangent-space normal mapping in RT. Per-object
+`MeshRenderer → In Reflections` excludes an object from reflections while it still casts shadows.
+
 ## Get it
 
 Just create anywhere a new folder for NukeEngine projects, where will be all other projects, relating to NukeEngine, and just clone this perository into it.

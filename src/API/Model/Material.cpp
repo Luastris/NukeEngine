@@ -20,9 +20,12 @@ void Material::ImportAiMaterial(aiMaterial* m) {
 	if (m->Get(AI_MATKEY_OPACITY, opacity) == AI_SUCCESS) color.a = opacity;
 
 	// PBR scalar factors (glTF / PBR materials).
-	float mf = 0.f, rf = 1.f;
+	float mf = 0.f, rf = 1.f, sf = 1.f;
 	if (m->Get(AI_MATKEY_METALLIC_FACTOR, mf)  == AI_SUCCESS) metallic  = mf;
 	if (m->Get(AI_MATKEY_ROUGHNESS_FACTOR, rf) == AI_SUCCESS) roughness = rf;
+#ifdef AI_MATKEY_SPECULAR_FACTOR
+	if (m->Get(AI_MATKEY_SPECULAR_FACTOR, sf)  == AI_SUCCESS) specular  = sf;   // KHR_materials_specular
+#endif
 	aiColor3D ec(0.f, 0.f, 0.f);
 	if (m->Get(AI_MATKEY_COLOR_EMISSIVE, ec) == AI_SUCCESS)
 	{
@@ -47,6 +50,7 @@ Material* Material::Clone() const
 	m->emissiveGuid   = emissiveGuid;
 	m->metallic    = metallic;
 	m->roughness   = roughness;
+	m->specular    = specular;
 	m->emissive = emissive;
 	m->emissiveIntensity = emissiveIntensity;
 	m->castShadows = castShadows;
@@ -94,6 +98,7 @@ bool Material::SaveToFile(const std::string& path) const
 	j["emissiveMap"]= emissiveGuid;
 	j["metallic"]   = metallic;
 	j["roughness"]  = roughness;
+	j["specularFactor"] = specular;
 	j["emissive"]   = { emissive.r, emissive.g, emissive.b };
 	j["emissiveIntensity"] = emissiveIntensity;
 	j["castShadows"] = castShadows;
@@ -125,6 +130,7 @@ Material* Material::LoadFromFile(const std::string& path)
 	m->emissiveGuid   = j.value("emissiveMap", std::string());
 	m->metallic     = j.value("metallic", 0.0f);
 	m->roughness    = j.value("roughness", 0.6f);
+	m->specular     = j.value("specularFactor", 1.0f);
 	m->emissiveIntensity = j.value("emissiveIntensity", 0.0f);
 	m->castShadows = j.value("castShadows", true);
 	m->blendMode   = j.value("blendMode", 0);

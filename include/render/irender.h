@@ -303,7 +303,7 @@ public:
     // world shader ray-queries (RT shadows, later RT reflections). No-op / false on D3D11 or unsupported GPUs.
     virtual bool rtAvailable() { return false; }
     virtual void beginRTScene() {}
-    virtual void addRTInstance(Mesh* mesh, Material* mat, const float pos[3], const float quat[4], const float scale[3]) {}
+    virtual void addRTInstance(Mesh* mesh, Material* mat, const float pos[3], const float quat[4], const float scale[3], bool inReflections = true) {}
     virtual void buildRTScene() {}
 //    virtual ~iRender(){
 //    }

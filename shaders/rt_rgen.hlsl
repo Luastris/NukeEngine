@@ -39,6 +39,9 @@ void main()
         {
             wpos = g_RTCam.xyz + V * cq.CommittedRayT();
             uint ci = cq.CommittedInstanceID();
+            // NOTE: primary reflector normal is geometric only. Normal-mapping the reflector here would sample the
+            // bindless g_MatTex from the ray-gen stage, where it is NOT bound (bindless array is a closest-hit
+            // resource) -> device removal. The reflected surfaces still get full normal mapping in the hit shaders.
             N = FetchWorldNormal(g_Instances[ci].nrmOffset, cq.CommittedPrimitiveIndex(),
                                  cq.CommittedTriangleBarycentrics(), cq.CommittedObjectToWorld3x4());
             if (dot(N, V) > 0.0) N = -N;
@@ -49,7 +52,7 @@ void main()
     float3 R = reflect(V, N);
     RayDesc ray; ray.Origin = wpos + N * 0.08 + R * 0.05; ray.Direction = R; ray.TMin = 0.02; ray.TMax = maxD;
     RTPayload p; p.color = 0.0; p.depth = 1;
-    TraceRay(g_TLAS, RAY_FLAG_NONE, 0xFF, 0, 1, 0, ray, p);
+    TraceRay(g_TLAS, RAY_FLAG_NONE, RT_REFLECT_MASK, 0, 1, 0, ray, p);   // only reflection-visible instances
 
     float k = saturate(refl * intensity);
     g_Output[px] = float4(lerp(base, p.color, k), 1.0);

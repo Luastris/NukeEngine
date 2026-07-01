@@ -27,16 +27,19 @@ public:
     std::string matName;           // display name
     [[nuke::prop(label="Base Color")]] Color color = Color(1, 1, 1, 1);   // base color RGBA
 
-    // Texture asset references (.nutex GUIDs). diffuse = base color; specular is legacy/unused (PBR).
+    // Texture asset references (.nutex GUIDs). diffuse = base color.
     [[nuke::prop(asset="texture", label="Base Color Map")]] std::string diffuseGuid;
     [[nuke::prop(asset="texture", label="Normal Map")]]     std::string normalGuid;
-    std::string specularGuid;
+    // Specular reflectance map (KHR_materials_specular): tints/scales the dielectric F0 (white = standard 0.04).
+    [[nuke::prop(asset="texture", label="Specular Map")]]   std::string specularGuid;
     // PBR (metallic-roughness, UE/Unity-Lit) maps + scalar params.
     [[nuke::prop(asset="texture", label="Metallic-Roughness Map")]] std::string metalRoughGuid; // G=rough,B=metal
     [[nuke::prop(asset="texture", label="Occlusion Map")]]          std::string occlusionGuid;  // R = AO
     [[nuke::prop(asset="texture", label="Emissive Map")]]           std::string emissiveGuid;
     [[nuke::prop(label="Metallic", min=0, max=1)]]  float metallic  = 0.0f;
     [[nuke::prop(label="Roughness", min=0, max=1)]] float roughness = 0.6f;
+    // KHR specular factor: scales dielectric specular reflectance (1 = default 0.04 F0; 0 = no dielectric specular).
+    [[nuke::prop(label="Specular", min=0, max=1)]]  float specular = 1.0f;
     [[nuke::prop(label="Emissive")]]  Color emissive = Color(0, 0, 0, 1);
     [[nuke::prop(label="Emissive Intensity")]] float emissiveIntensity = 0.0f;
     // Whether this surface casts shadows. Default on; turn on for transparent surfaces too — the

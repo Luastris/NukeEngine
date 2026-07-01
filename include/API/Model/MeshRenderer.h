@@ -15,6 +15,7 @@ public:
                                              // scene edits live here + save with the world, not in the .numat
     [[nuke::prop(asset="mesh", label="Mesh")]]         std::string meshGuid;   // mesh asset ref (ResDB)
     [[nuke::prop(asset="material", label="Material")]] std::string matGuid;    // material asset ref (ResDB)
+    [[nuke::prop(label="In Reflections")]] bool inReflections = true;          // appear in RT reflections (still casts shadows when off)
 
 	MeshRenderer();
 

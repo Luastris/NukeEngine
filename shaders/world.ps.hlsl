@@ -3,7 +3,7 @@
 //
 // MatCB:  g_Color    = base color (rgba)
 //         g_Params   = (hasBaseTex, hasNormalTex, metallic, roughness)
-//         g_Params2  = (hasMetalRoughTex, hasOcclusionTex, hasEmissiveTex, occlusionStrength)
+//         g_Params2  = (hasMetalRoughTex, hasOcclusionTex, hasEmissiveTex, specularFactor)
 //         g_Emissive2 = (emissive rgb, emissive intensity)  (texture g_Emissive is separate)
 cbuffer MatCB { float4 g_Color; float4 g_Params; float4 g_Params2; float4 g_Emissive2; };
 
@@ -85,12 +85,15 @@ float SamplePointShadow(float3 wpos, float3 lpos, int cube, float farZ)
 
 // One shared sampler for every map (g_Tex_sampler). FXC merges identical samplers anyway, and a single
 // combined sampler keeps Diligent's combined-texture-sampler reflection happy (no "unassigned" warnings).
-SamplerState g_Tex_sampler;
-Texture2D    g_Tex;          // base color
-Texture2D    g_Normal;       // tangent-space normal map
-Texture2D    g_MetalRough;   // G = roughness, B = metallic (glTF)
-Texture2D    g_Occlusion;    // R = ambient occlusion
-Texture2D    g_Emissive;     // emissive color
+// Combined-texture-sampler mode is ON (UseCombinedTextureSamplers) -> strict on D3D12: each texture MUST be sampled
+// through its OWN "<name>_sampler". Sharing g_Tex_sampler across maps breaks their sampler binding (normal/MR/AO/
+// emissive/spec read wrong -> no relief). One SamplerState per texture, one immutable sampler each in the PSO.
+Texture2D    g_Tex;          SamplerState g_Tex_sampler;         // base color
+Texture2D    g_Normal;       SamplerState g_Normal_sampler;      // tangent-space normal map
+Texture2D    g_MetalRough;   SamplerState g_MetalRough_sampler;  // G = roughness, B = metallic (glTF)
+Texture2D    g_Occlusion;    SamplerState g_Occlusion_sampler;   // R = ambient occlusion
+Texture2D    g_Emissive;     SamplerState g_Emissive_sampler;    // emissive color
+Texture2D    g_Spec;         SamplerState g_Spec_sampler;        // specular reflectance (KHR); white = 0.04 F0
 
 struct PSIn { float4 pos : SV_POSITION; float3 wpos : TEXCOORD0; float3 nrm : TEXCOORD1; float2 uv : TEXCOORD2; };
 
@@ -110,17 +113,19 @@ float GeometrySmith(float3 N, float3 V, float3 L, float rough)
     float k = (rough + 1.0); k = k * k / 8.0;
     return GeometrySchlick(max(dot(N, V), 0.0), k) * GeometrySchlick(max(dot(N, L), 0.0), k);
 }
-// Tangent-space normal mapping WITHOUT mesh tangents — derive a cotangent frame from screen-space derivatives.
-float3 PerturbNormal(float3 N, float3 V, float2 uv)
+// Tangent-space normal mapping WITHOUT mesh tangents — cotangent frame from screen-space derivatives (Schüler).
+// MUST use the world-space POSITION gradient (ddx(wpos)); the derivative of the *normalized* view vector loses the
+// radial component and collapses the frame -> normal maps add almost no relief. `wpos` = interpolated world position.
+// Derivatives (dp*/du*) are computed by the CALLER in main() and passed in — ddx/ddy MUST be evaluated where the
+// interpolated input is directly in scope; taking them inside a helper on a passed-in parameter miscompiles to zero
+// on DXC (the tangent frame collapses -> normal map has no effect). `dp1/dp2` = ddx/ddy of world pos, `du1/du2` = of uv.
+float3 PerturbNormal(float3 N, float3 n, float3 dp1, float3 dp2, float2 du1, float2 du2)
 {
-    float3 n = g_Normal.Sample(g_Tex_sampler, uv).xyz * 2.0 - 1.0;
-    float3 dp1 = ddx(-V), dp2 = ddy(-V);
-    float2 du1 = ddx(uv), du2 = ddy(uv);
     float3 dp2p = cross(dp2, N), dp1p = cross(N, dp1);
     float3 T = dp2p * du1.x + dp1p * du2.x;
     float3 B = dp2p * du1.y + dp1p * du2.y;
-    float inv = rsqrt(max(max(dot(T, T), dot(B, B)), 1e-8));
-    return normalize(T * (inv * n.x) + B * (inv * n.y) + N * n.z);
+    float inv = rsqrt(max(max(dot(T, T), dot(B, B)), 1e-20));   // tiny floor = div-by-zero guard ONLY; 1e-8 neutered
+    return normalize(T * (inv * n.x) + B * (inv * n.y) + N * n.z);   //   small tangent frames (fine texel/world ratio) -> flat
 }
 
 float4 main(in PSIn i) : SV_Target
@@ -133,16 +138,23 @@ float4 main(in PSIn i) : SV_Target
     float rough    = clamp(g_Params.w, 0.04, 1.0);
     if (g_Params2.x > 0.5)                                  // metallic-roughness map wins (glTF G/B)
     {
-        float3 m = g_MetalRough.Sample(g_Tex_sampler, i.uv).rgb;
+        float3 m = g_MetalRough.Sample(g_MetalRough_sampler, i.uv).rgb;
         rough = clamp(m.g, 0.04, 1.0); metallic = saturate(m.b);
     }
 
+    float3 specF = g_Params2.w * g_Spec.Sample(g_Spec_sampler, i.uv).rgb;   // KHR specular: factor × spec map (white default)
+
     float3 V = normalize(g_CamPos.xyz - i.wpos);
     float3 N = normalize(i.nrm);
-    if (g_Params.y > 0.5) N = PerturbNormal(N, V, i.uv);
+    if (g_Params.y > 0.5)   // normal map: derivatives computed HERE (main) — see PerturbNormal note on the DXC ddx pitfall
+    {
+        float3 nTS = g_Normal.Sample(g_Normal_sampler, i.uv).xyz * 2.0 - 1.0;
+        nTS.y = -nTS.y;   // green-channel convention: normal maps are OpenGL (+Y up); the screen-space TBN is DirectX (-Y)
+        N = PerturbNormal(N, nTS, ddx(i.wpos), ddy(i.wpos), ddx(i.uv), ddy(i.uv));
+    }
     float3 swpos = i.wpos + N * g_ShadowParams.y;   // normal-offset bias: sample shadows slightly off the surface
 
-    float3 F0 = lerp(float3(0.04, 0.04, 0.04), albedo, metallic);
+    float3 F0 = lerp(0.04 * specF, albedo, metallic);   // dielectric F0 scaled by KHR specular; conductor uses albedo
     float3 Lo = 0.0;
 
     int cnt = (int)g_LightCount.x;
@@ -195,7 +207,7 @@ float4 main(in PSIn i) : SV_Target
         Lo += (kd * albedo / PI + spec) * radiance * ndl;
     }
 
-    float ao = (g_Params2.y > 0.5) ? g_Occlusion.Sample(g_Tex_sampler, i.uv).r : 1.0;
+    float ao = (g_Params2.y > 0.5) ? g_Occlusion.Sample(g_Occlusion_sampler, i.uv).r : 1.0;
     float3 ambient;
     if (g_SkyParams.y > 0.5)   // image-based lighting from the procedural sky
     {
@@ -235,7 +247,7 @@ float4 main(in PSIn i) : SV_Target
     else
         ambient = g_Ambient.rgb * g_Ambient.w * albedo * ao;                   // flat ambient (no sky)
     float3 emissive = g_Emissive2.rgb * g_Emissive2.w;
-    if (g_Params2.z > 0.5) emissive *= g_Emissive.Sample(g_Tex_sampler, i.uv).rgb;
+    if (g_Params2.z > 0.5) emissive *= g_Emissive.Sample(g_Emissive_sampler, i.uv).rgb;
     float3 color = ambient + Lo + emissive;
 
     // HDR on (g_SkyParams.z == 0): output LINEAR HDR; the post pass tonemaps. HDR off (== 1): tonemap here.

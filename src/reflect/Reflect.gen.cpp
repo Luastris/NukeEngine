@@ -73,11 +73,13 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("color", &Material::color, "", "Base Color"));
 		t.fields.push_back(MakeField("diffuseGuid", &Material::diffuseGuid, "texture", "Base Color Map"));
 		t.fields.push_back(MakeField("normalGuid", &Material::normalGuid, "texture", "Normal Map"));
+		t.fields.push_back(MakeField("specularGuid", &Material::specularGuid, "texture", "Specular Map"));
 		t.fields.push_back(MakeField("metalRoughGuid", &Material::metalRoughGuid, "texture", "Metallic-Roughness Map"));
 		t.fields.push_back(MakeField("occlusionGuid", &Material::occlusionGuid, "texture", "Occlusion Map"));
 		t.fields.push_back(MakeField("emissiveGuid", &Material::emissiveGuid, "texture", "Emissive Map"));
 		t.fields.push_back(MakeField("metallic", &Material::metallic, "", "Metallic", 0.0f, 1.0f));
 		t.fields.push_back(MakeField("roughness", &Material::roughness, "", "Roughness", 0.0f, 1.0f));
+		t.fields.push_back(MakeField("specular", &Material::specular, "", "Specular", 0.0f, 1.0f));
 		t.fields.push_back(MakeField("emissive", &Material::emissive, "", "Emissive"));
 		t.fields.push_back(MakeField("emissiveIntensity", &Material::emissiveIntensity, "", "Emissive Intensity"));
 		t.fields.push_back(MakeField("castShadows", &Material::castShadows, "", "Cast Shadows"));
@@ -90,6 +92,7 @@ bool NukeReflectInit() {
 		t.base = "Component";
 		t.fields.push_back(MakeField("meshGuid", &MeshRenderer::meshGuid, "mesh", "Mesh"));
 		t.fields.push_back(MakeField("matGuid", &MeshRenderer::matGuid, "material", "Material"));
+		t.fields.push_back(MakeField("inReflections", &MeshRenderer::inReflections, "", "In Reflections"));
 		t.create = []() -> void* { return new MeshRenderer(); };
 	}
 	{

@@ -211,7 +211,7 @@ static Environment* FindEnvironment(bc::list<Atom*>& gos)
 }
 
 // One queued draw (gathered before drawing so transparent objects can be sorted back-to-front).
-struct DrawItem { Mesh* mesh; Material* mat; float pos[3], quat[4], scale[3]; Vector3 wpos; int blend; };
+struct DrawItem { Mesh* mesh; Material* mat; float pos[3], quat[4], scale[3]; Vector3 wpos; int blend; bool inReflections; };
 
 static void CollectMeshes(bc::list<Atom*>& gos, std::vector<DrawItem>& out)
 {
@@ -231,6 +231,7 @@ static void CollectMeshes(bc::list<Atom*>& gos, std::vector<DrawItem>& out)
 				it.scale[0]=(float)s.x; it.scale[1]=(float)s.y; it.scale[2]=(float)s.z;
 				it.wpos = p;
 				it.blend = mr->mat ? mr->mat->blendMode : 0;   // 0 = opaque, 1/2 = transparent/additive
+				it.inReflections = mr->inReflections;
 				out.push_back(it);
 			}
 		if (go->children.size() > 0)
@@ -486,7 +487,7 @@ void World::Render(iRender* r)
 	{
 		r->beginRTScene();
 		std::vector<DrawItem> rtItems; CollectMeshes(*hierarchy, rtItems);
-		for (auto& it : rtItems) if (it.blend == 0) r->addRTInstance(it.mesh, it.mat, it.pos, it.quat, it.scale);
+		for (auto& it : rtItems) if (it.blend == 0) r->addRTInstance(it.mesh, it.mat, it.pos, it.quat, it.scale, it.inReflections);
 		r->buildRTScene();
 	}
 
@@ -664,11 +665,13 @@ static void SaveAtom(Atom* go, json& j)
 				// PBR instance overrides (maps + scalar params).
 				jm["diffuse"]    = mr->mat->diffuseGuid;
 				jm["normal"]     = mr->mat->normalGuid;
+				jm["specularMap"]= mr->mat->specularGuid;
 				jm["metalRough"] = mr->mat->metalRoughGuid;
 				jm["occlusion"]  = mr->mat->occlusionGuid;
 				jm["emissiveMap"]= mr->mat->emissiveGuid;
 				jm["metallic"]   = mr->mat->metallic;
 				jm["roughness"]  = mr->mat->roughness;
+				jm["specularFactor"] = mr->mat->specular;
 				jm["emissive"]   = { mr->mat->emissive.r, mr->mat->emissive.g, mr->mat->emissive.b };
 				jm["emissiveIntensity"] = mr->mat->emissiveIntensity;
 				jm["castShadows"] = mr->mat->castShadows;
@@ -733,11 +736,13 @@ static Atom* LoadAtom(const json& j)
 						// PBR instance overrides (only when present, so older worlds keep the cloned asset maps).
 						if (jm.contains("diffuse"))     mr->mat->diffuseGuid    = jm.value("diffuse", std::string());
 						if (jm.contains("normal"))      mr->mat->normalGuid     = jm.value("normal", std::string());
+						if (jm.contains("specularMap")) mr->mat->specularGuid   = jm.value("specularMap", std::string());
 						if (jm.contains("metalRough"))  mr->mat->metalRoughGuid = jm.value("metalRough", std::string());
 						if (jm.contains("occlusion"))   mr->mat->occlusionGuid  = jm.value("occlusion", std::string());
 						if (jm.contains("emissiveMap")) mr->mat->emissiveGuid   = jm.value("emissiveMap", std::string());
 						if (jm.contains("metallic"))    mr->mat->metallic       = jm.value("metallic", 0.0f);
 						if (jm.contains("roughness"))   mr->mat->roughness      = jm.value("roughness", 0.6f);
+						if (jm.contains("specularFactor")) mr->mat->specular    = jm.value("specularFactor", 1.0f);
 						if (jm.contains("emissiveIntensity")) mr->mat->emissiveIntensity = jm.value("emissiveIntensity", 0.0f);
 						if (jm.contains("castShadows"))    mr->mat->castShadows    = jm.value("castShadows", true);
 						if (jm.contains("emissive") && jm["emissive"].is_array() && jm["emissive"].size() == 3)
