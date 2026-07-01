@@ -146,10 +146,13 @@ float4 main(in PSIn i) : SV_Target
 
     float3 V = normalize(g_CamPos.xyz - i.wpos);
     float3 N = normalize(i.nrm);
-    if (g_Params.y > 0.5)   // normal map: derivatives computed HERE (main) — see PerturbNormal note on the DXC ddx pitfall
+    // Normal map. g_Params.y encodes: 0 = none; >0 = present, OpenGL(+Y, flip green); <0 = present, DirectX (no flip).
+    // Sample RG only + reconstruct Z = sqrt(1-x^2-y^2): format-agnostic (BC5 stores no Z; also fine for BC1/BC3).
+    if (abs(g_Params.y) > 0.5)
     {
-        float3 nTS = g_Normal.Sample(g_Normal_sampler, i.uv).xyz * 2.0 - 1.0;
-        nTS.y = -nTS.y;   // green-channel convention: normal maps are OpenGL (+Y up); the screen-space TBN is DirectX (-Y)
+        float2 nxy = g_Normal.Sample(g_Normal_sampler, i.uv).rg * 2.0 - 1.0;
+        if (g_Params.y > 0.0) nxy.y = -nxy.y;
+        float3 nTS = float3(nxy, sqrt(saturate(1.0 - dot(nxy, nxy))));
         N = PerturbNormal(N, nTS, ddx(i.wpos), ddy(i.wpos), ddx(i.uv), ddy(i.uv));
     }
     float3 swpos = i.wpos + N * g_ShadowParams.y;   // normal-offset bias: sample shadows slightly off the surface

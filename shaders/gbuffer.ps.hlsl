@@ -38,10 +38,12 @@ float4 main(PSIn i) : SV_TARGET
         rough = clamp(m.g, 0.04, 1.0); metallic = saturate(m.b);
     }
     float3 N = normalize(i.nrm);
-    if (g_Params.y > 0.5)   // normal map present -> perturb (matches world.ps, incl. OpenGL green flip)
+    // g_Params.y: 0 none; >0 OpenGL(flip green); <0 DirectX. RG + reconstruct Z (BC5-agnostic). Matches world.ps.
+    if (abs(g_Params.y) > 0.5)
     {
-        float3 nTS = g_Normal.Sample(g_Normal_sampler, i.uv).xyz * 2.0 - 1.0;
-        nTS.y = -nTS.y;
+        float2 nxy = g_Normal.Sample(g_Normal_sampler, i.uv).rg * 2.0 - 1.0;
+        if (g_Params.y > 0.0) nxy.y = -nxy.y;
+        float3 nTS = float3(nxy, sqrt(saturate(1.0 - dot(nxy, nxy))));
         N = PerturbNormal(N, nTS, ddx(i.wpos), ddy(i.wpos), ddx(i.uv), ddy(i.uv));
     }
     return float4(OctEncode(N), rough, metallic);

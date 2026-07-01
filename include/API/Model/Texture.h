@@ -20,16 +20,18 @@ public:
     // pixels = the full data: for RAW it's mip0 RGBA8 (w*h*4); for BC it's every mip's compressed
     // blocks concatenated mip0..mipN (renderer derives per-mip size from format + dims).
     std::vector<unsigned char> pixels;
-    enum Format { FMT_RGBA8 = 0, FMT_BC1 = 1, FMT_BC3 = 3 };
-    int format   = FMT_RGBA8;              // texel format (BC1 = opaque, BC3 = alpha)
+    enum Format { FMT_RGBA8 = 0, FMT_BC1 = 1, FMT_BC3 = 3, FMT_BC5 = 5 };   // BC5 = 2-channel (RG), for normal maps
+    int format   = FMT_RGBA8;              // texel format (BC1 = opaque, BC3 = alpha, BC5 = RG normals)
     int mipCount = 1;                       // number of mip levels stored in `pixels`
 
     // Semantic usage (drives color-space, compression choice, normal green-flip). Set at import — from the assimp
     // texture type (model import) or a filename-suffix heuristic (bare image drop/picker); overridable in the asset
-    // inspector. Color/Emissive = sRGB source; Normal/Data = linear.
+    // inspector. Color/Emissive = sRGB source; Normal/Data = linear; Normal -> BC5.
     enum Usage { UsageColor = 0, UsageNormal = 1, UsageData = 2, UsageEmissive = 3 };
-    int usage = UsageColor;                 // serialized in the .nutex (v5)
+    int  usage = UsageColor;                // serialized in the .nutex (v5)
+    bool invertGreen = true;                // normal maps only: green convention (true = OpenGL +Y, flip; false = DirectX) — .nutex v6
     static int GuessUsage(const std::string& filename);   // filename-suffix heuristic -> Usage
+    bool Recompress(int targetFormat);                    // decode mip0 -> re-encode to FMT_BC1/BC3/BC5 (inspector override)
 
     // Animation (GIF): pixels holds `frameCount` frames back-to-back (RGBA8, w*h*4 each, no mips/BC).
     int              frameCount = 1;

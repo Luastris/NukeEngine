@@ -27,7 +27,7 @@ struct RTInstanceData
 {
     uint  nrmOffset, uvOffset, posOffset, matByteOffset;   // byte offsets into g_AllNrm/g_AllUV/g_AllPos
     uint  texIndex, nrmTexIndex, mrTexIndex, aoTexIndex;    // bindless slots: albedo, normal, metal-rough, occlusion
-    uint  emTexIndex, specTexIndex; float specularFactor; uint _pad;
+    uint  emTexIndex, specTexIndex; float specularFactor; uint nrmFlipG;   // nrmFlipG: 1 = flip green (OpenGL)
     float4 albedoMetal;     // rgb albedo factor, a = metallic factor
     float4 emissiveRough;   // rgb emissive (pre-multiplied), a = roughness factor
 };
@@ -127,9 +127,10 @@ float3 ApplyNormalMap(RTInstanceData inst, uint prim, float2 uv, float3 geomN, f
     float3 N = normalize(geomN);
     T = normalize(T - N * dot(N, T));                      // Gram-Schmidt orthonormalize
     float3 B = cross(N, T);
-    float3 nTS = g_MatTex[NonUniformResourceIndex(inst.nrmTexIndex)].SampleLevel(g_MatTex_sampler, uv, 0).xyz * 2.0 - 1.0;
-    nTS.y = -nTS.y;   // green-channel convention: normal maps are OpenGL (+Y up); match the raster path (world.ps)
-    return normalize(nTS.x * T + nTS.y * B + nTS.z * N);
+    float2 nxy = g_MatTex[NonUniformResourceIndex(inst.nrmTexIndex)].SampleLevel(g_MatTex_sampler, uv, 0).rg * 2.0 - 1.0;
+    if (inst.nrmFlipG != 0u) nxy.y = -nxy.y;   // green convention (OpenGL +Y). RG + reconstruct Z (BC5-agnostic).
+    float nz = sqrt(saturate(1.0 - dot(nxy, nxy)));
+    return normalize(nxy.x * T + nxy.y * B + nz * N);
 }
 
 // Shadow ray: 1 = lit, 0 = occluded (inline query, cheap; no separate hit group needed for visibility).

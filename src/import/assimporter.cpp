@@ -65,13 +65,40 @@ static std::vector<unsigned char> PadTo4(const std::vector<unsigned char>& rgba0
 
 // Compress an RGBA image into a BC texture + precomputed mip chain. BC1 (opaque) / BC3 (alpha). ANY size:
 // non-multiple-of-4 images are edge-padded to a multiple of 4 (BC needs it) instead of stored raw RGBA.
-static void CompressToBC(Texture* tex, const std::vector<unsigned char>& rgba0, int w0, int h0)
+// BC5 (2-channel R,G) block level — for normal maps. Each 4x4 block = a BC4 block of R then a BC4 block of G (16B).
+// The blue channel is dropped (z is reconstructed in the shader as sqrt(1-x^2-y^2)) — proper for tangent normals.
+static void BC5Level(std::vector<unsigned char>& out, const unsigned char* rgba, int w, int h)
+{
+	const int bx = (w + 3) / 4, by = (h + 3) / 4;
+	size_t base = out.size();
+	out.resize(base + (size_t)bx * by * 16);
+	unsigned char* dst = out.data() + base;
+	for (int byi = 0; byi < by; ++byi)
+		for (int bxi = 0; bxi < bx; ++bxi)
+		{
+			unsigned char R[16], G[16];
+			for (int py = 0; py < 4; ++py)
+				for (int px = 0; px < 4; ++px)
+				{
+					int sx = bxi * 4 + px; if (sx >= w) sx = w - 1;
+					int sy = byi * 4 + py; if (sy >= h) sy = h - 1;
+					const unsigned char* s = &rgba[((size_t)sy * w + sx) * 4];
+					R[py * 4 + px] = s[0]; G[py * 4 + px] = s[1];
+				}
+			stb_compress_bc4_block(dst,     R);   // BC4(R) -> 8 bytes
+			stb_compress_bc4_block(dst + 8, G);   // BC4(G) -> 8 bytes
+			dst += 16;
+		}
+}
+
+static void CompressToBC(Texture* tex, const std::vector<unsigned char>& rgba0, int w0, int h0, int usage = Texture::UsageColor)
 {
 	if (w0 <= 0 || h0 <= 0) { tex->format = Texture::FMT_RGBA8; tex->mipCount = 1; tex->width = w0; tex->height = h0; tex->pixels = rgba0; return; }
+	const bool bc5 = (usage == Texture::UsageNormal);   // normal maps -> BC5 (RG), z reconstructed in-shader
 	bool hasA = false;
-	for (size_t i = 3; i < rgba0.size(); i += 4) if (rgba0[i] < 255) { hasA = true; break; }
-	const int blockBytes = hasA ? 16 : 8, alpha = hasA ? 1 : 0;
-	tex->format = hasA ? Texture::FMT_BC3 : Texture::FMT_BC1;
+	if (!bc5) for (size_t i = 3; i < rgba0.size(); i += 4) if (rgba0[i] < 255) { hasA = true; break; }
+	const int blockBytes = bc5 ? 16 : (hasA ? 16 : 8), alpha = hasA ? 1 : 0;
+	tex->format = bc5 ? Texture::FMT_BC5 : (hasA ? Texture::FMT_BC3 : Texture::FMT_BC1);
 	tex->pixels.clear();
 
 	int w, h;
@@ -80,7 +107,8 @@ static void CompressToBC(Texture* tex, const std::vector<unsigned char>& rgba0, 
 	int mips = 0;
 	while (true)
 	{
-		BCLevel(tex->pixels, cur.data(), w, h, blockBytes, alpha);
+		if (bc5) BC5Level(tex->pixels, cur.data(), w, h);
+		else     BCLevel(tex->pixels, cur.data(), w, h, blockBytes, alpha);
 		++mips;
 		if (w == 1 && h == 1) break;
 		const int nw = w > 1 ? w / 2 : 1, nh = h > 1 ? h / 2 : 1;
@@ -257,7 +285,7 @@ static std::string ConvertTexture(const aiScene* sc, const std::string& texRef,
 	Texture* tex = new Texture();
 	tex->guid   = ResDB::NewGuid();
 	tex->usage  = usage;             // authoritative from the assimp texture type
-	CompressToBC(tex, rgba, w, h);   // BC1/BC3 + mip chain
+	CompressToBC(tex, rgba, w, h, usage);   // BC1/BC3 (or BC5 for normals) + mip chain
 
 	std::string stem = SafeStem(bfs::path(texRef).stem().string().c_str());
 	boost::system::error_code ec;
@@ -429,7 +457,7 @@ std::string AssImporter::ImportImage(const char* srcPath, const char* destDir)
 		if (!px) { delete tex; cout << "[Import]\timage load failed: " << srcPath << endl; return std::string(); }
 		std::vector<unsigned char> rgba(px, px + (size_t)w * h * 4);
 		stbi_image_free(px);
-		CompressToBC(tex, rgba, w, h);   // BC1/BC3 + mip chain (static images)
+		CompressToBC(tex, rgba, w, h, tex->usage);   // BC1/BC3 (or BC5 for normals) + mip chain (static images)
 	}
 
 	std::string stem = SafeStem(bfs::path(srcPath).stem().string().c_str());
