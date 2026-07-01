@@ -211,7 +211,8 @@ static Environment* FindEnvironment(bc::list<Atom*>& gos)
 }
 
 // One queued draw (gathered before drawing so transparent objects can be sorted back-to-front).
-struct DrawItem { Mesh* mesh; Material* mat; float pos[3], quat[4], scale[3]; Vector3 wpos; int blend; bool inReflections; };
+struct DrawItem { Mesh* mesh; Material* mat; float pos[3], quat[4], scale[3]; Vector3 wpos; int blend; bool inReflections;
+                  float prevPos[3], prevQuat[4], prevScale[3]; bool hasPrev; };   // prev transform for TAA velocity
 
 static void CollectMeshes(bc::list<Atom*>& gos, std::vector<DrawItem>& out)
 {
@@ -232,6 +233,10 @@ static void CollectMeshes(bc::list<Atom*>& gos, std::vector<DrawItem>& out)
 				it.wpos = p;
 				it.blend = mr->mat ? mr->mat->blendMode : 0;   // 0 = opaque, 1/2 = transparent/additive
 				it.inReflections = mr->inReflections;
+				it.hasPrev = mr->hasPrev;   // previous global transform (TAA velocity); false the first frame -> zero motion
+				for (int k = 0; k < 3; ++k) it.prevPos[k] = mr->prevPos[k];
+				for (int k = 0; k < 4; ++k) it.prevQuat[k] = mr->prevQuat[k];
+				for (int k = 0; k < 3; ++k) it.prevScale[k] = mr->prevScale[k];
 				out.push_back(it);
 			}
 		if (go->children.size() > 0)
@@ -275,6 +280,25 @@ static void CameraVP(iRender* r, float vp[16])
 		{ float s = 0; for (int k = 0; k < 4; ++k) s += view[i*4+k] * proj[k*4+j]; vp[i*4+j] = s; }
 }
 
+// End of frame: snapshot each MeshRenderer's current global transform as its "previous" for next frame's TAA
+// motion vectors. Runs once per frame (transforms are camera-independent), after all cameras have rendered.
+static void UpdatePrevTransforms(bc::list<Atom*>& gos)
+{
+	for (auto go : gos)
+	{
+		if (auto* mr = go->GetComponent<MeshRenderer>())
+		{
+			Transform& t = go->GetTransform();
+			Vector3 p = t.globalPosition(); Quaternion q = t.globalRotation(); Vector3 s = t.globalScale();
+			mr->prevPos[0] = (float)p.x; mr->prevPos[1] = (float)p.y; mr->prevPos[2] = (float)p.z;
+			mr->prevQuat[0] = (float)q.x; mr->prevQuat[1] = (float)q.y; mr->prevQuat[2] = (float)q.z; mr->prevQuat[3] = (float)q.w;
+			mr->prevScale[0] = (float)s.x; mr->prevScale[1] = (float)s.y; mr->prevScale[2] = (float)s.z;
+			mr->hasPrev = true;
+		}
+		UpdatePrevTransforms(go->children);
+	}
+}
+
 // SSR G-buffer prepass: opaque geometry only (transparent doesn't occlude / write the colour-pass depth).
 // Same cull setting as the colour pass so depths line up.
 static void DrawGBuffer(std::vector<DrawItem>& items, iRender* r, bool cull)
@@ -282,7 +306,8 @@ static void DrawGBuffer(std::vector<DrawItem>& items, iRender* r, bool cull)
 	float vp[16]; if (cull) CameraVP(r, vp);
 	for (auto& it : items)
 		if (it.blend == 0 && !(cull && FrustumCull(it, vp)))
-			r->renderGBufferObject(it.mesh, it.mat, it.pos, it.quat, it.scale);
+			r->renderGBufferObject(it.mesh, it.mat, it.pos, it.quat, it.scale,
+			                       it.hasPrev ? it.prevPos : nullptr, it.hasPrev ? it.prevQuat : nullptr, it.hasPrev ? it.prevScale : nullptr);
 }
 
 // Draw a gathered scene for one camera: opaque first (depth write on), then transparent/additive sorted
@@ -562,6 +587,7 @@ void World::Render(iRender* r)
 		// (shared transform). Each effect = a custom post-shader pipeline + its packed PostParams bytes.
 		std::vector<std::vector<float>> ppBlobs; std::vector<uint64_t> ppHandles;
 		bool hasSSR = false;   // an SSR or RT-reflection effect in this camera's chain -> run the G-buffer prepass first
+		bool hasTAA = false;   // temporal AA -> also needs the depth prepass + camera jitter
 		for (PostProcess* pp : pps)
 			if (pp->transform == cam->transform)
 			{
@@ -572,6 +598,7 @@ void World::Render(iRender* r)
 					Shader* sh = ResDB::getSingleton()->GetShader(e.shaderGuid);
 					if (!sh || !sh->isPost || sh->rendererHandle == 0) continue;
 					if (sh->name == "ssr" || sh->name == "rtreflect") hasSSR = true;   // both need the G-buffer prepass
+					if (sh->name == "taa") hasTAA = true;                              // TAA needs the depth prepass + jitter
 					std::vector<float> blob(64, 0.0f);   // 256-byte PostParams
 					for (const ShaderProp& sp : sh->props)
 					{
@@ -590,8 +617,10 @@ void World::Render(iRender* r)
 		{ ppStages[k].pipeline = ppHandles[k]; ppStages[k].params = ppBlobs[k].data(); ppStages[k].paramFloats = 64; }
 		r->setPostChain(ppStages.empty() ? nullptr : ppStages.data(), (int)ppStages.size());
 
-		// SSR needs scene normals/roughness/depth — capture them in a single-sample prepass before the colour pass.
-		if (hasSSR)
+		r->setCameraTAA(hasTAA);   // enable jitter + history for this camera (advances the jitter when on)
+
+		// SSR / RT reflections / TAA need scene depth (+ normals for SSR) — a single-sample prepass before colour.
+		if (hasSSR || hasTAA)
 		{
 			r->beginGBufferPass(d);
 			std::vector<DrawItem> gitems; CollectMeshes(*hierarchy, gitems);
@@ -622,6 +651,7 @@ void World::Render(iRender* r)
 					}
 		r->endCamera();
 	}
+	UpdatePrevTransforms(*hierarchy);   // snapshot transforms for next frame's TAA motion vectors
 }
 
 // --- scene serialization (.nuworld JSON via reflection) ---

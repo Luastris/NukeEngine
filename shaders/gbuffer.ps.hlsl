@@ -6,7 +6,9 @@ cbuffer MatCB { float4 g_Color; float4 g_Params; float4 g_Params2; float4 g_Emis
 Texture2D    g_MetalRough;   SamplerState g_MetalRough_sampler;   // G = roughness, B = metallic (glTF)
 Texture2D    g_Normal;       SamplerState g_Normal_sampler;       // tangent-space normal map
 
-struct PSIn { float4 pos : SV_POSITION; float3 wpos : TEXCOORD0; float3 nrm : TEXCOORD1; float2 uv : TEXCOORD2; };
+struct PSIn { float4 pos : SV_POSITION; float3 wpos : TEXCOORD0; float3 nrm : TEXCOORD1; float2 uv : TEXCOORD2;
+              float4 curClip : TEXCOORD3; float4 prevClip : TEXCOORD4; };
+struct PSOut { float4 gbuf : SV_Target0; float2 velocity : SV_Target1; };   // gbuffer + screen-space motion (TAA)
 
 // Tangent-space normal mapping WITHOUT mesh tangents (Schüler). Derivatives are computed by the caller (main) and
 // passed in — MUST match world.ps: `ddx` on a passed-in parameter miscompiles to zero on DXC, and the 1e-20 floor
@@ -28,7 +30,7 @@ float2 OctEncode(float3 n)
     return e;
 }
 
-float4 main(PSIn i) : SV_TARGET
+void main(PSIn i, out PSOut o)
 {
     float metallic = saturate(g_Params.z);
     float rough    = clamp(g_Params.w, 0.04, 1.0);
@@ -46,5 +48,13 @@ float4 main(PSIn i) : SV_TARGET
         float3 nTS = float3(nxy, sqrt(saturate(1.0 - dot(nxy, nxy))));
         N = PerturbNormal(N, nTS, ddx(i.wpos), ddy(i.wpos), ddx(i.uv), ddy(i.uv));
     }
-    return float4(OctEncode(N), rough, metallic);
+    o.gbuf = float4(OctEncode(N), rough, metallic);
+
+    // Screen-space motion vector (UV space): where this pixel was last frame. Uses per-object prev transform +
+    // previous camera (g_PrevWVP), both UNjittered. TAA does prevUV = uv - velocity.
+    float2 curNdc  = i.curClip.xy  / i.curClip.w;
+    float2 prevNdc = i.prevClip.xy / i.prevClip.w;
+    float2 curUV   = float2(curNdc.x  * 0.5 + 0.5, 0.5 - curNdc.y  * 0.5);
+    float2 prevUV  = float2(prevNdc.x * 0.5 + 0.5, 0.5 - prevNdc.y * 0.5);
+    o.velocity = curUV - prevUV;
 }

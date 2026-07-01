@@ -295,7 +295,8 @@ public:
     // that captures normal + roughness + metalness + depth into the renderer's G-buffer; the built-in "ssr"
     // post effect samples it. Driven only when the camera's post chain contains an SSR effect.
     virtual void beginGBufferPass(const NukeCameraDesc& cam) {}
-    virtual void renderGBufferObject(Mesh* mesh, Material* mat, const float pos[3], const float quat[4], const float scale[3]) {}
+    virtual void renderGBufferObject(Mesh* mesh, Material* mat, const float pos[3], const float quat[4], const float scale[3],
+                                     const float prevPos[3] = nullptr, const float prevQuat[4] = nullptr, const float prevScale[3] = nullptr) {}
     virtual void endGBufferPass() {}
 
     // Ray tracing (D3D12 + DXR-capable GPU). rtAvailable() gates all of it. Per frame, before the camera passes:
@@ -305,6 +306,11 @@ public:
     virtual void beginRTScene() {}
     virtual void addRTInstance(Mesh* mesh, Material* mat, const float pos[3], const float quat[4], const float scale[3], bool inReflections = true) {}
     virtual void buildRTScene() {}
+
+    // TAA: called per camera BEFORE beginGBufferPass/beginCamera. When enabled the renderer jitters the colour
+    // projection sub-pixel each frame + accumulates via a per-camera history (needs the depth prepass too).
+    // (END of vtable — appended so existing slot indices don't shift.)
+    virtual void setCameraTAA(bool enabled) {}
 //    virtual ~iRender(){
 //    }
 };

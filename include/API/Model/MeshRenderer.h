@@ -17,6 +17,10 @@ public:
     [[nuke::prop(asset="material", label="Material")]] std::string matGuid;    // material asset ref (ResDB)
     [[nuke::prop(label="In Reflections")]] bool inReflections = true;          // appear in RT reflections (still casts shadows when off)
 
+    // Previous-frame global transform (runtime only, NOT serialized) — feeds the TAA motion-vector (velocity) pass.
+    float prevPos[3] = {0,0,0}, prevQuat[4] = {0,0,0,1}, prevScale[3] = {1,1,1};
+    bool  hasPrev = false;
+
 	MeshRenderer();
 
 	void Init(Atom* parent);
