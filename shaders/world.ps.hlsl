@@ -246,6 +246,8 @@ float4 main(in PSIn i) : SV_Target
     }
     else
         ambient = g_Ambient.rgb * g_Ambient.w * albedo * ao;                   // flat ambient (no sky)
+    // Emissive: color * intensity, modulated by the emissive map when present. No magic defaults — black emissive
+    // color means no emission even with a map (so emission stays fully script/artist-controlled).
     float3 emissive = g_Emissive2.rgb * g_Emissive2.w;
     if (g_Params2.z > 0.5) emissive *= g_Emissive.Sample(g_Emissive_sampler, i.uv).rgb;
     float3 color = ambient + Lo + emissive;
