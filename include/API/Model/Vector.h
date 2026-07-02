@@ -148,6 +148,23 @@ public:
 	double norm();
 	double magnitude();
 	Quaternion UnitQuaternion();
+
+	// ---- Rotation utilities ------------------------------------------------------------
+	// Conventions match Transform (glm-backed): angles in DEGREES, euler order XYZ,
+	// forward = +Z (Transform::direction() == Rotate({0,0,1})).
+
+	static Quaternion Identity();
+	static Quaternion FromEulerDeg(const Vector3& deg);            // inverse of ToEulerDeg
+	Vector3           ToEulerDeg() const;
+	static Quaternion FromAxisAngle(const Vector3& axis, double deg);
+	// Rotation that looks along `forward` with `up` as the up-hint (both world-space;
+	// forward must be non-zero, up must not be parallel to it).
+	static Quaternion LookRotation(const Vector3& forward, const Vector3& up = Vector3(0, 1, 0));
+	static double     Dot(const Quaternion& a, const Quaternion& b);
+	// Spherical interpolation along the SHORT arc; t clamped to [0,1].
+	static Quaternion Slerp(const Quaternion& a, const Quaternion& b, double t);
+	Vector3           Rotate(const Vector3& v) const;              // rotate a vector by this rotation
+	Quaternion        Normalized() const;                          // unit quaternion (identity if zero)
 };
 
 

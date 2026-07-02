@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
@@ -189,11 +189,8 @@
     <ClInclude Include="framework.h" />
     <ClInclude Include="include\API\iGUI.h" />
     <ClInclude Include="include\API\Model\Camera.h" />
-    <ClInclude Include="include\API\Model\Clock.h" />
-    <ClInclude Include="include\API\Model\Collider.h" />
     <ClInclude Include="include\API\Model\Color.h" />
     <ClInclude Include="include\API\Model\Component.h" />
-    <ClInclude Include="include\API\Model\Game.h" />
     <ClInclude Include="include\API\Model\Atom.h" />
     <ClInclude Include="include\reflect\Reflect.h" />
     <ClInclude Include="include\API\Model\ID.h" />
@@ -207,15 +204,11 @@
     <ClInclude Include="include\API\Model\Math.h" />
     <ClInclude Include="include\API\Model\Mesh.h" />
     <ClInclude Include="include\API\Model\MeshRenderer.h" />
-    <ClInclude Include="include\API\Model\Module.h" />
-    <ClInclude Include="include\API\Model\Package.h" />
     <ClInclude Include="include\API\Model\ray.h" />
     <ClInclude Include="include\API\Model\resdb.h" />
     <ClInclude Include="include\API\Model\UnknownComponent.h" />
     <ClInclude Include="include\API\Model\Prefab.h" />
-    <ClInclude Include="include\API\Model\Resource.h" />
     <ClInclude Include="include\API\Model\World.h" />
-    <ClInclude Include="include\API\Model\Script.h" />
     <ClInclude Include="include\API\Model\Shader.h" />
     <ClInclude Include="include\API\Model\Texture.h" />
     <ClInclude Include="include\API\Model\Time.h" />
@@ -233,8 +226,16 @@
     <ClInclude Include="include\interface\EditorInstance.h" />
     <ClInclude Include="include\interface\EditorMenu\MenuItem.h" />
     <ClInclude Include="include\interface\EditorMenu\MenuStrip.h" />
+    <ClInclude Include="include\API\Model\Clock.h" />
+    <ClInclude Include="include\API\Model\Collider.h" />
+    <ClInclude Include="include\API\Model\Game.h" />
+    <ClInclude Include="include\API\Model\Module.h" />
+    <ClInclude Include="include\API\Model\Package.h" />
+    <ClInclude Include="include\API\Model\Resource.h" />
+    <ClInclude Include="include\API\Model\Script.h" />
     <ClInclude Include="include\interface\Modular.h" />
     <ClInclude Include="include\interface\Services.h" />
+    <ClInclude Include="include\reflect\ReflectBind.h" />
     <ClInclude Include="include\interface\NUKEEInteface.h" />
     <ClInclude Include="include\render\irender.h" />
     <ClInclude Include="NukeEngine.h" />
@@ -253,11 +254,8 @@
     <ClCompile Include="src\reflect\Reflect.gen.cpp" />
     <ClCompile Include="src\API\iGUI.cpp" />
     <ClCompile Include="src\API\Model\Camera.cpp" />
-    <ClCompile Include="src\API\Model\Clock.cpp" />
-    <ClCompile Include="src\API\Model\Collider.cpp" />
     <ClCompile Include="src\API\Model\Color.cpp" />
     <ClCompile Include="src\API\Model\Component.cpp" />
-    <ClCompile Include="src\API\Model\Game.cpp" />
     <ClCompile Include="src\API\Model\Atom.cpp" />
     <ClCompile Include="src\API\Model\ID.cpp" />
     <ClCompile Include="src\API\Model\Layers.cpp" />
@@ -269,14 +267,10 @@
     <ClCompile Include="src\API\Model\Math.cpp" />
     <ClCompile Include="src\API\Model\Mesh.cpp" />
     <ClCompile Include="src\API\Model\MeshRenderer.cpp" />
-    <ClCompile Include="src\API\Model\Module.cpp" />
-    <ClCompile Include="src\API\Model\Package.cpp" />
     <ClCompile Include="src\API\Model\ray.cpp" />
     <ClCompile Include="src\API\Model\resdb.cpp" />
     <ClCompile Include="src\API\Model\UnknownComponent.cpp" />
-    <ClCompile Include="src\API\Model\Resource.cpp" />
     <ClCompile Include="src\API\Model\World.cpp" />
-    <ClCompile Include="src\API\Model\Script.cpp" />
     <ClCompile Include="src\API\Model\Shader.cpp" />
     <ClCompile Include="src\API\Model\Texture.cpp" />
     <ClCompile Include="src\API\Model\Time.cpp" />
@@ -293,8 +287,16 @@
     <ClCompile Include="src\interface\EditorInstance.cpp" />
     <ClCompile Include="src\interface\EditorMenu\MenuItem.cpp" />
     <ClCompile Include="src\interface\EditorMenu\MenuStrip.cpp" />
+    <ClCompile Include="src\API\Model\Clock.cpp" />
+    <ClCompile Include="src\API\Model\Collider.cpp" />
+    <ClCompile Include="src\API\Model\Game.cpp" />
+    <ClCompile Include="src\API\Model\Module.cpp" />
+    <ClCompile Include="src\API\Model\Package.cpp" />
+    <ClCompile Include="src\API\Model\Resource.cpp" />
+    <ClCompile Include="src\API\Model\Script.cpp" />
     <ClCompile Include="src\interface\Modular.cpp" />
     <ClCompile Include="src\interface\Services.cpp" />
+    <ClCompile Include="src\reflect\ReflectBind.cpp" />
     <ClCompile Include="src\interface\NUKEEInteface.cpp" />
     <ClCompile Include="src\render\irender.cpp" />
   </ItemGroup>

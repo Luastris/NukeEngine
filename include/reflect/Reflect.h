@@ -10,7 +10,10 @@
 // raw address accessor; the editor switches on FT to pick a widget. Serialization
 // (JSON) lives here in the engine.
 
+#include <cstddef>
 #include <string>
+#include <type_traits>
+#include <utility>
 #include <vector>
 #include <functional>
 #include "API/Model/Vector.h"
@@ -54,10 +57,66 @@ struct Field {
     std::vector<std::string> enumLabels;
 };
 
+// ---- language-neutral value (reflection <-> scripting boundary) --------------------
+// One reflected value crossing the boundary. `type` says which member is valid:
+// Bool -> b; Int/Float/Double -> num; String -> str;
+// Vec2/Vec3/Vec4/Quat -> v as (x,y,z,w); Color -> v as (r,g,b,a). Unknown = void/none.
+struct ReflectValue
+{
+	FT          type = FT::Unknown;
+	bool        b    = false;
+	double      num  = 0.0;
+	std::string str;
+	double      v[4] = { 0, 0, 0, 0 };
+};
+
+namespace detail {
+// ReflectValue -> typed argument. Only the supported FT types specialize — tagging a
+// method with an unsupported parameter type is a COMPILE error, not a runtime surprise.
+template<class T> T FromRV(const ReflectValue& v);
+template<> inline bool        FromRV<bool>(const ReflectValue& v)        { return v.b; }
+template<> inline int         FromRV<int>(const ReflectValue& v)         { return (int)v.num; }
+template<> inline float       FromRV<float>(const ReflectValue& v)       { return (float)v.num; }
+template<> inline double      FromRV<double>(const ReflectValue& v)      { return v.num; }
+template<> inline std::string FromRV<std::string>(const ReflectValue& v) { return v.str; }
+template<> inline Vector2     FromRV<Vector2>(const ReflectValue& v)     { return Vector2(v.v[0], v.v[1]); }
+template<> inline Vector3     FromRV<Vector3>(const ReflectValue& v)     { return Vector3(v.v[0], v.v[1], v.v[2]); }
+template<> inline Vector4     FromRV<Vector4>(const ReflectValue& v)     { return Vector4(v.v[0], v.v[1], v.v[2], v.v[3]); }
+template<> inline Quaternion  FromRV<Quaternion>(const ReflectValue& v)  { return Quaternion(v.v[0], v.v[1], v.v[2], v.v[3]); }
+template<> inline Color       FromRV<Color>(const ReflectValue& v)       { return Color(v.v[0], v.v[1], v.v[2], v.v[3]); }
+
+// Typed return -> ReflectValue.
+inline void ToRV(bool x, ReflectValue& o)               { o.type = FT::Bool;   o.b = x; }
+inline void ToRV(int x, ReflectValue& o)                { o.type = FT::Int;    o.num = x; }
+inline void ToRV(float x, ReflectValue& o)              { o.type = FT::Float;  o.num = x; }
+inline void ToRV(double x, ReflectValue& o)             { o.type = FT::Double; o.num = x; }
+inline void ToRV(const std::string& x, ReflectValue& o) { o.type = FT::String; o.str = x; }
+inline void ToRV(const Vector2& x, ReflectValue& o)     { o.type = FT::Vec2;  o.v[0] = x.x; o.v[1] = x.y; }
+inline void ToRV(const Vector3& x, ReflectValue& o)     { o.type = FT::Vec3;  o.v[0] = x.x; o.v[1] = x.y; o.v[2] = x.z; }
+inline void ToRV(const Vector4& x, ReflectValue& o)     { o.type = FT::Vec4;  o.v[0] = x.x; o.v[1] = x.y; o.v[2] = x.z; o.v[3] = x.w; }
+inline void ToRV(const Quaternion& x, ReflectValue& o)  { o.type = FT::Quat;  o.v[0] = x.x; o.v[1] = x.y; o.v[2] = x.z; o.v[3] = x.w; }
+inline void ToRV(const Color& x, ReflectValue& o)       { o.type = FT::Color; o.v[0] = x.r; o.v[1] = x.g; o.v[2] = x.b; o.v[3] = x.a; }
+}  // namespace detail
+
+// ---- method reflection (tag with [[nuke::func]]; nukegen emits MakeMethod calls) ----
+// A reflected method: FT-typed signature + a type-erased invoker. Scripting backends
+// (Lua/C#) call ANY tagged method through this — no per-class wrappers. Overloads are
+// NOT supported (one reflected method per name); parameters/returns must be supported
+// FT types (by value or const&; return void or by value).
+struct Method {
+    std::string name;
+    FT ret = FT::Unknown;                 // FT::Unknown = void
+    std::vector<FT> params;               // declared parameter types, in order
+    // Invoke on an instance of the owning type. `args` must match params (count is
+    // checked, types are trusted — the caller converted by `params`). False = arity error.
+    std::function<bool(void* obj, const ReflectValue* args, std::size_t n, ReflectValue& ret)> invoke;
+};
+
 struct TypeInfo {
     std::string name;
     std::string base;
     std::vector<Field> fields;
+    std::vector<Method> methods;          // [[nuke::func]]-tagged methods
     std::function<void*()> create;   // factory (set by NUKE_REGISTER) — create-by-name on load
 };
 
@@ -95,6 +154,44 @@ Field MakeField(const char* name, T C::* p, const char* asset = "", const char* 
         f.enumLabels.push_back(cur);
     }
     return f;
+}
+
+namespace detail {
+template<class C, class M, class R, class... A, std::size_t... I>
+bool InvokeImpl(M mf, C* obj, const ReflectValue* a, ReflectValue& out, std::index_sequence<I...>) {
+    (void)a;   // unused for 0-arg methods
+    if constexpr (std::is_void_v<R>) {
+        (obj->*mf)(FromRV<std::decay_t<A>>(a[I])...);
+        out.type = FT::Unknown;
+    } else {
+        ToRV((obj->*mf)(FromRV<std::decay_t<A>>(a[I])...), out);
+    }
+    return true;
+}
+
+template<class C, class M, class R, class... A>
+Method MakeMethodImpl(const char* name, M mf) {
+    Method m;
+    m.name = name;
+    if constexpr (!std::is_void_v<R>) m.ret = FieldTypeOf<std::decay_t<R>>();
+    m.params = { FieldTypeOf<std::decay_t<A>>()... };
+    m.invoke = [mf](void* o, const ReflectValue* a, std::size_t n, ReflectValue& out) -> bool {
+        if (n != sizeof...(A)) return false;
+        return InvokeImpl<C, M, R, A...>(mf, (C*)o, a, out, std::index_sequence_for<A...>{});
+    };
+    return m;
+}
+}  // namespace detail
+
+// Build a Method from a member-function pointer (deduces the FT signature). Same void*
+// contract as Field::addr: invoke's `obj` is an instance of C.
+template<class C, class R, class... A>
+Method MakeMethod(const char* name, R (C::*mf)(A...)) {
+    return detail::MakeMethodImpl<C, decltype(mf), R, A...>(name, mf);
+}
+template<class C, class R, class... A>
+Method MakeMethod(const char* name, R (C::*mf)(A...) const) {
+    return detail::MakeMethodImpl<C, decltype(mf), R, A...>(name, mf);
 }
 
 } // namespace nuke

@@ -122,6 +122,16 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("rotation", &Transform::rotation));
 		t.fields.push_back(MakeField("eulerHint", &Transform::eulerHint));
 		t.fields.push_back(MakeField("scale", &Transform::scale));
+		t.methods.push_back(MakeMethod("forward", &Transform::forward));
+		t.methods.push_back(MakeMethod("right", &Transform::right));
+		t.methods.push_back(MakeMethod("up", &Transform::up));
+		t.methods.push_back(MakeMethod("direction", &Transform::direction));
+		t.methods.push_back(MakeMethod("globalPosition", &Transform::globalPosition));
+		t.methods.push_back(MakeMethod("globalRotation", &Transform::globalRotation));
+		t.methods.push_back(MakeMethod("globalScale", &Transform::globalScale));
+		t.methods.push_back(MakeMethod("SetGlobal", &Transform::SetGlobal));
+		t.methods.push_back(MakeMethod("SetEulerDeg", &Transform::SetEulerDeg));
+		t.methods.push_back(MakeMethod("EulerDeg", &Transform::EulerDeg));
 	}
 	return true;
 }

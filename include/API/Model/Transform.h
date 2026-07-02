@@ -23,20 +23,20 @@ public:
 	Transform(Atom* parent);
 	void Init(Atom* parent);
 
-	Vector3 forward();
-	Vector3 right();
-	Vector3 up();
-	Vector3 direction();
-    Vector3 globalPosition();
-	Quaternion globalRotation();
-	Vector3 globalScale();
+	[[nuke::func]] Vector3 forward();
+	[[nuke::func]] Vector3 right();
+	[[nuke::func]] Vector3 up();
+	[[nuke::func]] Vector3 direction();
+	[[nuke::func]] Vector3 globalPosition();
+	[[nuke::func]] Quaternion globalRotation();
+	[[nuke::func]] Vector3 globalScale();
 	// Set local values so the WORLD pose equals these (inverse of the global* getters, relative to the
 	// current parent). Keeps an object in place when reparented / drives gizmo write-back.
-	void    SetGlobal(const Vector3& pos, const Quaternion& rot, const Vector3& scale);
+	[[nuke::func]] void    SetGlobal(const Vector3& pos, const Quaternion& rot, const Vector3& scale);
 
 	// Euler helpers (degrees) for the inspector / authoring. Internally quaternion.
-	void    SetEulerDeg(const Vector3& deg);
-	Vector3 EulerDeg();
+	[[nuke::func]] void    SetEulerDeg(const Vector3& deg);
+	[[nuke::func]] Vector3 EulerDeg();
 
 	void Destroy();
 	void Update();

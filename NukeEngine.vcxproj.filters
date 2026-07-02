@@ -5,19 +5,10 @@
     <ClCompile Include="src\API\Model\Camera.cpp">
       <Filter>src\API\Model</Filter>
     </ClCompile>
-    <ClCompile Include="src\API\Model\Clock.cpp">
-      <Filter>src\API\Model</Filter>
-    </ClCompile>
-    <ClCompile Include="src\API\Model\Collider.cpp">
-      <Filter>src\API\Model</Filter>
-    </ClCompile>
     <ClCompile Include="src\API\Model\Color.cpp">
       <Filter>src\API\Model</Filter>
     </ClCompile>
     <ClCompile Include="src\API\Model\Component.cpp">
-      <Filter>src\API\Model</Filter>
-    </ClCompile>
-    <ClCompile Include="src\API\Model\Game.cpp">
       <Filter>src\API\Model</Filter>
     </ClCompile>
     <ClCompile Include="src\API\Model\Atom.cpp">
@@ -44,22 +35,10 @@
     <ClCompile Include="src\API\Model\ray.cpp">
       <Filter>src\API\Model</Filter>
     </ClCompile>
-    <ClCompile Include="src\API\Model\Resource.cpp">
-      <Filter>src\API\Model</Filter>
-    </ClCompile>
     <ClCompile Include="src\API\Model\resdb.cpp">
       <Filter>src\API\Model</Filter>
     </ClCompile>
-    <ClCompile Include="src\API\Model\Package.cpp">
-      <Filter>src\API\Model</Filter>
-    </ClCompile>
-    <ClCompile Include="src\API\Model\Module.cpp">
-      <Filter>src\API\Model</Filter>
-    </ClCompile>
     <ClCompile Include="src\API\Model\World.cpp">
-      <Filter>src\API\Model</Filter>
-    </ClCompile>
-    <ClCompile Include="src\API\Model\Script.cpp">
       <Filter>src\API\Model</Filter>
     </ClCompile>
     <ClCompile Include="src\API\Model\Shader.cpp">
@@ -77,6 +56,27 @@
     <ClCompile Include="src\API\Model\Vector.cpp">
       <Filter>src\API\Model</Filter>
     </ClCompile>
+    <ClCompile Include="src\API\Model\Clock.cpp">
+      <Filter>src\API\Model</Filter>
+    </ClCompile>
+    <ClCompile Include="src\API\Model\Collider.cpp">
+      <Filter>src\API\Model</Filter>
+    </ClCompile>
+    <ClCompile Include="src\API\Model\Game.cpp">
+      <Filter>src\API\Model</Filter>
+    </ClCompile>
+    <ClCompile Include="src\API\Model\Module.cpp">
+      <Filter>src\API\Model</Filter>
+    </ClCompile>
+    <ClCompile Include="src\API\Model\Package.cpp">
+      <Filter>src\API\Model</Filter>
+    </ClCompile>
+    <ClCompile Include="src\API\Model\Resource.cpp">
+      <Filter>src\API\Model</Filter>
+    </ClCompile>
+    <ClCompile Include="src\API\Model\Script.cpp">
+      <Filter>src\API\Model</Filter>
+    </ClCompile>
     <ClCompile Include="src\API\Model\ID.cpp">
       <Filter>src\API\Model</Filter>
     </ClCompile>
@@ -91,8 +91,6 @@
     </ClCompile>
     <ClCompile Include="src\config.cpp">
       <Filter>src</Filter>
-    </ClCompile>
-    </ClCompile>
     </ClCompile>
     <ClCompile Include="src\interface\EditorMenu\MenuItem.cpp">
       <Filter>src\interface\EditorMenu</Filter>
@@ -128,6 +126,7 @@
     <ClCompile Include="src\reflect\Reflect.gen.cpp" />
     <ClCompile Include="src\API\Model\UnknownComponent.cpp" />
     <ClCompile Include="src\interface\Services.cpp" />
+    <ClCompile Include="src\reflect\ReflectBind.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\config.h">
@@ -142,19 +141,10 @@
     <ClInclude Include="include\API\Model\Camera.h">
       <Filter>include\API\Model</Filter>
     </ClInclude>
-    <ClInclude Include="include\API\Model\Clock.h">
-      <Filter>include\API\Model</Filter>
-    </ClInclude>
-    <ClInclude Include="include\API\Model\Collider.h">
-      <Filter>include\API\Model</Filter>
-    </ClInclude>
     <ClInclude Include="include\API\Model\Color.h">
       <Filter>include\API\Model</Filter>
     </ClInclude>
     <ClInclude Include="include\API\Model\Component.h">
-      <Filter>include\API\Model</Filter>
-    </ClInclude>
-    <ClInclude Include="include\API\Model\Game.h">
       <Filter>include\API\Model</Filter>
     </ClInclude>
     <ClInclude Include="include\API\Model\Atom.h">
@@ -181,25 +171,13 @@
     <ClInclude Include="include\API\Model\MeshRenderer.h">
       <Filter>include\API\Model</Filter>
     </ClInclude>
-    <ClInclude Include="include\API\Model\Module.h">
-      <Filter>include\API\Model</Filter>
-    </ClInclude>
-    <ClInclude Include="include\API\Model\Package.h">
-      <Filter>include\API\Model</Filter>
-    </ClInclude>
     <ClInclude Include="include\API\Model\ray.h">
       <Filter>include\API\Model</Filter>
     </ClInclude>
     <ClInclude Include="include\API\Model\resdb.h">
       <Filter>include\API\Model</Filter>
     </ClInclude>
-    <ClInclude Include="include\API\Model\Resource.h">
-      <Filter>include\API\Model</Filter>
-    </ClInclude>
     <ClInclude Include="include\API\Model\World.h">
-      <Filter>include\API\Model</Filter>
-    </ClInclude>
-    <ClInclude Include="include\API\Model\Script.h">
       <Filter>include\API\Model</Filter>
     </ClInclude>
     <ClInclude Include="include\API\Model\Shader.h">
@@ -215,6 +193,27 @@
       <Filter>include\API\Model</Filter>
     </ClInclude>
     <ClInclude Include="include\API\Model\Vector.h">
+      <Filter>include\API\Model</Filter>
+    </ClInclude>
+    <ClInclude Include="include\API\Model\Clock.h">
+      <Filter>include\API\Model</Filter>
+    </ClInclude>
+    <ClInclude Include="include\API\Model\Collider.h">
+      <Filter>include\API\Model</Filter>
+    </ClInclude>
+    <ClInclude Include="include\API\Model\Game.h">
+      <Filter>include\API\Model</Filter>
+    </ClInclude>
+    <ClInclude Include="include\API\Model\Module.h">
+      <Filter>include\API\Model</Filter>
+    </ClInclude>
+    <ClInclude Include="include\API\Model\Package.h">
+      <Filter>include\API\Model</Filter>
+    </ClInclude>
+    <ClInclude Include="include\API\Model\Resource.h">
+      <Filter>include\API\Model</Filter>
+    </ClInclude>
+    <ClInclude Include="include\API\Model\Script.h">
       <Filter>include\API\Model</Filter>
     </ClInclude>
     <ClInclude Include="include\API\iGUI.h">
@@ -252,8 +251,6 @@
     </ClInclude>
     <ClInclude Include="deps\ImGuizmo\ImSequencer.h">
       <Filter>deps\ImGuizmo</Filter>
-    </ClInclude>
-    </ClInclude>
     </ClInclude>
     <ClInclude Include="include\input\keyboard.h">
       <Filter>include\input</Filter>
@@ -295,6 +292,7 @@
     <ClInclude Include="include\API\Model\UnknownComponent.h" />
     <ClInclude Include="include\API\Model\Prefab.h" />
     <ClInclude Include="include\interface\Services.h" />
+    <ClInclude Include="include\reflect\ReflectBind.h" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="src">
@@ -377,8 +375,6 @@
     </Filter>
     <Filter Include="deps\ImGuizmo">
       <UniqueIdentifier>{a125849c-6b98-4b06-9a4c-343accd92fac}</UniqueIdentifier>
-    </Filter>
-      <UniqueIdentifier>{ab7e0302-e4ad-4d31-99e8-8ebe4bdd2709}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
 </Project>

@@ -1,6 +1,9 @@
 #include "API/Model/Vector.h"
 #include "API/Model/Color.h"
 #include <sstream>
+#include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
+#include <glm/gtx/quaternion.hpp>   // quatLookAtLH (GLM_ENABLE_EXPERIMENTAL is a project define)
 
 namespace nuke {
 
@@ -541,7 +544,9 @@ bool  Quaternion::operator == (const Quaternion& q)
 
 Quaternion Quaternion::scale(double  s)
 {
-	return Quaternion(w * s, x * s, y * s, z * s);
+	// NOTE: the ctor is (x, y, z, w) — these used to pass (w, x, y, z) and permuted
+	// the components (scale/conjugate/inverse/UnitQuaternion all returned garbage).
+	return Quaternion(x * s, y * s, z * s, w * s);
 }
 
 Quaternion Quaternion::inverse()
@@ -551,7 +556,7 @@ Quaternion Quaternion::inverse()
 
 Quaternion Quaternion::conjugate()
 {
-	return Quaternion(w, -x, -y, -z);
+	return Quaternion(-x, -y, -z, w);
 }
 
 double Quaternion::norm()
@@ -567,6 +572,73 @@ double Quaternion::magnitude()
 Quaternion Quaternion::UnitQuaternion()
 {
 	return (*this).scale(1 / (*this).magnitude());
+}
+
+// ---- Rotation utilities (glm-backed; conventions shared with Transform:
+// degrees, euler order XYZ, forward = +Z) -------------------------------------------------
+
+static glm::quat QToGlm(const Quaternion& q) { return glm::quat((float)q.w, (float)q.x, (float)q.y, (float)q.z); }
+static Quaternion QFromGlm(const glm::quat& g) { return Quaternion(g.x, g.y, g.z, g.w); }
+
+Quaternion Quaternion::Identity() { return Quaternion(); }
+
+Quaternion Quaternion::FromEulerDeg(const Vector3& deg)
+{
+	glm::vec3 r(glm::radians((float)deg.x), glm::radians((float)deg.y), glm::radians((float)deg.z));
+	return QFromGlm(glm::quat(r));
+}
+
+Vector3 Quaternion::ToEulerDeg() const
+{
+	glm::vec3 e = glm::eulerAngles(QToGlm(*this));
+	return Vector3(glm::degrees(e.x), glm::degrees(e.y), glm::degrees(e.z));
+}
+
+Quaternion Quaternion::FromAxisAngle(const Vector3& axis, double deg)
+{
+	glm::vec3 a((float)axis.x, (float)axis.y, (float)axis.z);
+	float len = glm::length(a);
+	if (len < 1e-12f) return Quaternion();   // degenerate axis -> identity
+	return QFromGlm(glm::angleAxis(glm::radians((float)deg), a / len));
+}
+
+Quaternion Quaternion::LookRotation(const Vector3& forward, const Vector3& up)
+{
+	glm::vec3 f((float)forward.x, (float)forward.y, (float)forward.z);
+	glm::vec3 u((float)up.x, (float)up.y, (float)up.z);
+	float fl = glm::length(f);
+	if (fl < 1e-12f) return Quaternion();    // no direction -> identity
+	f /= fl;
+	if (glm::length(glm::cross(f, u)) < 1e-6f)   // up (near-)parallel to forward -> new hint
+		u = (fabsf(f.y) < 0.99f) ? glm::vec3(0, 1, 0) : glm::vec3(0, 0, 1);
+	// LH variant: the rotation maps +Z onto `f` — Transform::direction() is rot * (0,0,1).
+	return QFromGlm(glm::quatLookAtLH(f, glm::normalize(u)));
+}
+
+double Quaternion::Dot(const Quaternion& a, const Quaternion& b)
+{
+	return a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w;
+}
+
+Quaternion Quaternion::Slerp(const Quaternion& a, const Quaternion& b, double t)
+{
+	t = t < 0.0 ? 0.0 : (t > 1.0 ? 1.0 : t);
+	glm::quat ga = glm::normalize(QToGlm(a));
+	glm::quat gb = glm::normalize(QToGlm(b));
+	return QFromGlm(glm::slerp(ga, gb, (float)t));   // glm slerp takes the short arc
+}
+
+Vector3 Quaternion::Rotate(const Vector3& v) const
+{
+	glm::vec3 r = QToGlm(*this) * glm::vec3((float)v.x, (float)v.y, (float)v.z);
+	return Vector3(r.x, r.y, r.z);
+}
+
+Quaternion Quaternion::Normalized() const
+{
+	double m = sqrt(x * x + y * y + z * z + w * w);
+	if (m < 1e-12) return Quaternion();
+	return Quaternion(x / m, y / m, z / m, w / m);
 }
 
 /*Quaternion operator+(Quaternion other)
