@@ -234,6 +234,7 @@
     <ClInclude Include="include\API\Model\Resource.h" />
     <ClInclude Include="include\API\Model\Rigidbody.h" />
     <ClInclude Include="include\API\Model\Physics.h" />
+    <ClInclude Include="include\API\Model\DebugDraw.h" />
     <ClInclude Include="include\API\Model\Script.h" />
     <ClInclude Include="include\interface\Modular.h" />
     <ClInclude Include="include\interface\Services.h" />
@@ -299,6 +300,7 @@
     <ClCompile Include="src\API\Model\Resource.cpp" />
     <ClCompile Include="src\API\Model\Rigidbody.cpp" />
     <ClCompile Include="src\API\Model\Physics.cpp" />
+    <ClCompile Include="src\API\Model\DebugDraw.cpp" />
     <ClCompile Include="src\API\Model\Script.cpp" />
     <ClCompile Include="src\interface\Modular.cpp" />
     <ClCompile Include="src\interface\Services.cpp" />

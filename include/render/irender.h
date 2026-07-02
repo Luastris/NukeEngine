@@ -317,8 +317,14 @@ public:
 
     // Ask the render loop to end after the current frame (the window closes, loop() returns,
     // the host shuts down). Game::Quit() drives this in the Player.
-    // (END of vtable — appended so existing slot indices don't shift.)
     virtual void requestClose() {}
+
+    // Debug/gizmo line: world-space segment + RGBA color, accumulated for THIS frame
+    // (thread-safe; the fixed thread may emit too), drawn depth-tested into every camera
+    // pass and cleared at the next frame's start. The engine-side DebugDraw facade
+    // decomposes wire shapes into these — backends only ever see lines.
+    // (END of vtable — appended so existing slot indices don't shift.)
+    virtual void drawDebugLine(const float a[3], const float b[3], const float color[4]) {}
 //    virtual ~iRender(){
 //    }
 };

@@ -11,6 +11,7 @@
 #include "API/Model/Time.h"       // animated-texture (GIF) frame advance + fixed-step accumulator
 #include "API/Model/Collider.h"   // physics: shape components -> iPhysics bodies
 #include "API/Model/Rigidbody.h"  // physics: dynamic/kinematic body settings
+#include "API/Model/DebugDraw.h"   // editor gizmos (selection wire shapes)
 #include "interface/Services.h"   // GetService<iPhysics>()
 #include "service/iPhysics.h"     // the physics service seam (fixed-step driver below)
 #include <cmath>
@@ -542,9 +543,120 @@ static void RenderShadowMeshes(bc::list<Atom*>& gos, iRender* r)
 	}
 }
 
+// --- editor gizmos (debug-draw, roadmap 2.1): wire shapes for the SELECTED atom --------
+static void EmitSelectionGizmos(Atom* a)
+{
+	Transform& t = a->GetTransform();
+	Vector3 pos = t.globalPosition();
+	Quaternion rot = t.globalRotation();
+	Vector3 scl = t.globalScale();
+
+	if (Light* l = a->GetComponent<Light>())
+	{
+		const Color c(1.0, 0.9, 0.2, 1.0);   // lights: yellow
+		Vector3 fwd = t.direction();
+		if (l->type == 0)        // directional: an arrow along the travel direction
+			DebugDraw::Arrow(pos, Vector3(pos.x + fwd.x * 3, pos.y + fwd.y * 3, pos.z + fwd.z * 3), c);
+		else if (l->type == 1)   // point: range sphere
+			DebugDraw::WireSphere(pos, l->range, c);
+		else                     // spot: cone. world.ps lights the cone around -dir
+		                         // (cd = dot(-dir, -L)), so the gizmo opens along -forward.
+			DebugDraw::WireCone(pos, Vector3(-fwd.x, -fwd.y, -fwd.z), l->spotAngle, l->range, c);
+	}
+
+	if (Collider* col = a->GetComponent<Collider>())
+	{
+		// colliders: green; triggers: cyan
+		const Color c = col->isTrigger ? Color(0.2, 0.9, 1.0, 1.0) : Color(0.3, 1.0, 0.3, 1.0);
+		const double rScale = std::max(fabs(scl.x), std::max(fabs(scl.y), fabs(scl.z)));
+		switch (col->shape)
+		{
+			case Collider::S_Sphere:
+				DebugDraw::WireSphere(pos, col->radius * rScale, c);
+				break;
+			case Collider::S_Capsule:
+				DebugDraw::WireCapsule(pos, col->radius * rScale, col->halfHeight * fabs(scl.y), rot, c);
+				break;
+			case Collider::S_Mesh:
+			{
+				MeshRenderer* mr = a->GetComponent<MeshRenderer>();
+				if (mr && mr->mesh)
+				{
+					mr->mesh->EnsureBounds();
+					float* mn = mr->mesh->aabbMin; float* mx = mr->mesh->aabbMax;
+					Vector3 lc((mn[0] + mx[0]) * 0.5, (mn[1] + mx[1]) * 0.5, (mn[2] + mx[2]) * 0.5);
+					Vector3 lh((mx[0] - mn[0]) * 0.5 * fabs(scl.x),
+					           (mx[1] - mn[1]) * 0.5 * fabs(scl.y),
+					           (mx[2] - mn[2]) * 0.5 * fabs(scl.z));
+					Vector3 wc = rot.Rotate(Vector3(lc.x * scl.x, lc.y * scl.y, lc.z * scl.z));
+					DebugDraw::WireBox(Vector3(pos.x + wc.x, pos.y + wc.y, pos.z + wc.z), lh, rot, c);
+				}
+				break;
+			}
+			default:
+				DebugDraw::WireBox(pos, Vector3(col->halfExtents.x * fabs(scl.x),
+				                                col->halfExtents.y * fabs(scl.y),
+				                                col->halfExtents.z * fabs(scl.z)), rot, c);
+				break;
+		}
+	}
+
+	if (Camera* cam = a->GetComponent<Camera>())
+	{
+		if (a->GetName() != "Editor Camera")   // the editor camera doesn't gizmo itself
+		{
+			const Color c(1.0, 1.0, 1.0, 1.0);   // camera frustum: white
+			iRender* r = AppInstance::GetSingleton()->render;
+			const double aspect = (r && r->height > 0) ? (double)r->width / r->height : 16.0 / 9.0;
+			const double vFov = cam->fov * 3.14159265358979 / 180.0;
+			Vector3 fwd = t.direction();
+			Vector3 up = t.up();
+			Vector3 right = t.right();
+			auto plane = [&](double dist, Vector3* out)
+			{
+				const double h = tan(vFov * 0.5) * dist, w = h * aspect;
+				Vector3 cptr(pos.x + fwd.x * dist, pos.y + fwd.y * dist, pos.z + fwd.z * dist);
+				for (int i = 0; i < 4; ++i)
+				{
+					const double sx = (i == 0 || i == 3) ? -1 : 1, sy = (i < 2) ? 1 : -1;
+					out[i] = Vector3(cptr.x + right.x * w * sx + up.x * h * sy,
+					                 cptr.y + right.y * w * sx + up.y * h * sy,
+					                 cptr.z + right.z * w * sx + up.z * h * sy);
+				}
+			};
+			// far plane clamped for readability (a 10km frustum is just noise in the viewport)
+			Vector3 n[4], f[4];
+			plane(cam->_near, n);
+			plane(std::min((double)cam->_far, 25.0), f);
+			for (int i = 0; i < 4; ++i)
+			{
+				DebugDraw::Line(n[i], n[(i + 1) % 4], c);
+				DebugDraw::Line(f[i], f[(i + 1) % 4], c);
+				DebugDraw::Line(n[i], f[i], c);
+			}
+		}
+	}
+
+	if (ReflectionProbe* rp = a->GetComponent<ReflectionProbe>())
+	{
+		const Color c(0.8, 0.4, 1.0, 1.0);   // probes: purple
+		if (rp->boxProjection)
+			DebugDraw::WireBox(pos, Vector3(rp->boxSize.x * 0.5, rp->boxSize.y * 0.5, rp->boxSize.z * 0.5), rot, c);
+		else
+			DebugDraw::WireSphere(pos, 1.0, c);   // infinite probe: a small marker sphere
+	}
+}
+
 void World::Render(iRender* r)
 {
 	if (!r) return;
+
+	// Editor gizmos for the selection (edit mode only; lines live for one frame).
+	{
+		AppInstance* app = AppInstance::GetSingleton();
+		if (app->isEditor() && app->playState == 0 && app->selectedInHieararchy)
+			EmitSelectionGizmos(app->selectedInHieararchy);
+	}
 
 	// Advance animated textures (GIF) by real frame time — the renderer samples Texture::curFrame.
 	{

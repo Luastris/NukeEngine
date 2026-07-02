@@ -2,6 +2,7 @@
 #include "reflect/Reflect.h"
 #include "API/Model/Camera.h"
 #include "API/Model/Collider.h"
+#include "API/Model/DebugDraw.h"
 #include "API/Model/Environment.h"
 #include "API/Model/Light.h"
 #include "API/Model/Material.h"
@@ -48,6 +49,17 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("friction", &Collider::friction, "", "Friction", 0.0f, 1.0f));
 		t.fields.push_back(MakeField("restitution", &Collider::restitution, "", "Restitution", 0.0f, 1.0f));
 		t.create = []() -> void* { return new Collider(); };
+	}
+	{
+		TypeInfo& t = TypeOf<DebugDraw>();
+		t.base = "Object";
+		t.methods.push_back(MakeMethod("Line", &DebugDraw::Line));
+		t.methods.push_back(MakeMethod("Arrow", &DebugDraw::Arrow));
+		t.methods.push_back(MakeMethod("WireBox", &DebugDraw::WireBox));
+		t.methods.push_back(MakeMethod("WireSphere", &DebugDraw::WireSphere));
+		t.methods.push_back(MakeMethod("WireCapsule", &DebugDraw::WireCapsule));
+		t.methods.push_back(MakeMethod("WireCone", &DebugDraw::WireCone));
+		t.methods.push_back(MakeMethod("WireCircle", &DebugDraw::WireCircle));
 	}
 	{
 		TypeInfo& t = TypeOf<Environment>();
