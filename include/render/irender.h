@@ -313,8 +313,12 @@ public:
 
     // TAA: called per camera BEFORE beginGBufferPass/beginCamera. When enabled the renderer jitters the colour
     // projection sub-pixel each frame + accumulates via a per-camera history (needs the depth prepass too).
-    // (END of vtable — appended so existing slot indices don't shift.)
     virtual void setCameraTAA(bool enabled) {}
+
+    // Ask the render loop to end after the current frame (the window closes, loop() returns,
+    // the host shuts down). Game::Quit() drives this in the Player.
+    // (END of vtable — appended so existing slot indices don't shift.)
+    virtual void requestClose() {}
 //    virtual ~iRender(){
 //    }
 };

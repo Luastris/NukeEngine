@@ -236,6 +236,7 @@
     <ClInclude Include="include\interface\Modular.h" />
     <ClInclude Include="include\interface\Services.h" />
     <ClInclude Include="include\reflect\ReflectBind.h" />
+    <ClInclude Include="include\service\iScript.h" />
     <ClInclude Include="include\interface\NUKEEInteface.h" />
     <ClInclude Include="include\render\irender.h" />
     <ClInclude Include="NukeEngine.h" />
