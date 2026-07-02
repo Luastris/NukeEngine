@@ -2,6 +2,8 @@
 #ifndef NUKEE_IGUI_H
 #define NUKEE_IGUI_H
 #include "NukeAPI.h"
+#include "reflect/Reflect.h"
+#include <string>
 
 namespace nuke {
 
@@ -26,6 +28,24 @@ public:
 // (so game code calling GUI() in edit mode / without NukeGUI loaded is safe).
 NUKEENGINE_API void  SetGUIBackend(iGUI* backend);
 NUKEENGINE_API iGUI* GUI();
+
+// Reflected script surface over the runtime GUI: [[nuke::func]] statics wrap the iGUI
+// backend and are auto-bound as nuke.Gui.* by every scripting backend's generic static
+// binder - no hand-written GUI bindings anywhere. (The Lua `gui.*` namespace remains as a
+// thin legacy alias in NukeScript.) Value-carrying widgets return the NEW value.
+class NUKEENGINE_API Gui
+{
+	NUKE_CLASS_NOCREATE(Gui, Object)
+public:
+	[[nuke::func]] static bool   Begin(const std::string& name);
+	[[nuke::func]] static void   End();
+	[[nuke::func]] static void   Text(const std::string& text);
+	[[nuke::func]] static bool   Button(const std::string& label);
+	[[nuke::func]] static void   SameLine();
+	[[nuke::func]] static void   Separator();
+	[[nuke::func]] static bool   Checkbox(const std::string& label, bool value);
+	[[nuke::func]] static double Slider(const std::string& label, double value, double lo, double hi);
+};
 
 }  // namespace nuke
 

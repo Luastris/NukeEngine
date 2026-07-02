@@ -10,7 +10,9 @@
 #include "API/Model/PostProcess.h"
 #include "API/Model/ReflectionProbe.h"
 #include "API/Model/Rigidbody.h"
+#include "API/Model/Time.h"
 #include "API/Model/Transform.h"
+#include "interface/iGUI.h"
 
 namespace nuke {
 // Called once from World's constructor. Must be an EXTERNAL function called from a
@@ -165,6 +167,12 @@ bool NukeReflectInit() {
 		t.create = []() -> void* { return new Rigidbody(); };
 	}
 	{
+		TypeInfo& t = TypeOf<Time>();
+		t.base = "Object";
+		t.methods.push_back(MakeMethod("Elapsed", &Time::Elapsed));
+		t.methods.push_back(MakeMethod("Delta", &Time::Delta));
+	}
+	{
 		TypeInfo& t = TypeOf<Transform>();
 		t.base = "Component";
 		t.fields.push_back(MakeField("position", &Transform::position));
@@ -181,6 +189,20 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("SetGlobal", &Transform::SetGlobal));
 		t.methods.push_back(MakeMethod("SetEulerDeg", &Transform::SetEulerDeg));
 		t.methods.push_back(MakeMethod("EulerDeg", &Transform::EulerDeg));
+		t.methods.push_back(MakeMethod("setEuler", &Transform::setEuler));
+		t.methods.push_back(MakeMethod("euler", &Transform::euler));
+	}
+	{
+		TypeInfo& t = TypeOf<Gui>();
+		t.base = "Object";
+		t.methods.push_back(MakeMethod("Begin", &Gui::Begin));
+		t.methods.push_back(MakeMethod("End", &Gui::End));
+		t.methods.push_back(MakeMethod("Text", &Gui::Text));
+		t.methods.push_back(MakeMethod("Button", &Gui::Button));
+		t.methods.push_back(MakeMethod("SameLine", &Gui::SameLine));
+		t.methods.push_back(MakeMethod("Separator", &Gui::Separator));
+		t.methods.push_back(MakeMethod("Checkbox", &Gui::Checkbox));
+		t.methods.push_back(MakeMethod("Slider", &Gui::Slider));
 	}
 	return true;
 }

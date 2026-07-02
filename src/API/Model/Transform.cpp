@@ -78,6 +78,9 @@ Vector3 Transform::EulerDeg()
 }
 
 
+void Transform::setEuler(double x, double y, double z) { SetEulerDeg(Vector3(x, y, z)); }
+Vector3 Transform::euler() { return EulerDeg(); }
+
 void Transform::Destroy()
 {
 

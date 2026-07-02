@@ -2,15 +2,21 @@
 #ifndef NUKEE_TIME_H
 #define NUKEE_TIME_H
 #include "NukeAPI.h"
+#include "reflect/Reflect.h"
 
 namespace nuke {
 
 class NUKEENGINE_API Time
 {
+	NUKE_CLASS_NOCREATE(Time, Object)
 private:
 	Time();
 	~Time();
 public:
+	// Reflected script surface (auto-bound as nuke.Time.* by the generic static binder).
+	[[nuke::func]] static double Elapsed();   // real seconds since the first frame
+	[[nuke::func]] static double Delta();     // real seconds since the previous frame
+
 	static Time * getSingleton() 
 	{
 		static Time instance;

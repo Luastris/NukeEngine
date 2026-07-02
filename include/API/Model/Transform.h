@@ -37,6 +37,11 @@ public:
 	// Euler helpers (degrees) for the inspector / authoring. Internally quaternion.
 	[[nuke::func]] void    SetEulerDeg(const Vector3& deg);
 	[[nuke::func]] Vector3 EulerDeg();
+	// Legacy SCRIPT-facing aliases, reflected on purpose: older scripts call
+	// transform:setEuler(x, y, z) / transform:euler(). Real methods (not binder shims) so
+	// the Lua surface stays 100% reflection-driven.
+	[[nuke::func]] void    setEuler(double x, double y, double z);
+	[[nuke::func]] Vector3 euler();
 
 	void Destroy();
 	void Update();

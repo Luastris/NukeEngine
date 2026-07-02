@@ -6,6 +6,9 @@
 
 namespace nuke {
 
+double Time::Elapsed() { return getSingleton()->elapsed; }
+double Time::Delta()   { return getSingleton()->delta; }
+
 void Time::NewFrame()
 {
 	using clock = boost::chrono::steady_clock;
