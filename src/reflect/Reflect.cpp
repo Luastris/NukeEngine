@@ -1,4 +1,7 @@
 #include "reflect/ReflectJson.h"
+#include "API/Model/Atom.h"          // AtomRef resolution (stable id <-> live atom)
+#include "API/Model/World.h"
+#include "interface/AppInstance.h"
 #include <unordered_map>
 
 namespace nuke {
@@ -85,6 +88,19 @@ void LoadObject(const TypeInfo& ti, void* obj, const json& j)
     for (const Field& f : ti.fields)
         if (j.contains(f.name))
             LoadField(f.type, f.addr(obj), j.at(f.name));
+}
+
+// --- AtomRef resolution (FT::AtomRef travels as the atom's stable id) -----------------
+Atom* Reflect_AtomById(unsigned long id)
+{
+    if (!id) return nullptr;
+    World* w = AppInstance::GetSingleton()->currentScene;
+    return w ? w->GetById((long)id) : nullptr;
+}
+
+unsigned long Reflect_AtomId(Atom* a)
+{
+    return a ? a->id.id : 0;
 }
 
 } // namespace nuke

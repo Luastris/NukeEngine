@@ -56,8 +56,19 @@ public:
 	virtual void SetDynamicProp(const std::string& /*name*/, const NukeVar& /*v*/) {}
 
 	// Runtime immediate-mode UI hook. Called each frame by the GUI backend (NukeGUI) while playing;
-	// draw with nuke::GUI()->... (see interface/iGUI.h). ABI: keep this LAST virtual.
+	// draw with nuke::GUI()->... (see interface/iGUI.h).
 	virtual void OnGUI() {}
+
+	// Physics contact hooks, dispatched by World's FIXED-UPDATE THREAD right after
+	// iPhysics::step. `other` = the other atom of the contact pair. Pairs where either
+	// collider is a trigger get the Trigger pair; everything else gets the Collision pair.
+	// THREADING: these run on the fixed thread — a scripting component must QUEUE and
+	// flush into its VM on the game thread (see ScriptComponent), never call in here.
+	// ABI: new virtuals are appended at the END of the class; keep it that way.
+	virtual void OnCollisionEnter(Atom* other) {}
+	virtual void OnCollisionExit(Atom* other) {}
+	virtual void OnTriggerEnter(Atom* other) {}
+	virtual void OnTriggerExit(Atom* other) {}
 };
 }  // namespace nuke
 

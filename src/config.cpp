@@ -151,6 +151,8 @@ void Config::reload(Config* instance)
     if (root.contains("theme") && root["theme"].is_object())
         loadTheme(&instance->theme, root["theme"]);
 
+    instance->physicsCore = root.value("physicsCore", instance->physicsCore);
+
     if (root.contains("raytracing") && root["raytracing"].is_object())
     {
         const json& rt = root["raytracing"];

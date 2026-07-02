@@ -8,8 +8,13 @@
 #include "API/Model/PostProcess.h"// per-camera post-process -> iRender::setPostChain
 #include "API/Model/Shader.h"     // post-effect shader props (pack PostParams per stage)
 #include "API/Model/ReflectionProbe.h" // scene-captured reflection cubemap
-#include "API/Model/Time.h"       // animated-texture (GIF) frame advance
+#include "API/Model/Time.h"       // animated-texture (GIF) frame advance + fixed-step accumulator
+#include "API/Model/Collider.h"   // physics: shape components -> iPhysics bodies
+#include "API/Model/Rigidbody.h"  // physics: dynamic/kinematic body settings
+#include "interface/Services.h"   // GetService<iPhysics>()
+#include "service/iPhysics.h"     // the physics service seam (fixed-step driver below)
 #include <cmath>
+#include <map>
 #include <set>
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/glm.hpp>
@@ -146,11 +151,189 @@ void World::Start()
 
 }
 
+void World::LockGame()   { gameLock.lock(); }
+void World::UnlockGame() { gameLock.unlock(); }
+
 void World::Update()
 {
+	boost::recursive_mutex::scoped_lock lock(gameLock);
 	for (Atom* go : *hierarchy)
 	{
 		go->Update();
+	}
+}
+
+// --- fixed-step physics driver (service/iPhysics.h; no-op without a provider) ---------
+
+// Lazily create the physics body for an atom's Collider, and drive KINEMATIC bodies from
+// the Transform (gameplay moves them; the simulation follows and pushes dynamics away).
+// Fills `bodyMap` (bodyId -> Collider) for contact-event dispatch after the step.
+static void SyncBodies(bc::list<Atom*>& gos, iPhysics* p, std::map<uint64_t, Collider*>& bodyMap)
+{
+	for (Atom* go : gos)
+	{
+		if (!go) continue;
+		if (Collider* col = go->GetComponent<Collider>())
+		{
+			Rigidbody* rb = go->GetComponent<Rigidbody>();
+			Transform& t = go->GetTransform();
+			if (col->enabled && !col->bodyId)
+			{
+				// Bake the world scale into the shape (physics engines don't scale bodies).
+				Vector3 pos = t.globalPosition();
+				Quaternion rot = t.globalRotation();
+				Vector3 scl = t.globalScale();
+				NukeBodyDesc d;
+				d.shape = col->shape;
+				d.halfExtents[0] = (float)(col->halfExtents.x * fabs(scl.x));
+				d.halfExtents[1] = (float)(col->halfExtents.y * fabs(scl.y));
+				d.halfExtents[2] = (float)(col->halfExtents.z * fabs(scl.z));
+				const float rScale = (float)std::max(fabs(scl.x), std::max(fabs(scl.y), fabs(scl.z)));
+				d.radius     = col->radius * rScale;
+				d.halfHeight = col->halfHeight * (float)fabs(scl.y);
+				d.friction    = col->friction;
+				d.restitution = col->restitution;
+				d.isTrigger   = col->isTrigger;
+				d.convex      = col->convex;
+				d.motion = rb ? (rb->isKinematic ? 2 : 1) : 0;
+				if (rb)
+				{
+					d.mass           = rb->mass;
+					d.useGravity     = rb->useGravity;
+					d.linearDamping  = rb->linearDamping;
+					d.angularDamping = rb->angularDamping;
+				}
+				d.pos[0] = (float)pos.x; d.pos[1] = (float)pos.y; d.pos[2] = (float)pos.z;
+				d.quat[0] = (float)rot.x; d.quat[1] = (float)rot.y; d.quat[2] = (float)rot.z; d.quat[3] = (float)rot.w;
+
+				// Mesh shape: triangle soup from the sibling MeshRenderer, scale-baked.
+				std::vector<float> scaledVerts;
+				if (col->shape == Collider::S_Mesh)
+				{
+					MeshRenderer* mr = go->GetComponent<MeshRenderer>();
+					Mesh* mesh = mr ? mr->mesh : nullptr;
+					if (!mesh || !mesh->vertexArray || mesh->numVerts < 3)
+					{
+						std::cout << "[World]\t\t\tmesh collider on '" << go->name
+						          << "' has no sibling MeshRenderer mesh - skipped" << std::endl;
+						continue;
+					}
+					scaledVerts.resize((size_t)mesh->numVerts * 3);
+					for (int i = 0; i < mesh->numVerts; ++i)
+					{
+						scaledVerts[(size_t)i * 3 + 0] = mesh->vertexArray[i * 3 + 0] * (float)scl.x;
+						scaledVerts[(size_t)i * 3 + 1] = mesh->vertexArray[i * 3 + 1] * (float)scl.y;
+						scaledVerts[(size_t)i * 3 + 2] = mesh->vertexArray[i * 3 + 2] * (float)scl.z;
+					}
+					d.meshVerts     = scaledVerts.data();
+					d.meshVertCount = mesh->numVerts;
+				}
+				col->bodyId = p->createBody(d);
+			}
+			else if (col->bodyId && rb && rb->isKinematic)
+			{
+				Vector3 pos = t.globalPosition();
+				Quaternion rot = t.globalRotation();
+				float fp[3] = { (float)pos.x, (float)pos.y, (float)pos.z };
+				float fq[4] = { (float)rot.x, (float)rot.y, (float)rot.z, (float)rot.w };
+				p->setBodyPose(col->bodyId, fp, fq);
+			}
+			if (col->bodyId)
+				bodyMap[col->bodyId] = col;
+		}
+		if (!go->children.empty())
+			SyncBodies(go->children, p, bodyMap);
+	}
+}
+
+// Route drained contact transitions to BOTH atoms' components: trigger pairs (either
+// collider is a trigger) -> OnTriggerEnter/Exit, the rest -> OnCollisionEnter/Exit.
+static void DispatchContacts(iPhysics* p, const std::map<uint64_t, Collider*>& bodyMap)
+{
+	NukeContactEvent ev[128];
+	int n;
+	while ((n = p->fetchContacts(ev, 128)) > 0)
+	{
+		for (int i = 0; i < n; ++i)
+		{
+			auto ia = bodyMap.find(ev[i].bodyA);
+			auto ib = bodyMap.find(ev[i].bodyB);
+			if (ia == bodyMap.end() || ib == bodyMap.end()) continue;   // body died mid-step
+			Collider* ca = ia->second; Collider* cb = ib->second;
+			Atom* aa = ca->atom; Atom* ab = cb->atom;
+			if (!aa || !ab) continue;
+			const bool trigger = ca->isTrigger || cb->isTrigger;
+			const bool enter   = ev[i].phase == 0;
+			auto notify = [&](Atom* self, Atom* other)
+			{
+				for (Component* c : self->components)
+				{
+					if (!c || !c->enabled) continue;
+					if (trigger) { if (enter) c->OnTriggerEnter(other);   else c->OnTriggerExit(other); }
+					else         { if (enter) c->OnCollisionEnter(other); else c->OnCollisionExit(other); }
+				}
+			};
+			notify(aa, ab);
+			notify(ab, aa);
+		}
+		if (n < 128) break;
+	}
+}
+
+// Write simulated poses back into the Transforms of DYNAMIC bodies.
+static void PullDynamicPoses(bc::list<Atom*>& gos, iPhysics* p)
+{
+	for (Atom* go : gos)
+	{
+		if (!go) continue;
+		Collider* col = go->GetComponent<Collider>();
+		Rigidbody* rb = go->GetComponent<Rigidbody>();
+		if (col && rb && !rb->isKinematic && col->bodyId)
+		{
+			float fp[3], fq[4];
+			if (p->getBodyPose(col->bodyId, fp, fq))
+			{
+				Transform& t = go->GetTransform();
+				t.SetGlobal(Vector3(fp[0], fp[1], fp[2]),
+				            Quaternion(fq[0], fq[1], fq[2], fq[3]),
+				            t.globalScale());
+			}
+		}
+		if (!go->children.empty())
+			PullDynamicPoses(go->children, p);
+	}
+}
+
+void World::FixedUpdate()
+{
+	// ONE fixed step. The CADENCE lives in AppInstance::FixedThread (fixed frequency,
+	// frame-independent) — this function must not know about frames or accumulate time.
+	// Locking: world phases hold the game lock; the Jolt solve itself runs OUTSIDE it,
+	// so the simulation overlaps the frame (Update/render) instead of serializing with it.
+	const float dt = settings.fixedDt > 0.0001f ? settings.fixedDt : 1.0f / 60.0f;
+	iPhysics* p = GetService<iPhysics>();
+	std::map<uint64_t, Collider*> bodyMap;   // this step's live bodies (contact dispatch)
+
+	if (p)
+	{
+		boost::recursive_mutex::scoped_lock lock(gameLock);
+		p->init();   // idempotent
+		p->setGravity(settings.gravity);
+		SyncBodies(*hierarchy, p, bodyMap);
+	}
+
+	if (p)
+		p->step(dt);   // UNLOCKED: Jolt solves on its workers while the frame proceeds
+
+	{
+		boost::recursive_mutex::scoped_lock lock(gameLock);
+		if (p)
+		{
+			PullDynamicPoses(*hierarchy, p);
+			DispatchContacts(p, bodyMap);    // OnCollision/OnTrigger hooks — DIRECT, incl. scripts
+		}
+		for (Atom* go : *hierarchy)          // the EXISTING fixed chain: Atom -> components
+			go->FixedUpdate();               // (scripts' fixedUpdate runs HERE, under the lock)
 	}
 }
 
@@ -963,7 +1146,9 @@ std::string World::SaveToString()
 	j["settings"] = {                                     // world-level render settings (shadow globals, ...)
 		{"shadowRes", settings.shadowRes}, {"shadowDistance", settings.shadowDistance},
 		{"shadowDepthBias", settings.shadowDepthBias}, {"shadowNormalBias", settings.shadowNormalBias},
-		{"shadowSoftness", settings.shadowSoftness}, {"frustumCull", settings.frustumCull} };
+		{"shadowSoftness", settings.shadowSoftness}, {"frustumCull", settings.frustumCull},
+		{"gravity", { settings.gravity[0], settings.gravity[1], settings.gravity[2] }},
+		{"fixedDt", settings.fixedDt} };
 	j["atoms"] = json::array();
 	for (Atom* go : *hierarchy)
 	{
@@ -1007,7 +1192,15 @@ void World::LoadFromString(const std::string& data)
 		settings.shadowNormalBias = s.value("shadowNormalBias", settings.shadowNormalBias);
 		settings.shadowSoftness   = s.value("shadowSoftness", settings.shadowSoftness);
 		settings.frustumCull      = s.value("frustumCull", settings.frustumCull);
+		if (s.contains("gravity") && s["gravity"].is_array() && s["gravity"].size() == 3)
+			for (int i = 0; i < 3; ++i) settings.gravity[i] = s["gravity"][i].get<float>();
+		settings.fixedDt = s.value("fixedDt", settings.fixedDt);
 	}
+	// The old atoms are dropped WITHOUT component Destroy (fast path), so their physics
+	// bodies would leak — wipe the whole simulation; new colliders re-create lazily.
+	// gameLock: the fixed thread must not step a hierarchy that is being torn down.
+	boost::recursive_mutex::scoped_lock fixedGuard(gameLock);
+	if (iPhysics* p = GetService<iPhysics>()) p->reset();
 	for (auto it = hierarchy->begin(); it != hierarchy->end(); )   // keep editor camera, drop the rest
 	{
 		if ((*it)->GetName() == "Editor Camera") ++it;
@@ -1022,6 +1215,8 @@ void World::LoadFromString(const std::string& data)
 
 void World::Clear()
 {
+	boost::recursive_mutex::scoped_lock fixedGuard(gameLock);   // don't tear down under the fixed thread
+	if (iPhysics* p = GetService<iPhysics>()) p->reset();   // atoms drop without Destroy — wipe bodies
 	for (auto it = hierarchy->begin(); it != hierarchy->end(); )   // keep editor camera, drop the rest
 	{
 		if ((*it)->GetName() == "Editor Camera") ++it;

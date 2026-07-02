@@ -1,5 +1,13 @@
+// Header-only boost.chrono, defined BEFORE any boost include (same mode as Time.cpp /
+// Clock.cpp — the lib flavor double-defines steady_clock::now inside the engine DLL).
+#define BOOST_CHRONO_HEADER_ONLY
 #include "interface/AppInstance.h"
+#include "API/Model/World.h"
+#include <boost/chrono.hpp>
 #include <boost/filesystem.hpp>
+#ifdef _WIN32
+#include <Windows.h>   // SetThreadAffinityMask / SetThreadPriority (fixed-thread core pinning)
+#endif
 
 namespace nuke {
 
@@ -113,6 +121,63 @@ void AppInstance::UpdateThread()
 void AppInstance::StartUpdateThread()
 {
 	boost::thread updt(boost::bind(&AppInstance::UpdateThread, this));
+}
+
+// Fixed-frequency loop: ticks World::FixedUpdate at the world's fixedDt using an absolute
+// deadline (sleep_until), so the cadence never depends on frames or on how long a step
+// took — a fast render loop doesn't speed it up, a slow one doesn't starve it.
+void AppInstance::FixedThread()
+{
+	namespace bch = boost::chrono;
+
+#ifdef _WIN32
+	// Pin the simulation to its own core (config "physicsCore": -1 = auto -> the LAST
+	// core, keeping it off core 0 where the OS scheduler and the main thread live;
+	// -2 = don't pin) and bump priority so a busy render loop can't starve the cadence.
+	{
+		int core = config ? config->physicsCore : -1;
+		if (core == -1)
+			core = (int)boost::thread::hardware_concurrency() - 1;
+		if (core >= 0 && core < 64)
+			SetThreadAffinityMask(GetCurrentThread(), 1ull << core);
+		SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
+		if (core >= 0)
+			cout << "[AppInstance]\tfixed-update thread pinned to core " << core << endl;
+	}
+#endif
+
+	bch::steady_clock::time_point next = bch::steady_clock::now();
+	while (fixedThreadRun)
+	{
+		World* w = currentScene;
+		const double dt = (w && w->settings.fixedDt > 0.0001f) ? w->settings.fixedDt : 1.0 / 60.0;
+		if (w && playState == 1)
+		{
+			try { w->FixedUpdate(); }
+			catch (const std::exception& e)
+			{
+				cout << "[FixedThread]\terror in FixedUpdate: " << e.what() << endl;
+			}
+		}
+		next += bch::nanoseconds((long long)(dt * 1e9));
+		const bch::steady_clock::time_point now = bch::steady_clock::now();
+		if (next < now) next = now;   // fell behind (hitch/debugger): resume cadence, no burst catch-up
+		boost::this_thread::sleep_until(next);
+	}
+	cout << "[AppInstance]\tfixed-update thread stopped" << endl;
+}
+
+void AppInstance::StartFixedThread()
+{
+	if (fixedThreadRun) return;
+	fixedThreadRun = true;
+	boost::thread fxt(boost::bind(&AppInstance::FixedThread, this));
+	cout << "[AppInstance]\tfixed-update thread started" << endl;
+}
+
+void AppInstance::StopFixedThread()
+{
+	fixedThreadRun = false;
 }
 
 void AppInstance::PushWindow(const char* key, boost::function<void()> fWindow) {

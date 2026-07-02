@@ -24,8 +24,16 @@
 
 namespace nuke {
 
+class Atom;   // AtomRef values resolve through the live world (Reflect_AtomById below)
+
 // Supported field types. Extend as needed (Color/asset-refs/etc. added later).
-enum class FT { Unknown, Bool, Int, Float, Double, String, Vec2, Vec3, Vec4, Quat, Color };
+// AtomRef = a reference to a live Atom, carried across the boundary as its stable id —
+// stale-safe: a dead atom resolves to null, never to freed memory.
+enum class FT { Unknown, Bool, Int, Float, Double, String, Vec2, Vec3, Vec4, Quat, Color, AtomRef };
+
+// AtomRef <-> live atom (defined in Reflect.cpp; walks the CURRENT world by stable id).
+NUKEENGINE_API Atom*         Reflect_AtomById(unsigned long id);
+NUKEENGINE_API unsigned long Reflect_AtomId(Atom* a);
 
 // Map a C++ type -> FT tag. Primary = Unknown; specializations for supported types.
 template<class T> constexpr FT FieldTypeOf() { return FT::Unknown; }
@@ -39,6 +47,7 @@ template<> constexpr FT FieldTypeOf<Vector3>()     { return FT::Vec3; }
 template<> constexpr FT FieldTypeOf<Vector4>()     { return FT::Vec4; }
 template<> constexpr FT FieldTypeOf<Quaternion>()  { return FT::Quat; }
 template<> constexpr FT FieldTypeOf<Color>()       { return FT::Color; }
+template<> constexpr FT FieldTypeOf<Atom*>()       { return FT::AtomRef; }
 
 struct Field {
     std::string name;
@@ -68,6 +77,7 @@ struct ReflectValue
 	double      num  = 0.0;
 	std::string str;
 	double      v[4] = { 0, 0, 0, 0 };
+	unsigned long atom = 0;   // AtomRef: the atom's stable id (0 = null)
 };
 
 namespace detail {
@@ -84,6 +94,7 @@ template<> inline Vector3     FromRV<Vector3>(const ReflectValue& v)     { retur
 template<> inline Vector4     FromRV<Vector4>(const ReflectValue& v)     { return Vector4(v.v[0], v.v[1], v.v[2], v.v[3]); }
 template<> inline Quaternion  FromRV<Quaternion>(const ReflectValue& v)  { return Quaternion(v.v[0], v.v[1], v.v[2], v.v[3]); }
 template<> inline Color       FromRV<Color>(const ReflectValue& v)       { return Color(v.v[0], v.v[1], v.v[2], v.v[3]); }
+template<> inline Atom*       FromRV<Atom*>(const ReflectValue& v)       { return Reflect_AtomById(v.atom); }
 
 // Typed return -> ReflectValue.
 inline void ToRV(bool x, ReflectValue& o)               { o.type = FT::Bool;   o.b = x; }
@@ -96,6 +107,7 @@ inline void ToRV(const Vector3& x, ReflectValue& o)     { o.type = FT::Vec3;  o.
 inline void ToRV(const Vector4& x, ReflectValue& o)     { o.type = FT::Vec4;  o.v[0] = x.x; o.v[1] = x.y; o.v[2] = x.z; o.v[3] = x.w; }
 inline void ToRV(const Quaternion& x, ReflectValue& o)  { o.type = FT::Quat;  o.v[0] = x.x; o.v[1] = x.y; o.v[2] = x.z; o.v[3] = x.w; }
 inline void ToRV(const Color& x, ReflectValue& o)       { o.type = FT::Color; o.v[0] = x.r; o.v[1] = x.g; o.v[2] = x.b; o.v[3] = x.a; }
+inline void ToRV(Atom* x, ReflectValue& o)              { o.type = FT::AtomRef; o.atom = Reflect_AtomId(x); }
 }  // namespace detail
 
 // ---- method reflection (tag with [[nuke::func]]; nukegen emits MakeMethod calls) ----
@@ -107,8 +119,10 @@ struct Method {
     std::string name;
     FT ret = FT::Unknown;                 // FT::Unknown = void
     std::vector<FT> params;               // declared parameter types, in order
-    // Invoke on an instance of the owning type. `args` must match params (count is
-    // checked, types are trusted — the caller converted by `params`). False = arity error.
+    bool isStatic = false;                // static/free function: invoke ignores `obj` —
+                                          // script binders expose it as <Type>.<name>(...)
+    // Invoke on an instance of the owning type (null for statics). `args` must match
+    // params (count is checked, types are trusted — the caller converted by `params`).
     std::function<bool(void* obj, const ReflectValue* args, std::size_t n, ReflectValue& ret)> invoke;
 };
 
@@ -192,6 +206,37 @@ Method MakeMethod(const char* name, R (C::*mf)(A...)) {
 template<class C, class R, class... A>
 Method MakeMethod(const char* name, R (C::*mf)(A...) const) {
     return detail::MakeMethodImpl<C, decltype(mf), R, A...>(name, mf);
+}
+
+namespace detail {
+template<class F, class R, class... A, std::size_t... I>
+bool InvokeFreeImpl(F fn, const ReflectValue* a, ReflectValue& out, std::index_sequence<I...>) {
+    (void)a;
+    if constexpr (std::is_void_v<R>) {
+        fn(FromRV<std::decay_t<A>>(a[I])...);
+        out.type = FT::Unknown;
+    } else {
+        ToRV(fn(FromRV<std::decay_t<A>>(a[I])...), out);
+    }
+    return true;
+}
+}  // namespace detail
+
+// STATIC/free function overload ([[nuke::func]] on a `static` method — a static member
+// pointer IS a plain function pointer, so overload resolution picks this automatically).
+// Script binders expose these as <Type>.<name>(...) — facade APIs bind with zero hardcode.
+template<class R, class... A>
+Method MakeMethod(const char* name, R (*fn)(A...)) {
+    Method m;
+    m.name = name;
+    m.isStatic = true;
+    if constexpr (!std::is_void_v<R>) m.ret = FieldTypeOf<std::decay_t<R>>();
+    m.params = { FieldTypeOf<std::decay_t<A>>()... };
+    m.invoke = [fn](void*, const ReflectValue* a, std::size_t n, ReflectValue& out) -> bool {
+        if (n != sizeof...(A)) return false;
+        return detail::InvokeFreeImpl<decltype(fn), R, A...>(fn, a, out, std::index_sequence_for<A...>{});
+    };
+    return m;
 }
 
 } // namespace nuke

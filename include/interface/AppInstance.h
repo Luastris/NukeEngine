@@ -90,6 +90,17 @@ public:
 	uint64_t uiTarget = 0;            // render-target id (0 = backbuffer)
 	int      uiX = 0, uiY = 0;        // target top-left in window pixels (input offset)
 	int      uiW = 0, uiH = 0;        // target size in pixels
+
+	// --- Fixed-frequency update thread ------------------------------------------------
+	// World::FixedUpdate (physics + Component::FixedUpdate) runs on ITS OWN THREAD at the
+	// world's fixedDt cadence — fully independent of the render frame rate. Gated to play
+	// mode (playState == 1): in the editor it idles until PIE, in the Player it always
+	// ticks. Hosts call StartFixedThread() once at boot and StopFixedThread() at shutdown.
+	// (ABI: fixedThreadRun at the END of the class.)
+	void StartFixedThread();
+	void StopFixedThread();
+	void FixedThread();               // thread body (public for the thread bind, not for calling)
+	volatile bool fixedThreadRun = false;
 };
 
 }  // namespace nuke

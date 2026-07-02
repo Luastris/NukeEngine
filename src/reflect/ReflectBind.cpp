@@ -30,7 +30,8 @@ const Method* Reflect_FindMethod(const TypeInfo* type, const std::string& name)
 
 bool Reflect_Invoke(void* obj, const Method& m, const ReflectValue* args, std::size_t n, ReflectValue& ret)
 {
-	if (!obj || !m.invoke) return false;
+	if (!m.invoke) return false;
+	if (!obj && !m.isStatic) return false;   // instance methods need an instance; statics take null
 	ret = ReflectValue();
 	return m.invoke(obj, args, n, ret);
 }

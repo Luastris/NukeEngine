@@ -232,11 +232,14 @@
     <ClInclude Include="include\API\Model\Module.h" />
     <ClInclude Include="include\API\Model\Package.h" />
     <ClInclude Include="include\API\Model\Resource.h" />
+    <ClInclude Include="include\API\Model\Rigidbody.h" />
+    <ClInclude Include="include\API\Model\Physics.h" />
     <ClInclude Include="include\API\Model\Script.h" />
     <ClInclude Include="include\interface\Modular.h" />
     <ClInclude Include="include\interface\Services.h" />
     <ClInclude Include="include\reflect\ReflectBind.h" />
     <ClInclude Include="include\service\iScript.h" />
+    <ClInclude Include="include\service\iPhysics.h" />
     <ClInclude Include="include\interface\NUKEEInteface.h" />
     <ClInclude Include="include\render\irender.h" />
     <ClInclude Include="NukeEngine.h" />
@@ -294,6 +297,8 @@
     <ClCompile Include="src\API\Model\Module.cpp" />
     <ClCompile Include="src\API\Model\Package.cpp" />
     <ClCompile Include="src\API\Model\Resource.cpp" />
+    <ClCompile Include="src\API\Model\Rigidbody.cpp" />
+    <ClCompile Include="src\API\Model\Physics.cpp" />
     <ClCompile Include="src\API\Model\Script.cpp" />
     <ClCompile Include="src\interface\Modular.cpp" />
     <ClCompile Include="src\interface\Services.cpp" />

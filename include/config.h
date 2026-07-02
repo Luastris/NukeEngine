@@ -117,6 +117,10 @@ public:
     NukeWindow window {};
     NukeTheme theme{};
     NukeRT    rt{};
+    // CPU core the fixed-update (physics) thread is pinned to. -1 = auto (the LAST core,
+    // away from core 0 where the OS/main thread lives); -2 = no pinning. config/main.json
+    // "physicsCore".
+    int physicsCore = -1;
 	void reload(Config* instance);
 	static Config* getSingleton();
 };

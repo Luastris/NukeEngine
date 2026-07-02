@@ -49,7 +49,21 @@ void Atom::Init(Atom* parent)
 {
 	this->parent = parent;
 }
-void Atom::FixedUpdate() {}
+// Fixed-step tick (driven by World::FixedUpdate) — same shape as Update: children first,
+// then this atom's enabled components.
+void Atom::FixedUpdate()
+{
+	for (auto child : children)
+	{
+		if (child)
+			child->FixedUpdate();
+	}
+	for (auto cmp : components)
+	{
+		if (cmp && cmp->enabled)
+			cmp->FixedUpdate();
+	}
+}
 void Atom::Update()
 {
 	for (auto child : children)

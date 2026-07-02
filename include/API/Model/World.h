@@ -3,6 +3,7 @@
 #define NUKEE_SCENE_H
 #include "NukeAPI.h"
 #include "Atom.h"
+#include <boost/thread/recursive_mutex.hpp>
 #include <memory>
 
 namespace nuke {
@@ -26,6 +27,9 @@ public:
 		float shadowNormalBias = 0.0f;
 		float shadowSoftness   = 1.0f;    // PCF kernel scale
 		bool  frustumCull      = true;    // skip drawing objects outside the camera frustum (toggle)
+		// Physics (drives the fixed-step loop in Update; pushed to the physics service).
+		float gravity[3] = { 0.0f, -9.81f, 0.0f };
+		float fixedDt    = 1.0f / 60.0f;  // fixed simulation timestep (seconds)
 	};
 	Settings settings;
 
@@ -38,8 +42,26 @@ public:
 
 	void Start();
 
-	void Update();              // game logic (Play mode)
+	void Update();              // game logic, once per frame (Play mode); takes the game lock
+	// ONE fixed step (settings.fixedDt): sync bodies -> iPhysics::step -> pull dynamic
+	// poses into Transforms -> Atom::FixedUpdate. Runs even without a physics provider
+	// (gameplay fixed ticks are independent). Driven by AppInstance's FIXED-FREQUENCY
+	// THREAD — never by the render loop; the cadence does not depend on the frame rate.
+	void FixedUpdate();
 	void Render(iRender* r);    // draw pass: one render per camera (Edit + Play)
+
+	// THE GAME LOCK — the "shared world/VM" contract between the game thread and the
+	// fixed-update thread (how big engines serialize script/world access while physics
+	// solves in parallel): every entry that touches the hierarchy or enters the script VM
+	// holds it — Update(), FixedUpdate()'s world phases (the Jolt solve itself runs
+	// OUTSIDE the lock, overlapping the frame), LoadFromString/Clear, and the runtime-GUI
+	// OnGUI sweep (NukeGUI). RECURSIVE so a script may re-enter (e.g. LoadWorld from Lua).
+	void LockGame();
+	void UnlockGame();
+
+private:
+	boost::recursive_mutex gameLock;
+public:
 
 	// Ray-pick the nearest Atom (with a MeshRenderer) hit by a world-space ray.
 	// Returns nullptr on miss. Used by the editor viewport for click-to-select.
