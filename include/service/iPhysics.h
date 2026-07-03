@@ -86,9 +86,14 @@ public:
 	virtual uint64_t createBody(const NukeBodyDesc& desc) = 0;   // 0 on failure
 	virtual void     destroyBody(uint64_t body) = 0;
 
-	// Pose. set = teleport (kinematic drive / editor moves); get = simulated result.
+	// Pose. set = teleport (static moves / script teleports); get = simulated result.
 	virtual void setBodyPose(uint64_t body, const float pos[3], const float quat[4]) = 0;
 	virtual bool getBodyPose(uint64_t body, float pos[3], float quat[4]) = 0;
+
+	// Kinematic drive: move the body to the target pose over ONE fixed step, deriving the
+	// velocities — riders standing on it get carried (a teleport would leave them behind).
+	// dt <= 0 falls back to a teleport.
+	virtual void moveKinematic(uint64_t body, const float pos[3], const float quat[4], float dt) = 0;
 
 	// Dynamics (Dynamic bodies).
 	virtual void setLinearVelocity(uint64_t body, const float v[3]) = 0;

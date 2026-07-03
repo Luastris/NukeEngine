@@ -153,11 +153,14 @@ void AppInstance::FixedThread()
 		const double dt = (w && w->settings.fixedDt > 0.0001f) ? w->settings.fixedDt : 1.0 / 60.0;
 		if (w && playState == 1)
 		{
+			const bch::steady_clock::time_point t0 = bch::steady_clock::now();
 			try { w->FixedUpdate(); }
 			catch (const std::exception& e)
 			{
 				cout << "[FixedThread]\terror in FixedUpdate: " << e.what() << endl;
 			}
+			const double stepMs = bch::duration_cast<bch::duration<double, boost::milli>>(bch::steady_clock::now() - t0).count();
+			if (stepMs > 50.0) cout << "[FixedThread]	SLOW step: " << stepMs << " ms" << endl;
 		}
 		next += bch::nanoseconds((long long)(dt * 1e9));
 		const bch::steady_clock::time_point now = bch::steady_clock::now();

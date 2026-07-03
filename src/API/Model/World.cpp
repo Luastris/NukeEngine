@@ -1,3 +1,7 @@
+// Header-only boost.chrono, BEFORE any include that pulls boost headers (the lib flavor
+// double-defines steady_clock::now inside the engine DLL - same trap as Clock.cpp).
+#define BOOST_CHRONO_HEADER_ONLY
+#include <boost/chrono.hpp>
 #include "API/Model/World.h"
 #include "render/irender.h"
 #include "API/Model/Camera.h"
@@ -157,7 +161,15 @@ void World::UnlockGame() { gameLock.unlock(); }
 
 void World::Update()
 {
+	static int slowLog = 0;
+	auto t0 = boost::chrono::steady_clock::now();
 	boost::recursive_mutex::scoped_lock lock(gameLock);
+	{
+		double ms = boost::chrono::duration_cast<boost::chrono::duration<double, boost::milli>>(
+			boost::chrono::steady_clock::now() - t0).count();
+		if (ms > 50.0 && slowLog < 20)
+			{ std::cout << "[World]			Update lock wait: " << ms << " ms" << std::endl; ++slowLog; }
+	}
 	for (Atom* go : *hierarchy)
 	{
 		go->Update();
@@ -169,7 +181,7 @@ void World::Update()
 // Lazily create the physics body for an atom's Collider, and drive KINEMATIC bodies from
 // the Transform (gameplay moves them; the simulation follows and pushes dynamics away).
 // Fills `bodyMap` (bodyId -> Collider) for contact-event dispatch after the step.
-static void SyncBodies(bc::list<Atom*>& gos, iPhysics* p, std::map<uint64_t, Collider*>& bodyMap)
+static void SyncBodies(bc::list<Atom*>& gos, iPhysics* p, std::map<uint64_t, Collider*>& bodyMap, float dt)
 {
 	for (Atom* go : gos)
 	{
@@ -178,6 +190,18 @@ static void SyncBodies(bc::list<Atom*>& gos, iPhysics* p, std::map<uint64_t, Col
 		{
 			Rigidbody* rb = go->GetComponent<Rigidbody>();
 			Transform& t = go->GetTransform();
+
+			// Motion type changed live (Rigidbody added/removed, Kinematic toggled in the
+			// inspector mid-play)? Recreate — e.g. MoveKinematic on a stale STATIC body is
+			// silently ignored by the backend ("kinematic doesn't move at all").
+			const int desiredMotion = rb ? (rb->isKinematic ? 2 : 1) : 0;
+			if (col->bodyId && col->bodyMotion != desiredMotion)
+			{
+				p->destroyBody(col->bodyId);
+				col->bodyId = 0;
+				col->hasSync = false;
+			}
+
 			if (col->enabled && !col->bodyId)
 			{
 				// Bake the world scale into the shape (physics engines don't scale bodies).
@@ -230,20 +254,132 @@ static void SyncBodies(bc::list<Atom*>& gos, iPhysics* p, std::map<uint64_t, Col
 					d.meshVertCount = mesh->numVerts;
 				}
 				col->bodyId = p->createBody(d);
+				col->bodyMotion = desiredMotion;
+				col->lastSyncPos = pos; col->lastSyncRot = rot; col->hasSync = true;
 			}
-			else if (col->bodyId && rb && rb->isKinematic)
+			else if (col->bodyId)
 			{
 				Vector3 pos = t.globalPosition();
 				Quaternion rot = t.globalRotation();
 				float fp[3] = { (float)pos.x, (float)pos.y, (float)pos.z };
 				float fq[4] = { (float)rot.x, (float)rot.y, (float)rot.z, (float)rot.w };
-				p->setBodyPose(col->bodyId, fp, fq);
+				if (desiredMotion == 2)
+				{
+					// Kinematic tracking servo. Scripts write the transform at RENDER cadence,
+					// the simulation consumes it at the FIXED cadence, and the two BEAT:
+					// per-step deltas jitter between zero and twice the true speed. Riders are
+					// punted by velocity JUMPS (acceleration), so the body is driven with a
+					// velocity that is smooth BY CONSTRUCTION: the exponentially-smoothed
+					// write velocity (feedforward) plus a soft proportional pull towards the
+					// newest write (kills lag and drift). A script that moves the platform in
+					// fixedUpdate makes this exact tracking; update-rate scripts get a
+					// millimetre-level ripple instead of kicks.
+					const double dx = pos.x - col->lastSyncPos.x, dy = pos.y - col->lastSyncPos.y, dz = pos.z - col->lastSyncPos.z;
+					const double qd = fabs(Quaternion::Dot(rot, col->lastSyncRot));
+					const bool moved = !col->hasSync || (dx * dx + dy * dy + dz * dz) > 1e-10 || qd < 1.0 - 1e-7;
+					if (moved && col->quietSteps > 30)
+					{
+						// Parked (>0.5 s idle) and then moved: that's a TELEPORT, not a glide -
+						// snap, don't crawl there at (jump / idle-time) speed.
+						p->setBodyPose(col->bodyId, fp, fq);
+						col->kinVelEma = Vector3();
+						col->kinAngVelEma = Vector3();
+						col->quietSteps = 0;
+						col->lastSyncPos = pos; col->lastSyncRot = rot; col->hasSync = true;
+					}
+					else
+					{
+						if (moved)
+						{
+							// Fresh write: instantaneous velocity = the delta since the LAST
+							// write over the time that actually elapsed. Adopt instantly out of
+							// rest, then smooth (the beat spikes single deltas to ~2x).
+							const double span = dt * (col->quietSteps + 1);
+							const Vector3 instV(dx / span, dy / span, dz / span);
+							Quaternion dq = (rot * col->lastSyncRot.conjugate()).Normalized();
+							if (dq.w < 0) { dq.x = -dq.x; dq.y = -dq.y; dq.z = -dq.z; dq.w = -dq.w; }   // shortest arc
+							const double sinHalf = sqrt(std::max(0.0, 1.0 - dq.w * dq.w));
+							const double ang = 2.0 * atan2(sinHalf, dq.w);
+							Vector3 instW;
+							if (sinHalf > 1e-9)
+								instW = Vector3(dq.x / sinHalf, dq.y / sinHalf, dq.z / sinHalf) * (ang / span);
+							const bool fromRest = col->kinVelEma.abs() < 1e-9 && col->kinAngVelEma.abs() < 1e-9;
+							col->kinVelEma    = fromRest ? instV : col->kinVelEma * 0.75 + instV * 0.25;
+							col->kinAngVelEma = fromRest ? instW : col->kinAngVelEma * 0.75 + instW * 0.25;
+							col->quietSteps = 0;
+							col->lastSyncPos = pos; col->lastSyncRot = rot; col->hasSync = true;
+						}
+						else
+						{
+							// Short gaps ARE the beat - keep the feedforward alive. A long gap
+							// means the writes stopped: bleed the velocity off so the body
+							// settles instead of sailing past the parked transform.
+							++col->quietSteps;
+							if (col->quietSteps > 3)
+							{
+								col->kinVelEma    *= 0.6;
+								col->kinAngVelEma *= 0.6;
+							}
+						}
+
+						float bp[3], bq[4];
+						if (p->getBodyPose(col->bodyId, bp, bq))
+						{
+							// v = feedforward + Kp * error, under an absolute ceiling so a huge
+							// error (missed teleport, spawn) closes fast but never violently.
+							const double Kp = 5.0;   // 1/s: ~0.2 s to absorb tracking error
+							Vector3 v = col->kinVelEma
+							          + Vector3(col->lastSyncPos.x - bp[0], col->lastSyncPos.y - bp[1], col->lastSyncPos.z - bp[2]) * Kp;
+							Quaternion qb(bq[0], bq[1], bq[2], bq[3]);
+							Quaternion qe = (col->lastSyncRot * qb.conjugate()).Normalized();
+							if (qe.w < 0) { qe.x = -qe.x; qe.y = -qe.y; qe.z = -qe.z; qe.w = -qe.w; }
+							const double esin = sqrt(std::max(0.0, 1.0 - qe.w * qe.w));
+							const double eang = 2.0 * atan2(esin, qe.w);
+							Vector3 w = col->kinAngVelEma;
+							if (esin > 1e-9)
+								w += Vector3(qe.x / esin, qe.y / esin, qe.z / esin) * (eang * Kp);
+							const double vMax = std::max(col->kinVelEma.abs() * 3.0, 2.0);
+							const double wMax = std::max(col->kinAngVelEma.abs() * 3.0, 3.0);
+							const double vLen = v.abs(), wLen = w.abs();
+							if (vLen > vMax) v *= vMax / vLen;
+							if (wLen > wMax) w *= wMax / wLen;
+
+							// Compose next step's pose from the velocity command and let the
+							// backend derive the (smooth) velocities riders are carried with.
+							const Vector3 np(bp[0] + v.x * dt, bp[1] + v.y * dt, bp[2] + v.z * dt);
+							Quaternion nq = qb;
+							const double wA = w.abs();
+							if (wA > 1e-9)
+								nq = (Quaternion::FromAxisAngle(Vector3(w.x / wA, w.y / wA, w.z / wA),
+								                                wA * dt * (180.0 / 3.14159265358979323846)) * qb).Normalized();
+							float tp[3] = { (float)np.x, (float)np.y, (float)np.z };
+							float tq[4] = { (float)nq.x, (float)nq.y, (float)nq.z, (float)nq.w };
+							p->moveKinematic(col->bodyId, tp, tq, dt);
+						}
+						else
+							p->moveKinematic(col->bodyId, fp, fq, dt);
+					}
+				}
+				else
+				{
+					// Static/dynamic: push only EXTERNAL transform changes (script, moving
+					// parent, editor teleport). The driver's own dynamic write-backs refresh
+					// lastSync in PullDynamicPoses, so they don't re-trigger here.
+					const double dx = pos.x - col->lastSyncPos.x, dy = pos.y - col->lastSyncPos.y, dz = pos.z - col->lastSyncPos.z;
+					const double qd = fabs(Quaternion::Dot(rot, col->lastSyncRot));
+					const bool moved = !col->hasSync || (dx * dx + dy * dy + dz * dz) > 1e-10 || qd < 1.0 - 1e-7;
+					if (moved)
+					{
+						p->setBodyPose(col->bodyId, fp, fq);   // static move / dynamic teleport
+						col->lastSyncPos = pos; col->lastSyncRot = rot; col->hasSync = true;
+					}
+				}
 			}
 			if (col->bodyId)
 				bodyMap[col->bodyId] = col;
 		}
 		if (!go->children.empty())
-			SyncBodies(go->children, p, bodyMap);
+			SyncBodies(go->children, p, bodyMap, dt);
 	}
 }
 
@@ -298,6 +434,17 @@ static void PullDynamicPoses(bc::list<Atom*>& gos, iPhysics* p)
 				t.SetGlobal(Vector3(fp[0], fp[1], fp[2]),
 				            Quaternion(fq[0], fq[1], fq[2], fq[3]),
 				            t.globalScale());
+				// This write is OURS - refresh the cache so SyncBodies doesn't see it as an
+				// external move next step (which would teleport-fight the simulation).
+				// CRITICAL: cache what the transform will actually RETURN, not the raw values
+				// written - the write goes through the transform's internal representation
+				// (quat->euler->quat), which shifts a tumbling body's rotation by a couple of
+				// degrees. Caching the raw quat made every rotating dynamic body register as
+				// "externally rotated" and get pose-snapped EVERY step, fighting the solver
+				// (boxes bounced off platforms as if elastic).
+				col->lastSyncPos = t.globalPosition();
+				col->lastSyncRot = t.globalRotation();
+				col->hasSync = true;
 			}
 		}
 		if (!go->children.empty())
@@ -320,7 +467,7 @@ void World::FixedUpdate()
 		boost::recursive_mutex::scoped_lock lock(gameLock);
 		p->init();   // idempotent
 		p->setGravity(settings.gravity);
-		SyncBodies(*hierarchy, p, bodyMap);
+		SyncBodies(*hierarchy, p, bodyMap, dt);
 	}
 
 	if (p)

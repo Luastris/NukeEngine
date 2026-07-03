@@ -479,11 +479,14 @@ Quaternion Quaternion::operator - (const Quaternion& q)
 
 Quaternion Quaternion::operator * (const Quaternion& q)
 {
+	// Hamilton product. NOTE: the constructor takes (x, y, z, w) — W goes LAST.
+	// It used to be passed FIRST, silently turning every quaternion product into
+	// garbage (identity * identity came out as a 180-degree X flip).
 	return Quaternion(
-		w * q.w - x * q.x - y * q.y - z * q.z,
 		w * q.x + x * q.w + y * q.z - z * q.y,
 		w * q.y + y * q.w + z * q.x - x * q.z,
-		w * q.z + z * q.w + x * q.y - y * q.x);
+		w * q.z + z * q.w + x * q.y - y * q.x,
+		w * q.w - x * q.x - y * q.y - z * q.z);
 }
 
 Quaternion Quaternion::operator / (Quaternion& q)
