@@ -32,6 +32,9 @@ public:
     bool invertGreen = true;                // normal maps only: green convention (true = OpenGL +Y, flip; false = DirectX) — .nutex v6
     static int GuessUsage(const std::string& filename);   // filename-suffix heuristic -> Usage
     bool Recompress(int targetFormat);                    // decode mip0 -> re-encode to FMT_BC1/BC3/BC5 (inspector override)
+    // Decode mip0 (frame 0 for animated textures) to a tight width*height*4 RGBA8 buffer —
+    // CPU-side preview/inspection (the editor uploads it via iRender::createTexture2D).
+    std::vector<unsigned char> DecodeRGBA() const;
 
     // Animation (GIF): pixels holds `frameCount` frames back-to-back (RGBA8, w*h*4 each, no mips/BC).
     int              frameCount = 1;

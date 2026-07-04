@@ -33,6 +33,11 @@ public:
 	};
 	Settings settings;
 
+	// Auxiliary world (editor-owned asset previews): rendered IN ADDITION to the current
+	// scene each frame, so it skips the global heavy passes (RT scene build) — the live
+	// scene rebuilds them right after and must stay the last writer. NOT serialized.
+	bool auxiliary = false;
+
 	World();
 
 	Atom* Get(const char* name);

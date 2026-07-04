@@ -323,8 +323,24 @@ public:
     // (thread-safe; the fixed thread may emit too), drawn depth-tested into every camera
     // pass and cleared at the next frame's start. The engine-side DebugDraw facade
     // decomposes wire shapes into these — backends only ever see lines.
-    // (END of vtable — appended so existing slot indices don't shift.)
     virtual void drawDebugLine(const float a[3], const float b[3], const float color[4]) {}
+
+    // --- UI multi-viewport: detachable NATIVE OS windows -----------------------------
+    // The UI module's platform backend (imgui_impl_glfw in NukeImGui) creates and manages
+    // the secondary OS windows itself, sharing the process's ONE GLFW instance with the
+    // renderer (both link glfw3.dll). The renderer's part is small: hand out the main
+    // platform window, and own one swap chain per secondary window.
+    //
+    // Main platform window handle (GLFWwindow*). Null = the backend has no windowing
+    // layer the UI can mount on; the UI then stays single-window.
+    // (END of vtable — appended so existing slot indices don't shift.)
+    virtual void* nativeWindow() { return nullptr; }
+    // Render a UI draw list into a secondary OS window (nativeHandle = HWND on Windows,
+    // from the platform backend). The renderer lazily creates a swap chain per window,
+    // resizes it to w x h, draws, and presents (no vsync — the main window already syncs).
+    virtual void uiViewportRender(void* nativeHandle, int w, int h, const NukeUIDrawData& data) {}
+    // The secondary window is being destroyed — release its swap chain.
+    virtual void uiViewportDestroy(void* nativeHandle) {}
 //    virtual ~iRender(){
 //    }
 };

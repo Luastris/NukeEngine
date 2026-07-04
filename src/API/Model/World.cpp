@@ -806,6 +806,9 @@ void World::Render(iRender* r)
 	}
 
 	// Advance animated textures (GIF) by real frame time — the renderer samples Texture::curFrame.
+	// Only the CURRENT scene advances them: auxiliary worlds rendered in the same frame (the
+	// editor's asset preview) must not double-step the global animation clock.
+	if (this == AppInstance::GetSingleton()->currentScene)
 	{
 		double dtMs = Time::getSingleton()->delta * 1000.0;
 		for (Texture* t : ResDB::getSingleton()->textures)
@@ -950,7 +953,9 @@ void World::Render(iRender* r)
 
 	// Ray tracing (D3D12): build the scene TLAS from opaque meshes FIRST — before the probe capture and camera
 	// passes, both of which draw with the world PSO and ray-query g_TLAS (RT shadows). Must exist before any draw.
-	if (r->rtAvailable())
+	// Auxiliary worlds (asset previews) skip it: the TLAS is GLOBAL and the live scene must stay its last
+	// writer (and a preview doesn't need RT reflections).
+	if (r->rtAvailable() && !auxiliary)
 	{
 		r->beginRTScene();
 		std::vector<DrawItem> rtItems; CollectMeshes(*hierarchy, rtItems);

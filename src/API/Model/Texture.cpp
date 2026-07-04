@@ -119,6 +119,12 @@ int encodeBC(std::vector<uint8_t>& bytes, std::vector<uint8_t> cur, int w, int h
 
 // Re-compress this texture to another BC format in place (decode current mip0 -> re-encode). For the inspector's
 // Compression override (e.g. a normal map BC5<->BC1: quality vs half the size). No-op for render textures / GIFs.
+std::vector<unsigned char> Texture::DecodeRGBA() const
+{
+	if (renderTexture || width <= 0 || height <= 0) return {};
+	return decodeMip0(this);   // RGBA8 passthrough (frame 0) or BC decode
+}
+
 bool Texture::Recompress(int targetFormat)
 {
 	if (renderTexture || frameCount > 1 || width <= 0 || height <= 0) return false;
