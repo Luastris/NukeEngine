@@ -14,6 +14,7 @@
 #include "API/Model/ReflectionProbe.h" // scene-captured reflection cubemap
 #include "API/Model/Time.h"       // animated-texture (GIF) frame advance + fixed-step accumulator
 #include "API/Model/Collider.h"   // physics: shape components -> iPhysics bodies
+#include "API/Model/Jobs.h"       // PumpMain each game-thread frame (2.4)
 #include "API/Model/Rigidbody.h"  // physics: dynamic/kinematic body settings
 #include "API/Model/DebugDraw.h"   // editor gizmos (selection wire shapes)
 #include "interface/Services.h"   // GetService<iPhysics>()
@@ -161,6 +162,7 @@ void World::UnlockGame() { gameLock.unlock(); }
 
 void World::Update()
 {
+	Jobs::PumpMain();   // deliver background-job results on the game thread (2.4)
 	static int slowLog = 0;
 	auto t0 = boost::chrono::steady_clock::now();
 	boost::recursive_mutex::scoped_lock lock(gameLock);

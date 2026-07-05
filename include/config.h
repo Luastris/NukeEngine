@@ -121,6 +121,10 @@ public:
     // away from core 0 where the OS/main thread lives); -2 = no pinning. config/main.json
     // "physicsCore".
     int physicsCore = -1;
+    // Job system (roadmap 2.4): worker count (-1 = auto: one per core, minus core 0 and
+    // the physics core) and per-core pinning. config/main.json "jobs": {"workers","pinCores"}.
+    int  jobWorkers  = -1;
+    bool jobPinCores = true;
 	void reload(Config* instance);
 	static Config* getSingleton();
 };

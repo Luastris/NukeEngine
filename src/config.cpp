@@ -153,6 +153,13 @@ void Config::reload(Config* instance)
 
     instance->physicsCore = root.value("physicsCore", instance->physicsCore);
 
+    if (root.contains("jobs") && root["jobs"].is_object())
+    {
+        const json& j = root["jobs"];
+        instance->jobWorkers  = j.value("workers",  instance->jobWorkers);
+        instance->jobPinCores = j.value("pinCores", instance->jobPinCores);
+    }
+
     if (root.contains("raytracing") && root["raytracing"].is_object())
     {
         const json& rt = root["raytracing"];

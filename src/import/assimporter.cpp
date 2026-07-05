@@ -15,6 +15,10 @@
 #define STB_DXT_IMPLEMENTATION
 #include <stb_dxt.h>
 
+#include "API/Model/Jobs.h"        // async import (2.4)
+#include "API/Model/StatusBar.h"   // live import status
+#include <boost/thread/mutex.hpp>
+
 namespace nuke {
 
 // BC-compress one RGBA level (any size; partial edge blocks clamp) -> appended to `out`. 8=BC1, 16=BC3.
@@ -294,7 +298,7 @@ static std::string ConvertTexture(const aiScene* sc, const std::string& texRef,
 		out = bfs::path(destDir) / (stem + "_" + std::to_string(k) + ".nutex");
 
 	if (!tex->SaveToFile(out.string())) { delete tex; return std::string(); }
-	ResDB::getSingleton()->RegisterTexture(tex);
+	AssImporter::Reg([tex] { ResDB::getSingleton()->RegisterTexture(tex); });   // main-thread when async
 	cache[key] = tex->guid;
 	cout << "[Import]\twrote " << out.filename().string() << " (" << w << "x" << h << ")" << endl;
 	return tex->guid;
@@ -353,7 +357,7 @@ int AssImporter::ImportToContent(const char* srcPath, const char* destDir)
 			mout = bfs::path(destDir) / (mstem + "_" + std::to_string(n) + ".numat");
 		if (mt->SaveToFile(mout.string()))
 		{
-			res->RegisterMaterial(mt);
+			AssImporter::Reg([mt] { ResDB::getSingleton()->RegisterMaterial(mt); });   // main-thread when async
 			matGuids[i] = mt->guid;
 			cout << "[Import]\twrote " << mout.filename().string() << " (" << mt->guid << ")" << endl;
 		}
@@ -380,7 +384,7 @@ int AssImporter::ImportToContent(const char* srcPath, const char* destDir)
 			delete m;
 			continue;
 		}
-		res->RegisterMesh(m);          // available immediately (no rescan)
+		AssImporter::Reg([m] { ResDB::getSingleton()->RegisterMesh(m); });   // main-thread when async
 		meshGuids[i] = m->guid;
 		cout << "[Import]\twrote " << out.filename().string() << " (" << m->guid << ")" << endl;
 		++count;
@@ -466,8 +470,12 @@ std::string AssImporter::ImportImage(const char* srcPath, const char* destDir)
 	for (int k = 1; bfs::exists(out, ec); ++k)
 		out = bfs::path(destDir) / (stem + "_" + std::to_string(k) + ".nutex");
 	if (!tex->SaveToFile(out.string())) { delete tex; return std::string(); }
-	ResDB::getSingleton()->RegisterTexture(tex);
-	ResDB::getSingleton()->SetAssetPath(tex->guid, out.string());
+	const std::string outPath = out.string();
+	AssImporter::Reg([tex, outPath]
+	{
+		ResDB::getSingleton()->RegisterTexture(tex);
+		ResDB::getSingleton()->SetAssetPath(tex->guid, outPath);
+	});   // main-thread when async
 	cout << "[Import]\twrote " << out.filename().string() << " (" << w << "x" << h << ")" << endl;
 	return tex->guid;
 }
@@ -481,5 +489,45 @@ bool AssImporter::ImportAny(const char* srcPath, const char* destDir)
 	for (const char* e : kImg)
 		if (ext == e) return !ImportImage(srcPath, destDir).empty();
 	return ImportToContent(srcPath, destDir) > 0;
+}
+
+// --- async import (2.4) --------------------------------------------------------------
+
+// Thread-local defer sink: non-null only inside a WORKER import; a synchronous import
+// running on the game thread applies mutations immediately.
+static thread_local std::vector<boost::function<void()>>* tlDeferSink = nullptr;
+
+void AssImporter::Reg(const boost::function<void()>& f)
+{
+	if (tlDeferSink) tlDeferSink->push_back(f);
+	else f();
+}
+
+void AssImporter::ImportAnyAsync(const std::string& srcPath, const std::string& destDir,
+                                 boost::function<void(bool)> onDone)
+{
+	StatusBar::Set("import", "Importing " + bfs::path(srcPath).filename().string() + "...");
+	AssImporter* self = getSingleton();
+	Jobs::Schedule([self, srcPath, destDir, onDone]()
+	{
+		// Serialize imports: two racing over the same destination names would collide.
+		static boost::mutex importLock;
+		boost::mutex::scoped_lock l(importLock);
+
+		auto defers = std::make_shared<std::vector<boost::function<void()>>>();
+		tlDeferSink = defers.get();
+		bool ok = false;
+		try { ok = self->ImportAny(srcPath.c_str(), destDir.c_str()); }
+		catch (const std::exception& e) { cout << "[Import]	async import threw: " << e.what() << endl; }
+		tlDeferSink = nullptr;
+
+		// Registrations + completion land on the GAME thread (ResDB is not thread-safe).
+		Jobs::RunOnMain([defers, onDone, ok]()
+		{
+			for (auto& f : *defers) f();
+			StatusBar::Remove("import");
+			if (onDone) onDone(ok);
+		});
+	});
 }
 }  // namespace nuke

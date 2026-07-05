@@ -8,6 +8,8 @@
 #include <assimp/postprocess.h>
 #include <API/Model/resdb.h>
 #include <API/Model/MeshRenderer.h>
+#include <boost/function.hpp>
+#include <vector>
 
 namespace nuke {
 
@@ -39,6 +41,19 @@ public:
 	// Dispatch by file extension: image -> ImportImage, otherwise -> ImportToContent. Returns true on
 	// any success. Used by the browser Import button + Explorer drag&drop.
 	bool ImportAny(const char* srcPath, const char* destDir);
+
+	// ASYNC import on the core job system (2.4): the heavy work (assimp parsing, BC
+	// compression, file writes) runs on a WORKER; every ResDB mutation the import
+	// produces is deferred and applied on the MAIN thread (ResDB is not thread-safe),
+	// then onDone(ok) fires there too. Imports are serialized among themselves.
+	void ImportAnyAsync(const std::string& srcPath, const std::string& destDir,
+	                    boost::function<void(bool)> onDone = boost::function<void(bool)>());
+
+	// INTERNAL: apply a ResDB mutation now (sync import) or queue it for the main
+	// thread (async import worker) — the sink is THREAD-LOCAL, so a synchronous import
+	// on the game thread never crosses wires with a worker import. Used by the free
+	// helper functions in assimporter.cpp too.
+	static void Reg(const boost::function<void()>& f);
 };
 }  // namespace nuke
 
