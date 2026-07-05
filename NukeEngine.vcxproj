@@ -259,6 +259,7 @@
     <ClCompile Include="src\reflect\Reflect.gen.cpp" />
     <ClCompile Include="src\API\iGUI.cpp" />
     <ClCompile Include="src\API\Model\Camera.cpp" />
+    <ClCompile Include="src\API\Model\StatusBar.cpp" />
     <ClCompile Include="src\API\Model\Color.cpp" />
     <ClCompile Include="src\API\Model\Component.cpp" />
     <ClCompile Include="src\API\Model\Atom.cpp" />

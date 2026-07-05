@@ -341,6 +341,12 @@ public:
     virtual void uiViewportRender(void* nativeHandle, int w, int h, const NukeUIDrawData& data) {}
     // The secondary window is being destroyed — release its swap chain.
     virtual void uiViewportDestroy(void* nativeHandle) {}
+
+    // --- frame statistics (editor status bar, roadmap 2.3) ---------------------------
+    // Scene geometry submitted during the LAST completed frame: draw calls + triangles
+    // (world/gbuffer/probe/shadow passes; UI and post-process excluded). Backends that
+    // don't count report zeros.
+    virtual void getFrameStats(int& drawCalls, int& triangles) { drawCalls = 0; triangles = 0; }
 //    virtual ~iRender(){
 //    }
 };
