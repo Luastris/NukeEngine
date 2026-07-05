@@ -492,7 +492,7 @@ static void CollectCameras(bc::list<Atom*>& gos, std::vector<Camera*>& out)
 	for (auto go : gos)
 	{
 		if (auto* c = go->GetComponent<Camera>())
-			out.push_back(c);
+			if (c->enabled) out.push_back(c);   // a disabled camera renders nothing
 		if (go->children.size() > 0)
 			CollectCameras(go->children, out);
 	}
