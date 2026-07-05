@@ -37,6 +37,8 @@ public:
 	static void Init(int workers = -1, bool pinCores = true);
 	static void Shutdown();
 	static int  WorkerCount();
+	static int  Pending();   // jobs queued, not yet picked up (status-bar jobs list)
+	static int  Busy();      // jobs executing right now
 
 	// Queue a job on the pool.
 	static JobHandle Schedule(const boost::function<void()>& fn);

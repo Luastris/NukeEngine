@@ -17,9 +17,40 @@
 
 #include "API/Model/Jobs.h"        // async import (2.4)
 #include "API/Model/StatusBar.h"   // live import status
+#include <boost/atomic.hpp>
 #include <boost/thread/mutex.hpp>
 
 namespace nuke {
+
+// --- live import progress (worker -> status bar) ----------------------------------------
+// Only an ASYNC import reports: ImportAnyAsync installs this thread-local sink with its
+// status-bar entry key; the conversion stages feed it. Work units = every texture
+// conversion + every material + every mesh + the prefab, so the fraction is honest for
+// any model. A synchronous game-thread import leaves it null — no bar entry, no cost.
+struct ImportProgress
+{
+	std::string key;    // StatusBar entry id (unique per queued import)
+	std::string name;   // source filename (label prefix)
+	int done  = 0;      // completed units
+	int total = 0;      // 0 until the scene was counted -> indeterminate bar
+};
+static thread_local ImportProgress* tlProg = nullptr;
+
+// Report the current unit's label + its inner fraction [0..1].
+static void ProgStage(const std::string& label, float sub = 0.0f)
+{
+	if (!tlProg) return;
+	if (tlProg->total <= 0)
+	{
+		StatusBar::Set(tlProg->key, tlProg->name + " — " + label, StatusBar::kIndeterminate);
+		return;
+	}
+	if (sub < 0.0f) sub = 0.0f;
+	if (sub > 1.0f) sub = 1.0f;
+	StatusBar::Set(tlProg->key, tlProg->name + " — " + label,
+	               ((float)tlProg->done + sub) / (float)tlProg->total);
+}
+static void ProgUnitDone() { if (tlProg) ++tlProg->done; }
 
 // BC-compress one RGBA level (any size; partial edge blocks clamp) -> appended to `out`. 8=BC1, 16=BC3.
 static void BCLevel(std::vector<unsigned char>& out, const unsigned char* rgba, int w, int h, int blockBytes, int alpha)
@@ -95,7 +126,11 @@ static void BC5Level(std::vector<unsigned char>& out, const unsigned char* rgba,
 		}
 }
 
-static void CompressToBC(Texture* tex, const std::vector<unsigned char>& rgba0, int w0, int h0, int usage = Texture::UsageColor)
+// `prog` (optional) gets the compression fraction [0..1], weighted by each mip's pixel
+// count — level 0 is ~3/4 of the real work, so the bar moves honestly, not per-level.
+static void CompressToBC(Texture* tex, const std::vector<unsigned char>& rgba0, int w0, int h0,
+                         int usage = Texture::UsageColor,
+                         const boost::function<void(float)>& prog = boost::function<void(float)>())
 {
 	if (w0 <= 0 || h0 <= 0) { tex->format = Texture::FMT_RGBA8; tex->mipCount = 1; tex->width = w0; tex->height = h0; tex->pixels = rgba0; return; }
 	const bool bc5 = (usage == Texture::UsageNormal);   // normal maps -> BC5 (RG), z reconstructed in-shader
@@ -108,12 +143,24 @@ static void CompressToBC(Texture* tex, const std::vector<unsigned char>& rgba0, 
 	int w, h;
 	std::vector<unsigned char> cur = PadTo4(rgba0, w0, h0, w, h);   // top level padded to a multiple of 4
 	tex->width = w; tex->height = h;
+	double totalPx = 0.0, donePx = 0.0;
+	if (prog)
+	{
+		for (int tw = w, th = h;;)   // pixel total across the whole mip chain
+		{
+			totalPx += (double)tw * th;
+			if (tw == 1 && th == 1) break;
+			tw = tw > 1 ? tw / 2 : 1; th = th > 1 ? th / 2 : 1;
+		}
+		prog(0.0f);
+	}
 	int mips = 0;
 	while (true)
 	{
 		if (bc5) BC5Level(tex->pixels, cur.data(), w, h);
 		else     BCLevel(tex->pixels, cur.data(), w, h, blockBytes, alpha);
 		++mips;
+		if (prog) { donePx += (double)w * h; prog((float)(donePx / totalPx)); }
 		if (w == 1 && h == 1) break;
 		const int nw = w > 1 ? w / 2 : 1, nh = h > 1 ? h / 2 : 1;
 		std::vector<unsigned char> nx((size_t)nw * nh * 4);
@@ -243,6 +290,14 @@ static std::string ConvertTexture(const aiScene* sc, const std::string& texRef,
                                   std::map<std::string, std::string>& cache, int usage = Texture::UsageColor)
 {
 	if (texRef.empty()) return std::string();
+
+	// One progress unit per call, WHATEVER the exit path (cache hits and failures were
+	// counted into the total too — see the pre-scan in ImportToContent).
+	struct UnitGuard { ~UnitGuard() { ProgUnitDone(); } } unitGuard;
+	const std::string texLabel = "texture " +
+		(texRef[0] == '*' ? std::string("(embedded)") : bfs::path(texRef).filename().string());
+	ProgStage(texLabel);
+
 	std::string key = texRef + "|" + std::to_string(usage);   // same image in two roles -> distinct assets/treatment
 	auto cit = cache.find(key);
 	if (cit != cache.end()) return cit->second;
@@ -289,7 +344,8 @@ static std::string ConvertTexture(const aiScene* sc, const std::string& texRef,
 	Texture* tex = new Texture();
 	tex->guid   = ResDB::NewGuid();
 	tex->usage  = usage;             // authoritative from the assimp texture type
-	CompressToBC(tex, rgba, w, h, usage);   // BC1/BC3 (or BC5 for normals) + mip chain
+	CompressToBC(tex, rgba, w, h, usage,
+	             [&texLabel](float f) { ProgStage(texLabel, f); });   // BC1/BC3/BC5 + mip chain
 
 	std::string stem = SafeStem(bfs::path(texRef).stem().string().c_str());
 	boost::system::error_code ec;
@@ -306,12 +362,33 @@ static std::string ConvertTexture(const aiScene* sc, const std::string& texRef,
 
 int AssImporter::ImportToContent(const char* srcPath, const char* destDir)
 {
+	ProgStage("parsing...");   // assimp is one opaque stage -> indeterminate bar
 	Assimp::Importer importer;
 	const aiScene* sc = importer.ReadFile(srcPath, aiProcessPreset_TargetRealtime_MaxQuality);
 	if (!sc)
 	{
 		cout << "[Import]\t" << importer.GetErrorString() << endl;
 		return 0;
+	}
+
+	// Progress total: mirror the conversion loops below — one unit per texture slot that
+	// WILL be converted (non-empty ref), per material, per mesh, plus the prefab.
+	if (tlProg)
+	{
+		int texUnits = 0;
+		for (unsigned int i = 0; i < sc->mNumMaterials; ++i)
+		{
+			aiMaterial* am = sc->mMaterials[i];
+			auto has = [am](aiTextureType t) { aiString s; return am->GetTexture(t, 0, &s) == AI_SUCCESS && s.length > 0; };
+			if (has(aiTextureType_DIFFUSE))  ++texUnits;
+			if (has(aiTextureType_NORMALS))  ++texUnits;
+			if (has(aiTextureType_SPECULAR)) ++texUnits;
+			if (has(aiTextureType_METALNESS) || has(aiTextureType_DIFFUSE_ROUGHNESS) || has(aiTextureType_UNKNOWN)) ++texUnits;
+			if (has(aiTextureType_AMBIENT_OCCLUSION) || has(aiTextureType_LIGHTMAP)) ++texUnits;
+			if (has(aiTextureType_EMISSIVE)) ++texUnits;
+		}
+		tlProg->done  = 0;
+		tlProg->total = texUnits + (int)sc->mNumMaterials + (int)sc->mNumMeshes + 1;
 	}
 
 	boost::system::error_code ec;
@@ -324,6 +401,7 @@ int AssImporter::ImportToContent(const char* srcPath, const char* destDir)
 	std::vector<std::string> matGuids(sc->mNumMaterials);
 	for (unsigned int i = 0; i < sc->mNumMaterials; ++i)
 	{
+		ProgStage("material " + std::to_string(i + 1) + "/" + std::to_string(sc->mNumMaterials));
 		aiMaterial* am = sc->mMaterials[i];
 		Material* mt = new Material();
 		mt->ImportAiMaterial(am);
@@ -362,6 +440,7 @@ int AssImporter::ImportToContent(const char* srcPath, const char* destDir)
 			cout << "[Import]\twrote " << mout.filename().string() << " (" << mt->guid << ")" << endl;
 		}
 		else { cout << "[Import]\tfailed to write " << mout.filename().string() << endl; delete mt; }
+		ProgUnitDone();
 	}
 
 	// 1) Every mesh -> a .numesh asset; remember its GUID per mesh index.
@@ -369,6 +448,7 @@ int AssImporter::ImportToContent(const char* srcPath, const char* destDir)
 	int count = 0;
 	for (unsigned int i = 0; i < sc->mNumMeshes; ++i)
 	{
+		ProgStage("mesh " + std::to_string(i + 1) + "/" + std::to_string(sc->mNumMeshes));
 		Mesh* m = new Mesh();
 		m->ImportAIMesh(sc->mMeshes[i]);
 		m->guid = ResDB::NewGuid();
@@ -382,15 +462,18 @@ int AssImporter::ImportToContent(const char* srcPath, const char* destDir)
 		{
 			cout << "[Import]\tfailed to write " << out.filename().string() << endl;
 			delete m;
+			ProgUnitDone();
 			continue;
 		}
 		AssImporter::Reg([m] { ResDB::getSingleton()->RegisterMesh(m); });   // main-thread when async
 		meshGuids[i] = m->guid;
 		cout << "[Import]\twrote " << out.filename().string() << " (" << m->guid << ")" << endl;
 		++count;
+		ProgUnitDone();
 	}
 
 	// 2) The node hierarchy -> one .nuprefab that references those meshes + materials by GUID.
+	ProgStage("prefab");
 	Atom* root = BuildPrefabNode(sc->mRootNode, sc, meshGuids, matGuids);
 	std::string base = SafeStem(bfs::path(srcPath).stem().string().c_str());
 	bfs::path pf = bfs::path(destDir) / (base + ".nuprefab");
@@ -398,6 +481,7 @@ int AssImporter::ImportToContent(const char* srcPath, const char* destDir)
 		pf = bfs::path(destDir) / (base + "_" + std::to_string(n) + ".nuprefab");
 	if (SavePrefab(root, pf.string()))
 		cout << "[Import]\twrote " << pf.filename().string() << endl;
+	ProgUnitDone();
 	// root is persisted as the prefab; not added to any world here.
 
 	cout << "[Import]\tconverted " << count << " mesh(es) + prefab from "
@@ -409,6 +493,9 @@ std::string AssImporter::ImportImage(const char* srcPath, const char* destDir)
 {
 	std::string ext = bfs::path(srcPath).extension().string();
 	for (char& c : ext) c = (char)std::tolower((unsigned char)c);
+
+	if (tlProg) { tlProg->done = 0; tlProg->total = 1; }   // one unit: this image
+	ProgStage("reading");
 
 	Texture* tex = new Texture();
 	tex->guid = ResDB::NewGuid();
@@ -446,6 +533,8 @@ std::string AssImporter::ImportImage(const char* srcPath, const char* destDir)
 		int pw = 0, ph = 0;
 		for (int k = 0; k < frames; ++k)
 		{
+			ProgStage("compressing frame " + std::to_string(k + 1) + "/" + std::to_string(frames),
+			          (float)k / (float)frames);
 			std::vector<unsigned char> frame(px + (size_t)k * fb, px + (size_t)(k + 1) * fb);
 			std::vector<unsigned char> padded = PadTo4(frame, w, h, pw, ph);
 			BCLevel(tex->pixels, padded.data(), pw, ph, gbb, galpha);
@@ -461,7 +550,8 @@ std::string AssImporter::ImportImage(const char* srcPath, const char* destDir)
 		if (!px) { delete tex; cout << "[Import]\timage load failed: " << srcPath << endl; return std::string(); }
 		std::vector<unsigned char> rgba(px, px + (size_t)w * h * 4);
 		stbi_image_free(px);
-		CompressToBC(tex, rgba, w, h, tex->usage);   // BC1/BC3 (or BC5 for normals) + mip chain (static images)
+		CompressToBC(tex, rgba, w, h, tex->usage,
+		             [](float f) { ProgStage("compressing", f); });   // BC1/BC3/BC5 + mip chain (static images)
 	}
 
 	std::string stem = SafeStem(bfs::path(srcPath).stem().string().c_str());
@@ -506,26 +596,37 @@ void AssImporter::Reg(const boost::function<void()>& f)
 void AssImporter::ImportAnyAsync(const std::string& srcPath, const std::string& destDir,
                                  boost::function<void(bool)> onDone)
 {
-	StatusBar::Set("import", "Importing " + bfs::path(srcPath).filename().string() + "...");
+	// Unique status-bar entry per queued import: several drops show up as several jobs
+	// (queued ones sit at "queued" until the serialize lock lets them run).
+	static boost::atomic<int> seq(0);
+	const std::string key  = "import#" + std::to_string(++seq);
+	const std::string name = bfs::path(srcPath).filename().string();
+	StatusBar::Set(key, name + " — queued", StatusBar::kIndeterminate);
+
 	AssImporter* self = getSingleton();
-	Jobs::Schedule([self, srcPath, destDir, onDone]()
+	Jobs::Schedule([self, srcPath, destDir, onDone, key, name]()
 	{
 		// Serialize imports: two racing over the same destination names would collide.
 		static boost::mutex importLock;
 		boost::mutex::scoped_lock l(importLock);
 
 		auto defers = std::make_shared<std::vector<boost::function<void()>>>();
+		ImportProgress prog;
+		prog.key = key; prog.name = name;
+		tlProg = &prog;
 		tlDeferSink = defers.get();
 		bool ok = false;
 		try { ok = self->ImportAny(srcPath.c_str(), destDir.c_str()); }
 		catch (const std::exception& e) { cout << "[Import]	async import threw: " << e.what() << endl; }
 		tlDeferSink = nullptr;
+		tlProg = nullptr;
 
 		// Registrations + completion land on the GAME thread (ResDB is not thread-safe).
-		Jobs::RunOnMain([defers, onDone, ok]()
+		StatusBar::Set(key, name + " — registering", 1.0f);
+		Jobs::RunOnMain([defers, onDone, ok, key]()
 		{
 			for (auto& f : *defers) f();
-			StatusBar::Remove("import");
+			StatusBar::Remove(key);
 			if (onDone) onDone(ok);
 		});
 	});

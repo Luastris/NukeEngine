@@ -1,5 +1,6 @@
 #include "API/Model/Jobs.h"
 #include "config.h"
+#include <boost/atomic.hpp>
 #include <boost/thread.hpp>
 #include <boost/thread/mutex.hpp>
 #include <boost/thread/condition_variable.hpp>
@@ -43,6 +44,7 @@ struct Pool
 	boost::condition_variable qcv;
 	bool  stop = false;
 	bool  inited = false;
+	boost::atomic<int> busy{ 0 };   // jobs executing right now (status-bar jobs list)
 
 	// main-thread delivery queue (RunOnMain -> PumpMain)
 	boost::mutex                            mm;
@@ -71,9 +73,11 @@ void WorkerLoop(int core)
 			job = g_pool.queue.front();
 			g_pool.queue.pop_front();
 		}
+		++g_pool.busy;
 		try { if (job.second) job.second(); }
 		catch (const std::exception& e) { std::cout << "[Jobs]\t\tjob threw: " << e.what() << std::endl; }
 		catch (...)                     { std::cout << "[Jobs]\t\tjob threw (unknown)" << std::endl; }
+		--g_pool.busy;
 		if (job.first)
 		{
 			boost::mutex::scoped_lock l(job.first->m);
@@ -148,6 +152,17 @@ void Jobs::Shutdown()
 int Jobs::WorkerCount()
 {
 	return (int)g_pool.workers.size();
+}
+
+int Jobs::Pending()
+{
+	boost::mutex::scoped_lock l(g_pool.qm);
+	return (int)g_pool.queue.size();
+}
+
+int Jobs::Busy()
+{
+	return g_pool.busy.load(boost::memory_order_relaxed);
 }
 
 JobHandle Jobs::Schedule(const boost::function<void()>& fn)
