@@ -74,6 +74,39 @@ void ResDB::RegisterShader(Shader* s)
 	if (!s->guid.empty()) shaderByGuid[s->guid] = s;
 }
 
+void ResDB::RegisterClip(AnimClip* c)
+{
+	if (!c) return;
+	clips.push_back(c);
+	if (!c->guid.empty()) clipByGuid[c->guid] = c;
+}
+
+AnimClip* ResDB::GetClip(const std::string& guid)
+{
+	auto it = clipByGuid.find(guid);
+	return (it != clipByGuid.end()) ? it->second : nullptr;
+}
+
+AnimClip* ResDB::GetClipByName(const std::string& name)
+{
+	for (AnimClip* c : clips)
+		if (c && c->name == name) return c;
+	return nullptr;
+}
+
+void ResDB::RegisterBoneMap(BoneMap* b)
+{
+	if (!b) return;
+	boneMaps.push_back(b);
+	if (!b->guid.empty()) boneMapByGuid[b->guid] = b;
+}
+
+BoneMap* ResDB::GetBoneMap(const std::string& guid)
+{
+	auto it = boneMapByGuid.find(guid);
+	return (it != boneMapByGuid.end()) ? it->second : nullptr;
+}
+
 Shader* ResDB::GetShader(const std::string& guid)
 {
 	auto it = shaderByGuid.find(guid);
@@ -255,6 +288,8 @@ void ResDB::RemoveByGuid(const std::string& guid)
 	if (auto it = matByGuid.find(guid);    it != matByGuid.end())    { materials.remove(it->second);  matByGuid.erase(it); }
 	if (auto it = texByGuid.find(guid);    it != texByGuid.end())    { textures.remove(it->second);   texByGuid.erase(it); }
 	if (auto it = shaderByGuid.find(guid); it != shaderByGuid.end()) { shaders.remove(it->second);    shaderByGuid.erase(it); }
+	if (auto it = clipByGuid.find(guid);   it != clipByGuid.end())   { clips.remove(it->second);      clipByGuid.erase(it); }
+	if (auto it = boneMapByGuid.find(guid); it != boneMapByGuid.end()) { boneMaps.remove(it->second); boneMapByGuid.erase(it); }
 	if (auto it = pathByGuid.find(guid);   it != pathByGuid.end())   { guidByPath.erase(it->second);  pathByGuid.erase(it); }
 }
 
@@ -314,6 +349,24 @@ void ResDB::LoadContentDir(const std::string& dir)
 			RegisterTexture(tx);
 			SetAssetPath(tx->guid, it->path().string());
 			std::cout << "[ResDB]\tloaded texture '" << tx->guid << "' (" << tx->width << "x" << tx->height << ")" << std::endl;
+		}
+		else if (ext == ".nuanim")
+		{
+			AnimClip* c = AnimClip::LoadFromFile(it->path().string());
+			if (!c) { std::cout << "[ResDB]\tfailed to load " << it->path().filename().string() << std::endl; continue; }
+			if (c->guid.empty() || clipByGuid.count(c->guid)) { delete c; continue; }
+			RegisterClip(c);
+			SetAssetPath(c->guid, it->path().string());
+			std::cout << "[ResDB]\tloaded clip '" << c->name << "' (" << c->duration << " s)" << std::endl;
+		}
+		else if (ext == ".nubonemap")
+		{
+			BoneMap* b = BoneMap::LoadFromFile(it->path().string());
+			if (!b) { std::cout << "[ResDB]\tfailed to load " << it->path().filename().string() << std::endl; continue; }
+			if (b->guid.empty() || boneMapByGuid.count(b->guid)) { delete b; continue; }
+			RegisterBoneMap(b);
+			SetAssetPath(b->guid, it->path().string());
+			std::cout << "[ResDB]\tloaded bone map '" << b->name << "' (" << b->map.size() << " entries)" << std::endl;
 		}
 		else if (ext == ".nuprefab")
 		{

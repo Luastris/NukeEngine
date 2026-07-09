@@ -1,5 +1,10 @@
 #include "API/Model/Mesh.h"
+#include <assimp/scene.h>
+#include <algorithm>
+#include <array>
 #include <vector>
+#include <map>
+#include <set>
 #include <cmath>
 #include <cstdint>
 #include <boost/filesystem/fstream.hpp>
@@ -33,8 +38,93 @@ void Mesh::EnsureBounds() {
 	boundsValid = true;
 }
 
-void Mesh::ImportAIMesh(aiMesh* mesh) {
+// assimp matrices are ROW-major; glm/our storage is COLUMN-major -> transpose on copy.
+static void AiToCol16(const aiMatrix4x4& m, float out[16])
+{
+	const float* s = &m.a1;                       // row-major 4x4
+	for (int r = 0; r < 4; ++r)
+		for (int c = 0; c < 4; ++c)
+			out[c * 4 + r] = s[r * 4 + c];
+}
+
+// Build the skeleton for `mesh`: its bone nodes + every node on the root->bone paths
+// (clips animate intermediates too), in DFS pre-order so parent index < child index.
+static void BuildSkeleton(aiMesh* mesh, const aiScene* sc, std::vector<MeshBone>& outBones,
+                          std::map<std::string, int>& outIndex)
+{
+	std::set<const aiNode*> needed;
+	for (unsigned int b = 0; b < mesh->mNumBones; ++b)
+	{
+		const aiNode* n = sc->mRootNode->FindNode(mesh->mBones[b]->mName);
+		for (; n; n = n->mParent) needed.insert(n);   // the bone + all ancestors
+	}
+	if (needed.empty()) return;
+
+	struct Walker
+	{
+		std::set<const aiNode*>& needed;
+		std::vector<MeshBone>&   bones;
+		std::map<std::string, int>& index;
+		void Walk(const aiNode* n, int parent)
+		{
+			int self = parent;
+			if (needed.count(n))
+			{
+				MeshBone mb;
+				mb.name   = n->mName.C_Str();
+				mb.parent = parent;
+				for (int k = 0; k < 16; ++k) mb.invBind[k] = (k % 5 == 0) ? 1.0f : 0.0f;   // identity until aiBone fills it
+				aiVector3D p, s; aiQuaternion r;
+				n->mTransformation.Decompose(s, r, p);
+				mb.localPos[0] = p.x; mb.localPos[1] = p.y; mb.localPos[2] = p.z;
+				mb.localRot[0] = r.x; mb.localRot[1] = r.y; mb.localRot[2] = r.z; mb.localRot[3] = r.w;
+				mb.localScale[0] = s.x; mb.localScale[1] = s.y; mb.localScale[2] = s.z;
+				self = (int)bones.size();
+				index[mb.name] = self;
+				bones.push_back(mb);
+			}
+			for (unsigned int c = 0; c < n->mNumChildren; ++c) Walk(n->mChildren[c], self);
+		}
+	} w{ needed, outBones, outIndex };
+	w.Walk(sc->mRootNode, -1);
+
+	for (unsigned int b = 0; b < mesh->mNumBones; ++b)
+	{
+		auto it = outIndex.find(mesh->mBones[b]->mName.C_Str());
+		if (it != outIndex.end()) AiToCol16(mesh->mBones[b]->mOffsetMatrix, outBones[it->second].invBind);
+	}
+}
+
+void Mesh::ImportAIMesh(aiMesh* mesh, const aiScene* scene) {
 	numVerts = mesh->mNumFaces * 3;
+
+	// --- skin: per-ORIGINAL-vertex weights first (expanded to the soup with the faces) ---
+	std::map<std::string, int> boneIdx;
+	std::vector<std::array<std::pair<int, float>, 4>> vw;   // per original vertex: up to 4 (bone, weight)
+	if (scene && mesh->HasBones())
+	{
+		BuildSkeleton(mesh, scene, bones, boneIdx);
+		if (!bones.empty())
+		{
+			vw.assign(mesh->mNumVertices, { { { 0, 0.f }, { 0, 0.f }, { 0, 0.f }, { 0, 0.f } } });
+			for (unsigned int b = 0; b < mesh->mNumBones; ++b)
+			{
+				auto bi = boneIdx.find(mesh->mBones[b]->mName.C_Str());
+				if (bi == boneIdx.end()) continue;
+				for (unsigned int wi = 0; wi < mesh->mBones[b]->mNumWeights; ++wi)
+				{
+					const aiVertexWeight& aw = mesh->mBones[b]->mWeights[wi];
+					if (aw.mVertexId >= vw.size() || aw.mWeight <= 0.0f) continue;
+					auto& slots = vw[aw.mVertexId];
+					int weakest = 0;
+					for (int k = 1; k < 4; ++k) if (slots[k].second < slots[weakest].second) weakest = k;
+					if (aw.mWeight > slots[weakest].second) slots[weakest] = { bi->second, aw.mWeight };
+				}
+			}
+			boneIndex  = new unsigned short[(size_t)numVerts * 4];
+			boneWeight = new float[(size_t)numVerts * 4];
+		}
+	}
 
 	vertexArray = new float[mesh->mNumFaces * 3 * 3];
 	normalArray = new float[mesh->mNumFaces * 3 * 3];
@@ -62,6 +152,19 @@ void Mesh::ImportAIMesh(aiMesh* mesh) {
 			aiVector3D pos = mesh->mVertices[idx];
 			memcpy(vertexArray, &pos, sizeof(float) * 3);
 			vertexArray += 3;
+
+			if (boneIndex)   // expand this original vertex's (normalized) bindings into the soup slot
+			{
+				const size_t slot = ((size_t)i * 3 + j) * 4;
+				const auto& sw = vw[idx];
+				float sum = sw[0].second + sw[1].second + sw[2].second + sw[3].second;
+				if (sum <= 0.0f) sum = 1.0f;
+				for (int k = 0; k < 4; ++k)
+				{
+					boneIndex[slot + k]  = (unsigned short)std::min(sw[k].first, 65535);
+					boneWeight[slot + k] = sw[k].second / sum;
+				}
+			}
 		}
 	}
 
@@ -162,9 +265,13 @@ Mesh* Mesh::CreateSphere() {
 // ---- native .numesh (binary) -------------------------------------------------
 // Layout: magic "NUMESH\0\0" | u32 version | u32 nameLen + name | u32 guidLen + guid |
 //         i32 numVerts | f32 pos[3N] | u8 hasNormals (+ f32 nrm[3N]) | u8 hasUV (+ f32 uv[2N])
+// v2 appends the SKIN block: u8 hasSkin { u32 boneCount, per bone: str name | i32 parent |
+//         f32 invBind[16] | f32 localPos[3] | f32 localRot[4] | f32 localScale[3];
+//         boneIndex[4N] | f32 boneWeight[4N] }.  v1 files load with no skin.
+// v3: boneIndex widened u8 -> u16 (FBX helper-node skeletons exceed 255 joints).
 namespace {
 	const char  kMagic[8] = { 'N','U','M','E','S','H','\0','\0' };
-	const uint32_t kVersion = 1;
+	const uint32_t kVersion = 3;
 	template <class T> void wr(bfs::ofstream& o, const T& v) { o.write((const char*)&v, sizeof(T)); }
 	template <class T> void rd(bfs::ifstream& i, T& v)       { i.read((char*)&v, sizeof(T)); }
 	void wrStr(bfs::ofstream& o, const std::string& s) { uint32_t n = (uint32_t)s.size(); wr(o, n); if (n) o.write(s.data(), n); }
@@ -186,6 +293,22 @@ bool Mesh::SaveToFile(const std::string& path) const
 	if (hasN) o.write((const char*)normalArray, sizeof(float) * 3 * n);
 	uint8_t hasUV = (uvArray != nullptr) ? 1 : 0; wr(o, hasUV);
 	if (hasUV) o.write((const char*)uvArray, sizeof(float) * 2 * n);
+	uint8_t hasSkin = HasSkin() ? 1 : 0; wr(o, hasSkin);
+	if (hasSkin)
+	{
+		uint32_t bc = (uint32_t)bones.size(); wr(o, bc);
+		for (const MeshBone& b : bones)
+		{
+			wrStr(o, b.name);
+			int32_t par = b.parent; wr(o, par);
+			o.write((const char*)b.invBind,    sizeof(float) * 16);
+			o.write((const char*)b.localPos,   sizeof(float) * 3);
+			o.write((const char*)b.localRot,   sizeof(float) * 4);
+			o.write((const char*)b.localScale, sizeof(float) * 3);
+		}
+		o.write((const char*)boneIndex,  sizeof(unsigned short) * 4 * n);
+		o.write((const char*)boneWeight, sizeof(float) * 4 * n);
+	}
 	return (bool)o;
 }
 
@@ -212,6 +335,36 @@ Mesh* Mesh::LoadFromFile(const std::string& path)
 	if (hasN && n > 0) { m->normalArray = new float[3 * n]; i.read((char*)m->normalArray, sizeof(float) * 3 * n); }
 	uint8_t hasUV = 0; rd(i, hasUV);
 	if (hasUV && n > 0) { m->uvArray = new float[2 * n]; i.read((char*)m->uvArray, sizeof(float) * 2 * n); }
+	if (version >= 2)   // skin block (v1 files simply have none)
+	{
+		uint8_t hasSkin = 0; rd(i, hasSkin);
+		if (hasSkin && n > 0)
+		{
+			uint32_t bc = 0; rd(i, bc);
+			m->bones.resize(bc);
+			for (uint32_t b = 0; b < bc; ++b)
+			{
+				MeshBone& mb = m->bones[b];
+				mb.name = rdStr(i);
+				int32_t par = -1; rd(i, par); mb.parent = par;
+				i.read((char*)mb.invBind,    sizeof(float) * 16);
+				i.read((char*)mb.localPos,   sizeof(float) * 3);
+				i.read((char*)mb.localRot,   sizeof(float) * 4);
+				i.read((char*)mb.localScale, sizeof(float) * 3);
+			}
+			m->boneIndex  = new unsigned short[(size_t)n * 4];
+			m->boneWeight = new float[(size_t)n * 4];
+			if (version >= 3)
+				i.read((char*)m->boneIndex, sizeof(unsigned short) * 4 * n);
+			else   // v2 stored u8 indices — widen on load
+			{
+				std::vector<unsigned char> old((size_t)n * 4);
+				i.read((char*)old.data(), old.size());
+				for (size_t k = 0; k < old.size(); ++k) m->boneIndex[k] = old[k];
+			}
+			i.read((char*)m->boneWeight, sizeof(float) * 4 * n);
+		}
+	}
 	if (!i && !i.eof()) { delete m; return nullptr; }
 	return m;
 }

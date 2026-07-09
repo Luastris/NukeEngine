@@ -19,8 +19,7 @@ surface to shade in a reflection, so they must not get an RT hit group. Provide 
 shader you want reflected faithfully; otherwise the standard PBR hit shader is used.
 
 Material maps (base color, normal, metallic-roughness, occlusion, emissive, specular) are honoured in **both** the
-raster pass and RT reflections (bindless), including analytic tangent-space normal mapping in RT. Per-object
-`MeshRenderer → In Reflections` excludes an object from reflections while it still casts shadows.
+raster pass and RT reflections (bindless), including analytic tangent-space normal mapping in RT.
 
 ## Get it
 

@@ -348,6 +348,12 @@ public:
     // don't count report zeros.
     virtual void getFrameStats(int& drawCalls, int& triangles) { drawCalls = 0; triangles = 0; }
 
+    // Drop every cached GPU resource built from this mesh (buffers, BLAS). MUST be called
+    // before a Mesh object is deleted (asset removal, skinned-instance release) — a stale
+    // cache entry keyed by a freed pointer serves WRONG buffers when the allocator reuses
+    // the address (render safety).
+    virtual void invalidateMesh(Mesh* m) {}
+
     // --- runtime-GUI input (roadmap 2.5) ----------------------------------------------
     // Polled by the runtime GUI backend (NukeGUI) once per frame. The queues DRAIN on
     // fetch and are size-capped inside the backend, so an idle consumer can't leak.

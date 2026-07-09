@@ -961,7 +961,11 @@ void World::Render(iRender* r)
 	{
 		r->beginRTScene();
 		std::vector<DrawItem> rtItems; CollectMeshes(*hierarchy, rtItems);
-		for (auto& it : rtItems) if (it.blend == 0) r->addRTInstance(it.mesh, it.mat, it.pos, it.quat, it.scale, it.inReflections);
+		// Dynamic meshes (skinned instances) provide a static stand-in for BLAS/TLAS —
+		// per-frame BLAS rebuilds are a non-goal (rtProxy = the bind-pose source).
+		for (auto& it : rtItems) if (it.blend == 0)
+			r->addRTInstance(it.mesh->rtProxy ? it.mesh->rtProxy : it.mesh,
+			                 it.mat, it.pos, it.quat, it.scale, it.inReflections);
 		r->buildRTScene();
 	}
 

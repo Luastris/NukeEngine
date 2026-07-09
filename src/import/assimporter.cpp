@@ -2,6 +2,8 @@
 #include "API/Model/Prefab.h"
 #include "API/Model/Transform.h"
 #include "API/Model/Texture.h"
+#include "API/Model/AnimClip.h"
+#include "API/Model/Animator.h"
 #include <boost/filesystem.hpp>
 #include <vector>
 #include <string>
@@ -253,10 +255,12 @@ static std::string SafeStem(const char* in)
 }
 
 // Rebuild the assimp node tree as an Atom hierarchy, with each node's transform and a
-// MeshRenderer (referencing the converted mesh by GUID) per mesh on the node.
+// MeshRenderer (referencing the converted mesh by GUID) per mesh on the node. Skinned
+// meshes also get an Animator wired to the model's first imported clip (3.1).
 static Atom* BuildPrefabNode(aiNode* node, const aiScene* sc,
                              const std::vector<std::string>& meshGuids,
-                             const std::vector<std::string>& matGuids)
+                             const std::vector<std::string>& matGuids,
+                             const std::string& firstClipGuid = std::string())
 {
 	Atom* go = new Atom(node->mName.C_Str());
 
@@ -276,10 +280,16 @@ static Atom* BuildPrefabNode(aiNode* node, const aiScene* sc,
 		unsigned int matIdx = sc->mMeshes[mi]->mMaterialIndex;
 		if (matIdx < matGuids.size()) mr->matGuid = matGuids[matIdx];
 		child->AddComponent(mr);
+		if (sc->mMeshes[mi]->HasBones())   // skinned: ready-to-use Animator (clip may be picked later)
+		{
+			Animator* an = new Animator();
+			an->clipGuid = firstClipGuid;   // "" when the file carries no clips
+			child->AddComponent(an);
+		}
 		go->AddChild(child);
 	}
 	for (unsigned int i = 0; i < node->mNumChildren; ++i)
-		go->AddChild(BuildPrefabNode(node->mChildren[i], sc, meshGuids, matGuids));
+		go->AddChild(BuildPrefabNode(node->mChildren[i], sc, meshGuids, matGuids, firstClipGuid));
 	return go;
 }
 
@@ -364,6 +374,12 @@ int AssImporter::ImportToContent(const char* srcPath, const char* destDir)
 {
 	ProgStage("parsing...");   // assimp is one opaque stage -> indeterminate bar
 	Assimp::Importer importer;
+	// COLLAPSE FBX transform pivots: without this assimp splits every FBX node into
+	// $AssimpFbx$_Translation/PreRotation/... pseudo-nodes — skeletons balloon (mixamo:
+	// 65 joints -> 700 nodes) and, worse, animation channels land on pseudo-node names
+	// that DIFFER between files, so a clip from one FBX never binds to a skeleton
+	// imported from another. Collapsed, channels and bones use the REAL joint names.
+	importer.SetPropertyBool(AI_CONFIG_IMPORT_FBX_PRESERVE_PIVOTS, false);
 	const aiScene* sc = importer.ReadFile(srcPath, aiProcessPreset_TargetRealtime_MaxQuality);
 	if (!sc)
 	{
@@ -388,7 +404,8 @@ int AssImporter::ImportToContent(const char* srcPath, const char* destDir)
 			if (has(aiTextureType_EMISSIVE)) ++texUnits;
 		}
 		tlProg->done  = 0;
-		tlProg->total = texUnits + (int)sc->mNumMaterials + (int)sc->mNumMeshes + 1;
+		tlProg->total = texUnits + (int)sc->mNumMaterials + (int)sc->mNumMeshes
+		              + (int)sc->mNumAnimations + 1;
 	}
 
 	boost::system::error_code ec;
@@ -435,7 +452,12 @@ int AssImporter::ImportToContent(const char* srcPath, const char* destDir)
 			mout = bfs::path(destDir) / (mstem + "_" + std::to_string(n) + ".numat");
 		if (mt->SaveToFile(mout.string()))
 		{
-			AssImporter::Reg([mt] { ResDB::getSingleton()->RegisterMaterial(mt); });   // main-thread when async
+			const std::string mpath = mout.string();
+			AssImporter::Reg([mt, mpath]
+			{
+				ResDB::getSingleton()->RegisterMaterial(mt);
+				ResDB::getSingleton()->SetAssetPath(mt->guid, mpath);
+			});   // main-thread when async
 			matGuids[i] = mt->guid;
 			cout << "[Import]\twrote " << mout.filename().string() << " (" << mt->guid << ")" << endl;
 		}
@@ -450,7 +472,7 @@ int AssImporter::ImportToContent(const char* srcPath, const char* destDir)
 	{
 		ProgStage("mesh " + std::to_string(i + 1) + "/" + std::to_string(sc->mNumMeshes));
 		Mesh* m = new Mesh();
-		m->ImportAIMesh(sc->mMeshes[i]);
+		m->ImportAIMesh(sc->mMeshes[i], sc);   // scene enables skin import (bones + skeleton)
 		m->guid = ResDB::NewGuid();
 
 		std::string stem = SafeStem(sc->mMeshes[i]->mName.C_Str());
@@ -465,28 +487,110 @@ int AssImporter::ImportToContent(const char* srcPath, const char* destDir)
 			ProgUnitDone();
 			continue;
 		}
-		AssImporter::Reg([m] { ResDB::getSingleton()->RegisterMesh(m); });   // main-thread when async
+		const std::string mpath = out.string();
+		AssImporter::Reg([m, mpath]
+		{
+			ResDB::getSingleton()->RegisterMesh(m);
+			ResDB::getSingleton()->SetAssetPath(m->guid, mpath);
+		});   // main-thread when async
 		meshGuids[i] = m->guid;
 		cout << "[Import]\twrote " << out.filename().string() << " (" << m->guid << ")" << endl;
 		++count;
 		ProgUnitDone();
 	}
 
-	// 2) The node hierarchy -> one .nuprefab that references those meshes + materials by GUID.
-	ProgStage("prefab");
-	Atom* root = BuildPrefabNode(sc->mRootNode, sc, meshGuids, matGuids);
-	std::string base = SafeStem(bfs::path(srcPath).stem().string().c_str());
-	bfs::path pf = bfs::path(destDir) / (base + ".nuprefab");
-	for (int n = 1; bfs::exists(pf, ec); ++n)
-		pf = bfs::path(destDir) / (base + "_" + std::to_string(n) + ".nuprefab");
-	if (SavePrefab(root, pf.string()))
-		cout << "[Import]\twrote " << pf.filename().string() << endl;
-	ProgUnitDone();
-	// root is persisted as the prefab; not added to any world here.
+	// 2) Animation clips -> .nuanim assets (channels by bone NAME, key times in seconds).
+	// Clip names come from the FILE stem, not the embedded take name: exporters stamp a
+	// generic name ("mixamo.com") into EVERY file, so a pack would collide on it, while
+	// the files are named by the actual animation ("idle.fbx", "run.fbx").
+	std::string firstClipGuid;
+	std::string base0 = SafeStem(bfs::path(srcPath).stem().string().c_str());
+	for (unsigned int a = 0; a < sc->mNumAnimations; ++a)
+	{
+		ProgStage("clip " + std::to_string(a + 1) + "/" + std::to_string(sc->mNumAnimations));
+		const aiAnimation* an = sc->mAnimations[a];
+		const double tps = an->mTicksPerSecond > 0.0 ? an->mTicksPerSecond : 25.0;
+		AnimClip* clip = new AnimClip();
+		clip->guid = ResDB::NewGuid();
+		if (sc->mNumAnimations == 1)
+			clip->name = base0;                                       // "idle.fbx" -> "idle"
+		else
+			clip->name = base0 + "_" + ((an->mName.length > 0) ? SafeStem(an->mName.C_Str())
+			                                                   : std::to_string(a));
+		clip->duration = an->mDuration / tps;
+		clip->channels.resize(an->mNumChannels);
+		for (unsigned int c = 0; c < an->mNumChannels; ++c)
+		{
+			const aiNodeAnim* na = an->mChannels[c];
+			AnimClip::Channel& ch = clip->channels[c];
+			ch.bone = na->mNodeName.C_Str();
+			ch.pos.resize(na->mNumPositionKeys);
+			for (unsigned int k = 0; k < na->mNumPositionKeys; ++k)
+			{
+				ch.pos[k].t = (float)(na->mPositionKeys[k].mTime / tps);
+				const aiVector3D& v = na->mPositionKeys[k].mValue;
+				ch.pos[k].v[0] = v.x; ch.pos[k].v[1] = v.y; ch.pos[k].v[2] = v.z; ch.pos[k].v[3] = 0;
+			}
+			ch.rot.resize(na->mNumRotationKeys);
+			for (unsigned int k = 0; k < na->mNumRotationKeys; ++k)
+			{
+				ch.rot[k].t = (float)(na->mRotationKeys[k].mTime / tps);
+				const aiQuaternion& q = na->mRotationKeys[k].mValue;
+				ch.rot[k].v[0] = q.x; ch.rot[k].v[1] = q.y; ch.rot[k].v[2] = q.z; ch.rot[k].v[3] = q.w;
+			}
+			ch.scl.resize(na->mNumScalingKeys);
+			for (unsigned int k = 0; k < na->mNumScalingKeys; ++k)
+			{
+				ch.scl[k].t = (float)(na->mScalingKeys[k].mTime / tps);
+				const aiVector3D& v = na->mScalingKeys[k].mValue;
+				ch.scl[k].v[0] = v.x; ch.scl[k].v[1] = v.y; ch.scl[k].v[2] = v.z; ch.scl[k].v[3] = 0;
+			}
+		}
+		bfs::path aout = bfs::path(destDir) / (clip->name + ".nuanim");
+		for (int nn = 1; bfs::exists(aout, ec); ++nn)
+			aout = bfs::path(destDir) / (clip->name + "_" + std::to_string(nn) + ".nuanim");
+		if (clip->SaveToFile(aout.string()))
+		{
+			const std::string apath = aout.string();
+			AnimClip* cptr = clip;
+			AssImporter::Reg([cptr, apath]
+			{
+				ResDB::getSingleton()->RegisterClip(cptr);
+				ResDB::getSingleton()->SetAssetPath(cptr->guid, apath);
+			});   // main-thread when async
+			if (firstClipGuid.empty()) firstClipGuid = clip->guid;
+			cout << "[Import]\twrote " << aout.filename().string() << " (" << clip->duration << " s, "
+			     << clip->channels.size() << " channels)" << endl;
+		}
+		else { cout << "[Import]\tfailed to write " << aout.filename().string() << endl; delete clip; }
+		ProgUnitDone();
+	}
 
-	cout << "[Import]\tconverted " << count << " mesh(es) + prefab from "
-	     << bfs::path(srcPath).filename().string() << endl;
-	return count;
+	// 3) The node hierarchy -> one .nuprefab that references those meshes + materials by
+	// GUID — only when the file HAS meshes. An animation-only file (mixamo "without skin"
+	// packs) would otherwise produce a prefab of hundreds of EMPTY joint atoms.
+	ProgStage("prefab");
+	if (count > 0)
+	{
+		Atom* root = BuildPrefabNode(sc->mRootNode, sc, meshGuids, matGuids, firstClipGuid);
+		std::string base = SafeStem(bfs::path(srcPath).stem().string().c_str());
+		bfs::path pf = bfs::path(destDir) / (base + ".nuprefab");
+		for (int n = 1; bfs::exists(pf, ec); ++n)
+			pf = bfs::path(destDir) / (base + "_" + std::to_string(n) + ".nuprefab");
+		if (SavePrefab(root, pf.string()))
+			cout << "[Import]\twrote " << pf.filename().string() << endl;
+		// root is persisted as the prefab; not added to any world here.
+	}
+	ProgUnitDone();
+
+	if (count > 0)
+		cout << "[Import]\tconverted " << count << " mesh(es) + prefab from "
+		     << bfs::path(srcPath).filename().string() << endl;
+	else if (sc->mNumAnimations > 0)
+		cout << "[Import]\tanimation-only file: " << sc->mNumAnimations << " clip(s), no prefab ("
+		     << bfs::path(srcPath).filename().string() << ")" << endl;
+	// Clips alone are a SUCCESSFUL import (animation packs).
+	return count > 0 ? count : (int)sc->mNumAnimations;
 }
 
 std::string AssImporter::ImportImage(const char* srcPath, const char* destDir)

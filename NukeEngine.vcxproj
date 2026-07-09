@@ -202,6 +202,9 @@
     <ClInclude Include="include\API\Model\ReflectionProbe.h" />
     <ClInclude Include="include\API\Model\Material.h" />
     <ClInclude Include="include\API\Model\Math.h" />
+    <ClInclude Include="include\API\Model\AnimClip.h" />
+    <ClInclude Include="include\API\Model\BoneMap.h" />
+    <ClInclude Include="include\API\Model\Animator.h" />
     <ClInclude Include="include\API\Model\Mesh.h" />
     <ClInclude Include="include\API\Model\MeshRenderer.h" />
     <ClInclude Include="include\API\Model\ray.h" />
@@ -272,6 +275,9 @@
     <ClCompile Include="src\API\Model\ReflectionProbe.cpp" />
     <ClCompile Include="src\API\Model\Material.cpp" />
     <ClCompile Include="src\API\Model\Math.cpp" />
+    <ClCompile Include="src\API\Model\AnimClip.cpp" />
+    <ClCompile Include="src\API\Model\BoneMap.cpp" />
+    <ClCompile Include="src\API\Model\Animator.cpp" />
     <ClCompile Include="src\API\Model\Mesh.cpp" />
     <ClCompile Include="src\API\Model\MeshRenderer.cpp" />
     <ClCompile Include="src\API\Model\ray.cpp" />

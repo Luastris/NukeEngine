@@ -266,7 +266,12 @@ void Camera::Pause() {}
 
 void Camera::Destroy()
 {
-	renderer->deinit();
+	// NEVER deinit the MAIN renderer — this camera doesn't own it. Deleting a camera
+	// atom used to tear the whole device down mid-session (render safety). Only a
+	// camera-OWNED secondary renderer (init'ed in Init when renderer != main) is ours.
+	if (renderer && renderer != AppInstance::GetSingleton()->render)
+		renderer->deinit();
+	renderer = nullptr;
 }
 
 }  // namespace nuke

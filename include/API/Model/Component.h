@@ -69,6 +69,11 @@ public:
 	virtual void OnCollisionExit(Atom* other) {}
 	virtual void OnTriggerEnter(Atom* other) {}
 	virtual void OnTriggerExit(Atom* other) {}
+
+	// Animation event (roadmap 3.1): the sibling Animator fires this on every component
+	// of its atom when the playhead crosses a clip event. GAME thread, game lock held —
+	// scripting components may enter their VM directly (same contract as OnGUI).
+	virtual void OnAnimEvent(const char* name) {}
 };
 }  // namespace nuke
 

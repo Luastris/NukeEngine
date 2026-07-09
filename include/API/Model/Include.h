@@ -21,6 +21,8 @@
 #include "Camera.h"
 #include "Mesh.h"
 #include "MeshRenderer.h"
+#include "AnimClip.h"
+#include "Animator.h"
 
 
 

@@ -5,6 +5,8 @@
 #include "Texture.h"
 #include "Material.h"
 #include "Shader.h"
+#include "AnimClip.h"
+#include "BoneMap.h"
 #include "Atom.h"
 #include <boost/container/list.hpp>
 #include <memory>
@@ -33,12 +35,16 @@ public:
     bc::list<Texture*> textures;
     bc::list<Material*> materials;
     bc::list<Shader*> shaders;
+    bc::list<AnimClip*> clips;                     // animation clips (.nuanim, roadmap 3.1)
+    bc::list<BoneMap*>  boneMaps;                  // retarget maps (.nubonemap, roadmap 3.1)
     bc::list<Atom*> prefabs;
 
     std::map<std::string, Mesh*>     meshByGuid;   // GUID -> mesh asset
     std::map<std::string, Material*> matByGuid;    // GUID -> material asset
     std::map<std::string, Texture*>  texByGuid;    // GUID -> texture asset
     std::map<std::string, Shader*>   shaderByGuid; // GUID -> shader asset
+    std::map<std::string, AnimClip*> clipByGuid;   // GUID -> animation clip
+    std::map<std::string, BoneMap*>  boneMapByGuid;// GUID -> retarget map
     std::map<std::string, std::string> pathByGuid; // GUID -> source file path (for "locate"/DnD)
     std::map<std::string, std::string> guidByPath; // source file path -> GUID
     std::map<std::string, long long>   assetMtime; // asset path -> last-seen mtime (hot-reload)
@@ -56,6 +62,13 @@ public:
 
     Shader*  GetShader(const std::string& guid);      // nullptr if unknown
     void     RegisterShader(Shader* s);               // add to shaders + index by s->guid
+
+    AnimClip* GetClip(const std::string& guid);       // nullptr if unknown
+    AnimClip* GetClipByName(const std::string& name); // first clip with this name (Animator states)
+    void      RegisterClip(AnimClip* c);              // add to clips + index by c->guid
+
+    BoneMap* GetBoneMap(const std::string& guid);     // nullptr if unknown
+    void     RegisterBoneMap(BoneMap* b);             // add to boneMaps + index by b->guid
     // Scan a dir (recursively) for "<name>.vs.hlsl" + "<name>.ps.hlsl" pairs -> Shader assets.
     // Used for both roots: the engine's built-in `shaders/` and the project content folder.
     void     LoadShadersDir(const std::string& dir);
