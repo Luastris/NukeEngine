@@ -38,8 +38,12 @@ public:
 	// registered in ResDB. Returns the new texture GUID ("" on failure).
 	std::string ImportImage(const char* srcPath, const char* destDir);
 
-	// Dispatch by file extension: image -> ImportImage, otherwise -> ImportToContent. Returns true on
-	// any success. Used by the browser Import button + Explorer drag&drop.
+	// Import an audio file (ogg/wav/mp3/flac) = collision-safe COPY into content (no custom
+	// format — the audio service decodes the file; components reference it by relative path).
+	bool ImportAudio(const char* srcPath, const char* destDir);
+
+	// Dispatch by file extension: image -> ImportImage, audio -> ImportAudio, otherwise ->
+	// ImportToContent. Returns true on any success. Browser Import button + Explorer drag&drop.
 	bool ImportAny(const char* srcPath, const char* destDir);
 
 	// ASYNC import on the core job system (2.4): the heavy work (assimp parsing, BC

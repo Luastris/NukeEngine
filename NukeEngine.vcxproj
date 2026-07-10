@@ -205,6 +205,10 @@
     <ClInclude Include="include\API\Model\AnimClip.h" />
     <ClInclude Include="include\API\Model\BoneMap.h" />
     <ClInclude Include="include\API\Model\Animator.h" />
+    <ClInclude Include="include\API\Model\Audio.h" />
+    <ClInclude Include="include\API\Model\AudioSource.h" />
+    <ClInclude Include="include\API\Model\AudioListener.h" />
+    <ClInclude Include="include\service\iAudio.h" />
     <ClInclude Include="include\API\Model\Mesh.h" />
     <ClInclude Include="include\API\Model\MeshRenderer.h" />
     <ClInclude Include="include\API\Model\ray.h" />
@@ -276,6 +280,9 @@
     <ClCompile Include="src\API\Model\Material.cpp" />
     <ClCompile Include="src\API\Model\Math.cpp" />
     <ClCompile Include="src\API\Model\AnimClip.cpp" />
+    <ClCompile Include="src\API\Model\Audio.cpp" />
+    <ClCompile Include="src\API\Model\AudioSource.cpp" />
+    <ClCompile Include="src\API\Model\AudioListener.cpp" />
     <ClCompile Include="src\API\Model\BoneMap.cpp" />
     <ClCompile Include="src\API\Model\Animator.cpp" />
     <ClCompile Include="src\API\Model\Mesh.cpp" />

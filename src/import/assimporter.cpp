@@ -674,6 +674,26 @@ std::string AssImporter::ImportImage(const char* srcPath, const char* destDir)
 	return tex->guid;
 }
 
+// Audio has NO custom asset format (the audio service decodes the file itself) — import
+// is a plain collision-safe COPY into content. Components reference the file by its
+// content-relative path, so nothing needs registering.
+bool AssImporter::ImportAudio(const char* srcPath, const char* destDir)
+{
+	if (tlProg) { tlProg->done = 0; tlProg->total = 1; }
+	ProgStage("copying");
+	std::string stem = SafeStem(bfs::path(srcPath).stem().string().c_str());
+	std::string ext  = bfs::path(srcPath).extension().string();
+	for (char& c : ext) c = (char)std::tolower((unsigned char)c);
+	boost::system::error_code ec;
+	bfs::path out = bfs::path(destDir) / (stem + ext);
+	for (int k = 1; bfs::exists(out, ec); ++k)
+		out = bfs::path(destDir) / (stem + "_" + std::to_string(k) + ext);
+	bfs::copy_file(bfs::path(srcPath), out, ec);
+	if (ec) { cout << "[Import]\taudio copy failed: " << srcPath << " (" << ec.message() << ")" << endl; return false; }
+	cout << "[Import]\twrote " << out.filename().string() << " (audio)" << endl;
+	return true;
+}
+
 bool AssImporter::ImportAny(const char* srcPath, const char* destDir)
 {
 	if (!srcPath || !*srcPath) return false;
@@ -682,6 +702,9 @@ bool AssImporter::ImportAny(const char* srcPath, const char* destDir)
 	static const char* kImg[] = { ".png", ".jpg", ".jpeg", ".tga", ".bmp", ".psd", ".gif", ".hdr", ".pic", ".ppm", ".pgm" };
 	for (const char* e : kImg)
 		if (ext == e) return !ImportImage(srcPath, destDir).empty();
+	static const char* kAud[] = { ".ogg", ".wav", ".mp3", ".flac" };
+	for (const char* e : kAud)
+		if (ext == e) return ImportAudio(srcPath, destDir);
 	return ImportToContent(srcPath, destDir) > 0;
 }
 

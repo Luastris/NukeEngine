@@ -7,8 +7,9 @@ Texture2D    g_MetalRough;   SamplerState g_MetalRough_sampler;   // G = roughne
 Texture2D    g_Normal;       SamplerState g_Normal_sampler;       // tangent-space normal map
 
 struct PSIn { float4 pos : SV_POSITION; float3 wpos : TEXCOORD0; float3 nrm : TEXCOORD1; float2 uv : TEXCOORD2;
-              float4 curClip : TEXCOORD3; float4 prevClip : TEXCOORD4; };
-struct PSOut { float4 gbuf : SV_Target0; float2 velocity : SV_Target1; };   // gbuffer + screen-space motion (TAA)
+              float4 curClip : TEXCOORD3; float4 prevClip : TEXCOORD4;
+              nointerpolation float objId : TEXCOORD5; };   // per-OBJECT id (generic G-buffer channel)
+struct PSOut { float4 gbuf : SV_Target0; float2 velocity : SV_Target1; float objId : SV_Target2; };   // + per-object id (R8)
 
 // Tangent-space normal mapping WITHOUT mesh tangents (Schüler). Derivatives are computed by the caller (main) and
 // passed in — MUST match world.ps: `ddx` on a passed-in parameter miscompiles to zero on DXC, and the 1e-20 floor
@@ -57,4 +58,5 @@ void main(PSIn i, out PSOut o)
     float2 curUV   = float2(curNdc.x  * 0.5 + 0.5, 0.5 - curNdc.y  * 0.5);
     float2 prevUV  = float2(prevNdc.x * 0.5 + 0.5, 0.5 - prevNdc.y * 0.5);
     o.velocity = curUV - prevUV;
+    o.objId = i.objId;   // flat per-object id (no effect semantics here)
 }

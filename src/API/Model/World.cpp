@@ -19,6 +19,9 @@
 #include "API/Model/DebugDraw.h"   // editor gizmos (selection wire shapes)
 #include "interface/Services.h"   // GetService<iPhysics>()
 #include "service/iPhysics.h"     // the physics service seam (fixed-step driver below)
+#include "service/iAudio.h"       // the audio service seam (per-frame pump in Render)
+#include "API/Model/Audio.h"      // analysis snapshot cache + g_Nuke* system post-params
+#include "API/Model/AudioListener.h" // spatial-audio listener pose (Render pump)
 #include <cmath>
 #include <map>
 #include <set>
@@ -511,6 +514,20 @@ static void CollectLights(bc::list<Atom*>& gos, std::vector<Light*>& out)
 	}
 }
 
+// First enabled AudioListener's transform (spatial-audio ears), depth-first. Null when the
+// world has none — the caller falls back to the first camera.
+static Transform* FindAudioListener(bc::list<Atom*>& gos)
+{
+	for (auto go : gos)
+	{
+		if (auto* l = go->GetComponent<AudioListener>())
+			if (l->enabled && l->transform) return l->transform;
+		if (!go->children.empty())
+			if (Transform* t = FindAudioListener(go->children)) return t;
+	}
+	return nullptr;
+}
+
 // Post-process components (one may sit beside each Camera on the same atom — matched by shared transform).
 static void CollectPostProcess(bc::list<Atom*>& gos, std::vector<PostProcess*>& out)
 {
@@ -836,6 +853,30 @@ void World::Render(iRender* r)
 	std::vector<Light*> lights;
 	CollectLights(*hierarchy, lights);
 
+	// Drive the audio service once per frame (Render runs every frame in BOTH hosts;
+	// World::Update only runs in play mode, so the pump can't live there — the editor's
+	// Preview bus and the analysis must work in edit mode too). Listener = the first
+	// enabled AudioListener, else the first camera; game pause halts Music/SFX voices.
+	if (this == AppInstance::GetSingleton()->currentScene)
+		if (iAudio* au = GetService<iAudio>())
+		{
+			au->init();   // idempotent (first call opens the device)
+			Transform* ears = FindAudioListener(*hierarchy);
+			if (!ears && !cams.empty() && cams[0]->transform) ears = cams[0]->transform;
+			if (ears)
+			{
+				Vector3 p = ears->globalPosition(), f = ears->direction(), u = ears->up();
+				float lp[3] = { (float)p.x, (float)p.y, (float)p.z };
+				float lf[3] = { (float)f.x, (float)f.y, (float)f.z };
+				float lu[3] = { (float)u.x, (float)u.y, (float)u.z };
+				au->setListener(lp, lf, lu);
+			}
+			au->setGamePaused(AppInstance::GetSingleton()->playState == 2);
+			au->update((float)Time::getSingleton()->delta);
+			Audio::Refresh();   // cache this frame's analysis (scripts + g_Nuke* post-params)
+		}
+		else Audio::Refresh();   // no provider -> calm zeros for scripts/effects
+
 	// Post-process components (each applies only to its own camera = the Camera on the same atom).
 	std::vector<PostProcess*> pps;
 	CollectPostProcess(*hierarchy, pps);
@@ -1051,6 +1092,7 @@ void World::Render(iRender* r)
 					Shader* sh = ResDB::getSingleton()->GetShader(e.shaderGuid);
 					if (!sh || !sh->isPost || sh->rendererHandle == 0) continue;
 					if (sh->name == "ssr" || sh->name == "rtreflect") hasSSR = true;   // both need the G-buffer prepass
+					if (sh->name == "musicvis") hasSSR = true;   // ghost overlays sample the G-buffer normals + depth
 					if (sh->name == "taa") hasTAA = true;                              // TAA needs the depth prepass + jitter
 					std::vector<float> blob(64, 0.0f);   // 256-byte PostParams
 					for (const ShaderProp& sp : sh->props)
@@ -1058,6 +1100,11 @@ void World::Render(iRender* r)
 						const float* v = sp.def;
 						auto pit = e.props.find(sp.name);
 						if (pit != e.props.end()) v = pit->second.data();
+						// System params (g_NukeAudio/g_NukeNote/g_NukeChromaA..C): engine-filled
+						// per frame from the audio analysis — this is what syncs audio-reactive
+						// effects to the music. User values/defaults never apply to these.
+						float sys[4];
+						if (sp.name.compare(0, 6, "g_Nuke") == 0 && Audio::SystemParam(sp.name, sys)) v = sys;
 						for (int c = 0; c < sp.components && (sp.offset / 4 + c) < 64; ++c)
 							blob[sp.offset / 4 + c] = v[c];
 					}
@@ -1471,6 +1518,7 @@ void World::LoadFromString(const std::string& data)
 	// gameLock: the fixed thread must not step a hierarchy that is being torn down.
 	boost::recursive_mutex::scoped_lock fixedGuard(gameLock);
 	if (iPhysics* p = GetService<iPhysics>()) p->reset();
+	if (iAudio* au = GetService<iAudio>()) au->reset();   // world switch — silence game voices
 	for (auto it = hierarchy->begin(); it != hierarchy->end(); )   // keep editor camera, drop the rest
 	{
 		if ((*it)->GetName() == "Editor Camera") ++it;
@@ -1487,6 +1535,7 @@ void World::Clear()
 {
 	boost::recursive_mutex::scoped_lock fixedGuard(gameLock);   // don't tear down under the fixed thread
 	if (iPhysics* p = GetService<iPhysics>()) p->reset();   // atoms drop without Destroy — wipe bodies
+	if (iAudio* au = GetService<iAudio>()) au->reset();     // same: their voices must not outlive them
 	for (auto it = hierarchy->begin(); it != hierarchy->end(); )   // keep editor camera, drop the rest
 	{
 		if ((*it)->GetName() == "Editor Camera") ++it;

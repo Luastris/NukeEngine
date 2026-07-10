@@ -348,12 +348,6 @@ public:
     // don't count report zeros.
     virtual void getFrameStats(int& drawCalls, int& triangles) { drawCalls = 0; triangles = 0; }
 
-    // Drop every cached GPU resource built from this mesh (buffers, BLAS). MUST be called
-    // before a Mesh object is deleted (asset removal, skinned-instance release) — a stale
-    // cache entry keyed by a freed pointer serves WRONG buffers when the allocator reuses
-    // the address (render safety).
-    virtual void invalidateMesh(Mesh* m) {}
-
     // --- runtime-GUI input (roadmap 2.5) ----------------------------------------------
     // Polled by the runtime GUI backend (NukeGUI) once per frame. The queues DRAIN on
     // fetch and are size-capped inside the backend, so an idle consumer can't leak.
@@ -363,6 +357,17 @@ public:
     virtual void getScrollDelta(double& x, double& y) { x = 0; y = 0; }                  // wheel since last call
     virtual const char* getClipboardText() { return ""; }        // valid until the next call
     virtual void setClipboardText(const char* text) {}
+
+    // Drop every cached GPU resource built from this mesh (buffers, BLAS). MUST be called
+    // before a Mesh object is deleted (asset removal, skinned-instance release) — a stale
+    // cache entry keyed by a freed pointer serves WRONG buffers when the allocator reuses
+    // the address (render safety).
+    virtual void invalidateMesh(Mesh* m) {}
+
+    // ABI: new virtuals are appended at the END of the class, NEVER inserted mid-vtable —
+    // plugins are separate DLLs built at different times, and an inserted slot shifts every
+    // later one (an old NukeGUI.dll calling getScrollDelta through a shifted slot landed in
+    // fetchUIKeys and corrupted its caller's stack). Keep it that way.
 };
 
 }  // namespace nuke

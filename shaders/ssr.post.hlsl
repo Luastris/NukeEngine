@@ -13,7 +13,7 @@ cbuffer PostParams         // inspector-tweakable (names + defaults parsed by th
     float g_Thickness   = 0.6;    // view-space depth tolerance for a hit
     float g_MaxSteps    = 48.0;   // linear march steps
 };
-cbuffer SSRCB { float4x4 g_View; float4x4 g_Proj; float4x4 g_InvProj; float4 g_SSRRes; };  // res: w,h,1/w,1/h
+cbuffer SSRCB { float4x4 g_View; float4x4 g_Proj; float4x4 g_InvProj; float4x4 g_InvView; float4 g_SSRRes; };  // res: w,h,1/w,1/h
 
 struct PSIn { float4 pos : SV_POSITION; float2 uv : TEXCOORD0; };
 

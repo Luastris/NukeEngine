@@ -2,6 +2,9 @@
 #include "reflect/Reflect.h"
 #include "API/iGUI.h"
 #include "API/Model/Animator.h"
+#include "API/Model/Audio.h"
+#include "API/Model/AudioListener.h"
+#include "API/Model/AudioSource.h"
 #include "API/Model/Camera.h"
 #include "API/Model/Collider.h"
 #include "API/Model/DebugDraw.h"
@@ -84,6 +87,58 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("SetIKChain", &Animator::SetIKChain));
 		t.methods.push_back(MakeMethod("ClearIK", &Animator::ClearIK));
 		t.create = []() -> void* { return new Animator(); };
+	}
+	{
+		TypeInfo& t = TypeOf<Audio>();
+		t.base = "Object";
+		t.methods.push_back(MakeMethod("Available", &Audio::Available));
+		t.methods.push_back(MakeMethod("Play", &Audio::Play));
+		t.methods.push_back(MakeMethod("PlayAt", &Audio::PlayAt));
+		t.methods.push_back(MakeMethod("Stop", &Audio::Stop));
+		t.methods.push_back(MakeMethod("StopAll", &Audio::StopAll));
+		t.methods.push_back(MakeMethod("IsPlaying", &Audio::IsPlaying));
+		t.methods.push_back(MakeMethod("SetPaused", &Audio::SetPaused));
+		t.methods.push_back(MakeMethod("SetVolume", &Audio::SetVolume));
+		t.methods.push_back(MakeMethod("SetPitch", &Audio::SetPitch));
+		t.methods.push_back(MakeMethod("Seek", &Audio::Seek));
+		t.methods.push_back(MakeMethod("Time", &Audio::Time));
+		t.methods.push_back(MakeMethod("Length", &Audio::Length));
+		t.methods.push_back(MakeMethod("SetBusVolume", &Audio::SetBusVolume));
+		t.methods.push_back(MakeMethod("GetBusVolume", &Audio::GetBusVolume));
+		t.methods.push_back(MakeMethod("SetMasterVolume", &Audio::SetMasterVolume));
+		t.methods.push_back(MakeMethod("GetMasterVolume", &Audio::GetMasterVolume));
+		t.methods.push_back(MakeMethod("GetKick", &Audio::GetKick));
+		t.methods.push_back(MakeMethod("GetSnare", &Audio::GetSnare));
+		t.methods.push_back(MakeMethod("GetBass", &Audio::GetBass));
+		t.methods.push_back(MakeMethod("GetEnergy", &Audio::GetEnergy));
+		t.methods.push_back(MakeMethod("GetChroma", &Audio::GetChroma));
+		t.methods.push_back(MakeMethod("GetNote", &Audio::GetNote));
+		t.methods.push_back(MakeMethod("GetNoteStrength", &Audio::GetNoteStrength));
+		t.methods.push_back(MakeMethod("GetBeatPhase", &Audio::GetBeatPhase));
+	}
+	{
+		TypeInfo& t = TypeOf<AudioListener>();
+		t.base = "Component";
+		t.create = []() -> void* { return new AudioListener(); };
+	}
+	{
+		TypeInfo& t = TypeOf<AudioSource>();
+		t.base = "Component";
+		t.fields.push_back(MakeField("clip", &AudioSource::clip, "audio", "Clip"));
+		t.fields.push_back(MakeField("bus", &AudioSource::bus, "", "Bus", 0.0f, 0.0f, "Music,SFX"));
+		t.fields.push_back(MakeField("volume", &AudioSource::volume, "", "Volume", 0.0f, 2.0f));
+		t.fields.push_back(MakeField("pitch", &AudioSource::pitch, "", "Pitch", 0.1f, 3.0f));
+		t.fields.push_back(MakeField("loop", &AudioSource::loop, "", "Loop"));
+		t.fields.push_back(MakeField("playOnStart", &AudioSource::playOnStart, "", "Play On Start"));
+		t.fields.push_back(MakeField("spatial", &AudioSource::spatial, "", "Spatial (3D)"));
+		t.fields.push_back(MakeField("minDist", &AudioSource::minDist, "", "Min Distance"));
+		t.fields.push_back(MakeField("maxDist", &AudioSource::maxDist, "", "Max Distance"));
+		t.fields.push_back(MakeField("decode", &AudioSource::decode, "", "Decode", 0.0f, 0.0f, "Auto,Memory,Stream"));
+		t.methods.push_back(MakeMethod("Play", &AudioSource::Play));
+		t.methods.push_back(MakeMethod("Stop", &AudioSource::Stop));
+		t.methods.push_back(MakeMethod("SetPaused", &AudioSource::SetPaused));
+		t.methods.push_back(MakeMethod("IsPlaying", &AudioSource::IsPlaying));
+		t.create = []() -> void* { return new AudioSource(); };
 	}
 	{
 		TypeInfo& t = TypeOf<Camera>();
