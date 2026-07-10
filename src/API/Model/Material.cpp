@@ -112,10 +112,15 @@ bool Material::SaveToFile(const std::string& path) const
 
 Material* Material::LoadFromFile(const std::string& path)
 {
-	boost::filesystem::path p(path);
-	boost::filesystem::ifstream f(p);
+	boost::filesystem::ifstream f{boost::filesystem::path(path)};   // brace-init: vexing parse
 	if (!f) return nullptr;
-	json j = json::parse(f, nullptr, false);
+	std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+	return LoadFromString(text);
+}
+
+Material* Material::LoadFromString(const std::string& text)
+{
+	json j = json::parse(text, nullptr, false);
 	if (j.is_discarded()) return nullptr;
 
 	Material* m = new Material();

@@ -1,4 +1,6 @@
 #include "API/Model/resdb.h"
+#include <cstring>
+#include "API/Model/Package.h"   // packed-content scan (3.2)
 #include "API/Model/Prefab.h"   // PrefabGuid (register prefab guid<->path)
 #include "render/irender.h"
 #include <boost/filesystem.hpp>
@@ -162,6 +164,14 @@ void ResDB::HotReloadShaders(iRender* r)
 	}
 }
 
+// Renderer-internal pass pairs (fed to the renderer by LoadBuiltinShaders, never material
+// shaders). ONE list for the disk scan and the packed scan — extend HERE for new passes.
+static bool RendererInternalShader(const std::string& name)
+{
+	return name == "ui" || name == "shadow" || name == "sky" || name == "post" || name == "debug"
+	    || name.rfind("outline", 0) == 0;
+}
+
 void ResDB::LoadShadersDir(const std::string& dir)
 {
 	boost::system::error_code ec;
@@ -187,7 +197,7 @@ void ResDB::LoadShadersDir(const std::string& dir)
 		if (fn.size() <= vsuf.size() || fn.compare(fn.size() - vsuf.size(), vsuf.size(), vsuf) != 0)
 			continue;                                   // not a "*.vs.hlsl"
 		std::string name = fn.substr(0, fn.size() - vsuf.size());
-		if (name == "ui" || name == "shadow" || name == "sky" || name == "post" || name == "debug" || name.rfind("outline", 0) == 0) continue;  // renderer-internal passes, not material shaders
+		if (RendererInternalShader(name)) continue;     // renderer-internal passes, not material shaders
 		bfs::path psPath = it->path().parent_path() / (name + ".ps.hlsl");
 		if (!bfs::exists(psPath, ec)) continue;         // no matching pixel shader
 		if (shaderByGuid.count(name)) continue;         // first one wins (engine before project)
@@ -322,57 +332,177 @@ void ResDB::LoadContentDir(const std::string& dir)
 	{
 		if (ec) break;
 		if (bfs::is_directory(it->path())) continue;
-		auto ext = it->path().extension();
-		if (ext == ".numesh")
+		LoadContentFile(it->path().string());
+	}
+}
+
+// Packed runtime (3.2): the same registration pass over the Package layer stack. Raw
+// overlay files load from disk; pak entries load from MEMORY — packed content is never
+// written out (SetAssetPath is skipped for those: no file to locate).
+void ResDB::LoadContentPackaged()
+{
+	for (const std::string& rel : Package::List("content/"))
+	{
+		std::string disk = Package::ResolveRead(rel);   // raw overlay only
+		if (!disk.empty()) { LoadContentFile(disk); continue; }
+		std::string bytes;
+		if (Package::Read(rel, bytes)) LoadContentEntry(rel, bytes);
+	}
+}
+
+// ONE packed entry (project-relative path + raw bytes) -> the DB, from memory.
+void ResDB::LoadContentEntry(const std::string& rel, const std::string& bytes)
+{
+	bfs::path p(rel);
+	auto ext = p.extension();
+	const std::string stem = p.stem().string();
+	if (ext == ".numesh")
+	{
+		Mesh* m = Mesh::LoadFromMemory(bytes);
+		if (!m) { std::cout << "[ResDB]	failed to load (pak) " << rel << std::endl; return; }
+		if (m->guid.empty() || meshByGuid.count(m->guid)) { delete m; return; }
+		RegisterMesh(m);
+		std::cout << "[ResDB]	loaded mesh '" << m->name << "' (pak)" << std::endl;
+	}
+	else if (ext == ".numat")
+	{
+		Material* mt = Material::LoadFromString(bytes);
+		if (!mt) { std::cout << "[ResDB]	failed to load (pak) " << rel << std::endl; return; }
+		if (mt->guid.empty() || matByGuid.count(mt->guid)) { delete mt; return; }
+		RegisterMaterial(mt);
+		std::cout << "[ResDB]	loaded material '" << mt->matName << "' (pak)" << std::endl;
+	}
+	else if (ext == ".nutex")
+	{
+		Texture* tx = Texture::LoadFromMemory(bytes);
+		if (!tx) { std::cout << "[ResDB]	failed to load (pak) " << rel << std::endl; return; }
+		if (tx->guid.empty() || texByGuid.count(tx->guid)) { delete tx; return; }
+		RegisterTexture(tx);
+		std::cout << "[ResDB]	loaded texture '" << tx->guid << "' (pak)" << std::endl;
+	}
+	else if (ext == ".nuanim")
+	{
+		AnimClip* c = AnimClip::LoadFromMemory(bytes);
+		if (!c) { std::cout << "[ResDB]	failed to load (pak) " << rel << std::endl; return; }
+		if (c->guid.empty() || clipByGuid.count(c->guid)) { delete c; return; }
+		RegisterClip(c);
+		std::cout << "[ResDB]	loaded clip '" << c->name << "' (pak)" << std::endl;
+	}
+	else if (ext == ".nubonemap")
+	{
+		BoneMap* b = BoneMap::LoadFromString(bytes, stem);
+		if (!b) { std::cout << "[ResDB]	failed to load (pak) " << rel << std::endl; return; }
+		if (b->guid.empty() || boneMapByGuid.count(b->guid)) { delete b; return; }
+		RegisterBoneMap(b);
+	}
+	else if (ext == ".nuprefab")
+	{
+		// guid<->PROJECT-RELATIVE key so instances resolve their prefab through the pak.
+		std::string g = PrefabGuidFromString(bytes);
+		if (!g.empty() && !pathByGuid.count(g)) SetAssetPath(g, rel);
+	}
+}
+
+// Packed runtime (3.2): shaders from the Package layers — .vs/.ps pairs matched by base
+// name + single .post.hlsl files, built straight from the pak bytes. Two prefixes:
+// "content/" = project shaders (everything registers), "shaders/" = engine built-ins
+// (renderer-internal pass pairs are skipped, same rule as the disk scan).
+static void ScanPakShaders(ResDB* db, const std::string& prefix, bool builtins)
+{
+	std::map<std::string, std::pair<std::string, std::string>> pairs;   // base -> (vsRel, psRel)
+	for (const std::string& rel : Package::List(prefix))
+	{
+		std::string low = rel;
+		for (char& c : low) c = (char)tolower((unsigned char)c);
+		auto ends = [&](const char* suf) { size_t n = strlen(suf); return low.size() > n && low.compare(low.size() - n, n, suf) == 0; };
+		if (ends(".post.hlsl"))
 		{
-			Mesh* m = Mesh::LoadFromFile(it->path().string());
-			if (!m) { std::cout << "[ResDB]\tfailed to load " << it->path().filename().string() << std::endl; continue; }
-			if (m->guid.empty() || meshByGuid.count(m->guid)) { delete m; continue; }   // skip dups
-			RegisterMesh(m);
-			SetAssetPath(m->guid, it->path().string());
-			std::cout << "[ResDB]\tloaded mesh '" << m->name << "' (" << m->guid << ")" << std::endl;
+			std::string name = bfs::path(rel).filename().string();
+			name = name.substr(0, name.size() - strlen(".post.hlsl"));
+			if (db->shaderByGuid.count(name)) continue;
+			std::string src;
+			if (Package::Read(rel, src))
+				if (Shader* sh = Shader::PostFromSource(name, src))
+				{ db->RegisterShader(sh); std::cout << "[ResDB]	loaded post shader '" << name << "' (pak)" << std::endl; }
 		}
-		else if (ext == ".numat")
+		else if (ends(".vs.hlsl") || ends(".ps.hlsl"))
 		{
-			Material* mt = Material::LoadFromFile(it->path().string());
-			if (!mt) { std::cout << "[ResDB]\tfailed to load " << it->path().filename().string() << std::endl; continue; }
-			if (mt->guid.empty() || matByGuid.count(mt->guid)) { delete mt; continue; }
-			RegisterMaterial(mt);
-			SetAssetPath(mt->guid, it->path().string());
-			std::cout << "[ResDB]\tloaded material '" << mt->matName << "' (" << mt->guid << ")" << std::endl;
+			std::string fn = bfs::path(rel).filename().string();
+			std::string base = fn.substr(0, fn.size() - strlen(".vs.hlsl"));
+			if (ends(".vs.hlsl")) pairs[base].first = rel; else pairs[base].second = rel;
 		}
-		else if (ext == ".nutex")
-		{
-			Texture* tx = Texture::LoadFromFile(it->path().string());
-			if (!tx) { std::cout << "[ResDB]\tfailed to load " << it->path().filename().string() << std::endl; continue; }
-			if (tx->guid.empty() || texByGuid.count(tx->guid)) { delete tx; continue; }
-			RegisterTexture(tx);
-			SetAssetPath(tx->guid, it->path().string());
-			std::cout << "[ResDB]\tloaded texture '" << tx->guid << "' (" << tx->width << "x" << tx->height << ")" << std::endl;
-		}
-		else if (ext == ".nuanim")
-		{
-			AnimClip* c = AnimClip::LoadFromFile(it->path().string());
-			if (!c) { std::cout << "[ResDB]\tfailed to load " << it->path().filename().string() << std::endl; continue; }
-			if (c->guid.empty() || clipByGuid.count(c->guid)) { delete c; continue; }
-			RegisterClip(c);
-			SetAssetPath(c->guid, it->path().string());
-			std::cout << "[ResDB]\tloaded clip '" << c->name << "' (" << c->duration << " s)" << std::endl;
-		}
-		else if (ext == ".nubonemap")
-		{
-			BoneMap* b = BoneMap::LoadFromFile(it->path().string());
-			if (!b) { std::cout << "[ResDB]\tfailed to load " << it->path().filename().string() << std::endl; continue; }
-			if (b->guid.empty() || boneMapByGuid.count(b->guid)) { delete b; continue; }
-			RegisterBoneMap(b);
-			SetAssetPath(b->guid, it->path().string());
-			std::cout << "[ResDB]\tloaded bone map '" << b->name << "' (" << b->map.size() << " entries)" << std::endl;
-		}
-		else if (ext == ".nuprefab")
-		{
-			std::string g = PrefabGuid(it->path().string());   // guid<->path so instances can resolve their prefab
-			if (!g.empty()) SetAssetPath(g, it->path().string());
-		}
+	}
+	for (auto& kv : pairs)
+	{
+		if (kv.second.first.empty() || kv.second.second.empty() || db->shaderByGuid.count(kv.first)) continue;
+		if (builtins && RendererInternalShader(kv.first)) continue;
+		std::string vs, ps;
+		if (Package::Read(kv.second.first, vs) && Package::Read(kv.second.second, ps))
+			if (Shader* sh = Shader::FromSources(kv.first, vs, ps))
+			{ db->RegisterShader(sh); std::cout << "[ResDB]	loaded shader '" << kv.first << "' (pak)" << std::endl; }
+	}
+}
+
+void ResDB::LoadShadersPackaged()
+{
+	ScanPakShaders(this, "content/", false);
+	ScanPakShaders(this, "shaders/", true);   // engine built-ins ride in the pak too (3.2)
+}
+
+// ONE content file -> the DB, dispatched by extension (shared by both scans above).
+void ResDB::LoadContentFile(const std::string& path)
+{
+	bfs::path p(path);
+	auto ext = p.extension();
+	if (ext == ".numesh")
+	{
+		Mesh* m = Mesh::LoadFromFile(path);
+		if (!m) { std::cout << "[ResDB]	failed to load " << p.filename().string() << std::endl; return; }
+		if (m->guid.empty() || meshByGuid.count(m->guid)) { delete m; return; }   // skip dups
+		RegisterMesh(m);
+		SetAssetPath(m->guid, path);
+		std::cout << "[ResDB]	loaded mesh '" << m->name << "' (" << m->guid << ")" << std::endl;
+	}
+	else if (ext == ".numat")
+	{
+		Material* mt = Material::LoadFromFile(path);
+		if (!mt) { std::cout << "[ResDB]	failed to load " << p.filename().string() << std::endl; return; }
+		if (mt->guid.empty() || matByGuid.count(mt->guid)) { delete mt; return; }
+		RegisterMaterial(mt);
+		SetAssetPath(mt->guid, path);
+		std::cout << "[ResDB]	loaded material '" << mt->matName << "' (" << mt->guid << ")" << std::endl;
+	}
+	else if (ext == ".nutex")
+	{
+		Texture* tx = Texture::LoadFromFile(path);
+		if (!tx) { std::cout << "[ResDB]	failed to load " << p.filename().string() << std::endl; return; }
+		if (tx->guid.empty() || texByGuid.count(tx->guid)) { delete tx; return; }
+		RegisterTexture(tx);
+		SetAssetPath(tx->guid, path);
+		std::cout << "[ResDB]	loaded texture '" << tx->guid << "' (" << tx->width << "x" << tx->height << ")" << std::endl;
+	}
+	else if (ext == ".nuanim")
+	{
+		AnimClip* c = AnimClip::LoadFromFile(path);
+		if (!c) { std::cout << "[ResDB]	failed to load " << p.filename().string() << std::endl; return; }
+		if (c->guid.empty() || clipByGuid.count(c->guid)) { delete c; return; }
+		RegisterClip(c);
+		SetAssetPath(c->guid, path);
+		std::cout << "[ResDB]	loaded clip '" << c->name << "' (" << c->duration << " s)" << std::endl;
+	}
+	else if (ext == ".nubonemap")
+	{
+		BoneMap* b = BoneMap::LoadFromFile(path);
+		if (!b) { std::cout << "[ResDB]	failed to load " << p.filename().string() << std::endl; return; }
+		if (b->guid.empty() || boneMapByGuid.count(b->guid)) { delete b; return; }
+		RegisterBoneMap(b);
+		SetAssetPath(b->guid, path);
+		std::cout << "[ResDB]	loaded bone map '" << b->name << "' (" << b->map.size() << " entries)" << std::endl;
+	}
+	else if (ext == ".nuprefab")
+	{
+		std::string g = PrefabGuid(path);   // guid<->path so instances can resolve their prefab
+		if (!g.empty()) SetAssetPath(g, path);
 	}
 }
 

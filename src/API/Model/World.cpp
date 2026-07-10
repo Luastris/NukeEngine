@@ -1205,6 +1205,7 @@ static void SaveAtom(Atom* go, json& j)
 				jm["emissive"]   = { mr->mat->emissive.r, mr->mat->emissive.g, mr->mat->emissive.b };
 				jm["emissiveIntensity"] = mr->mat->emissiveIntensity;
 				jm["castShadows"] = mr->mat->castShadows;
+				jm["blendMode"]   = mr->mat->blendMode;
 				if (!mr->mat->props.empty())
 				{
 					json jp = json::object();
@@ -1275,6 +1276,7 @@ static Atom* LoadAtom(const json& j)
 						if (jm.contains("specularFactor")) mr->mat->specular    = jm.value("specularFactor", 1.0f);
 						if (jm.contains("emissiveIntensity")) mr->mat->emissiveIntensity = jm.value("emissiveIntensity", 0.0f);
 						if (jm.contains("castShadows"))    mr->mat->castShadows    = jm.value("castShadows", true);
+						if (jm.contains("blendMode"))      mr->mat->blendMode      = jm.value("blendMode", 0);
 						if (jm.contains("emissive") && jm["emissive"].is_array() && jm["emissive"].size() == 3)
 						{
 							mr->mat->emissive.r = jm["emissive"][0]; mr->mat->emissive.g = jm["emissive"][1];
@@ -1383,7 +1385,13 @@ Atom* LoadPrefab(const std::string& path)
 	boost::filesystem::path p(path);
 	boost::filesystem::ifstream f(p);
 	if (!f) return nullptr;
-	json j = json::parse(f, nullptr, false);
+	std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+	return LoadPrefabFromString(text);
+}
+
+Atom* LoadPrefabFromString(const std::string& text)
+{
+	json j = json::parse(text, nullptr, false);
 	if (j.is_discarded()) return nullptr;
 	Atom* a = LoadAtom(j);
 	RegenIds(a);                         // instances are unique — don't share the prefab's saved ids
@@ -1396,7 +1404,13 @@ std::string PrefabGuid(const std::string& path)
 	boost::filesystem::path p(path);
 	boost::filesystem::ifstream f(p);
 	if (!f) return std::string();
-	json j = json::parse(f, nullptr, false);
+	std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+	return PrefabGuidFromString(text);
+}
+
+std::string PrefabGuidFromString(const std::string& text)
+{
+	json j = json::parse(text, nullptr, false);
 	if (j.is_discarded()) return std::string();
 	return j.value("prefab", std::string());
 }
@@ -1493,6 +1507,225 @@ static void FixDuplicateIds(bc::list<Atom*>& gos, std::set<unsigned long>& seenA
 		}
 		FixDuplicateIds(go->children, seenAtoms);
 	}
+}
+
+// ---- packed-world layer merge (3.2 mods) ------------------------------------------------------
+// Two mods may each carry a copy of the SAME world (one swaps an audio track, another adds
+// a panel) — by file they'd overwrite each other, although the edits don't conflict at all.
+// So world files merge SEMANTICALLY: every layer is diffed against the BASE copy and the
+// diffs apply bottom-up. Granularity: atoms by id, components by cid inside a changed atom,
+// scalar atom fields (name/prefab/transform) individually — a layer only imposes what it
+// actually CHANGED vs the base, everything else keeps the lower layers' result. Additions
+// union; deletions apply; a true conflict (two layers changing the same thing) resolves to
+// the higher layer.
+namespace {
+struct MergeRec
+{
+	json atom;          // the atom object WITHOUT "children" (hierarchy tracked via parent)
+	long parent = 0;    // 0 = world root
+	int  order  = 0;    // emit order (base order first, additions after)
+};
+void FlattenAtoms(const json& arr, long parentId, std::map<long, MergeRec>& out, int& counter)
+{
+	if (!arr.is_array()) return;
+	for (const json& a : arr)
+	{
+		if (!a.is_object()) continue;
+		long id = a.value("id", 0L);
+		if (!id) continue;
+		MergeRec r;
+		r.atom = a; r.atom.erase("children");
+		r.parent = parentId;
+		r.order  = counter++;
+		out[id] = std::move(r);
+		if (a.contains("children")) FlattenAtoms(a["children"], id, out, counter);
+	}
+}
+// Apply ONE layer's atom onto the current merged atom, three-way against the base: only the
+// fields/components the layer changed vs the base overwrite the merged state.
+json MergeAtomJson(const json& baseA, json cur, const json& layerA)
+{
+	for (const char* key : { "name", "prefab", "transform" })
+	{
+		const json b = baseA.contains(key) ? baseA[key] : json();
+		const json l = layerA.contains(key) ? layerA[key] : json();
+		if (l != b) { if (l.is_null()) cur.erase(key); else cur[key] = l; }
+	}
+	auto index = [](const json& a) {
+		std::map<long, json> m;
+		if (a.contains("components") && a["components"].is_array())
+			for (const json& c : a["components"])
+				if (c.is_object()) m[c.value("cid", 0L)] = c;
+		return m;
+	};
+	std::map<long, json> bC = index(baseA), lC = index(layerA);
+	json comps = json::array();
+	std::set<long> emitted;
+	if (cur.contains("components") && cur["components"].is_array())
+		for (const json& c : cur["components"])
+		{
+			long cid = c.is_object() ? c.value("cid", 0L) : 0L;
+			if (bC.count(cid) && !lC.count(cid)) continue;          // deleted by this layer
+			auto lit = lC.find(cid);
+			const bool changed = lit != lC.end() && (!bC.count(cid) || bC[cid] != lit->second);
+			comps.push_back(changed ? lit->second : c);             // layer's change, else keep
+			emitted.insert(cid);
+		}
+	for (auto& kv : lC)                                             // components ADDED by this layer
+		if (!emitted.count(kv.first) && !bC.count(kv.first)) comps.push_back(kv.second);
+	cur["components"] = comps;
+	return cur;
+}
+json EmitAtomTree(long id, std::map<long, MergeRec>& recs, std::map<long, std::vector<long>>& kids)
+{
+	json j = recs[id].atom;
+	auto it = kids.find(id);
+	if (it != kids.end())
+		for (long ch : it->second)
+			j["children"].push_back(EmitAtomTree(ch, recs, kids));
+	return j;
+}
+// The running merged state: the flat atom map + the world settings object.
+struct MergeState
+{
+	std::map<long, MergeRec> atoms;
+	json settings = json::object();
+};
+// Apply ONE layer onto `cur`, three-way against `baseline` (what that layer's AUTHOR saw):
+// only what the layer changed vs its baseline lands; counters are optional (final pass).
+void ApplyLayer(MergeState& cur, const MergeState& baseline,
+                const json& Ldoc, const std::map<long, MergeRec>& lMap,
+                int* adds, int* changes, int* dels)
+{
+	if (Ldoc.contains("settings") && Ldoc["settings"].is_object())
+		for (auto it = Ldoc["settings"].begin(); it != Ldoc["settings"].end(); ++it)
+		{
+			const json b = baseline.settings.contains(it.key()) ? baseline.settings[it.key()] : json();
+			if (it.value() != b) cur.settings[it.key()] = it.value();
+		}
+	for (auto& kv : lMap)
+	{
+		auto bit = baseline.atoms.find(kv.first);
+		if (bit == baseline.atoms.end())
+		{
+			// Added by this layer (or two layers add the same id — the higher wins).
+			if (adds && !cur.atoms.count(kv.first)) ++*adds;
+			cur.atoms[kv.first] = kv.second;
+		}
+		else if (cur.atoms.count(kv.first))
+		{
+			MergeRec& c = cur.atoms[kv.first];
+			if (kv.second.atom != bit->second.atom)
+			{
+				c.atom = MergeAtomJson(bit->second.atom, c.atom, kv.second.atom);
+				if (changes) ++*changes;
+			}
+			if (kv.second.parent != bit->second.parent) c.parent = kv.second.parent;   // reparented
+		}
+	}
+	for (auto& kv : baseline.atoms)                          // deleted by this layer
+		if (!lMap.count(kv.first) && cur.atoms.erase(kv.first) && dels) ++*dels;
+}
+}  // namespace
+
+std::string World::MergeWorldLayers(const std::vector<std::string>& layers)
+{
+	return MergeWorldLayers(layers, std::vector<std::vector<int>>());
+}
+
+std::string World::MergeWorldLayers(const std::vector<std::string>& layers,
+                                    const std::vector<std::vector<int>>& deps)
+{
+	if (layers.empty())     return std::string();
+	if (layers.size() == 1) return layers[0];
+	json base = json::parse(layers[0], nullptr, false);
+	if (base.is_discarded() || !base.is_object()) return layers.back();   // unmergeable base: top wins
+
+	// Parse + flatten every layer once. A layer's additions get order slots AFTER the base
+	// block so rebuilt hierarchies keep the base order with additions appended.
+	struct Parsed { json doc; std::map<long, MergeRec> flat; bool ok = false; };
+	std::vector<Parsed> P(layers.size());
+	int counter = 0;
+	{
+		P[0].doc = base; P[0].ok = true;
+		FlattenAtoms(base.contains("atoms") ? base["atoms"] : json::array(), 0, P[0].flat, counter);
+	}
+	for (size_t i = 1; i < layers.size(); ++i)
+	{
+		P[i].doc = json::parse(layers[i], nullptr, false);
+		P[i].ok = !P[i].doc.is_discarded() && P[i].doc.is_object();
+		if (!P[i].ok) continue;   // corrupt layer: skipped, the rest still merges
+		int c = counter;
+		FlattenAtoms(P[i].doc.contains("atoms") ? P[i].doc["atoms"] : json::array(), 0, P[i].flat, c);
+	}
+
+	// Transitive dependency closure per layer, ascending (mount order); base 0 implicit.
+	// A layer's diff BASELINE = the merged state of base + its dependencies — a patch-mod
+	// built on top of mods A+B must not re-impose A's and B's changes as its own.
+	auto closureOf = [&](int idx) {
+		std::set<int> s;
+		std::function<void(int)> walk = [&](int i) {
+			if (i <= 0 || i >= (int)deps.size()) return;
+			for (int d : deps[i])
+				if (d > 0 && d < (int)layers.size() && s.insert(d).second) walk(d);
+		};
+		walk(idx);
+		return std::vector<int>(s.begin(), s.end());   // std::set: already ascending
+	};
+
+	// Merged state of base + an ascending index set (memoized — dependency sets repeat).
+	std::map<std::string, MergeState> memo;
+	std::function<MergeState(const std::vector<int>&, int*, int*, int*)> mergeSet =
+		[&](const std::vector<int>& S, int* adds, int* changes, int* dels) -> MergeState
+	{
+		std::string key;
+		for (int i : S) key += std::to_string(i) + ",";
+		if (!adds)   // memo only the counter-less baseline computations
+		{
+			auto it = memo.find(key);
+			if (it != memo.end()) return it->second;
+		}
+		MergeState st;
+		st.atoms = P[0].flat;
+		if (P[0].doc.contains("settings") && P[0].doc["settings"].is_object()) st.settings = P[0].doc["settings"];
+		for (int idx : S)
+		{
+			if (!P[idx].ok) continue;
+			MergeState bl = mergeSet(closureOf(idx), nullptr, nullptr, nullptr);
+			ApplyLayer(st, bl, P[idx].doc, P[idx].flat, adds, changes, dels);
+		}
+		if (!adds) memo[key] = st;
+		return st;
+	};
+
+	std::vector<int> all;
+	for (size_t i = 1; i < layers.size(); ++i) all.push_back((int)i);
+	int adds = 0, changes = 0, dels = 0;
+	MergeState fin = mergeSet(all, &adds, &changes, &dels);
+
+	// Rebuild the nested hierarchy: children grouped by parent (orphans -> root), emit in
+	// (order, id) — base atoms keep their order, additions follow.
+	std::map<long, std::vector<long>> kids;
+	std::vector<long> roots;
+	for (auto& kv : fin.atoms)
+	{
+		long p = kv.second.parent;
+		if (p && fin.atoms.count(p)) kids[p].push_back(kv.first);
+		else                         roots.push_back(kv.first);
+	}
+	auto byOrder = [&](long a, long b) {
+		return fin.atoms[a].order != fin.atoms[b].order ? fin.atoms[a].order < fin.atoms[b].order : a < b;
+	};
+	std::sort(roots.begin(), roots.end(), byOrder);
+	for (auto& kv : kids) std::sort(kv.second.begin(), kv.second.end(), byOrder);
+	json merged = base;
+	merged["settings"] = fin.settings;
+	json atoms = json::array();
+	for (long id : roots) atoms.push_back(EmitAtomTree(id, fin.atoms, kids));
+	merged["atoms"] = atoms;
+	std::cout << "[World]\t\t\t" << "merged " << layers.size() << " layers (" << adds << " added, "
+	          << changes << " changed, " << dels << " removed atoms)" << std::endl;
+	return merged.dump();
 }
 
 void World::LoadFromString(const std::string& data)

@@ -2,6 +2,7 @@
 #ifndef NUKEE_TEXTURE_H
 #define NUKEE_TEXTURE_H
 #include "NukeAPI.h"
+#include <istream>
 #include <string>
 #include <vector>
 #include <cstdint>
@@ -54,6 +55,8 @@ public:
     // references the source at runtime.
     bool            SaveToFile(const std::string& path) const;
     static Texture* LoadFromFile(const std::string& path);
+    static Texture* LoadFromMemory(const std::string& data);   // packed content (3.2)
+    static Texture* LoadFromStream(std::istream& i);
 };
 }  // namespace nuke
 

@@ -35,7 +35,7 @@ void AudioSource::Play()
 		d.pos[0] = (float)p.x; d.pos[1] = (float)p.y; d.pos[2] = (float)p.z;
 		d.minDist = minDist; d.maxDist = maxDist;
 	}
-	voice = a->play(Audio::ResolveClip(clip).c_str(), d);
+	voice = Audio::PlayDesc(clip, d);   // raw file by path; pak entry from memory (3.2)
 	lastVolume = volume; lastPitch = pitch;
 }
 

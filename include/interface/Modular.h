@@ -59,6 +59,9 @@ NUKEENGINE_API NUKEModule* FindServiceProvider(const char* service,
 // the render module stays free of file/boost dependencies.
 class iRender;
 NUKEENGINE_API void LoadBuiltinShaders(iRender* render, const std::string& dir);
+// Packed variant (3.2): built-ins from the mounted game.nupak ("shaders/" entries) — the
+// dist ships no loose shaders/ dir; mods override entries through the Package layers.
+NUKEENGINE_API void LoadBuiltinShadersPackaged(iRender* render);
 
 // Which plugin (dll name) provides a component type, "" for engine built-ins. Learned by
 // diffing the reflection registry around each plugin's OnLoad().

@@ -3,8 +3,11 @@
 #define BOOST_CHRONO_HEADER_ONLY
 #include "interface/AppInstance.h"
 #include "API/Model/World.h"
+#include "API/Model/Package.h"   // packed-content resolve (3.2)
+#include <map>                   // mod-name -> layer index (world-merge baselines)
 #include <boost/chrono.hpp>
 #include <boost/filesystem.hpp>
+#include <boost/filesystem/fstream.hpp>
 #ifdef _WIN32
 #include <Windows.h>   // SetThreadAffinityMask / SetThreadPriority (fixed-thread core pinning)
 #endif
@@ -36,6 +39,22 @@ std::string AppInstance::WorldFullPath(const std::string& relPath) const
 	return (boost::filesystem::path(contentRoot) / rp).string();
 }
 
+// Read a content-relative file through every layer: the raw project/overlay from disk,
+// mounted paks from MEMORY (packed content is bytes-only — it never touches the disk).
+bool AppInstance::ReadContent(const std::string& relPath, std::string& out) const
+{
+	std::string full = ResolveContent(relPath);
+	boost::system::error_code ec;
+	if (!full.empty() && boost::filesystem::exists(boost::filesystem::path(full), ec))
+	{
+		boost::filesystem::ifstream f(boost::filesystem::path(full), std::ios::binary);
+		if (f) { out.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()); return true; }
+	}
+	if (Package::MountedCount() > 0)
+		return Package::Read("content/" + boost::filesystem::path(relPath).generic_string(), out);
+	return false;
+}
+
 bool AppInstance::OpenWorld(const std::string& relPath)
 {
 	if (relPath.empty() || !currentScene) return false;
@@ -43,7 +62,51 @@ bool AppInstance::OpenWorld(const std::string& relPath)
 	std::string full = WorldFullPath(relPath);
 	if (!boost::filesystem::exists(boost::filesystem::path(full), ec))
 		full = ResolveContent(relPath);   // legacy fallback (e.g. a world next to the exe)
-	if (!boost::filesystem::exists(boost::filesystem::path(full), ec)) return false;
+	if (!boost::filesystem::exists(boost::filesystem::path(full), ec))
+	{
+		// Packed runtime (3.2): the world lives in a mounted pak — load it from bytes.
+		// SEVERAL layers may carry this world (base game + mods editing it): they MERGE
+		// semantically (World::MergeWorldLayers) instead of the top file winning outright.
+		// Each layer diffs against ITS OWN baseline: an ordinary mod against the base game,
+		// a patch-mod against base + the mods it requires (mod.json), the modder's raw
+		// overlay against everything mounted below it (the session it was authored in).
+		std::vector<std::pair<std::string, std::string>> hits;   // (data, source pak; "" = raw)
+		if (Package::MountedCount() > 0 && Package::ReadAllInfo("content/" + relPath, hits) > 0)
+		{
+			std::vector<std::string> layers;
+			std::vector<std::vector<int>> deps(hits.size());
+			// Which layer index a mod NAME resolves to (only mods carrying THIS world count).
+			std::map<std::string, int> nameToLayer;
+			auto lower = [](std::string s) { for (char& c : s) c = (char)tolower((unsigned char)c); return s; };
+			for (size_t i = 0; i < hits.size(); ++i)
+			{
+				layers.push_back(hits[i].first);
+				if (hits[i].second.empty())
+				{
+					// The raw overlay: authored on top of the FULL mounted stack.
+					for (size_t j = 1; j < i; ++j) deps[i].push_back((int)j);
+					continue;
+				}
+				for (const Package::ModInfo& mi : Package::Mods())
+					if (mi.pakPath == hits[i].second)
+					{
+						nameToLayer[lower(mi.name)] = (int)i;
+						for (const std::string& r : mi.requires_)
+						{
+							auto it = nameToLayer.find(lower(r));   // deps mount below -> already seen
+							if (it != nameToLayer.end()) deps[i].push_back(it->second);
+						}
+						break;
+					}
+			}
+			selectedInHieararchy = nullptr;
+			currentScene->LoadFromString(layers.size() > 1 ? World::MergeWorldLayers(layers, deps)
+			                                               : layers[0]);
+			currentWorldPath = relPath;
+			return true;
+		}
+		return false;
+	}
 	selectedInHieararchy = nullptr;
 	currentScene->LoadFromFile(full);
 	currentWorldPath = relPath;

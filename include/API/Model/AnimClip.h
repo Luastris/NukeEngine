@@ -2,6 +2,7 @@
 #ifndef NUKEE_ANIMCLIP_H
 #define NUKEE_ANIMCLIP_H
 #include "NukeAPI.h"
+#include <istream>
 #include <string>
 #include <vector>
 
@@ -35,6 +36,8 @@ public:
 	// Native asset format (.nuanim): binary, same header style as .numesh.
 	bool             SaveToFile(const std::string& path) const;
 	static AnimClip* LoadFromFile(const std::string& path);
+	static AnimClip* LoadFromMemory(const std::string& data);   // packed content (3.2)
+	static AnimClip* LoadFromStream(std::istream& i);
 };
 
 }  // namespace nuke

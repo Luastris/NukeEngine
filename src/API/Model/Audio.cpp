@@ -4,6 +4,7 @@
 #include "API/Model/Time.h"
 #include "interface/Services.h"
 #include "interface/AppInstance.h"
+#include <boost/filesystem.hpp>
 
 namespace nuke {
 
@@ -17,13 +18,32 @@ std::string Audio::ResolveClip(const std::string& clip)
 	return AppInstance::GetSingleton()->ResolveContent(clip);
 }
 
-double Audio::Play(const std::string& clip, double volume, bool loop, double bus)
+// Start a voice through the content layers: a real file plays by PATH (the backend
+// streams it from disk); a pak-only clip is read as BYTES and decoded from memory —
+// packed content never touches the disk (3.2).
+uint64_t Audio::PlayDesc(const std::string& clip, const NukeVoiceDesc& d)
 {
 	iAudio* a = GetService<iAudio>();
-	if (!a || clip.empty()) return 0.0;
+	if (!a || clip.empty()) return 0;
+	// Init on demand (idempotent): in the Player the FIRST World::Update (playOnStart
+	// sources) runs before the first World::Render (the per-frame pump that inits the
+	// backend) — without this the very first Play() of the game died silently.
+	if (!a->init()) return 0;
+	std::string full = ResolveClip(clip);
+	boost::system::error_code ec;
+	if (!full.empty() && boost::filesystem::exists(boost::filesystem::path(full), ec))
+		return a->play(full.c_str(), d);
+	std::string bytes;
+	if (AppInstance::GetSingleton()->ReadContent(clip, bytes) && !bytes.empty())
+		return a->playData(bytes.data(), bytes.size(), d);
+	return 0;
+}
+
+double Audio::Play(const std::string& clip, double volume, bool loop, double bus)
+{
 	NukeVoiceDesc d;
 	d.volume = (float)volume; d.loop = loop; d.bus = (int)bus;
-	return (double)a->play(ResolveClip(clip).c_str(), d);
+	return (double)PlayDesc(clip, d);
 }
 
 double Audio::PlayAt(const std::string& clip, const Vector3& pos,
@@ -36,7 +56,7 @@ double Audio::PlayAt(const std::string& clip, const Vector3& pos,
 	d.spatial = true;
 	d.pos[0] = (float)pos.x; d.pos[1] = (float)pos.y; d.pos[2] = (float)pos.z;
 	d.minDist = (float)minDist; d.maxDist = (float)maxDist;
-	return (double)a->play(ResolveClip(clip).c_str(), d);
+	return (double)PlayDesc(clip, d);
 }
 
 void Audio::Stop(double voice)             { if (iAudio* a = GetService<iAudio>()) a->stop((uint64_t)voice); }

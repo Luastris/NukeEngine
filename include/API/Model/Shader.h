@@ -42,6 +42,9 @@ public:
 	// Build a POST-process effect shader from a single fullscreen ".post.hlsl" pixel shader (the renderer
 	// pairs it with the built-in post.vs). Params come from its `cbuffer PostParams { ... }`.
 	static Shader* LoadPostShader(const std::string& name, const std::string& psPath);
+	// Packed content (3.2): construct from source text (pak entries; no hot-reload paths).
+	static Shader* FromSources(const std::string& name, const std::string& vsSrc, const std::string& psSrc);
+	static Shader* PostFromSource(const std::string& name, const std::string& psSrc);
 	// Parse a named `cbuffer` block of a pixel shader into ShaderProp entries (engine-side reflection from
 	// source text). For MatCB the standard lit fields (g_Color/g_Params/...) are excluded.
 	static void ParseCBProps(const std::string& psSource, const char* cbName, std::vector<ShaderProp>& out);

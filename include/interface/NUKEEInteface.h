@@ -2,6 +2,7 @@
 #ifndef NUKEE_INTERFACE_H
 #define NUKEE_INTERFACE_H
 #include <boost/config.hpp>   // BOOST_SYMBOL_EXPORT (the loader side pulls boost/dll itself)
+#include <cstdint>
 
 #include <string>
 #include <vector>
@@ -87,6 +88,20 @@ public:
 	//Services_Provide) and revoked BEFORE Shutdown(), so the lifecycle is loader-bound and a
 	//provider can't forget to revoke. Utility plugins keep the nullptr default.
 	virtual void* queryService() { return nullptr; }
+
+	// ---- Shipping cooker hook (3.2) ------------------------------------------------------
+	// The editor's Package Project walks the dependency closure of the shipped worlds; the
+	// EDITOR itself only understands the engine's serialized data (worlds/prefabs/materials
+	// — reflected props, GUIDs, content paths). Everything else is a MODULE's domain: when
+	// the walk reaches a file, every loaded module is asked. Return TRUE if this module OWNS
+	// the file type (its scripts/data — the file ships), and append every content it uses —
+	// content-relative paths, hardcoded paths, or ResDB asset GUIDs — to `outUses` (each is
+	// resolved and walked recursively). A file no engine loader and no LOADED module claims
+	// never ships (e.g. .lua without the scripting module). PURE function: may be called
+	// from a worker thread, must not touch live module state.
+	// ABI: new virtuals append at the END of the class, never mid-vtable.
+	virtual bool cookContent(const char* contentRel, const char* bytes, uint64_t size,
+	                         std::vector<std::string>& outUses) { return false; }
 };
 
 }  // namespace nuke

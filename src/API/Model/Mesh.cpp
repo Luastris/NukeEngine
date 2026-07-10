@@ -1,4 +1,5 @@
 #include "API/Model/Mesh.h"
+#include <sstream>
 #include <assimp/scene.h>
 #include <algorithm>
 #include <array>
@@ -273,9 +274,9 @@ namespace {
 	const char  kMagic[8] = { 'N','U','M','E','S','H','\0','\0' };
 	const uint32_t kVersion = 3;
 	template <class T> void wr(bfs::ofstream& o, const T& v) { o.write((const char*)&v, sizeof(T)); }
-	template <class T> void rd(bfs::ifstream& i, T& v)       { i.read((char*)&v, sizeof(T)); }
+	template <class T> void rd(std::istream& i, T& v)       { i.read((char*)&v, sizeof(T)); }
 	void wrStr(bfs::ofstream& o, const std::string& s) { uint32_t n = (uint32_t)s.size(); wr(o, n); if (n) o.write(s.data(), n); }
-	std::string rdStr(bfs::ifstream& i) { uint32_t n = 0; rd(i, n); std::string s(n, '\0'); if (n) i.read(&s[0], n); return s; }
+	std::string rdStr(std::istream& i) { uint32_t n = 0; rd(i, n); std::string s(n, '\0'); if (n) i.read(&s[0], n); return s; }
 }
 
 bool Mesh::SaveToFile(const std::string& path) const
@@ -316,6 +317,17 @@ Mesh* Mesh::LoadFromFile(const std::string& path)
 {
 	bfs::ifstream i(bfs::path(path), std::ios::binary);
 	if (!i) return nullptr;
+	return LoadFromStream(i);
+}
+
+Mesh* Mesh::LoadFromMemory(const std::string& data)
+{
+	std::istringstream i(data, std::ios::binary);
+	return LoadFromStream(i);
+}
+
+Mesh* Mesh::LoadFromStream(std::istream& i)
+{
 	char magic[8]; i.read(magic, 8);
 	if (memcmp(magic, kMagic, 8) != 0) return nullptr;
 	uint32_t version = 0; rd(i, version);

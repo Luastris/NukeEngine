@@ -68,6 +68,7 @@ public:
 	// Shared by the editor (New/Open/Save) and the game (loads the project's default world).
 	std::string currentWorldPath;                     // content-relative path of the open world ("" = unsaved)
 	std::string WorldFullPath(const std::string& relPath) const;   // canonical content path for a world
+	bool        ReadContent(const std::string& relPath, std::string& out) const; // bytes via all layers (pak = memory)
 	bool        OpenWorld(const std::string& relPath); // load a world from content into currentScene
 	bool        SaveWorld(const std::string& relPath); // save currentScene to content (creates dirs)
 	void        NewWorld();                            // replace currentScene with a fresh empty world

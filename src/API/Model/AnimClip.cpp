@@ -1,4 +1,5 @@
 #include "API/Model/AnimClip.h"
+#include <sstream>
 #include <cstdint>
 #include <cstring>
 #include <boost/filesystem/fstream.hpp>
@@ -15,15 +16,15 @@ namespace {
 	const char     kMagic[8] = { 'N','U','A','N','I','M','\0','\0' };
 	const uint32_t kVersion  = 2;
 	template <class T> void wr(bfs::ofstream& o, const T& v) { o.write((const char*)&v, sizeof(T)); }
-	template <class T> void rd(bfs::ifstream& i, T& v)       { i.read((char*)&v, sizeof(T)); }
+	template <class T> void rd(std::istream& i, T& v)       { i.read((char*)&v, sizeof(T)); }
 	void wrStr(bfs::ofstream& o, const std::string& s) { uint32_t n = (uint32_t)s.size(); wr(o, n); if (n) o.write(s.data(), n); }
-	std::string rdStr(bfs::ifstream& i) { uint32_t n = 0; rd(i, n); std::string s(n, '\0'); if (n) i.read(&s[0], n); return s; }
+	std::string rdStr(std::istream& i) { uint32_t n = 0; rd(i, n); std::string s(n, '\0'); if (n) i.read(&s[0], n); return s; }
 	void wrKeys(bfs::ofstream& o, const std::vector<AnimClip::Key>& k)
 	{
 		uint32_t n = (uint32_t)k.size(); wr(o, n);
 		if (n) o.write((const char*)k.data(), sizeof(AnimClip::Key) * n);
 	}
-	void rdKeys(bfs::ifstream& i, std::vector<AnimClip::Key>& k)
+	void rdKeys(std::istream& i, std::vector<AnimClip::Key>& k)
 	{
 		uint32_t n = 0; rd(i, n);
 		k.resize(n);
@@ -64,6 +65,17 @@ AnimClip* AnimClip::LoadFromFile(const std::string& path)
 {
 	bfs::ifstream i(bfs::path(path), std::ios::binary);
 	if (!i) return nullptr;
+	return LoadFromStream(i);
+}
+
+AnimClip* AnimClip::LoadFromMemory(const std::string& data)
+{
+	std::istringstream i(data, std::ios::binary);
+	return LoadFromStream(i);
+}
+
+AnimClip* AnimClip::LoadFromStream(std::istream& i)
+{
 	char magic[8]; i.read(magic, 8);
 	if (memcmp(magic, kMagic, 8) != 0) return nullptr;
 	uint32_t version = 0; rd(i, version);

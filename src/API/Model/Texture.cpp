@@ -1,4 +1,5 @@
 #include "API/Model/Texture.h"
+#include <sstream>
 #include <boost/filesystem/fstream.hpp>
 #include <cstdint>
 #include <cstring>
@@ -200,9 +201,19 @@ bool Texture::SaveToFile(const std::string& path) const
 
 Texture* Texture::LoadFromFile(const std::string& path)
 {
-	bfs::path p(path);
-	bfs::ifstream i(p, std::ios::binary);
+	bfs::ifstream i(bfs::path(path), std::ios::binary);
 	if (!i) return nullptr;
+	return LoadFromStream(i);
+}
+
+Texture* Texture::LoadFromMemory(const std::string& data)
+{
+	std::istringstream i(data, std::ios::binary);
+	return LoadFromStream(i);
+}
+
+Texture* Texture::LoadFromStream(std::istream& i)
+{
 	char magic[8]; i.read(magic, 8);
 	if (memcmp(magic, kMagic, 8) != 0) return nullptr;
 	uint32_t version = 0; i.read((char*)&version, sizeof(version)); (void)version;

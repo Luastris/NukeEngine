@@ -20,6 +20,7 @@ public:
 
 	bool            SaveToFile(const std::string& path) const;
 	static BoneMap* LoadFromFile(const std::string& path);
+	static BoneMap* LoadFromString(const std::string& text, const std::string& name = std::string());   // packed content (3.2)
 
 	// Fresh file template for the browser's "New" menu.
 	static std::string Template();

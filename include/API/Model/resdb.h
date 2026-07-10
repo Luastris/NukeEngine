@@ -85,6 +85,15 @@ public:
     // indexed by the GUID stored in the file. Skips GUIDs already registered. Call at startup
     // so meshGuid references in saved worlds resolve.
     void  LoadContentDir(const std::string& dir);
+    // Same, over the PACKAGE layer stack (packed runtime, roadmap 3.2): raw overlay files
+    // load from disk, pak entries from MEMORY (packed content never touches the disk).
+    void  LoadContentPackaged();
+    // Load ONE content file by disk path (the shared per-extension dispatch of the scans).
+    void  LoadContentFile(const std::string& path);
+    // Load ONE packed entry from bytes (project-relative path decides the type).
+    void  LoadContentEntry(const std::string& rel, const std::string& bytes);
+    // Content shaders from the Package layers (pairs + .post.hlsl, built from pak bytes).
+    void  LoadShadersPackaged();
 
     static std::string NewGuid();              // fresh opaque asset id (for imports)
 

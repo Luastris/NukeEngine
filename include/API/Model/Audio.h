@@ -64,6 +64,8 @@ public:
 	static bool SystemParam(const std::string& name, float out[4]);
 	// Resolve a content-relative clip path against the project content root.
 	static std::string ResolveClip(const std::string& clip);
+	// Start a voice through the content layers (raw file by path, pak entry from bytes).
+	static uint64_t PlayDesc(const std::string& clip, const NukeVoiceDesc& desc);
 };
 
 }  // namespace nuke

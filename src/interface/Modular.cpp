@@ -2,6 +2,7 @@
 #include "interface/Services.h"
 #include "reflect/Reflect.h"
 #include "API/Model/World.h"
+#include "API/Model/Package.h"   // packed built-in shaders (3.2)
 #include <boost/filesystem/fstream.hpp>
 #include <iterator>
 #include <map>
@@ -215,5 +216,24 @@ void LoadBuiltinShaders(iRender* render, const std::string& dir)
 		render->setShaderSource(name.c_str(), src.c_str());
 		cout << "[Modular]\tshader '" << name << "' (" << src.size() << " bytes)" << endl;
 	}
+}
+
+// Packed runtime (3.2): the engine built-ins ride INSIDE game.nupak under "shaders/" — feed
+// them to the renderer from the Package layers (so mods can override them like any entry).
+void LoadBuiltinShadersPackaged(iRender* render)
+{
+	if (!render) return;
+	int n = 0;
+	for (const std::string& rel : Package::List("shaders/"))
+	{
+		const std::string suf = ".hlsl";
+		if (rel.size() <= suf.size() || rel.compare(rel.size() - suf.size(), suf.size(), suf) != 0) continue;
+		std::string src;
+		if (!Package::Read(rel, src)) continue;
+		std::string name = bfs::path(rel).stem().string();   // "shaders/world.vs.hlsl" -> "world.vs"
+		render->setShaderSource(name.c_str(), src.c_str());
+		++n;
+	}
+	cout << "[Modular]\t" << n << " built-in shaders loaded from the package" << endl;
 }
 }  // namespace nuke

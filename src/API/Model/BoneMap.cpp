@@ -30,17 +30,18 @@ BoneMap* BoneMap::LoadFromFile(const std::string& path)
 {
 	bfs::ifstream i{ bfs::path(path) };
 	if (!i) return nullptr;
-	json j;
-	try { i >> j; }
-	catch (const std::exception& e)
-	{
-		std::cout << "[BoneMap]\tbad json in " << path << ": " << e.what() << std::endl;
-		return nullptr;
-	}
+	std::string text((std::istreambuf_iterator<char>(i)), std::istreambuf_iterator<char>());
+	return LoadFromString(text, bfs::path(path).stem().string());
+}
+
+BoneMap* BoneMap::LoadFromString(const std::string& text, const std::string& name)
+{
+	json j = json::parse(text, nullptr, false);
+	if (j.is_discarded()) { std::cout << "[BoneMap]\tbad json" << std::endl; return nullptr; }
 	if (j.value("type", "") != "BoneMap") return nullptr;
 	BoneMap* b = new BoneMap();
 	b->guid = j.value("guid", "");
-	b->name = bfs::path(path).stem().string();
+	b->name = name;
 	if (j.contains("map") && j["map"].is_object())
 		for (auto it = j["map"].begin(); it != j["map"].end(); ++it)
 			if (it.value().is_string()) b->map[it.key()] = it.value().get<std::string>();

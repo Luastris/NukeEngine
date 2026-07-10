@@ -78,6 +78,7 @@ public:
     // Native asset format (.numat, JSON): guid + name + color + texture GUIDs.
     bool             SaveToFile(const std::string& path) const;
     static Material* LoadFromFile(const std::string& path);
+    static Material* LoadFromString(const std::string& text);   // packed content (3.2)
 };
 }  // namespace nuke
 

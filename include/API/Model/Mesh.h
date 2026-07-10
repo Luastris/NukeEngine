@@ -2,6 +2,7 @@
 #ifndef NUKEE_MESH_H
 #define NUKEE_MESH_H
 #include "NukeAPI.h"
+#include <istream>
 #include "Transform.h"
 #include "Material.h"
 #include <assimp/mesh.h>
@@ -87,6 +88,8 @@ public:
 	// at runtime. The GUID is stored inside the file; ResDB indexes by it.
 	bool         SaveToFile(const std::string& path) const;
 	static Mesh* LoadFromFile(const std::string& path);
+	static Mesh* LoadFromMemory(const std::string& data);   // packed content (3.2) — no disk copy
+	static Mesh* LoadFromStream(std::istream& i);
 };
 }  // namespace nuke
 

@@ -100,6 +100,11 @@ public:
 
 	// Latest master-mix analysis (refreshed in update()).
 	virtual void getAnalysis(NukeAudioAnalysis& out) = 0;
+
+	// ABI: new virtuals append at the END, never mid-vtable (see iRender's incident note).
+	// Play a clip from MEMORY (packed content, 3.2): the backend COPIES/owns the bytes for
+	// the voice's lifetime (decode + streaming both run off its own copy). 0 on failure.
+	virtual uint64_t playData(const void* bytes, uint64_t size, const NukeVoiceDesc& desc) { return 0; }
 };
 
 }  // namespace nuke

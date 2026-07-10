@@ -76,6 +76,19 @@ public:
 	// excluded from save and preserved across load (it is editor infrastructure).
 	std::string SaveToString();                  // serialize to JSON text (also used for PIE snapshots)
 	void        LoadFromString(const std::string& data);
+	// Merge every mounted layer's copy of ONE world (Package::ReadAll order: base first,
+	// mods above). Each layer is diffed against the BASE (atoms by id, components by cid)
+	// and the diffs apply bottom-up — two mods editing the same world MERGE instead of the
+	// top file replacing the other; a true conflict resolves to the higher layer. Returns
+	// the merged world JSON (layers.back() when there is nothing to merge).
+	static std::string MergeWorldLayers(const std::vector<std::string>& layers);
+	// Mods-on-mods: deps[i] = indices (into `layers`) of layer i's dependencies. A layer's
+	// diff baseline = base + its dependency closure — a patch-mod authored on top of mods
+	// A+B carries their content in its world copy, and diffing it against base would
+	// re-impose A's and B's changes as the patch's own; diffing against base+A+B leaves
+	// only the patch's actual fixes. deps[0] is ignored (the base has no dependencies).
+	static std::string MergeWorldLayers(const std::vector<std::string>& layers,
+	                                    const std::vector<std::vector<int>>& deps);
 	void SaveToFile(const std::string& path);
 	void LoadFromFile(const std::string& path);
 	void Clear();   // drop all atoms except the Editor Camera (for "New World")

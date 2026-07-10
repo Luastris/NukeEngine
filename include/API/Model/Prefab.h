@@ -14,6 +14,7 @@ class Atom;
 // (e.g. MeshRenderer.meshGuid -> ResDB, missing-plugin types -> inert placeholders).
 NUKEENGINE_API bool  SavePrefab(Atom* root, const std::string& path);
 NUKEENGINE_API Atom* LoadPrefab(const std::string& path);   // nullptr on failure
+NUKEENGINE_API Atom* LoadPrefabFromString(const std::string& text);   // packed content (3.2)
 
 // In-memory variants of the same atom-subtree (de)serialization (used by editor undo deltas).
 NUKEENGINE_API std::string SaveAtomToString(Atom* root);
@@ -21,6 +22,7 @@ NUKEENGINE_API Atom*       LoadAtomFromString(const std::string& json);   // nul
 
 // The prefab file's own GUID (its root "prefab" field), or "" for pre-link prefabs.
 NUKEENGINE_API std::string PrefabGuid(const std::string& path);
+NUKEENGINE_API std::string PrefabGuidFromString(const std::string& text);
 
 }  // namespace nuke
 

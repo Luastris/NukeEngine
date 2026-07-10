@@ -130,4 +130,26 @@ Shader* Shader::LoadPostShader(const std::string& name, const std::string& psPat
 	ParseCBProps(s->psSource, "PostParams", s->props);
 	return s;
 }
+
+// Packed content (3.2): build shaders straight from SOURCE TEXT (a pak entry) — no file,
+// no hot-reload (empty paths make HotReloadShaders skip them).
+Shader* Shader::FromSources(const std::string& name, const std::string& vsSrc, const std::string& psSrc)
+{
+	if (vsSrc.empty() || psSrc.empty()) return nullptr;
+	Shader* s = new Shader();
+	s->guid = name; s->name = name;
+	s->vsSource = vsSrc; s->psSource = psSrc;
+	ParseMatCBProps(s->psSource, s->props);
+	return s;
+}
+
+Shader* Shader::PostFromSource(const std::string& name, const std::string& psSrc)
+{
+	if (psSrc.empty()) return nullptr;
+	Shader* s = new Shader();
+	s->guid = name; s->name = name; s->isPost = true;
+	s->psSource = psSrc;
+	ParseCBProps(s->psSource, "PostParams", s->props);
+	return s;
+}
 }  // namespace nuke
