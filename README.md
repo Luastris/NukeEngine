@@ -1,6 +1,40 @@
 # NukeEngine
 
-NukeEngine is a free, cross-platform modular engine. This project is an engine shared library.
+The CORE of [NukeEngine](https://github.com/Luastris/NukeEngine-Eco) by
+[Luastris](https://luastris.com): a modular C++20 game engine shared library
+(`NukeEngine.dll`) with curated `NUKEENGINE_API` exports. Everything else — the editor,
+the player, renderers, physics, audio, scripting, runtime GUI — is a separate host or a
+hot-pluggable module behind POD service seams.
+
+For the full picture (quick start, ecosystem, packaging, modding, scripting) see the
+ecosystem root: **[NukeEngine-Eco](https://github.com/Luastris/NukeEngine-Eco)** — clone
+it with submodules and build everything with one command via the superbuild.
+
+## What lives here
+
+- The Model API (`nuke::` namespace): Atom / World / Component, Transform (quaternions),
+  Material, Mesh, Texture, Shader, AnimClip, Prefab, ResDB, Package (NUPAK), Audio,
+  Physics facades, Jobs, Log, Math.
+- The reflection registry (`[[nuke::prop]]` / `[[nuke::func]]` + nukegen codegen for
+  C++ < 26) — the single source the inspector, serialization, Lua, C# and modding ride.
+- Service seams (`iRender`, `iPhysics`, `iAudio`, `iScript`, `iGUI`) and the module
+  loader (`NUKEModule`, unified plugin export, shared services).
+- World serialization (`.nuworld` JSON), the layered content resolver (raw project over
+  mounted paks/mods), the world-merge for mods (per-property point diffs).
+
+## Building
+
+Preferred: the superbuild at the ecosystem root (`cmake -S . -B build` there) — it drives
+this repo's `NukeEngine.sln` plus every present module in dependency order.
+
+Standalone: `NukeEngine.sln` builds the engine + the editor (VS2022, v143, x64, C++20).
+The engine is vcpkg MANIFEST mode (`vcpkg.json` → `vcpkg_installed/`); `VCPKG_ROOT` must
+be set. Reflection codegen (`tools/nukegen.py` in the eco root) needs Python on PATH.
+Run dir = `x64/<Config>` — the editor, player, `modules/` and `shaders/` all land there.
+
+**ABI rule:** new virtuals go at the END of seam vtables (`iRender`, `iAudio`,
+`iPhysics`, `NUKEModule`) — inserting mid-vtable silently corrupts stale module DLLs.
+After any seam change rebuild ALL modules in the same batch.
 
 ## Shaders & ray-traced reflections
 
@@ -20,87 +54,3 @@ shader you want reflected faithfully; otherwise the standard PBR hit shader is u
 
 Material maps (base color, normal, metallic-roughness, occlusion, emissive, specular) are honoured in **both** the
 raster pass and RT reflections (bindless), including analytic tangent-space normal mapping in RT.
-
-## Get it
-
-Just create anywhere a new folder for NukeEngine projects, where will be all other projects, relating to NukeEngine, and just clone this perository into it.
-
-Then, do
-
-```
-git submodule init
-git submodule update --recursive
-```
-
-Then, go to `deps/assimp`, build it and install, if you have not it already installed.
-
-And this should be all done.
-
-
-## Building
-
-### Windows
-
-It is highly recommended to use Visual Studio 2019 (or up) with [vcpkg](https://github.com/Microsoft/vcpkg).
-We suggest to install all dependecies that are submodules via `vcpkg`, to avoid a lot of confilcts and asspain.
-Thus, you should install boost libaraies via `vcpkg`. You can install not whole library, just subs, like `boost-thread` and others.
-If some dependencies could not be resolved, `Visual Studio` will automatically suggest to install it via `vcpkg`.
-In other cases, generate dependency projects as told in their READMEs and chack links to them in solution.
-Whih dependecies are higly recommended to install via vcpkg?:
-* assimp
-* glfw
-* glm
-* lua
-* freeglut
-* glew
-
-Unfortunately, bgfx, bimg and bx are not avaliable via vcpkg, and you need to build them with your own. Just initialize submodules, then generate Visual Studio projects for them. Also, you can fix broken links to them on NukeEngine solution, if this happened.
-So, try to build it!
-
-> Note: It would be better to clone NukeEngine Editor nearby NukeEngine root directory.
-
-> The best hierarchy scheme for solution:
-+ [NE]
-  + [NukeEngine] (repo)
-    + .... (files)
-  + [NukeEngine-Editor] (repo)
-    + .... (files)
-
-### Linux
-The build system, used by project, is `qmake`, so you can just use Qt Creator to build it, or even simple qmake, if you have qt tools.
-
-If you see next errors:
-`error: cannot find -lglut`
-or the same, you need to install development files of needed libraries(e.g. `freeglut`, or `glew` for this case).
-
-If you see smth like this:
-```
-.../projects/NE/NukeEngine/API/Model/Include.h:3: error: boost/container/list.hpp: No such file or directory
- #include <boost/container/list.hpp>
-          ^~~~~~~~~~~~~~~~~~~~~~~~~~
-```
-You need to install boost libraries sources.
-
-#### Building the assimp:
-Int the project dir, goto `deps/assimp`, then:
-
-```
-cmake CMakeLists.txt
-make -j4 install
-```
-
-j4 means that you will use 4 threads for building.
-
-
-### MacOS [Attention!!!]
-
-You will need to do some preparations for building NukeEngine on Mac:
-
-+ Install XQuartz - required by freeglut
-+ Install homebrew - required for next
-+ Install freeglut via brew
-+ Install glew via brew
-+ Install glfw via brew
-+ Install boost via brew
-+ Install assimp via brew (you should better build it own and install build into system, its always fresh)
-+ Install other via brew if you cannot install it in another way
