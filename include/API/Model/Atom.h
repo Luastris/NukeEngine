@@ -24,6 +24,9 @@ public:
 	
 	std::string name = "Atom";
 	std::string tag = "Untagged";
+	// Which MOD added this atom (world-merge provenance, RUNTIME only — never serialized):
+	// "" = native to the base game. The editor badges non-native atoms with it.
+	std::string modOrigin;
 	Atom* parent = nullptr;
 	Transform transform = Transform(this);
 	

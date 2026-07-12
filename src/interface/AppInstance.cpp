@@ -76,6 +76,7 @@ bool AppInstance::OpenWorld(const std::string& relPath)
 			std::vector<std::string> layers;
 			std::vector<std::vector<int>> deps(hits.size());
 			std::vector<std::string> basis(hits.size());   // per-layer recorded baseline ("" = none)
+			std::vector<std::string> names(hits.size());   // provenance: the mod each layer is
 			// Which layer index a mod NAME resolves to (only mods carrying THIS world count).
 			std::map<std::string, int> nameToLayer;
 			auto lower = [](std::string s) { for (char& c : s) c = (char)tolower((unsigned char)c); return s; };
@@ -100,6 +101,7 @@ bool AppInstance::OpenWorld(const std::string& relPath)
 				for (const Package::ModInfo& mi : Package::Mods())
 					if (mi.pakPath == hits[i].second)
 					{
+						names[i] = mi.name;
 						nameToLayer[lower(mi.name)] = (int)i;
 						for (const std::string& r : mi.requires_)
 						{
@@ -110,7 +112,7 @@ bool AppInstance::OpenWorld(const std::string& relPath)
 					}
 			}
 			selectedInHieararchy = nullptr;
-			currentScene->LoadFromString(layers.size() > 1 ? World::MergeWorldLayers(layers, deps, basis)
+			currentScene->LoadFromString(layers.size() > 1 ? World::MergeWorldLayers(layers, deps, basis, names)
 			                                               : layers[0]);
 			currentWorldPath = relPath;
 			return true;

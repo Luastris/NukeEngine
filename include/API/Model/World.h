@@ -97,6 +97,13 @@ public:
 	static std::string MergeWorldLayers(const std::vector<std::string>& layers,
 	                                    const std::vector<std::vector<int>>& deps,
 	                                    const std::vector<std::string>& basis);
+	// PROVENANCE: names[i] = the mod that layer i is ("" = base/raw). Atoms/components a
+	// mod ADDS get tagged "__mod" in the merged JSON — LoadAtom lifts it into the runtime
+	// modOrigin fields (never serialized back), so the editor can badge non-native content.
+	static std::string MergeWorldLayers(const std::vector<std::string>& layers,
+	                                    const std::vector<std::vector<int>>& deps,
+	                                    const std::vector<std::string>& basis,
+	                                    const std::vector<std::string>& names);
 	void SaveToFile(const std::string& path);
 	void LoadFromFile(const std::string& path);
 	void Clear();   // drop all atoms except the Editor Camera (for "New World")

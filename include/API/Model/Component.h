@@ -37,6 +37,9 @@ class NUKEENGINE_API Component
 public:
     ID id;                  // per-component identity (multiple components of one type per atom, e.g. scripts)
     bool enabled = true;
+    // Which MOD added this component (world-merge provenance, RUNTIME only — never
+    // serialized): "" = native. The inspector badges non-native components with it.
+    std::string modOrigin;
 	Transform* transform = nullptr;
 	Atom* atom = nullptr;   // owning Atom (back-reference), set by the component's Init
     char* name;

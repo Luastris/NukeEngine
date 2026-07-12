@@ -1234,6 +1234,7 @@ static Atom* LoadAtom(const json& j)
 	Atom* go = new Atom(j.value("name", std::string("Atom")).c_str());
 	if (j.contains("id")) { go->id.id = j["id"].get<long>(); ID::observe(go->id.id); }   // keep the saved identity
 	go->prefabGuid = j.value("prefab", std::string());       // instance link (if any)
+	go->modOrigin  = j.value("__mod", std::string());        // merge provenance (runtime only)
 	if (j.contains("transform"))
 	{
 		Transform& t = go->GetTransform();
@@ -1250,6 +1251,7 @@ static Atom* LoadAtom(const json& j)
 				Component* c = (Component*)ti->create();
 				c->enabled = cj.value("enabled", true);
 				c->id.id   = cj.value("cid", c->id.id); ID::observe(c->id.id);
+				c->modOrigin = cj.value("__mod", std::string());   // merge provenance (runtime only)
 				if (cj.contains("props")) LoadObject(*ti, c, cj["props"]);
 				go->AddComponent(c);             // Init() wires transform/owner + clones the material instance
 				// Apply saved material-instance overrides onto the cloned instance (after Init).
@@ -1569,7 +1571,8 @@ json MergeObject3(const json& baseO, json cur, const json& layerO, int depth)
 
 // Apply ONE layer's atom onto the current merged atom, three-way against the base: only the
 // fields/components/PROPS the layer changed vs the base overwrite the merged state.
-json MergeAtomJson(const json& baseA, json cur, const json& layerA)
+// `layerName` = provenance: components the layer ADDS get tagged "__mod" (editor badge).
+json MergeAtomJson(const json& baseA, json cur, const json& layerA, const std::string& layerName)
 {
 	for (const char* key : { "name", "prefab" })
 	{
@@ -1611,7 +1614,12 @@ json MergeAtomJson(const json& baseA, json cur, const json& layerA)
 			emitted.insert(cid);
 		}
 	for (auto& kv : lC)                                             // components ADDED by this layer
-		if (!emitted.count(kv.first) && !bC.count(kv.first)) comps.push_back(kv.second);
+		if (!emitted.count(kv.first) && !bC.count(kv.first))
+		{
+			json add = kv.second;
+			if (!layerName.empty()) add["__mod"] = layerName;       // provenance badge
+			comps.push_back(add);
+		}
 	cur["components"] = comps;
 	return cur;
 }
@@ -1634,6 +1642,7 @@ struct MergeState
 // only what the layer changed vs its baseline lands; counters are optional (final pass).
 void ApplyLayer(MergeState& cur, const MergeState& baseline,
                 const json& Ldoc, const std::map<long, MergeRec>& lMap,
+                const std::string& layerName,
                 int* adds, int* changes, int* dels)
 {
 	if (Ldoc.contains("settings") && Ldoc["settings"].is_object())
@@ -1649,14 +1658,16 @@ void ApplyLayer(MergeState& cur, const MergeState& baseline,
 		{
 			// Added by this layer (or two layers add the same id — the higher wins).
 			if (adds && !cur.atoms.count(kv.first)) ++*adds;
-			cur.atoms[kv.first] = kv.second;
+			MergeRec r = kv.second;
+			if (!layerName.empty()) r.atom["__mod"] = layerName;   // provenance badge
+			cur.atoms[kv.first] = std::move(r);
 		}
 		else if (cur.atoms.count(kv.first))
 		{
 			MergeRec& c = cur.atoms[kv.first];
 			if (kv.second.atom != bit->second.atom)
 			{
-				c.atom = MergeAtomJson(bit->second.atom, c.atom, kv.second.atom);
+				c.atom = MergeAtomJson(bit->second.atom, c.atom, kv.second.atom, layerName);
 				if (changes) ++*changes;
 			}
 			if (kv.second.parent != bit->second.parent) c.parent = kv.second.parent;   // reparented
@@ -1681,6 +1692,14 @@ std::string World::MergeWorldLayers(const std::vector<std::string>& layers,
 std::string World::MergeWorldLayers(const std::vector<std::string>& layers,
                                     const std::vector<std::vector<int>>& deps,
                                     const std::vector<std::string>& basis)
+{
+	return MergeWorldLayers(layers, deps, basis, std::vector<std::string>());
+}
+
+std::string World::MergeWorldLayers(const std::vector<std::string>& layers,
+                                    const std::vector<std::vector<int>>& deps,
+                                    const std::vector<std::string>& basis,
+                                    const std::vector<std::string>& names)
 {
 	if (layers.empty())     return std::string();
 	if (layers.size() == 1) return layers[0];
@@ -1761,7 +1780,8 @@ std::string World::MergeWorldLayers(const std::vector<std::string>& layers,
 			}
 			else
 				bl = mergeSet(closureOf(idx), nullptr, nullptr, nullptr);
-			ApplyLayer(st, bl, P[idx].doc, P[idx].flat, adds, changes, dels);
+			const std::string lname = idx < (int)names.size() ? names[idx] : std::string();
+			ApplyLayer(st, bl, P[idx].doc, P[idx].flat, lname, adds, changes, dels);
 		}
 		if (!adds) memo[key] = st;
 		return st;
