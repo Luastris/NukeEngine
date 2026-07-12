@@ -30,6 +30,11 @@ public:
 	[[nuke::func]] static double Play(const std::string& clip, double volume, bool loop, double bus);
 	[[nuke::func]] static double PlayAt(const std::string& clip, const Vector3& pos,
 	                                    double volume, double minDist, double maxDist, double bus);
+	// Script-provided SOUND CONTENT: play encoded audio (ogg/wav/mp3/flac) from a memory
+	// buffer — bytes a script composed or read via Packages. NOT [[nuke::func]] (blobs
+	// don't fit the reflected value channel); every language binds it by hand, like
+	// Texture's setPixels. The backend copies the bytes for the voice's lifetime.
+	static double PlayData(const void* bytes, uint64_t size, double volume, bool loop, double bus);
 	[[nuke::func]] static void   Stop(double voice);
 	[[nuke::func]] static void   StopAll();
 	[[nuke::func]] static bool   IsPlaying(double voice);

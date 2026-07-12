@@ -13,7 +13,8 @@ class NUKEENGINE_API Environment : public Component
 {
 	NUKE_CLASS(Environment, Component)
 public:
-	[[nuke::prop(label="Mode", enum="None,Procedural")]] int mode = 1;   // 0 = clear color only, 1 = sky gradient
+	enum Mode : int { None = 0, Procedural = 1 };   // None = clear color only
+	[[nuke::prop(label="Mode", enum="None,Procedural")]] Mode mode = Procedural;
 
 	[[nuke::prop(label="Sky Top")]]     Color skyTop     = Color(0.30, 0.50, 0.90, 1);
 	[[nuke::prop(label="Sky Horizon")]] Color skyHorizon = Color(0.70, 0.80, 0.95, 1);

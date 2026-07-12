@@ -46,6 +46,16 @@ double Audio::Play(const std::string& clip, double volume, bool loop, double bus
 	return (double)PlayDesc(clip, d);
 }
 
+double Audio::PlayData(const void* bytes, uint64_t size, double volume, bool loop, double bus)
+{
+	iAudio* a = GetService<iAudio>();
+	if (!a || !bytes || !size) return 0.0;
+	if (!a->init()) return 0.0;   // same on-demand init as PlayDesc
+	NukeVoiceDesc d;
+	d.volume = (float)volume; d.loop = loop; d.bus = (int)bus;
+	return (double)a->playData(bytes, size, d);
+}
+
 double Audio::PlayAt(const std::string& clip, const Vector3& pos,
                      double volume, double minDist, double maxDist, double bus)
 {

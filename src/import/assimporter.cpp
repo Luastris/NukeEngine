@@ -353,7 +353,7 @@ static std::string ConvertTexture(const aiScene* sc, const std::string& texRef,
 
 	Texture* tex = new Texture();
 	tex->guid   = ResDB::NewGuid();
-	tex->usage  = usage;             // authoritative from the assimp texture type
+	tex->usage  = (Texture::Usage)usage;   // authoritative from the assimp texture type
 	CompressToBC(tex, rgba, w, h, usage,
 	             [&texLabel](float f) { ProgStage(texLabel, f); });   // BC1/BC3/BC5 + mip chain
 
@@ -603,7 +603,7 @@ std::string AssImporter::ImportImage(const char* srcPath, const char* destDir)
 
 	Texture* tex = new Texture();
 	tex->guid = ResDB::NewGuid();
-	tex->usage = Texture::GuessUsage(srcPath);   // bare image: guess role from filename suffix (overridable in inspector)
+	tex->usage = (Texture::Usage)Texture::GuessUsage(srcPath);   // bare image: guess role from filename suffix (overridable in inspector)
 	int w = 0, h = 0;
 
 	if (ext == ".gif")

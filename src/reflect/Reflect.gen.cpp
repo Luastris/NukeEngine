@@ -2,6 +2,7 @@
 #include "reflect/Reflect.h"
 #include "API/iGUI.h"
 #include "API/Model/Animator.h"
+#include "API/Model/AnimClip.h"
 #include "API/Model/Audio.h"
 #include "API/Model/AudioListener.h"
 #include "API/Model/AudioSource.h"
@@ -11,11 +12,14 @@
 #include "API/Model/Environment.h"
 #include "API/Model/Light.h"
 #include "API/Model/Material.h"
+#include "API/Model/Mesh.h"
 #include "API/Model/MeshRenderer.h"
 #include "API/Model/Physics.h"
 #include "API/Model/PostProcess.h"
 #include "API/Model/ReflectionProbe.h"
 #include "API/Model/Rigidbody.h"
+#include "API/Model/Shader.h"
+#include "API/Model/Texture.h"
 #include "API/Model/Time.h"
 #include "API/Model/Transform.h"
 #include "interface/iGUI.h"
@@ -87,6 +91,13 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("SetIKChain", &Animator::SetIKChain));
 		t.methods.push_back(MakeMethod("ClearIK", &Animator::ClearIK));
 		t.create = []() -> void* { return new Animator(); };
+	}
+	{
+		TypeInfo& t = TypeOf<AnimClip>();
+		t.base = "Object";
+		t.fields.push_back(MakeField("name", &AnimClip::name, "", "Name"));
+		t.fields.push_back(MakeField("duration", &AnimClip::duration, "", "Duration"));
+		t.create = []() -> void* { return new AnimClip(); };
 	}
 	{
 		TypeInfo& t = TypeOf<Audio>();
@@ -235,6 +246,11 @@ bool NukeReflectInit() {
 		t.create = []() -> void* { return new Material(); };
 	}
 	{
+		TypeInfo& t = TypeOf<Mesh>();
+		t.base = "Object";
+		t.create = []() -> void* { return new Mesh(); };
+	}
+	{
 		TypeInfo& t = TypeOf<MeshRenderer>();
 		t.base = "Component";
 		t.fields.push_back(MakeField("meshGuid", &MeshRenderer::meshGuid, "mesh", "Mesh"));
@@ -294,6 +310,22 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("SetAngularVelocity", &Rigidbody::SetAngularVelocity));
 		t.methods.push_back(MakeMethod("AngularVelocity", &Rigidbody::AngularVelocity));
 		t.create = []() -> void* { return new Rigidbody(); };
+	}
+	{
+		TypeInfo& t = TypeOf<Shader>();
+		t.base = "Object";
+		t.fields.push_back(MakeField("name", &Shader::name, "", "Name"));
+		t.fields.push_back(MakeField("isPost", &Shader::isPost, "", "Post Effect"));
+		t.create = []() -> void* { return new Shader(); };
+	}
+	{
+		TypeInfo& t = TypeOf<Texture>();
+		t.base = "Object";
+		t.fields.push_back(MakeField("width", &Texture::width, "", "Width"));
+		t.fields.push_back(MakeField("height", &Texture::height, "", "Height"));
+		t.fields.push_back(MakeField("usage", &Texture::usage, "", "Usage", 0.0f, 0.0f, "Color,Normal,Data,Emissive"));
+		t.fields.push_back(MakeField("invertGreen", &Texture::invertGreen, "", "Invert Green"));
+		t.create = []() -> void* { return new Texture(); };
 	}
 	{
 		TypeInfo& t = TypeOf<Time>();

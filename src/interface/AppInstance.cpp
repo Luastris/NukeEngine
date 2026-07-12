@@ -75,6 +75,7 @@ bool AppInstance::OpenWorld(const std::string& relPath)
 		{
 			std::vector<std::string> layers;
 			std::vector<std::vector<int>> deps(hits.size());
+			std::vector<std::string> basis(hits.size());   // per-layer recorded baseline ("" = none)
 			// Which layer index a mod NAME resolves to (only mods carrying THIS world count).
 			std::map<std::string, int> nameToLayer;
 			auto lower = [](std::string s) { for (char& c : s) c = (char)tolower((unsigned char)c); return s; };
@@ -86,6 +87,15 @@ bool AppInstance::OpenWorld(const std::string& relPath)
 					// The raw overlay: authored on top of the FULL mounted stack.
 					for (size_t j = 1; j < i; ++j) deps[i].push_back((int)j);
 					continue;
+				}
+				// The layer's own recorded BASELINE (Package Mod stores the world exactly as
+				// the mod's author saw it under "basis/<rel>"): the diff applies the author's
+				// ACTUAL point changes — a stale mod can't wipe what the base gained since.
+				if (i > 0)
+				{
+					Package::File pf;
+					std::string b;
+					if (pf.Open(hits[i].second) && pf.Read("basis/content/" + relPath, b)) basis[i] = b;
 				}
 				for (const Package::ModInfo& mi : Package::Mods())
 					if (mi.pakPath == hits[i].second)
@@ -100,7 +110,7 @@ bool AppInstance::OpenWorld(const std::string& relPath)
 					}
 			}
 			selectedInHieararchy = nullptr;
-			currentScene->LoadFromString(layers.size() > 1 ? World::MergeWorldLayers(layers, deps)
+			currentScene->LoadFromString(layers.size() > 1 ? World::MergeWorldLayers(layers, deps, basis)
 			                                               : layers[0]);
 			currentWorldPath = relPath;
 			return true;

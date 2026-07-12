@@ -19,9 +19,9 @@ class NUKEENGINE_API Collider : public Component
 {
 	NUKE_CLASS(Collider, Component)
 public:
-	enum Shape { S_Box = 0, S_Sphere = 1, S_Capsule = 2, S_Mesh = 3 };
+	enum Shape : int { S_Box = 0, S_Sphere = 1, S_Capsule = 2, S_Mesh = 3 };
 
-	[[nuke::prop(label="Shape", enum="Box,Sphere,Capsule,Mesh")]] int shape = S_Box;
+	[[nuke::prop(label="Shape", enum="Box,Sphere,Capsule,Mesh")]] Shape shape = S_Box;
 	[[nuke::prop(label="Half Extents")]] Vector3 halfExtents = Vector3(0.5, 0.5, 0.5);   // Box
 	[[nuke::prop(label="Radius")]]       float radius = 0.5f;                            // Sphere / Capsule
 	[[nuke::prop(label="Half Height")]]  float halfHeight = 0.5f;                        // Capsule: cylinder half-length

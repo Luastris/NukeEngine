@@ -299,16 +299,28 @@ bool Package::Read(const std::string& rel, std::string& out)
 	std::string k = LowerKey(rel);
 	{
 		boost::mutex::scoped_lock l(gPakLock);
-		for (const MountLayer& m : gMounts)
+		for (size_t i = 0; i < gMounts.size(); ++i)
 		{
+			const MountLayer& m = gMounts[i];
 			auto it = m.byKey.find(k);
-			if (it != m.byKey.end())
-			{
-				const Entry e = it->second;         // copy: read outside the lock
-				const std::string pak = m.pakPath;
-				l.unlock();
-				return ReadEntry(pak, e, out);
-			}
+			if (it == m.byKey.end()) continue;
+			// OVERRIDE visibility: a layer above the base serving a path a LOWER layer also
+			// carries = game data silently replaced by a mod. Say it ONCE per path — every
+			// "my world/components vanished" hunt starts at this line.
+			if (m.priority > 0)
+				for (size_t j = i + 1; j < gMounts.size(); ++j)
+					if (gMounts[j].byKey.count(k))
+					{
+						static std::set<std::string> warned;
+						if (warned.insert(k).second)
+							cout << "[Package]\t'" << rel << "' OVERRIDDEN by mod: "
+							     << bfs::path(m.pakPath).stem().string() << endl;
+						break;
+					}
+			const Entry e = it->second;             // copy: read outside the lock
+			const std::string pak = m.pakPath;
+			l.unlock();
+			return ReadEntry(pak, e, out);
 		}
 	}
 	return false;
@@ -319,21 +331,48 @@ static std::vector<Package::ModInfo> gMods;   // mount order, bottom-up (guarded
 
 const std::vector<Package::ModInfo>& Package::Mods() { return gMods; }
 
+bool Package::Unmount(const std::string& pakPath)
+{
+	boost::mutex::scoped_lock l(gPakLock);
+	boost::system::error_code ec;
+	auto same = [&](const std::string& p) {
+		return p == pakPath || bfs::equivalent(bfs::path(p), bfs::path(pakPath), ec);
+	};
+	for (auto it = gMounts.begin(); it != gMounts.end(); ++it)
+		if (same(it->pakPath))
+		{
+			gMounts.erase(it);
+			for (auto m = gMods.begin(); m != gMods.end(); ++m)
+				if (same(m->pakPath)) { gMods.erase(m); break; }
+			return true;
+		}
+	return false;
+}
+
 int Package::MountMods(const std::string& gameRoot)
 {
-	{ boost::mutex::scoped_lock l(gPakLock); gMods.clear(); }
+	// The PLAYER's list: config/mods.json. Editor sessions never call this — they mount
+	// their own explicit selection through MountModList below.
 	bfs::path root(gameRoot);
 	bfs::ifstream mf(root / "config" / "mods.json");
 	if (!mf) return 0;
 	nlohmann::json mj = nlohmann::json::parse(mf, nullptr, false);
 	if (mj.is_discarded() || !mj.contains("mods") || !mj["mods"].is_array()) return 0;
-
-	// 1) Resolve every enabled entry to a file + read its manifest (name + requires).
-	std::vector<ModInfo> mods;
+	std::vector<std::string> entries;
 	for (auto& m : mj["mods"])
+		if (m.is_string()) entries.push_back(m.get<std::string>());
+	return MountModList(gameRoot, entries);
+}
+
+int Package::MountModList(const std::string& gameRoot, const std::vector<std::string>& entries)
+{
+	{ boost::mutex::scoped_lock l(gPakLock); gMods.clear(); }
+	bfs::path root(gameRoot);
+
+	// 1) Resolve every entry to a file + read its manifest (name + requires).
+	std::vector<ModInfo> mods;
+	for (const std::string& mp : entries)
 	{
-		if (!m.is_string()) continue;
-		std::string mp = m.get<std::string>();
 		boost::system::error_code ec;
 		// Tolerant resolution: as written (absolute or game-root-relative), then under
 		// mods/, then mods/<filename> — a bare name in the config is the common way.

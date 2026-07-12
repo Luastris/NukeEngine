@@ -67,6 +67,7 @@ public:
 	// ---- mounted layer stack (runtime resolver) -----------------------------------------
 	// Higher priority wins. False when the pak can't be parsed.
 	static bool Mount(const std::string& pakPath, int priority);
+	static bool Unmount(const std::string& pakPath);   // drop ONE layer (path-equivalent match)
 	static void UnmountAll();
 	static int  MountedCount();
 	static std::vector<std::string> MountedPaks();   // pak paths, priority order (top first)
@@ -88,6 +89,11 @@ public:
 	// independent mods; a mod whose dependency is missing/disabled is SKIPPED with a log).
 	// Returns how many mods mounted. Shared by the Player boot and the editor session.
 	static int MountMods(const std::string& gameRoot);
+	// The same dependency-aware mounting with an EXPLICIT entry list (resolved against the
+	// game root) instead of config/mods.json. The config is the PLAYER's mod list — an
+	// EDITOR session mounts only what it was explicitly told to (its own separate list, or
+	// an opened mod's `requires` chain), through this.
+	static int MountModList(const std::string& gameRoot, const std::vector<std::string>& entries);
 	// Metadata of the mounted mods (mount order, bottom-up). The base pak is not a mod.
 	static const std::vector<ModInfo>& Mods();
 

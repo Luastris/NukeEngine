@@ -89,6 +89,14 @@ public:
 	// only the patch's actual fixes. deps[0] is ignored (the base has no dependencies).
 	static std::string MergeWorldLayers(const std::vector<std::string>& layers,
 	                                    const std::vector<std::vector<int>>& deps);
+	// Recorded BASELINES: basis[i] = the world EXACTLY as layer i's author saw it when the
+	// mod was packed ("" = none; Package Mod stores it as "basis/<rel>" inside the .numod).
+	// A layer diffs against ITS OWN basis, so a mod carries only what its author actually
+	// touched — a stale mod can never read as "delete everything the base gained since".
+	// Missing basis falls back to the deps closure (legacy mods).
+	static std::string MergeWorldLayers(const std::vector<std::string>& layers,
+	                                    const std::vector<std::vector<int>>& deps,
+	                                    const std::vector<std::string>& basis);
 	void SaveToFile(const std::string& path);
 	void LoadFromFile(const std::string& path);
 	void Clear();   // drop all atoms except the Editor Camera (for "New World")

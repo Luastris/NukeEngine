@@ -138,7 +138,7 @@ Material* Material::LoadFromString(const std::string& text)
 	m->specular     = j.value("specularFactor", 1.0f);
 	m->emissiveIntensity = j.value("emissiveIntensity", 0.0f);
 	m->castShadows = j.value("castShadows", true);
-	m->blendMode   = j.value("blendMode", 0);
+	m->blendMode   = (Material::Blend)j.value("blendMode", 0);
 	if (j.contains("color") && j["color"].is_array() && j["color"].size() == 4)
 	{
 		m->color.r = j["color"][0]; m->color.g = j["color"][1];

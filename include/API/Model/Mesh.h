@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 #include "../../../NukeEngine.h"
+#include "reflect/Reflect.h"   // NUKE_CLASS (reflected asset)
 
 struct aiScene;   // fwd (skin import needs the node hierarchy)
 
@@ -38,6 +39,8 @@ struct MeshBone
 
 class NUKEENGINE_API Mesh
 {
+    // Reflected ASSET class (scripts create/edit/assign it like any engine object).
+    NUKE_CLASS(Mesh, Object)
 public:
     char name[256];
     std::string guid;   // asset id ("builtin:cube" for primitives, generated for imports)

@@ -1276,7 +1276,7 @@ static Atom* LoadAtom(const json& j)
 						if (jm.contains("specularFactor")) mr->mat->specular    = jm.value("specularFactor", 1.0f);
 						if (jm.contains("emissiveIntensity")) mr->mat->emissiveIntensity = jm.value("emissiveIntensity", 0.0f);
 						if (jm.contains("castShadows"))    mr->mat->castShadows    = jm.value("castShadows", true);
-						if (jm.contains("blendMode"))      mr->mat->blendMode      = jm.value("blendMode", 0);
+						if (jm.contains("blendMode"))      mr->mat->blendMode      = (Material::Blend)jm.value("blendMode", 0);
 						if (jm.contains("emissive") && jm["emissive"].is_array() && jm["emissive"].size() == 3)
 						{
 							mr->mat->emissive.r = jm["emissive"][0]; mr->mat->emissive.g = jm["emissive"][1];
@@ -1541,15 +1541,52 @@ void FlattenAtoms(const json& arr, long parentId, std::map<long, MergeRec>& out,
 		if (a.contains("children")) FlattenAtoms(a["children"], id, out, counter);
 	}
 }
+// Three-way PER-FIELD object merge: impose onto `cur` ONLY the keys this layer actually
+// changed vs its baseline. `depth` recurses that many levels into nested OBJECTS — a mod
+// that touched one prop inside a component's "props" leaves every other prop to the lower
+// layers (arrays and scalars are atomic values). Shape change (non-object) = layer wins.
+json MergeObject3(const json& baseO, json cur, const json& layerO, int depth)
+{
+	if (!cur.is_object() || !layerO.is_object())
+		return layerO;
+	std::set<std::string> keys;
+	if (baseO.is_object())
+		for (auto it = baseO.begin(); it != baseO.end(); ++it) keys.insert(it.key());
+	for (auto it = layerO.begin(); it != layerO.end(); ++it) keys.insert(it.key());
+	for (const std::string& k : keys)
+	{
+		const json b = baseO.is_object() && baseO.contains(k) ? baseO[k] : json();
+		const json l = layerO.contains(k) ? layerO[k] : json();
+		if (l == b) continue;                              // untouched by this layer
+		if (l.is_null()) { cur.erase(k); continue; }       // removed by this layer
+		if (depth > 0 && l.is_object() && cur.contains(k))
+			cur[k] = MergeObject3(b, cur[k], l, depth - 1);
+		else
+			cur[k] = l;
+	}
+	return cur;
+}
+
 // Apply ONE layer's atom onto the current merged atom, three-way against the base: only the
-// fields/components the layer changed vs the base overwrite the merged state.
+// fields/components/PROPS the layer changed vs the base overwrite the merged state.
 json MergeAtomJson(const json& baseA, json cur, const json& layerA)
 {
-	for (const char* key : { "name", "prefab", "transform" })
+	for (const char* key : { "name", "prefab" })
 	{
 		const json b = baseA.contains(key) ? baseA[key] : json();
 		const json l = layerA.contains(key) ? layerA[key] : json();
 		if (l != b) { if (l.is_null()) cur.erase(key); else cur[key] = l; }
+	}
+	{
+		// Transform merges PER-SUBKEY (position/rotation/scale): a mod that moved an atom
+		// must not undo the base's later rescale.
+		const json b = baseA.contains("transform") ? baseA["transform"] : json();
+		const json l = layerA.contains("transform") ? layerA["transform"] : json();
+		if (l != b)
+		{
+			if (l.is_null()) cur.erase("transform");
+			else cur["transform"] = MergeObject3(b, cur.contains("transform") ? cur["transform"] : json::object(), l, 1);
+		}
 	}
 	auto index = [](const json& a) {
 		std::map<long, json> m;
@@ -1568,7 +1605,9 @@ json MergeAtomJson(const json& baseA, json cur, const json& layerA)
 			if (bC.count(cid) && !lC.count(cid)) continue;          // deleted by this layer
 			auto lit = lC.find(cid);
 			const bool changed = lit != lC.end() && (!bC.count(cid) || bC[cid] != lit->second);
-			comps.push_back(changed ? lit->second : c);             // layer's change, else keep
+			// A changed component merges PER-PROP (depth 1 recurses into its "props" object):
+			// the layer imposes exactly the fields its author edited, nothing else.
+			comps.push_back(changed ? MergeObject3(bC.count(cid) ? bC[cid] : json(), c, lit->second, 2) : c);
 			emitted.insert(cid);
 		}
 	for (auto& kv : lC)                                             // components ADDED by this layer
@@ -1630,11 +1669,18 @@ void ApplyLayer(MergeState& cur, const MergeState& baseline,
 
 std::string World::MergeWorldLayers(const std::vector<std::string>& layers)
 {
-	return MergeWorldLayers(layers, std::vector<std::vector<int>>());
+	return MergeWorldLayers(layers, std::vector<std::vector<int>>(), std::vector<std::string>());
 }
 
 std::string World::MergeWorldLayers(const std::vector<std::string>& layers,
                                     const std::vector<std::vector<int>>& deps)
+{
+	return MergeWorldLayers(layers, deps, std::vector<std::string>());
+}
+
+std::string World::MergeWorldLayers(const std::vector<std::string>& layers,
+                                    const std::vector<std::vector<int>>& deps,
+                                    const std::vector<std::string>& basis)
 {
 	if (layers.empty())     return std::string();
 	if (layers.size() == 1) return layers[0];
@@ -1657,6 +1703,19 @@ std::string World::MergeWorldLayers(const std::vector<std::string>& layers,
 		if (!P[i].ok) continue;   // corrupt layer: skipped, the rest still merges
 		int c = counter;
 		FlattenAtoms(P[i].doc.contains("atoms") ? P[i].doc["atoms"] : json::array(), 0, P[i].flat, c);
+	}
+
+	// Recorded BASELINES: what layer i's author ACTUALLY saw at pack time (see the header).
+	// A layer with one never phantom-deletes content the base gained after it was authored.
+	std::vector<Parsed> B(layers.size());
+	for (size_t i = 1; i < layers.size() && i < basis.size(); ++i)
+	{
+		if (basis[i].empty()) continue;
+		B[i].doc = json::parse(basis[i], nullptr, false);
+		B[i].ok = !B[i].doc.is_discarded() && B[i].doc.is_object();
+		if (!B[i].ok) continue;
+		int c = counter;
+		FlattenAtoms(B[i].doc.contains("atoms") ? B[i].doc["atoms"] : json::array(), 0, B[i].flat, c);
 	}
 
 	// Transitive dependency closure per layer, ascending (mount order); base 0 implicit.
@@ -1691,7 +1750,17 @@ std::string World::MergeWorldLayers(const std::vector<std::string>& layers,
 		for (int idx : S)
 		{
 			if (!P[idx].ok) continue;
-			MergeState bl = mergeSet(closureOf(idx), nullptr, nullptr, nullptr);
+			MergeState bl;
+			if (idx < (int)B.size() && B[idx].ok)
+			{
+				// The layer's own recorded basis wins over any reconstruction: the diff is
+				// exactly what its author changed, frozen at pack time.
+				bl.atoms = B[idx].flat;
+				if (B[idx].doc.contains("settings") && B[idx].doc["settings"].is_object())
+					bl.settings = B[idx].doc["settings"];
+			}
+			else
+				bl = mergeSet(closureOf(idx), nullptr, nullptr, nullptr);
 			ApplyLayer(st, bl, P[idx].doc, P[idx].flat, adds, changes, dels);
 		}
 		if (!adds) memo[key] = st;

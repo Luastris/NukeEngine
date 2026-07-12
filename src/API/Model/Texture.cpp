@@ -230,7 +230,7 @@ Texture* Texture::LoadFromStream(std::istream& i)
 		t->frameDelaysMs.resize(t->frameCount);
 		for (int k = 0; k < t->frameCount; ++k) { int32_t d = 100; i.read((char*)&d, 4); t->frameDelaysMs[k] = d; }
 	}
-	if (version >= 5) { int32_t u = 0; i.read((char*)&u, 4); t->usage = u; }   // v5: semantic usage
+	if (version >= 5) { int32_t u = 0; i.read((char*)&u, 4); t->usage = (Texture::Usage)u; }   // v5: semantic usage
 	if (version >= 6) { uint8_t ig = 1; i.read((char*)&ig, 1); t->invertGreen = (ig != 0); }   // v6: normal green convention
 	uint32_t bytes = 0; i.read((char*)&bytes, 4);
 	if (bytes) { t->pixels.resize(bytes); i.read((char*)t->pixels.data(), bytes); }

@@ -5,6 +5,7 @@
 #include <istream>
 #include <string>
 #include <vector>
+#include "reflect/Reflect.h"   // NUKE_CLASS (reflected asset)
 
 namespace nuke {
 
@@ -14,10 +15,12 @@ namespace nuke {
 // Sampling/blending lives in the Animator component — the clip is pure data.
 class NUKEENGINE_API AnimClip
 {
+	// Reflected ASSET class (scripts create/edit/assign it like any engine object).
+	NUKE_CLASS(AnimClip, Object)
 public:
 	std::string guid;    // asset id (ResDB)
-	std::string name;    // clip name (shown in pickers / addressed by Animator states)
-	double duration = 0.0;   // seconds
+	[[nuke::prop(label="Name")]]     std::string name;    // clip name (shown in pickers / addressed by Animator states)
+	[[nuke::prop(label="Duration")]] double duration = 0.0;   // seconds
 
 	struct Key { float t; float v[4]; };   // v = xyz (pos/scale, w unused) or xyzw (rotation quat)
 	struct Channel

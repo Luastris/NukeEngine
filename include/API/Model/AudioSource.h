@@ -19,7 +19,8 @@ class NUKEENGINE_API AudioSource : public Component
 	NUKE_CLASS(AudioSource, Component)
 public:
 	[[nuke::prop(asset="audio", label="Clip")]]        std::string clip;        // content-relative path
-	[[nuke::prop(label="Bus", enum="Music,SFX")]]      int   bus = 1;
+	enum Bus : int { Music = 0, SFX = 1 };
+	[[nuke::prop(label="Bus", enum="Music,SFX")]]      Bus   bus = SFX;
 	[[nuke::prop(label="Volume", min=0, max=2)]]       float volume = 1.0f;
 	[[nuke::prop(label="Pitch",  min=0.1, max=3)]]     float pitch = 1.0f;
 	[[nuke::prop(label="Loop")]]                       bool  loop = false;
@@ -27,7 +28,8 @@ public:
 	[[nuke::prop(label="Spatial (3D)")]]               bool  spatial = false;
 	[[nuke::prop(label="Min Distance", min=0.01)]]     float minDist = 1.0f;
 	[[nuke::prop(label="Max Distance", min=0.1)]]      float maxDist = 50.0f;
-	[[nuke::prop(label="Decode", enum="Auto,Memory,Stream")]] int decode = 0;
+	enum DecodeMode : int { Auto = 0, Memory = 1, Stream = 2 };
+	[[nuke::prop(label="Decode", enum="Auto,Memory,Stream")]] DecodeMode decode = Auto;
 
 	// Script/game control (auto-bound: source:Play() etc. via component reflection).
 	[[nuke::func]] void Play();

@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <ctime>
 #include <vector>
+#include "reflect/Reflect.h"   // NUKE_CLASS (reflected asset)
 
 namespace nuke {
 
@@ -26,15 +27,17 @@ struct ShaderProp
 // build a pipeline per shader (next step); for now these are registered as ResDB assets.
 class NUKEENGINE_API Shader
 {
+	// Reflected ASSET class (scripts look shaders up by name and assign them to materials).
+	NUKE_CLASS(Shader, Object)
 public:
 	std::string guid;          // asset id (== name; "world" is the engine default)
-	std::string name;
+	[[nuke::prop(label="Name")]] std::string name;
 	std::string vsSource;      // HLSL vertex shader source
 	std::string psSource;      // HLSL pixel shader source
 	std::string vsPath, psPath;// source file paths (for hot-reload)
 	std::time_t vsTime = 0, psTime = 0;   // last-write times (hot-reload change detection)
 	uint64_t    rendererHandle = 0;   // renderer pipeline handle (0 until built)
-	bool        isPost = false;       // post-process effect shader (fullscreen PS over a "PostParams" cbuffer)
+	[[nuke::prop(label="Post Effect")]] bool isPost = false;   // post-process effect shader (fullscreen PS over a "PostParams" cbuffer)
 	std::vector<ShaderProp> props;    // custom params parsed from psSource (MatCB for materials, PostParams for post)
 
 	// Build a Shader from a VS/PS file pair. Returns nullptr if either file can't be read.

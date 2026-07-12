@@ -35,8 +35,13 @@ enum class FT { Unknown, Bool, Int, Float, Double, String, Vec2, Vec3, Vec4, Qua
 NUKEENGINE_API Atom*         Reflect_AtomById(unsigned long id);
 NUKEENGINE_API unsigned long Reflect_AtomId(Atom* a);
 
-// Map a C++ type -> FT tag. Primary = Unknown; specializations for supported types.
-template<class T> constexpr FT FieldTypeOf() { return FT::Unknown; }
+// Map a C++ type -> FT tag. Primary: ENUMS reflect as Int (the label list comes from the
+// [[nuke::prop(enum="...")]] metadata; engine prop-enums declare `: int` so the generic
+// addr-based int read/write is layout-exact); everything else unknown unless specialized.
+template<class T> constexpr FT FieldTypeOf()
+{
+	return std::is_enum_v<T> ? FT::Int : FT::Unknown;
+}
 template<> constexpr FT FieldTypeOf<bool>()        { return FT::Bool; }
 template<> constexpr FT FieldTypeOf<int>()         { return FT::Int; }
 template<> constexpr FT FieldTypeOf<float>()       { return FT::Float; }

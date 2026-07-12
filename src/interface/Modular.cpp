@@ -112,11 +112,12 @@ void EnablePlugin(NUKEModule* m)
 {
 	if (!m || m->loaded) return;
 
-	// One active provider per service. A PHASE_BOOT provider (the renderer: it owns the
-	// window/device) cannot be swapped live in either direction — the UI persists the new
-	// choice, which takes effect on the next start.
+	// One active provider per EXCLUSIVE service. A PHASE_BOOT provider (the renderer: it
+	// owns the window/device) cannot be swapped live in either direction — the UI persists
+	// the new choice, which takes effect on the next start. SHARED services (scripting)
+	// skip the displacement entirely: Lua and C# providers load side by side.
 	const std::string service = m->provides();
-	if (!service.empty())
+	if (!service.empty() && !m->sharedService())
 	{
 		if (NUKEModule* cur = ActiveServiceProvider(service.c_str()))
 		{
@@ -161,9 +162,10 @@ void DisablePlugin(NUKEModule* m)
 {
 	if (!m || !m->loaded) return;
 
-	// Revoke the service FIRST so no consumer can grab the interface while it's dying.
+	// Revoke THIS module's interface FIRST so no consumer can grab it while it's dying —
+	// by instance, not by name: a shared service's other providers must stay registered.
 	if (*m->provides())
-		Services_Revoke(m->provides());
+		Services_RevokeIface(m->provides(), m->queryService());
 
 	// Live downgrade FIRST (while the type's reflection + vtable are still valid): convert this
 	// plugin's live components into inert placeholders so nothing dangles after it goes away.
@@ -184,7 +186,7 @@ void UnloadModules()
 		{
 			if (!i || !i->loaded || i->phase() != phase) continue;
 			if (*i->provides())
-				Services_Revoke(i->provides());
+				Services_RevokeIface(i->provides(), i->queryService());   // this instance only
 			i->Shutdown();
 			i->loaded = false;
 		}

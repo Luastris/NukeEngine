@@ -242,6 +242,7 @@
     <ClInclude Include="include\API\Model\Rigidbody.h" />
     <ClInclude Include="include\API\Model\Physics.h" />
     <ClInclude Include="include\API\Model\DebugDraw.h" />
+    <ClInclude Include="include\API\Model\Log.h" />
     <ClInclude Include="include\API\Model\Script.h" />
     <ClInclude Include="include\interface\Modular.h" />
     <ClInclude Include="include\interface\Services.h" />
@@ -311,6 +312,7 @@
     <ClCompile Include="src\API\Model\Collider.cpp" />
     <ClCompile Include="src\API\Model\Game.cpp" />
     <ClCompile Include="src\API\Model\Module.cpp" />
+    <ClCompile Include="src\API\Model\Log.cpp" />
     <ClCompile Include="src\API\Model\Package.cpp" />
     <ClCompile Include="src\API\Model\Resource.cpp" />
     <ClCompile Include="src\API\Model\Rigidbody.cpp" />

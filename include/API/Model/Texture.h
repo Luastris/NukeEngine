@@ -6,18 +6,22 @@
 #include <string>
 #include <vector>
 #include <cstdint>
+#include "reflect/Reflect.h"   // NUKE_CLASS (reflected asset)
 
 namespace nuke {
 
 class NUKEENGINE_API Texture
 {
+    // Reflected ASSET class (scripts create/edit/assign it like any engine object).
+    NUKE_CLASS(Texture, Object)
 public:
     unsigned int id = 0;
     char name[64] = { 0 };
     char path[1024] = { 0 };
 
     std::string guid;                      // asset id
-    int width = 0, height = 0;             // base (mip0) dimensions
+    [[nuke::prop(label="Width")]]  int width = 0;    // base (mip0) dimensions
+    [[nuke::prop(label="Height")]] int height = 0;
     // pixels = the full data: for RAW it's mip0 RGBA8 (w*h*4); for BC it's every mip's compressed
     // blocks concatenated mip0..mipN (renderer derives per-mip size from format + dims).
     std::vector<unsigned char> pixels;
@@ -29,8 +33,8 @@ public:
     // texture type (model import) or a filename-suffix heuristic (bare image drop/picker); overridable in the asset
     // inspector. Color/Emissive = sRGB source; Normal/Data = linear; Normal -> BC5.
     enum Usage { UsageColor = 0, UsageNormal = 1, UsageData = 2, UsageEmissive = 3 };
-    int  usage = UsageColor;                // serialized in the .nutex (v5)
-    bool invertGreen = true;                // normal maps only: green convention (true = OpenGL +Y, flip; false = DirectX) — .nutex v6
+    [[nuke::prop(label="Usage", enum="Color,Normal,Data,Emissive")]] Usage usage = UsageColor;   // serialized in the .nutex (v5)
+    [[nuke::prop(label="Invert Green")]] bool invertGreen = true;                // normal maps only: green convention (true = OpenGL +Y, flip; false = DirectX) — .nutex v6
     static int GuessUsage(const std::string& filename);   // filename-suffix heuristic -> Usage
     bool Recompress(int targetFormat);                    // decode mip0 -> re-encode to FMT_BC1/BC3/BC5 (inspector override)
     // Decode mip0 (frame 0 for animated textures) to a tight width*height*4 RGBA8 buffer —

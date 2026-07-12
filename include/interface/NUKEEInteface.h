@@ -5,6 +5,7 @@
 #include <cstdint>
 
 #include <string>
+#include <utility>   // std::pair (shipExtras dist copies)
 #include <vector>
 #include "AppInstance.h"
 
@@ -102,6 +103,27 @@ public:
 	// ABI: new virtuals append at the END of the class, never mid-vtable.
 	virtual bool cookContent(const char* contentRel, const char* bytes, uint64_t size,
 	                         std::vector<std::string>& outUses) { return false; }
+
+	// Whether this module's service is SHARED — several providers may be live at once
+	// (scripting: a game can run Lua and C# side by side; each backend brings its own
+	// component types and file formats). Exclusive services (render/physics/audio: they
+	// own a device/simulation) keep the default false — the loader displaces the previous
+	// provider. ABI: appended at the END of the vtable (rebuild ALL modules together).
+	virtual bool sharedService() { return false; }
+
+	// Extra files this module needs SHIPPED with a packaged game beyond its own DLL —
+	// the editor's Package Project asks every loaded module and bundles what it names:
+	//   * `pakFiles`  — PROJECT-relative paths forced into the game pak (the cooker can't
+	//                   discover them: compiled script assemblies and the like);
+	//   * `distFiles` — (source -> dist-relative destination) copies into the dist tree
+	//                   (runtime companions: a managed bridge dir, a private language
+	//                   runtime). A RELATIVE source resolves against the runtime dir being
+	//                   shipped (x64/Release), an ABSOLUTE one against itself; a directory
+	//                   source copies recursively.
+	// ABI: appended at the END of the vtable (rebuild ALL modules together).
+	virtual void shipExtras(const char* projectDir,
+	                        std::vector<std::string>& pakFiles,
+	                        std::vector<std::pair<std::string, std::string>>& distFiles) {}
 };
 
 }  // namespace nuke
