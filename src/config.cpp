@@ -141,6 +141,10 @@ void Config::reload(Config* instance)
         win.floating    = w.value("floating",    win.floating);
         win.maximized   = w.value("maximized",   win.maximized);
         win.fullscreen  = w.value("fullscreen",  win.fullscreen);
+        // `mode` is authoritative; a config predating it derives from the legacy `fullscreen`
+        // bool (true -> exclusive). `fullscreen` is then kept in sync with mode.
+        win.mode        = w.value("mode", win.fullscreen ? 2 : 0);
+        win.fullscreen  = win.mode != 0;
         win.transparent = w.value("transparent", win.transparent);
         win.opacity     = w.value("opacity",     win.opacity);
         win.backend     = w.value("backend",     win.backend);
@@ -169,6 +173,38 @@ void Config::reload(Config* instance)
         r.bounces     = rt.value("bounces",     r.bounces);
         r.roughCutoff = rt.value("roughCutoff", r.roughCutoff);
     }
+}
+
+void Config::saveWindow()
+{
+    bfs::path configDir("config");
+    boost::system::error_code ec;
+    if (!bfs::exists(configDir, ec)) bfs::create_directory(configDir, ec);
+    bfs::path cfg("./config/main.json");
+
+    // Read-modify-write: preserve every other section (theme is large; raytracing/jobs too).
+    json root = json::object();
+    { bfs::ifstream f(cfg); if (f) { json parsed = json::parse(f, nullptr, false, true); if (!parsed.is_discarded() && parsed.is_object()) root = parsed; } }
+
+    json& w = root["window"];   // creates the object if absent
+    w["width"]       = window.w;
+    w["height"]      = window.h;
+    if (!window.mainFont.empty()) w["mainFont"] = window.mainFont;
+    w["title"]       = window.title;
+    w["decorated"]   = window.decorated;
+    w["resizable"]   = window.resizable;
+    w["floating"]    = window.floating;
+    w["maximized"]   = window.maximized;
+    w["mode"]        = window.mode;
+    w["fullscreen"]  = window.fullscreen;   // legacy mirror (mode != 0)
+    w["transparent"] = window.transparent;
+    w["opacity"]     = window.opacity;
+    w["backend"]     = window.backend;
+
+    bfs::ofstream out(cfg, std::ios::trunc);
+    if (!out) { cout << PREFIX_CONF << "saveWindow: cannot write config/main.json" << endl; return; }
+    out << root.dump(2);
+    cout << PREFIX_CONF << "window config saved (mode=" << window.mode << ", " << window.w << "x" << window.h << ")" << endl;
 }
 
 Config::Config()

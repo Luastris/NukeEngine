@@ -8,6 +8,7 @@ namespace bc = boost::container;
 #include "Transform.h"
 #include "Layers.h"
 #include "ID.h"
+#include "reflect/Reflect.h"
 
 namespace nuke {
 //
@@ -17,11 +18,14 @@ namespace nuke {
 #pragma pack(push, 1)
 class NUKEENGINE_API Atom
 {
+	// Reflected for METHOD dispatch (name/tag/parenting/destroy work identically in every
+	// scripting language). Atoms still travel as AtomRef stable ids, never object handles.
+	NUKE_CLASS_NOCREATE(Atom, Object)
 protected:
-	
+
 
 public:
-	
+
 	std::string name = "Atom";
 	std::string tag = "Untagged";
 	// Which MOD added this atom (world-merge provenance, RUNTIME only — never serialized):
@@ -43,10 +47,10 @@ public:
 	~Atom();
 
 
-	std::string GetName();
-	std::string GetTag();
-	void SetName(const char* name);
-	void SetTag(const char* tag);
+	[[nuke::func]] std::string GetName();
+	[[nuke::func]] std::string GetTag();
+	[[nuke::func]] void SetName(const std::string& name);
+	[[nuke::func]] void SetTag(const std::string& tag);
 	Transform& GetTransform();
 	
 	template<class T>
@@ -75,10 +79,10 @@ public:
 	void FixedUpdate();
 	void Update();
 
-	void SetParent(Atom* newparent);
-	Atom* GetParent();
+	[[nuke::func]] void SetParent(Atom* newparent);
+	[[nuke::func]] Atom* GetParent();
 
-	void AddChild(Atom* newChild);
+	[[nuke::func]] void AddChild(Atom* newChild);
 
     template <class T>
 	void Update() {
@@ -90,7 +94,9 @@ public:
 
 	void Reset();
 	void Pause();
-	void Destroy();
+	// DEFERRED destruction (delegates to World::QueueDestroy): the subtree is removed and
+	// deleted at the end of the current Update — safe from scripts, callbacks, anywhere.
+	[[nuke::func]] void Destroy();
 
 private:
 

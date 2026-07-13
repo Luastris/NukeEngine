@@ -39,6 +39,31 @@ std::vector<TypeInfo*> Registry_All()
     return out;
 }
 
+// --- reflected enums: name -> ordered labels (index = enum value) ---------------------
+static std::unordered_map<std::string, std::vector<std::string>>& enumRegistry()
+{
+    static std::unordered_map<std::string, std::vector<std::string>> r;
+    return r;
+}
+
+void Reflect_RegisterEnum(const std::string& name, const std::vector<std::string>& labels)
+{
+    if (!name.empty()) enumRegistry()[name] = labels;   // idempotent (re-register overwrites)
+}
+
+const std::vector<std::string>* Reflect_EnumLabels(const std::string& name)
+{
+    auto it = enumRegistry().find(name);
+    return it != enumRegistry().end() ? &it->second : nullptr;
+}
+
+std::vector<std::string> Reflect_AllEnumNames()
+{
+    std::vector<std::string> out;
+    for (auto& kv : enumRegistry()) out.push_back(kv.first);
+    return out;
+}
+
 // --- single value <-> json by tag ---
 void SaveField(FT t, const void* a, json& j)
 {

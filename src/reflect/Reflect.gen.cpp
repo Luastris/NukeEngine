@@ -3,25 +3,31 @@
 #include "API/iGUI.h"
 #include "API/Model/Animator.h"
 #include "API/Model/AnimClip.h"
+#include "API/Model/Atom.h"
 #include "API/Model/Audio.h"
 #include "API/Model/AudioListener.h"
 #include "API/Model/AudioSource.h"
 #include "API/Model/Camera.h"
+#include "API/Model/Clock.h"
 #include "API/Model/Collider.h"
 #include "API/Model/DebugDraw.h"
 #include "API/Model/Environment.h"
+#include "API/Model/Game.h"
 #include "API/Model/Light.h"
+#include "API/Model/Log.h"
 #include "API/Model/Material.h"
 #include "API/Model/Mesh.h"
 #include "API/Model/MeshRenderer.h"
 #include "API/Model/Physics.h"
 #include "API/Model/PostProcess.h"
+#include "API/Model/Prefab.h"
 #include "API/Model/ReflectionProbe.h"
 #include "API/Model/Rigidbody.h"
 #include "API/Model/Shader.h"
 #include "API/Model/Texture.h"
 #include "API/Model/Time.h"
 #include "API/Model/Transform.h"
+#include "API/Model/World.h"
 #include "interface/iGUI.h"
 
 namespace nuke {
@@ -97,7 +103,20 @@ bool NukeReflectInit() {
 		t.base = "Object";
 		t.fields.push_back(MakeField("name", &AnimClip::name, "", "Name"));
 		t.fields.push_back(MakeField("duration", &AnimClip::duration, "", "Duration"));
+		t.methods.push_back(MakeMethod("AddEvent", &AnimClip::AddEvent));
 		t.create = []() -> void* { return new AnimClip(); };
+	}
+	{
+		TypeInfo& t = TypeOf<Atom>();
+		t.base = "Object";
+		t.methods.push_back(MakeMethod("GetName", &Atom::GetName));
+		t.methods.push_back(MakeMethod("GetTag", &Atom::GetTag));
+		t.methods.push_back(MakeMethod("SetName", &Atom::SetName));
+		t.methods.push_back(MakeMethod("SetTag", &Atom::SetTag));
+		t.methods.push_back(MakeMethod("SetParent", &Atom::SetParent));
+		t.methods.push_back(MakeMethod("GetParent", &Atom::GetParent));
+		t.methods.push_back(MakeMethod("AddChild", &Atom::AddChild));
+		t.methods.push_back(MakeMethod("Destroy", &Atom::Destroy));
 	}
 	{
 		TypeInfo& t = TypeOf<Audio>();
@@ -162,8 +181,20 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("_far", &Camera::_far));
 		t.fields.push_back(MakeField("freeMode", &Camera::freeMode));
 		t.fields.push_back(MakeField("depth", &Camera::depth));
+		t.fields.push_back(MakeField("background", &Camera::background, "", "Background"));
 		t.fields.push_back(MakeField("targetTexGuid", &Camera::targetTexGuid, "texture", "Target Texture"));
 		t.create = []() -> void* { return new Camera(); };
+	}
+	{
+		TypeInfo& t = TypeOf<Clock>();
+		t.base = "Object";
+		t.methods.push_back(MakeMethod("Restart", &Clock::Restart));
+		t.methods.push_back(MakeMethod("Pause", &Clock::Pause));
+		t.methods.push_back(MakeMethod("Resume", &Clock::Resume));
+		t.methods.push_back(MakeMethod("IsPaused", &Clock::IsPaused));
+		t.methods.push_back(MakeMethod("Elapsed", &Clock::Elapsed));
+		t.methods.push_back(MakeMethod("Now", &Clock::Now));
+		t.create = []() -> void* { return new Clock(); };
 	}
 	{
 		TypeInfo& t = TypeOf<Collider>();
@@ -214,6 +245,28 @@ bool NukeReflectInit() {
 		t.create = []() -> void* { return new Environment(); };
 	}
 	{
+		TypeInfo& t = TypeOf<Game>();
+		t.base = "Object";
+		t.methods.push_back(MakeMethod("GetWorld", &Game::GetWorld));
+		t.methods.push_back(MakeMethod("LoadWorld", &Game::LoadWorld));
+		t.methods.push_back(MakeMethod("IsEditor", &Game::IsEditor));
+		t.methods.push_back(MakeMethod("IsPlaying", &Game::IsPlaying));
+		t.methods.push_back(MakeMethod("IsPaused", &Game::IsPaused));
+		t.methods.push_back(MakeMethod("SetPaused", &Game::SetPaused));
+		t.methods.push_back(MakeMethod("Quit", &Game::Quit));
+		t.methods.push_back(MakeMethod("SetResolution", &Game::SetResolution));
+		t.methods.push_back(MakeMethod("SetWindowMode", &Game::SetWindowMode));
+		t.methods.push_back(MakeMethod("SetBorderless", &Game::SetBorderless));
+		t.methods.push_back(MakeMethod("SetTransparent", &Game::SetTransparent));
+		t.methods.push_back(MakeMethod("SetOpacity", &Game::SetOpacity));
+		t.methods.push_back(MakeMethod("WindowWidth", &Game::WindowWidth));
+		t.methods.push_back(MakeMethod("WindowHeight", &Game::WindowHeight));
+		t.methods.push_back(MakeMethod("GetWindowMode", &Game::GetWindowMode));
+		t.methods.push_back(MakeMethod("IsBorderless", &Game::IsBorderless));
+		t.methods.push_back(MakeMethod("IsTransparent", &Game::IsTransparent));
+		t.methods.push_back(MakeMethod("Opacity", &Game::Opacity));
+	}
+	{
 		TypeInfo& t = TypeOf<Light>();
 		t.base = "Component";
 		t.fields.push_back(MakeField("type", &Light::type, "", "Type", 0.0f, 0.0f, "Directional,Point,Spot"));
@@ -224,6 +277,13 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("spotBlend", &Light::spotBlend, "", "Spot Blend"));
 		t.fields.push_back(MakeField("castShadows", &Light::castShadows, "", "Cast Shadows"));
 		t.create = []() -> void* { return new Light(); };
+	}
+	{
+		TypeInfo& t = TypeOf<Log>();
+		t.base = "Object";
+		t.methods.push_back(MakeMethod("Info", &Log::Info));
+		t.methods.push_back(MakeMethod("Warn", &Log::Warn));
+		t.methods.push_back(MakeMethod("Error", &Log::Error));
 	}
 	{
 		TypeInfo& t = TypeOf<Material>();
@@ -283,6 +343,11 @@ bool NukeReflectInit() {
 		t.create = []() -> void* { return new PostProcess(); };
 	}
 	{
+		TypeInfo& t = TypeOf<Prefabs>();
+		t.base = "Object";
+		t.methods.push_back(MakeMethod("Instantiate", &Prefabs::Instantiate));
+	}
+	{
 		TypeInfo& t = TypeOf<ReflectionProbe>();
 		t.base = "Component";
 		t.fields.push_back(MakeField("resolution", &ReflectionProbe::resolution, "", "Resolution", 0.0f, 0.0f, "64,128,256,512"));
@@ -325,6 +390,8 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("height", &Texture::height, "", "Height"));
 		t.fields.push_back(MakeField("usage", &Texture::usage, "", "Usage", 0.0f, 0.0f, "Color,Normal,Data,Emissive"));
 		t.fields.push_back(MakeField("invertGreen", &Texture::invertGreen, "", "Invert Green"));
+		t.methods.push_back(MakeMethod("GuessUsage", &Texture::GuessUsage));
+		t.methods.push_back(MakeMethod("Recompress", &Texture::Recompress));
 		t.create = []() -> void* { return new Texture(); };
 	}
 	{
@@ -352,6 +419,24 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("EulerDeg", &Transform::EulerDeg));
 		t.methods.push_back(MakeMethod("setEuler", &Transform::setEuler));
 		t.methods.push_back(MakeMethod("euler", &Transform::euler));
+	}
+	{
+		TypeInfo& t = TypeOf<World>();
+		t.base = "Object";
+		t.fields.push_back(MakeField("name", &World::name));
+		t.methods.push_back(MakeMethod("Get", &World::Get));
+		t.methods.push_back(MakeMethod("GetById", &World::GetById));
+		t.methods.push_back(MakeMethod("Add", &World::Add));
+		t.methods.push_back(MakeMethod("CreateAtom", &World::CreateAtom));
+		t.methods.push_back(MakeMethod("QueueDestroy", &World::QueueDestroy));
+		t.methods.push_back(MakeMethod("Pick", &World::Pick));
+		t.methods.push_back(MakeMethod("SaveToString", &World::SaveToString));
+		t.methods.push_back(MakeMethod("LoadFromString", &World::LoadFromString));
+		t.methods.push_back(MakeMethod("SaveToFile", &World::SaveToFile));
+		t.methods.push_back(MakeMethod("LoadFromFile", &World::LoadFromFile));
+		t.methods.push_back(MakeMethod("Clear", &World::Clear));
+		t.methods.push_back(MakeMethod("Reparent", &World::Reparent));
+		t.methods.push_back(MakeMethod("ReparentBefore", &World::ReparentBefore));
 	}
 	{
 		TypeInfo& t = TypeOf<Gui>();

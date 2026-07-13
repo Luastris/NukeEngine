@@ -168,6 +168,14 @@ unsigned long StoreHandle(void* obj, TypeInfo* ti, const std::string& guid)
 }
 }  // namespace
 
+bool Reflect_IsAssetType(const std::string& typeName)
+{
+	// The ResDB-backed asset classes: guid-identified, findable by name/guid, materialized
+	// on Create. Keep in sync with Reflect_CreateObject / Reflect_ObjectFromGuid below.
+	return typeName == "Material" || typeName == "Texture" || typeName == "Mesh"
+	    || typeName == "AnimClip" || typeName == "Shader";
+}
+
 unsigned long Reflect_CreateObject(const std::string& typeName)
 {
 	TypeInfo* ti = Registry_Find(typeName);
@@ -200,6 +208,32 @@ unsigned long Reflect_WrapObject(void* obj, const std::string& typeName)
 	else if (typeName == "AnimClip") guid = ((AnimClip*)obj)->guid;
 	else if (typeName == "Shader")   guid = ((Shader*)obj)->guid;
 	return StoreHandle(obj, ti, guid);
+}
+
+// ---- ObjectRef channel (FT::ObjectRef in [[nuke::func]] signatures) ----------------------------
+
+unsigned long Reflect_WrapObjectPtr(void* obj, const char* typeName)
+{
+	return (obj && typeName) ? Reflect_WrapObject(obj, typeName) : 0;
+}
+
+void* Reflect_ObjectPtr(unsigned long id, const char* typeName)
+{
+	auto it = ObjTable().find(id);
+	if (it == ObjTable().end() || !typeName || !*typeName) return nullptr;
+	// IS-A check: the handle's registered type must be `typeName` or derive from it.
+	for (TypeInfo* t = it->second.ti; t; t = t->base.empty() ? nullptr : Registry_Find(t->base))
+		if (t->name == typeName) return it->second.obj;
+	return nullptr;
+}
+
+void Reflect_DropObject(void* obj)
+{
+	if (!obj) return;
+	auto idx = ObjIndex().find(obj);
+	if (idx == ObjIndex().end()) return;
+	ObjTable().erase(idx->second);   // every script-held handle id goes stale-safe dead
+	ObjIndex().erase(idx);
 }
 
 unsigned long Reflect_ObjectFromGuid(const std::string& guid)
@@ -319,7 +353,7 @@ void Reflect_ComponentFieldChanged(Component* c, const Field& f)
 		if (f.name == "matGuid")
 			if (Material* asset = ResDB::getSingleton()->GetMaterial(mr->matGuid))
 			{
-				if (mr->mat) delete mr->mat;
+				if (mr->mat) { Reflect_DropObject(mr->mat); delete mr->mat; }   // kill wrapped handles first
 				mr->mat = asset->Clone();   // instance semantics, same as world load
 			}
 	}

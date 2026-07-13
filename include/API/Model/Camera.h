@@ -32,7 +32,10 @@ public:
     // Per-camera render contract (see World::Render).
     uint64_t renderTarget = 0;                       // iRender RT id; 0 = backbuffer
     [[nuke::prop]] int depth = 0;                    // render order (lower drawn first)
-    float    clearColor[4] = {0.20f, 0.30f, 0.45f, 1.0f};
+    // Background: the colour the camera clears to where nothing is drawn. The ALPHA matters
+    // for a transparent window (Game.SetTransparent) — set it below 1 for a see-through
+    // background (0 = fully transparent -> desktop shows); ignored on an opaque window.
+    [[nuke::prop(label="Background")]] Color background = Color(0.20f, 0.30f, 0.45f, 1.0f);
     // If set, the camera renders into this RenderTexture asset (World::Render resolves it -> renderTarget).
     [[nuke::prop(asset="texture", label="Target Texture")]] std::string targetTexGuid;
 

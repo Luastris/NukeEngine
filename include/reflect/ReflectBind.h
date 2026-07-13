@@ -69,6 +69,13 @@ NUKEENGINE_API unsigned long Reflect_CreateObject(const std::string& typeName); 
 // Wrap an EXISTING engine-owned instance (a MeshRenderer's material, a ResDB asset) into
 // a handle WITHOUT taking ownership. Null-safe: obj==nullptr -> 0.
 NUKEENGINE_API unsigned long Reflect_WrapObject(void* obj, const std::string& typeName);
+// Is this reflected type a ResDB ASSET (guid-identified, findable by name/guid)? The one
+// place that answers it — Reflect_CreateObject's registration, Reflect_ObjectFromGuid's
+// lookup and the C# wrapper generator (Find/FromGuid factories) all agree through this.
+// Facades/singletons (World/Game/Log/Physics/Clock/...) are NOT assets — you never look
+// one up by name.
+NUKEENGINE_API bool Reflect_IsAssetType(const std::string& typeName);
+
 // ResDB asset by guid -> handle (mesh/material/texture/clip/bonemap; "" kind = try all).
 NUKEENGINE_API unsigned long Reflect_ObjectFromGuid(const std::string& guid);
 NUKEENGINE_API std::string   Reflect_ObjectGuid(unsigned long id);   // "" when it has none

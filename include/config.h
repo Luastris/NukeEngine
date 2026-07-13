@@ -5,6 +5,17 @@
 
 namespace nuke {
 
+// Window display mode — the typed API surface (Game.SetWindowMode / NukeWindow::mode). A
+// reflected enum: the C# bindings expose it as `enum WindowMode`, Lua as `nuke.WindowMode`
+// (see the NukeEnumInfo<WindowMode> specialization in Game.h). Stored as int on the POD
+// config / WindowDesc so it crosses the render seam and JSON as a plain number.
+enum class WindowMode : int
+{
+    Windowed             = 0,   // regular window (decoration per `decorated`)
+    BorderlessFullscreen = 1,   // undecorated window covering the monitor at desktop res (no mode switch)
+    ExclusiveFullscreen  = 2,   // real fullscreen; the monitor switches to the window's resolution
+};
+
 struct NukeWindow{
     int w = 1280, h = 720;
     std::string mainFont;
@@ -15,8 +26,11 @@ struct NukeWindow{
     bool  resizable   = true;
     bool  floating    = false;   // always-on-top
     bool  maximized   = false;
+    // Display mode (authoritative; `fullscreen` mirrors mode != 0): 0 = windowed,
+    // 1 = borderless fullscreen (desktop-res, no mode switch), 2 = exclusive fullscreen.
+    int   mode        = 0;
     bool  fullscreen  = false;
-    bool  transparent = false;   // per-pixel alpha (needs renderer DComp support)
+    bool  transparent = false;   // per-pixel alpha (creation-time; applied on next launch)
     float opacity     = 1.0f;    // whole-window opacity 0..1
     int   backend     = 0;       // render backend: 0 = D3D11, 1 = D3D12 (D3D12 enables ray tracing; restart to apply)
     bool hierarchy = true,
@@ -126,6 +140,10 @@ public:
     int  jobWorkers  = -1;
     bool jobPinCores = true;
 	void reload(Config* instance);
+	// Persist config/main.json, updating ONLY the "window" object from `window` and leaving
+	// every other section (theme, raytracing, jobs, physicsCore) exactly as on disk. Used by
+	// the runtime window API (Game.Set*) so a game's chosen video settings survive relaunch.
+	void saveWindow();
 	static Config* getSingleton();
 };
 }  // namespace nuke

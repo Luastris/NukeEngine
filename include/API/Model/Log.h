@@ -2,6 +2,7 @@
 #ifndef NUKEE_LOG_H
 #define NUKEE_LOG_H
 #include "NukeAPI.h"
+#include "reflect/Reflect.h"
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -33,14 +34,15 @@ struct LogEntry
 
 class NUKEENGINE_API Log
 {
+	NUKE_CLASS_NOCREATE(Log, Object)   // scripts log to the Console: Log.Info/Warn/Error(tag, text)
 public:
 	static constexpr size_t kMaxEntries = 4096;
 
 	static void Write(LogLevel level, const std::string& tag, const std::string& text,
 	                  const std::string& file = std::string(), int line = 0);
-	static void Info (const std::string& tag, const std::string& text) { Write(LOG_INFO,  tag, text); }
-	static void Warn (const std::string& tag, const std::string& text) { Write(LOG_WARN,  tag, text); }
-	static void Error(const std::string& tag, const std::string& text) { Write(LOG_ERROR, tag, text); }
+	[[nuke::func]] static void Info (const std::string& tag, const std::string& text) { Write(LOG_INFO,  tag, text); }
+	[[nuke::func]] static void Warn (const std::string& tag, const std::string& text) { Write(LOG_WARN,  tag, text); }
+	[[nuke::func]] static void Error(const std::string& tag, const std::string& text) { Write(LOG_ERROR, tag, text); }
 
 	// Route std::cout / std::cerr through the ring (they keep printing where they did).
 	// Idempotent; call once early in the host (before modules load, so their boot logs

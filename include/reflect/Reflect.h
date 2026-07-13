@@ -29,21 +29,80 @@ class Atom;   // AtomRef values resolve through the live world (Reflect_AtomById
 // Supported field types. Extend as needed (Color/asset-refs/etc. added later).
 // AtomRef = a reference to a live Atom, carried across the boundary as its stable id —
 // stale-safe: a dead atom resolves to null, never to freed memory.
-enum class FT { Unknown, Bool, Int, Float, Double, String, Vec2, Vec3, Vec4, Quat, Color, AtomRef };
+// ObjectRef = a pointer to ANY reflected (NUKE_CLASS) instance, carried as its engine
+// OBJECT-HANDLE id (ReflectBind's table) — World*, Transform*, Clock*, Mesh*, ... become
+// legal [[nuke::func]] parameter/return types with zero per-class glue.
+enum class FT { Unknown, Bool, Int, Float, Double, String, Vec2, Vec3, Vec4, Quat, Color, AtomRef, ObjectRef };
 
 // AtomRef <-> live atom (defined in Reflect.cpp; walks the CURRENT world by stable id).
 NUKEENGINE_API Atom*         Reflect_AtomById(unsigned long id);
 NUKEENGINE_API unsigned long Reflect_AtomId(Atom* a);
 
+// ObjectRef <-> live reflected instance (defined in ReflectBind.cpp — the object-handle
+// table). Reflect_ObjectPtr is IS-A checked: the handle's type must be `typeName` or
+// derive from it (base chain), else null. Reflect_WrapObjectPtr wraps without ownership
+// (null-safe, dedups per instance). Reflect_DropObject invalidates every handle to the
+// instance — owners MUST call it right before deleting a wrapped/wrappable object.
+NUKEENGINE_API void*         Reflect_ObjectPtr(unsigned long id, const char* typeName);
+NUKEENGINE_API unsigned long Reflect_WrapObjectPtr(void* obj, const char* typeName);
+NUKEENGINE_API void          Reflect_DropObject(void* obj);
+
+namespace detail {
+// Compile-time "is a NUKE_CLASS type": detected by the macro-provided __NukeTypeName().
+template<class T, class = void> struct IsReflected : std::false_type {};
+template<class T> struct IsReflected<T, std::void_t<decltype(T::__NukeTypeName())>> : std::true_type {};
+}  // namespace detail
+
+// ---- reflected ENUM types ----------------------------------------------------------------
+// A [[nuke::func]] parameter/return whose C++ type is a REFLECTED enum generates a real typed
+// enum in every binding (C# `enum WindowMode`, Lua `nuke.WindowMode`) instead of a bare int.
+// To reflect an enum, specialize NukeEnumInfo for it (see Game.h / WindowMode). Unspecialized
+// enums stay ints. The name + labels register into a global table the generators read.
+NUKEENGINE_API void Reflect_RegisterEnum(const std::string& name, const std::vector<std::string>& labels);
+NUKEENGINE_API const std::vector<std::string>* Reflect_EnumLabels(const std::string& name);   // null if unknown
+NUKEENGINE_API std::vector<std::string>        Reflect_AllEnumNames();
+
+template<class E> struct NukeEnumInfo {
+	static constexpr bool reflected = false;
+	static const char* Name() { return ""; }
+	static void        Register() {}
+};
+
+namespace detail {
+// The reflected-enum name of a param/return type ("" = plain int / not reflected). Registers
+// the enum's labels on first use, so the registry is populated by the same static-init pass
+// that builds the type registry.
+template<class T>
+inline const char* EnumNameRegister()
+{
+	using U = std::decay_t<T>;
+	if constexpr (std::is_enum_v<U> && NukeEnumInfo<U>::reflected)
+	{
+		NukeEnumInfo<U>::Register();
+		return NukeEnumInfo<U>::Name();
+	}
+	else
+		return "";
+}
+}  // namespace detail
+
 // Map a C++ type -> FT tag. Primary: ENUMS reflect as Int (the label list comes from the
 // [[nuke::prop(enum="...")]] metadata; engine prop-enums declare `: int` so the generic
-// addr-based int read/write is layout-exact); everything else unknown unless specialized.
+// addr-based int read/write is layout-exact); POINTERS to reflected classes are ObjectRef
+// ([[nuke::func]] params/returns only — never a serialized field); everything else
+// unknown unless specialized.
 template<class T> constexpr FT FieldTypeOf()
 {
-	return std::is_enum_v<T> ? FT::Int : FT::Unknown;
+	if constexpr (std::is_pointer_v<T>)
+		return detail::IsReflected<std::remove_cv_t<std::remove_pointer_t<T>>>::value ? FT::ObjectRef : FT::Unknown;
+	else
+		return std::is_enum_v<T> ? FT::Int : FT::Unknown;
 }
 template<> constexpr FT FieldTypeOf<bool>()        { return FT::Bool; }
 template<> constexpr FT FieldTypeOf<int>()         { return FT::Int; }
+template<> constexpr FT FieldTypeOf<long>()        { return FT::Int; }   // engine ids (Atom/Component ID)
+template<> constexpr FT FieldTypeOf<unsigned long>() { return FT::Int; }
+template<> constexpr FT FieldTypeOf<long long>()   { return FT::Int; }
 template<> constexpr FT FieldTypeOf<float>()       { return FT::Float; }
 template<> constexpr FT FieldTypeOf<double>()      { return FT::Double; }
 template<> constexpr FT FieldTypeOf<std::string>() { return FT::String; }
@@ -83,14 +142,32 @@ struct ReflectValue
 	std::string str;
 	double      v[4] = { 0, 0, 0, 0 };
 	unsigned long atom = 0;   // AtomRef: the atom's stable id (0 = null)
+	unsigned long obj  = 0;   // ObjectRef: the engine object-handle id (0 = null)
 };
 
 namespace detail {
-// ReflectValue -> typed argument. Only the supported FT types specialize — tagging a
-// method with an unsupported parameter type is a COMPILE error, not a runtime surprise.
-template<class T> T FromRV(const ReflectValue& v);
+// ReflectValue -> typed argument. The PRIMARY handles enums (as their numeric value) and
+// pointers to reflected classes (resolved is-a-checked through the object-handle table);
+// every other supported FT type specializes below — tagging a method with an unsupported
+// parameter type is a COMPILE error, not a runtime surprise.
+template<class T> T FromRV(const ReflectValue& v)
+{
+	if constexpr (std::is_enum_v<T>)
+		return (T)(long long)v.num;
+	else
+	{
+		static_assert(std::is_pointer_v<T> &&
+		              IsReflected<std::remove_cv_t<std::remove_pointer_t<T>>>::value,
+		              "[[nuke::func]]: unsupported parameter type");
+		using P = std::remove_cv_t<std::remove_pointer_t<T>>;
+		return (T)Reflect_ObjectPtr(v.obj, P::__NukeTypeName());
+	}
+}
 template<> inline bool        FromRV<bool>(const ReflectValue& v)        { return v.b; }
 template<> inline int         FromRV<int>(const ReflectValue& v)         { return (int)v.num; }
+template<> inline long        FromRV<long>(const ReflectValue& v)        { return (long)v.num; }
+template<> inline unsigned long FromRV<unsigned long>(const ReflectValue& v) { return (unsigned long)v.num; }
+template<> inline long long   FromRV<long long>(const ReflectValue& v)   { return (long long)v.num; }
 template<> inline float       FromRV<float>(const ReflectValue& v)       { return (float)v.num; }
 template<> inline double      FromRV<double>(const ReflectValue& v)      { return v.num; }
 template<> inline std::string FromRV<std::string>(const ReflectValue& v) { return v.str; }
@@ -104,6 +181,16 @@ template<> inline Atom*       FromRV<Atom*>(const ReflectValue& v)       { retur
 // Typed return -> ReflectValue.
 inline void ToRV(bool x, ReflectValue& o)               { o.type = FT::Bool;   o.b = x; }
 inline void ToRV(int x, ReflectValue& o)                { o.type = FT::Int;    o.num = x; }
+inline void ToRV(long x, ReflectValue& o)               { o.type = FT::Int;    o.num = (double)x; }
+inline void ToRV(unsigned long x, ReflectValue& o)      { o.type = FT::Int;    o.num = (double)x; }
+inline void ToRV(long long x, ReflectValue& o)          { o.type = FT::Int;    o.num = (double)x; }
+// Enum return -> its numeric value (matches the FieldTypeOf primary: enums are Int).
+template<class T> inline std::enable_if_t<std::is_enum_v<T>> ToRV(T x, ReflectValue& o)
+{ o.type = FT::Int; o.num = (double)(long long)x; }
+// Reflected-class pointer return -> a (deduped, non-owning) object handle. The exact
+// ToRV(Atom*) overload below still wins for Atom* — atoms stay on the AtomRef channel.
+template<class T> inline std::enable_if_t<IsReflected<T>::value> ToRV(T* x, ReflectValue& o)
+{ o.type = FT::ObjectRef; o.obj = Reflect_WrapObjectPtr((void*)x, T::__NukeTypeName()); }
 inline void ToRV(float x, ReflectValue& o)              { o.type = FT::Float;  o.num = x; }
 inline void ToRV(double x, ReflectValue& o)             { o.type = FT::Double; o.num = x; }
 inline void ToRV(const std::string& x, ReflectValue& o) { o.type = FT::String; o.str = x; }
@@ -124,6 +211,15 @@ struct Method {
     std::string name;
     FT ret = FT::Unknown;                 // FT::Unknown = void
     std::vector<FT> params;               // declared parameter types, in order
+    // Reflected CLASS names behind the ref-typed slots ("" = plain value): paramClass[i]
+    // names the class of an AtomRef/ObjectRef parameter ("Atom" for AtomRef), retClass the
+    // return's. Typed-wrapper GENERATORS (C#) read these to emit real classes.
+    std::vector<std::string> paramClass;
+    std::string retClass;
+    // Reflected ENUM names behind Int-typed slots ("" = plain int): paramEnum[i]/retEnum name
+    // a registered enum (see NukeEnumInfo) so generators emit the real enum type, not an int.
+    std::vector<std::string> paramEnum;
+    std::string retEnum;
     bool isStatic = false;                // static/free function: invoke ignores `obj` —
                                           // script binders expose it as <Type>.<name>(...)
     // Invoke on an instance of the owning type (null for statics). `args` must match
@@ -188,12 +284,35 @@ bool InvokeImpl(M mf, C* obj, const ReflectValue* a, ReflectValue& out, std::ind
     return true;
 }
 
+// The reflected class name behind a ref-typed slot ("Atom" for Atom*, the NUKE_CLASS name
+// for reflected pointers, "" for plain values) — generator metadata, see Method::paramClass.
+template<class T>
+inline const char* RefClassOf()
+{
+    if constexpr (std::is_same_v<T, Atom*>) return "Atom";
+    else if constexpr (std::is_pointer_v<T>)
+    {
+        using P = std::remove_cv_t<std::remove_pointer_t<T>>;
+        if constexpr (IsReflected<P>::value) return P::__NukeTypeName();
+        else return "";
+    }
+    else return "";
+}
+
+template<class R, class... A>
+inline void FillMethodClasses(Method& m) {
+    if constexpr (!std::is_void_v<R>) { m.retClass = RefClassOf<std::decay_t<R>>(); m.retEnum = EnumNameRegister<R>(); }
+    m.paramClass = { std::string(RefClassOf<std::decay_t<A>>())... };
+    m.paramEnum  = { std::string(EnumNameRegister<A>())... };
+}
+
 template<class C, class M, class R, class... A>
 Method MakeMethodImpl(const char* name, M mf) {
     Method m;
     m.name = name;
     if constexpr (!std::is_void_v<R>) m.ret = FieldTypeOf<std::decay_t<R>>();
     m.params = { FieldTypeOf<std::decay_t<A>>()... };
+    FillMethodClasses<R, A...>(m);
     m.invoke = [mf](void* o, const ReflectValue* a, std::size_t n, ReflectValue& out) -> bool {
         if (n != sizeof...(A)) return false;
         return InvokeImpl<C, M, R, A...>(mf, (C*)o, a, out, std::index_sequence_for<A...>{});
@@ -237,6 +356,7 @@ Method MakeMethod(const char* name, R (*fn)(A...)) {
     m.isStatic = true;
     if constexpr (!std::is_void_v<R>) m.ret = FieldTypeOf<std::decay_t<R>>();
     m.params = { FieldTypeOf<std::decay_t<A>>()... };
+    detail::FillMethodClasses<R, A...>(m);
     m.invoke = [fn](void*, const ReflectValue* a, std::size_t n, ReflectValue& out) -> bool {
         if (n != sizeof...(A)) return false;
         return detail::InvokeFreeImpl<decltype(fn), R, A...>(fn, a, out, std::index_sequence_for<A...>{});

@@ -33,6 +33,7 @@
 #include "API/Model/resdb.h"
 #include "API/Model/UnknownComponent.h"
 #include "API/Model/Prefab.h"
+#include "interface/AppInstance.h"   // Prefabs::Instantiate reads content through the host
 #include "interface/Modular.h"
 #include "reflect/ReflectJson.h"
 #include <boost/filesystem/fstream.hpp>
@@ -121,11 +122,29 @@ Atom* World::Pick(const Vector3& origin, const Vector3& dir)
 	return best;
 }
 
-Atom* World::Get(const char* name)
+World::~World()
 {
+	Reflect_DropObject(this);   // script handles to this world go stale-safe dead
+}
+
+static Atom* FindByName(Atom* node, const std::string& name)
+{
+	if (!node) return nullptr;
+	if (node->name == name) return node;
+	for (Atom* c : node->children)
+		if (Atom* r = FindByName(c, name)) return r;
+	return nullptr;
+}
+
+Atom* World::Get(const std::string& name)
+{
+	// Whole-tree lookup, roots first (a root match always wins over a nested one).
 	for (auto go : GetHierarchy())
 		if (go->GetName() == name)
 			return go;
+	for (auto go : GetHierarchy())
+		if (Atom* r = FindByName(go, name))
+			return r;
 	return nullptr;
 }
 
@@ -155,6 +174,22 @@ void World::Add(Atom* go)
 	hierarchy->push_back(go);
 }
 
+Atom* World::CreateAtom(const std::string& name)
+{
+	boost::recursive_mutex::scoped_lock lock(gameLock);   // scripts create mid-frame
+	Atom* a = new Atom();                                 // fresh stable id (monotonic ID ctor)
+	a->name = name.empty() ? "Atom" : name;
+	Add(a);
+	return a;
+}
+
+void World::QueueDestroy(long atomId)
+{
+	if (!atomId) return;
+	boost::recursive_mutex::scoped_lock lock(gameLock);
+	destroyQueue.push_back(atomId);
+}
+
 void World::Start()
 {
 
@@ -175,9 +210,35 @@ void World::Update()
 		if (ms > 50.0 && slowLog < 20)
 			{ std::cout << "[World]			Update lock wait: " << ms << " ms" << std::endl; ++slowLog; }
 	}
+	AppInstance* app = AppInstance::GetSingleton();
+	app->worldTickActive = true;   // scripts' Game.LoadWorld queues instead of reloading mid-loop
 	for (Atom* go : *hierarchy)
 	{
 		go->Update();
+	}
+	app->worldTickActive = false;
+	// Flush deferred destruction (Atom::Destroy / world:QueueDestroy) at a SAFE point —
+	// after the traversal, still under the game lock. Swap first: RemoveAtomById tears
+	// down components whose Destroy might queue more (those wait one frame).
+	if (!destroyQueue.empty())
+	{
+		std::vector<long> doomed;
+		doomed.swap(destroyQueue);
+		for (long id : doomed)
+		{
+			if (!GetById(id))   // queued id that no longer resolves — say so instead of silence
+				std::cout << "[World]\t\t\t" << "destroy flush: atom " << id << " not found" << std::endl;
+			RemoveAtomById(id);
+		}
+	}
+	// Apply a script-queued world switch at the FRAME BOUNDARY (traversal done, lock held).
+	if (!app->pendingWorldLoad.empty())
+	{
+		std::string path;
+		path.swap(app->pendingWorldLoad);
+		std::cout << "[World]\t\t\t" << "Game.LoadWorld -> '" << path << "'" << std::endl;
+		if (!app->OpenWorld(path))
+			std::cout << "[World]\t\t\t" << "Game.LoadWorld: world '" << path << "' not found" << std::endl;
 	}
 }
 
@@ -480,6 +541,8 @@ void World::FixedUpdate()
 
 	{
 		boost::recursive_mutex::scoped_lock lock(gameLock);
+		AppInstance* app = AppInstance::GetSingleton();
+		app->worldTickActive = true;   // Game.LoadWorld from fixed hooks queues (applied by Update)
 		if (p)
 		{
 			PullDynamicPoses(*hierarchy, p);
@@ -487,6 +550,7 @@ void World::FixedUpdate()
 		}
 		for (Atom* go : *hierarchy)          // the EXISTING fixed chain: Atom -> components
 			go->FixedUpdate();               // (scripts' fixedUpdate runs HERE, under the lock)
+		app->worldTickActive = false;
 	}
 }
 
@@ -1065,8 +1129,8 @@ void World::Render(iRender* r)
 		NukeCameraDesc d;
 		d.target = cam->renderTarget;
 		d.vpW = 0; d.vpH = 0; // renderer uses the target's full size
-		d.clear[0] = cam->clearColor[0]; d.clear[1] = cam->clearColor[1];
-		d.clear[2] = cam->clearColor[2]; d.clear[3] = cam->clearColor[3];
+		d.clear[0] = cam->background.r; d.clear[1] = cam->background.g;
+		d.clear[2] = cam->background.b; d.clear[3] = cam->background.a;
 		Vector3 cp = cam->transform->globalPosition();
 		Vector3 cf = cam->transform->direction();
 		Vector3 cu = cam->transform->up();
@@ -1417,6 +1481,30 @@ std::string PrefabGuidFromString(const std::string& text)
 	return j.value("prefab", std::string());
 }
 
+// Script-facing prefab spawn: content bytes through the engine's layered resolution
+// (raw project or mounted pak + mods) -> reconstruct -> add to the current world root.
+Atom* Prefabs::Instantiate(const std::string& contentRelPath)
+{
+	AppInstance* app = AppInstance::GetSingleton();
+	if (!app || !app->currentScene || contentRelPath.empty()) return nullptr;
+	std::string text;
+	if (!app->ReadContent(contentRelPath, text) || text.empty())
+	{
+		std::cout << "[Prefab]\t\tInstantiate: '" << contentRelPath << "' not found in content" << std::endl;
+		return nullptr;
+	}
+	Atom* a = LoadPrefabFromString(text);
+	if (!a)
+	{
+		std::cout << "[Prefab]\t\tInstantiate: '" << contentRelPath << "' is not a valid prefab" << std::endl;
+		return nullptr;
+	}
+	app->currentScene->LockGame();   // scripts spawn mid-frame — same contract as CreateAtom
+	app->currentScene->Add(a);
+	app->currentScene->UnlockGame();
+	return a;
+}
+
 std::string SaveAtomToString(Atom* root)
 {
 	if (!root) return std::string();
@@ -1438,6 +1526,13 @@ static void DeleteSubtree(Atom* a)
 {
 	if (!a) return;
 	for (Atom* c : a->children) DeleteSubtree(c);
+	// Proper teardown: components release what they own (Collider -> physics body,
+	// MeshRenderer -> material instance, ...) and every script handle into the atom
+	// (its Transform object, owned sub-objects) goes stale-safe dead before the memory does.
+	for (Component* c : a->components)
+		if (c) { c->Destroy(); Reflect_DropObject(c); delete c; }
+	a->components.clear();
+	Reflect_DropObject(&a->GetTransform());
 	delete a;
 }
 
@@ -1476,6 +1571,7 @@ std::string World::SaveToString()
 	json j;
 	j["type"] = "World";
 	j["version"] = 1;
+	j["name"] = name;                                     // authored world name (round-trips; see AppInstance::OpenWorld)
 	j["settings"] = {                                     // world-level render settings (shadow globals, ...)
 		{"shadowRes", settings.shadowRes}, {"shadowDistance", settings.shadowDistance},
 		{"shadowDepthBias", settings.shadowDepthBias}, {"shadowNormalBias", settings.shadowNormalBias},
@@ -1821,6 +1917,9 @@ void World::LoadFromString(const std::string& data)
 {
 	json j = json::parse(data, nullptr, false);
 	if (j.is_discarded()) { std::cout << "[World]\t\t\t" << "LoadFromString: bad JSON" << std::endl; return; }
+	// The authored world name. Empty when the file carries none (older worlds / never named) —
+	// AppInstance::OpenWorld then fills it from the file stem so Game.GetWorld().Name is useful.
+	name = j.value("name", std::string());
 	settings = Settings{};   // defaults, then override from file
 	if (j.contains("settings") && j["settings"].is_object())
 	{

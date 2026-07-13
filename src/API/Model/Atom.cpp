@@ -1,5 +1,6 @@
 #include "API/Model/Atom.h"
 #include "interface/AppInstance.h"   // SetParent delegates to the active world's Reparent
+#include "reflect/ReflectBind.h"     // Reflect_DropObject: transform handles die with the atom
 #include <iostream>
 
 namespace nuke {
@@ -14,7 +15,10 @@ Atom::Atom(const char* name) : name(name), transform(this)
 	cout << "[Atom]\t\t" << "New Atom(\"" << name << "\")" << endl;
 }
 
-Atom::~Atom() {}
+Atom::~Atom()
+{
+	Reflect_DropObject(&transform);   // script handles wrapping this transform go stale-safe dead
+}
 
 std::string Atom::GetName()
 {
@@ -26,12 +30,12 @@ std::string Atom::GetTag()
 	return this->tag;
 }
 
-void Atom::SetName(const char* name)
+void Atom::SetName(const std::string& name)
 {
 	this->name = name;
 }
 
-void Atom::SetTag(const char* tag)
+void Atom::SetTag(const std::string& tag)
 {
 	this->tag = tag;
 }
@@ -98,11 +102,10 @@ void Atom::Reset() {}
 void Atom::Pause() {}
 void Atom::Destroy()
 {
-	for (auto x : children)
-	{
-		x->Destroy();
-	}
-	parent->children.remove(this);
-	free(this);
+	// DEFERRED, whole-subtree: the world removes + deletes it at the end of Update — never
+	// mid-traversal (the old immediate `free(this)` corrupted the running iteration and
+	// crashed on root atoms). Safe to call from scripts, contacts, even on `self`.
+	if (World* w = AppInstance::GetSingleton()->currentScene)
+		w->QueueDestroy((long)id.id);
 }
 }  // namespace nuke

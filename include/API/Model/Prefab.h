@@ -2,6 +2,7 @@
 #ifndef NUKEE_PREFAB_H
 #define NUKEE_PREFAB_H
 #include "NukeAPI.h"
+#include "reflect/Reflect.h"
 #include <string>
 
 namespace nuke {
@@ -23,6 +24,20 @@ NUKEENGINE_API Atom*       LoadAtomFromString(const std::string& json);   // nul
 // The prefab file's own GUID (its root "prefab" field), or "" for pre-link prefabs.
 NUKEENGINE_API std::string PrefabGuid(const std::string& path);
 NUKEENGINE_API std::string PrefabGuidFromString(const std::string& text);
+
+// The SCRIPT-facing face of the prefab API ([[nuke::func]]-reflected statics — Lua
+// nuke.Prefabs.*, C# Prefabs.*): spawn saved subtrees at runtime.
+class NUKEENGINE_API Prefabs
+{
+	NUKE_CLASS_NOCREATE(Prefabs, Object)
+public:
+	// Reconstruct a .nuprefab from the project CONTENT (content-relative path, e.g.
+	// "Prefabs/Enemy.nuprefab") into the current world root — reads through the engine's
+	// layered resolution (raw project or mounted pak + mods), fresh stable ids, components
+	// resolved like a world load. Returns the new root atom (null on failure); place it
+	// via its Transform, parent it via SetParent/Reparent.
+	[[nuke::func]] static Atom* Instantiate(const std::string& contentRelPath);
+};
 
 }  // namespace nuke
 

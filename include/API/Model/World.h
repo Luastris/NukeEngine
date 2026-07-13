@@ -3,8 +3,10 @@
 #define NUKEE_SCENE_H
 #include "NukeAPI.h"
 #include "Atom.h"
+#include "reflect/Reflect.h"
 #include <boost/thread/recursive_mutex.hpp>
 #include <memory>
+#include <vector>
 
 namespace nuke {
 
@@ -12,10 +14,13 @@ class iRender;
 
 class NUKEENGINE_API World
 {
+	// Reflected: scripts hold the CURRENT world as an object handle (Game.GetWorld()) and
+	// use the [[nuke::func]] API below 1:1 — find/create/destroy/reparent atoms, (de)serialize.
+	NUKE_CLASS_NOCREATE(World, Object)
 protected:
 	bc::list<Atom*> *hierarchy = nullptr;
 public:
-	std::string name = "Default scene";
+	[[nuke::prop]] std::string name = "Default scene";
 
 	// World-level render settings (edited in the World Settings window, saved in .nuworld -> "settings").
 	// Shadow GLOBALS (which lights cast is per-Light); pushed to the renderer each frame in Render().
@@ -39,11 +44,20 @@ public:
 	bool auxiliary = false;
 
 	World();
+	~World();   // drops every script handle wrapping this world
 
-	Atom* Get(const char* name);
-	Atom* GetById(long id);     // recursive lookup by stable atom id
+	[[nuke::func]] Atom* Get(const std::string& name);
+	[[nuke::func]] Atom* GetById(long id);     // recursive lookup by stable atom id
 	bc::list<Atom*>& GetHierarchy();
-	void Add(Atom* go);
+	[[nuke::func]] void Add(Atom* go);
+	// Create an empty atom at the world root (fresh stable id) — THE script-side factory
+	// (scripts can't `new`). Parent afterwards via Reparent/atom:SetParent.
+	[[nuke::func]] Atom* CreateAtom(const std::string& name);
+	// Deferred destruction: queue an atom subtree by id; it is removed and deleted at a
+	// SAFE point (end of World::Update, game lock held) — never mid-iteration. This is what
+	// Atom::Destroy delegates to, so scripts may destroy anything (their own atom included)
+	// from Update/collision callbacks without invalidating the running traversal.
+	[[nuke::func]] void QueueDestroy(long atomId);
 
 	void Start();
 
@@ -66,16 +80,17 @@ public:
 
 private:
 	boost::recursive_mutex gameLock;
+	std::vector<long> destroyQueue;   // QueueDestroy ids; flushed at the end of Update (under gameLock)
 public:
 
 	// Ray-pick the nearest Atom (with a MeshRenderer) hit by a world-space ray.
 	// Returns nullptr on miss. Used by the editor viewport for click-to-select.
-	Atom* Pick(const Vector3& origin, const Vector3& dir);
+	[[nuke::func]] Atom* Pick(const Vector3& origin, const Vector3& dir);
 
 	// Text (.nuworld JSON) scene serialization via reflection. The editor camera is
 	// excluded from save and preserved across load (it is editor infrastructure).
-	std::string SaveToString();                  // serialize to JSON text (also used for PIE snapshots)
-	void        LoadFromString(const std::string& data);
+	[[nuke::func]] std::string SaveToString();   // serialize to JSON text (also used for PIE snapshots)
+	[[nuke::func]] void        LoadFromString(const std::string& data);
 	// Merge every mounted layer's copy of ONE world (Package::ReadAll order: base first,
 	// mods above). Each layer is diffed against the BASE (atoms by id, components by cid)
 	// and the diffs apply bottom-up — two mods editing the same world MERGE instead of the
@@ -104,16 +119,17 @@ public:
 	                                    const std::vector<std::vector<int>>& deps,
 	                                    const std::vector<std::string>& basis,
 	                                    const std::vector<std::string>& names);
-	void SaveToFile(const std::string& path);
-	void LoadFromFile(const std::string& path);
-	void Clear();   // drop all atoms except the Editor Camera (for "New World")
+	[[nuke::func]] void SaveToFile(const std::string& path);
+	[[nuke::func]] void LoadFromFile(const std::string& path);
+	[[nuke::func]] void Clear();   // drop all atoms except the Editor Camera (for "New World")
 	// Move an atom under a new parent (nullptr = scene root). Detaches from its current location
 	// (old parent's children or the root list) first; ignores cycles (parenting under a descendant).
-	void Reparent(Atom* a, Atom* newParent);
+	[[nuke::func]] void Reparent(Atom* a, Atom* newParent);
 	// Like Reparent, but insert `a` directly BEFORE `sibling` in `sibling`'s parent (for reordering /
 	// moving an atom up between siblings). nullptr sibling is ignored.
-	void ReparentBefore(Atom* a, Atom* sibling);
+	[[nuke::func]] void ReparentBefore(Atom* a, Atom* sibling);
 	// Undo helpers: delete an atom subtree by id; insert one at a placement (parentId 0 = root).
+	// (Scripts prefer QueueDestroy — RemoveAtomById deletes IMMEDIATELY, editor-only safe.)
 	void RemoveAtomById(long id);
 	void InsertAtom(Atom* a, long parentId, int index);
 

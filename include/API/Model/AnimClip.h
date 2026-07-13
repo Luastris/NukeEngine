@@ -34,7 +34,7 @@ public:
 	// the playhead crosses one (loop-aware). Kept sorted by t (AddEvent inserts in order).
 	struct Event { float t; std::string name; };
 	std::vector<Event> events;
-	void AddEvent(float t, const std::string& name);
+	[[nuke::func]] void AddEvent(float t, const std::string& name);
 
 	// Native asset format (.nuanim): binary, same header style as .numesh.
 	bool             SaveToFile(const std::string& path) const;

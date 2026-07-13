@@ -92,9 +92,14 @@ struct WindowDesc
     bool  resizable   = true;
     bool  floating    = false;  // always-on-top
     bool  maximized   = false;
+    // Window display mode (nuke::WindowMode as int; `fullscreen` is a legacy mirror of
+    // mode != 0). 0 = windowed, 1 = borderless fullscreen (undecorated window covering the
+    // monitor at the DESKTOP resolution, no mode switch — instant alt-tab), 2 = exclusive
+    // fullscreen (the monitor switches to the window's resolution).
+    int   mode        = 0;
     bool  fullscreen  = false;
-    bool  transparent = false;  // per-pixel alpha to desktop (needs renderer DComp support)
-    float opacity     = 1.0f;   // whole-window opacity 0..1 (cheap, always works)
+    bool  transparent = false;  // per-pixel alpha to the desktop (DirectComposition swap chain)
+    float opacity     = 1.0f;   // whole-window opacity 0..1 (cheap, always works — live-settable)
     int   backend     = 0;      // 0 = D3D11, 1 = D3D12 (chosen at launch; D3D12 enables ray tracing)
 };
 
@@ -363,6 +368,13 @@ public:
     // cache entry keyed by a freed pointer serves WRONG buffers when the allocator reuses
     // the address (render safety).
     virtual void invalidateMesh(Mesh* m) {}
+
+    // Runtime WINDOW control (Game.Set* window API — a game's video-settings menu). Applies
+    // what the platform can change live: size, display mode (windowed / borderless-fullscreen
+    // / exclusive-fullscreen), decoration (borderless), whole-window opacity. `transparent`
+    // is a per-pixel creation-time property — it can't toggle live, so it takes effect on the
+    // next launch (via the persisted config). No-op on backends without a window.
+    virtual void applyWindow(const WindowDesc& desc) {}
 
     // ABI: new virtuals are appended at the END of the class, NEVER inserted mid-vtable —
     // plugins are separate DLLs built at different times, and an inserted slot shifts every

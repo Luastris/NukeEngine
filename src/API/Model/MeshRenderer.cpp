@@ -1,5 +1,6 @@
 #include "API/Model/MeshRenderer.h"
 #include "API/Model/resdb.h"
+#include "reflect/ReflectBind.h"   // Reflect_DropObject: kill script handles to the owned material
 #include <render/irender.h>
 
 namespace nuke {
@@ -20,7 +21,7 @@ void MeshRenderer::Init(Atom* parent) {
 }
 
 void MeshRenderer::Destroy() {
-	if (mat) { delete mat; mat = nullptr; }   // the instance is owned
+	if (mat) { Reflect_DropObject(mat); delete mat; mat = nullptr; }   // owned instance; script handles die with it
 }
 
 // MeshRenderer is now pure data (mesh + material + enabled). Drawing is done by

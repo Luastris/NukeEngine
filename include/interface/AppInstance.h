@@ -67,9 +67,16 @@ public:
 	// (resolved via ResolveContent), so worlds always live IN the project content, not "wherever".
 	// Shared by the editor (New/Open/Save) and the game (loads the project's default world).
 	std::string currentWorldPath;                     // content-relative path of the open world ("" = unsaved)
+	// GAME-INITIATED world switches (Game.LoadWorld from a script) arrive MID-TICK — while
+	// World::Update/FixedUpdate iterate the very hierarchy a load would replace. The tick
+	// sets worldTickActive (under the game lock); OpenWorld then only QUEUES the path and
+	// World::Update applies it at the frame boundary, after its traversal.
+	bool        worldTickActive = false;
+	std::string pendingWorldLoad;
 	std::string WorldFullPath(const std::string& relPath) const;   // canonical content path for a world
 	bool        ReadContent(const std::string& relPath, std::string& out) const; // bytes via all layers (pak = memory)
 	bool        OpenWorld(const std::string& relPath); // load a world from content into currentScene
+	void        NameWorldFromPath(const std::string& relPath); // name an unnamed world from its file stem
 	bool        SaveWorld(const std::string& relPath); // save currentScene to content (creates dirs)
 	void        NewWorld();                            // replace currentScene with a fresh empty world
 

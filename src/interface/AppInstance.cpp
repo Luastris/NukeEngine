@@ -58,6 +58,14 @@ bool AppInstance::ReadContent(const std::string& relPath, std::string& out) cons
 bool AppInstance::OpenWorld(const std::string& relPath)
 {
 	if (relPath.empty() || !currentScene) return false;
+	// Mid-tick call (a script's Game.LoadWorld inside Update/FixedUpdate): loading NOW
+	// would replace the hierarchy the tick is iterating. Queue it — World::Update applies
+	// it at the frame boundary. `true` = accepted (a missing world logs on apply).
+	if (worldTickActive)
+	{
+		pendingWorldLoad = relPath;
+		return true;
+	}
 	boost::system::error_code ec;
 	std::string full = WorldFullPath(relPath);
 	if (!boost::filesystem::exists(boost::filesystem::path(full), ec))
@@ -115,6 +123,7 @@ bool AppInstance::OpenWorld(const std::string& relPath)
 			currentScene->LoadFromString(layers.size() > 1 ? World::MergeWorldLayers(layers, deps, basis, names)
 			                                               : layers[0]);
 			currentWorldPath = relPath;
+			NameWorldFromPath(relPath);
 			return true;
 		}
 		return false;
@@ -122,7 +131,17 @@ bool AppInstance::OpenWorld(const std::string& relPath)
 	selectedInHieararchy = nullptr;
 	currentScene->LoadFromFile(full);
 	currentWorldPath = relPath;
+	NameWorldFromPath(relPath);
 	return true;
+}
+
+// A world with no authored name (older files / never named) reads its name from the file
+// stem, so Game.GetWorld().Name is meaningful ("MusicVisTest") instead of the constructor
+// default. An explicitly named world (LoadFromString set it) is left untouched.
+void AppInstance::NameWorldFromPath(const std::string& relPath)
+{
+	if (currentScene && currentScene->name.empty())
+		currentScene->name = boost::filesystem::path(relPath).stem().string();
 }
 
 bool AppInstance::SaveWorld(const std::string& relPath)
