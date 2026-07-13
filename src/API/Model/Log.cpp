@@ -1,4 +1,5 @@
 #include "API/Model/Log.h"
+#include <atomic>
 #include <boost/thread/mutex.hpp>
 #include <cctype>
 #include <cstring>
@@ -7,6 +8,11 @@
 #include <streambuf>
 
 namespace nuke {
+
+// Echo logs to the real console/IDE output? Off = the slow conhost write is skipped (the
+// ring/Console panel still receives lines when the tee is active). Read on the hot path.
+static std::atomic<bool> g_consoleEcho{true};
+static bool              g_captured = false;   // CaptureStd installed the tee (editor)
 
 // ---- the ring ---------------------------------------------------------------------------------
 
@@ -182,17 +188,25 @@ protected:
 	int overflow(int c) override
 	{
 		if (c == EOF) return orig_ ? orig_->pubsync() : 0;
-		if (orig_) orig_->sputc((char)c);
+		if (orig_ && g_consoleEcho.load(std::memory_order_relaxed)) orig_->sputc((char)c);
 		if (c == '\n') { IngestLine(line_, err_); line_.clear(); }
 		else if (line_.size() < 4096) line_ += (char)c;
 		return c;
 	}
 	std::streamsize xsputn(const char* p, std::streamsize n) override
 	{
-		for (std::streamsize i = 0; i < n; ++i) overflow((unsigned char)p[i]);
+		// BATCH the console write (one syscall, not per-char) and gate it on the echo flag —
+		// the char-by-char loop was itself a cost. Scan separately to feed the ring by line.
+		if (orig_ && g_consoleEcho.load(std::memory_order_relaxed)) orig_->sputn(p, n);
+		for (std::streamsize i = 0; i < n; ++i)
+		{
+			const char ch = p[i];
+			if (ch == '\n') { IngestLine(line_, err_); line_.clear(); }
+			else if (line_.size() < 4096) line_ += ch;
+		}
 		return n;
 	}
-	int sync() override { return orig_ ? orig_->pubsync() : 0; }
+	int sync() override { return (orig_ && g_consoleEcho.load(std::memory_order_relaxed)) ? orig_->pubsync() : 0; }
 private:
 	std::streambuf* orig_;
 	bool            err_;
@@ -204,11 +218,45 @@ void Log::CaptureStd()
 	static bool done = false;
 	if (done) return;
 	done = true;
+	g_captured = true;
 	static TeeBuf coutTee(std::cout.rdbuf(), false);
 	static TeeBuf cerrTee(std::cerr.rdbuf(), true);
 	std::cout.rdbuf(&coutTee);
 	std::cerr.rdbuf(&cerrTee);
 	std::cout << "[Log]\t\tconsole capture active (cout+cerr -> Console panel)" << std::endl;
+}
+
+// A discard streambuf for hosts WITHOUT capture (the Player): when the OS console echo is
+// off there's no ring to feed, so cout/cerr just drop their bytes cheaply.
+namespace {
+struct NullBuf : std::streambuf
+{
+	int overflow(int c) override { return c; }                                   // pretend written
+	std::streamsize xsputn(const char*, std::streamsize n) override { return n; }
+};
+NullBuf         g_null;
+std::streambuf* g_savedCout = nullptr;   // originals, to restore when echo turns back on
+std::streambuf* g_savedCerr = nullptr;
+}  // namespace
+
+void Log::SetConsoleEcho(bool on)
+{
+	g_consoleEcho.store(on, std::memory_order_relaxed);
+	if (g_captured)
+		return;   // the tee gates the OS write on g_consoleEcho; the ring keeps receiving.
+	// No tee (Player): redirect cout/cerr to a null sink when off (drop output), restore when on.
+	if (!on)
+	{
+		if (!g_savedCout) { g_savedCout = std::cout.rdbuf(); g_savedCerr = std::cerr.rdbuf(); }
+		std::cout.rdbuf(&g_null);
+		std::cerr.rdbuf(&g_null);
+	}
+	else if (g_savedCout)
+	{
+		std::cout.rdbuf(g_savedCout);
+		std::cerr.rdbuf(g_savedCerr);
+		g_savedCout = g_savedCerr = nullptr;
+	}
 }
 
 }  // namespace nuke

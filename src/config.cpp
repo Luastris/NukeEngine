@@ -4,6 +4,9 @@
 #include <boost/filesystem.hpp>
 #include <boost/filesystem/fstream.hpp>
 #include <iostream>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 namespace nuke {
 
@@ -148,6 +151,7 @@ void Config::reload(Config* instance)
         win.transparent = w.value("transparent", win.transparent);
         win.opacity     = w.value("opacity",     win.opacity);
         win.backend     = w.value("backend",     win.backend);
+        win.showConsole = w.value("showConsole", win.showConsole);
         cout << PREFIX_CONF << "Window size = [" << win.w << "x" << win.h << "]  backend=" << (win.backend == 1 ? "D3D12" : "D3D11") << endl;
         cout << PREFIX_CONF << "FONT IS " << win.mainFont << endl;
     }
@@ -155,7 +159,8 @@ void Config::reload(Config* instance)
     if (root.contains("theme") && root["theme"].is_object())
         loadTheme(&instance->theme, root["theme"]);
 
-    instance->physicsCore = root.value("physicsCore", instance->physicsCore);
+    instance->physicsCore  = root.value("physicsCore",  instance->physicsCore);
+    instance->logToConsole = root.value("logToConsole", instance->logToConsole);
 
     if (root.contains("jobs") && root["jobs"].is_object())
     {
@@ -200,11 +205,32 @@ void Config::saveWindow()
     w["transparent"] = window.transparent;
     w["opacity"]     = window.opacity;
     w["backend"]     = window.backend;
+    w["showConsole"] = window.showConsole;
 
     bfs::ofstream out(cfg, std::ios::trunc);
     if (!out) { cout << PREFIX_CONF << "saveWindow: cannot write config/main.json" << endl; return; }
     out << root.dump(2);
     cout << PREFIX_CONF << "window config saved (mode=" << window.mode << ", " << window.w << "x" << window.h << ")" << endl;
+}
+
+void Config::SetConsoleWindowVisible(bool visible)
+{
+#ifdef _WIN32
+    HWND con = GetConsoleWindow();
+    if (!con) return;   // no console attached (e.g. windows-subsystem build)
+    // NEVER hide a console we SHARE with a launching terminal — that would hide the user's
+    // cmd/powershell. GetConsoleProcessList > 1 means another process is attached too.
+    DWORD pids[4];
+    DWORD n = GetConsoleProcessList(pids, 4);
+    if (!visible && n > 1)
+    {
+        cout << PREFIX_CONF << "showConsole=false ignored (console shared with a terminal)" << endl;
+        return;
+    }
+    ShowWindow(con, visible ? SW_SHOW : SW_HIDE);
+#else
+    (void)visible;
+#endif
 }
 
 Config::Config()

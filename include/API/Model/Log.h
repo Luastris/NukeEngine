@@ -49,6 +49,13 @@ public:
 	// are captured too).
 	static void CaptureStd();
 
+	// Enable/disable echoing logs to the OS console (conhost) — that write is SLOW and can
+	// cost frame time under heavy logging. When OFF: if CaptureStd is active (editor) the OS
+	// echo is gated but the ring (Console panel) keeps receiving everything; otherwise (Player)
+	// std::cout/std::cerr are redirected to a null sink so the output is dropped cheaply.
+	// Idempotent; a host calls it once after config load with config.logToConsole.
+	static void SetConsoleEcho(bool on);
+
 	static uint64_t Version();                   // bumps on every append (cheap change check)
 	static std::vector<LogEntry> Snapshot();     // copy of the ring, oldest first
 	static void Clear();

@@ -33,6 +33,10 @@ struct NukeWindow{
     bool  transparent = false;   // per-pixel alpha (creation-time; applied on next launch)
     float opacity     = 1.0f;    // whole-window opacity 0..1
     int   backend     = 0;       // render backend: 0 = D3D11, 1 = D3D12 (D3D12 enables ray tracing; restart to apply)
+    // Show the process's own OS console window (the black log window). false hides it at
+    // startup — for a shipped game. Distinct from the `console` panel flag below (that's the
+    // editor's in-app Console). A console shared with a launching terminal is never hidden.
+    bool  showConsole = true;
     bool hierarchy = true,
             console = true,
             browser = true,
@@ -139,7 +143,16 @@ public:
     // the physics core) and per-core pinning. config/main.json "jobs": {"workers","pinCores"}.
     int  jobWorkers  = -1;
     bool jobPinCores = true;
+    // Echo logs to the OS console (conhost). Writing to the Windows console is SLOW (per-line
+    // cross-process I/O) and can cost real frame time under heavy logging. false stops the OS
+    // echo — in the editor the in-app Console panel still shows everything (cout is tee'd into
+    // the log ring); in the Player it discards the output entirely. config/main.json "logToConsole".
+    bool logToConsole = true;
 	void reload(Config* instance);
+	// Show/hide the process's OWN OS console window (driven by window.showConsole). NO-OP if
+	// the console is SHARED with a launching terminal (>1 attached process) so it never hides
+	// the user's shell; no-op off Windows. Called once by each host after config load.
+	static void SetConsoleWindowVisible(bool visible);
 	// Persist config/main.json, updating ONLY the "window" object from `window` and leaving
 	// every other section (theme, raytracing, jobs, physicsCore) exactly as on disk. Used by
 	// the runtime window API (Game.Set*) so a game's chosen video settings survive relaunch.
