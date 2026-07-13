@@ -106,7 +106,7 @@
       <LanguageStandard>stdcpp20</LanguageStandard>
     </ClCompile>
     <PreBuildEvent>
-      <Command>where python &gt;nul 2&gt;nul &amp;&amp; python "$(ProjectDir)..\tools\nukegen.py"</Command>
+      <Command>where python &gt;nul 2&gt;nul &amp;&amp; python "$(ProjectDir)..\NukeUtils\nukegen.py"</Command>
       <Message>NukeEngine reflection codegen (nukegen.py)</Message>
     </PreBuildEvent>
     <Link>
@@ -169,7 +169,7 @@
       <LanguageStandard>stdcpp20</LanguageStandard>
     </ClCompile>
     <PreBuildEvent>
-      <Command>where python &gt;nul 2&gt;nul &amp;&amp; python "$(ProjectDir)..\tools\nukegen.py"</Command>
+      <Command>where python &gt;nul 2&gt;nul &amp;&amp; python "$(ProjectDir)..\NukeUtils\nukegen.py"</Command>
       <Message>NukeEngine reflection codegen (nukegen.py)</Message>
     </PreBuildEvent>
     <Link>

@@ -29,7 +29,7 @@ this repo's `NukeEngine.sln` plus every present module in dependency order.
 
 Standalone: `NukeEngine.sln` builds the engine + the editor (VS2022, v143, x64, C++20).
 The engine is vcpkg MANIFEST mode (`vcpkg.json` → `vcpkg_installed/`); `VCPKG_ROOT` must
-be set. Reflection codegen (`tools/nukegen.py` in the eco root) needs Python on PATH.
+be set. Reflection codegen (`NukeUtils/nukegen.py` in the eco root) needs Python on PATH.
 Run dir = `x64/<Config>` — the editor, player, `modules/` and `shaders/` all land there.
 
 **ABI rule:** new virtuals go at the END of seam vtables (`iRender`, `iAudio`,
