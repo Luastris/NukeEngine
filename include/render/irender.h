@@ -376,6 +376,13 @@ public:
     // next launch (via the persisted config). No-op on backends without a window.
     virtual void applyWindow(const WindowDesc& desc) {}
 
+    // Vertical sync for the MAIN window's Present: true = cap to the display refresh rate (no
+    // tearing), false = present immediately (uncapped FPS — for benchmarking or low-latency).
+    // Live-settable, honoured from config/main.json "vsync" and Game.SetVSync. Default on.
+    // Secondary UI-viewport windows always present unsynced (the main window paces the frame).
+    virtual void setVSync(bool on) {}
+    virtual bool getVSync() { return true; }
+
     // ABI: new virtuals are appended at the END of the class, NEVER inserted mid-vtable —
     // plugins are separate DLLs built at different times, and an inserted slot shifts every
     // later one (an old NukeGUI.dll calling getScrollDelta through a shifted slot landed in

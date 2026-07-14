@@ -259,12 +259,14 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("SetBorderless", &Game::SetBorderless));
 		t.methods.push_back(MakeMethod("SetTransparent", &Game::SetTransparent));
 		t.methods.push_back(MakeMethod("SetOpacity", &Game::SetOpacity));
+		t.methods.push_back(MakeMethod("SetVSync", &Game::SetVSync));
 		t.methods.push_back(MakeMethod("WindowWidth", &Game::WindowWidth));
 		t.methods.push_back(MakeMethod("WindowHeight", &Game::WindowHeight));
 		t.methods.push_back(MakeMethod("GetWindowMode", &Game::GetWindowMode));
 		t.methods.push_back(MakeMethod("IsBorderless", &Game::IsBorderless));
 		t.methods.push_back(MakeMethod("IsTransparent", &Game::IsTransparent));
 		t.methods.push_back(MakeMethod("Opacity", &Game::Opacity));
+		t.methods.push_back(MakeMethod("IsVSync", &Game::IsVSync));
 	}
 	{
 		TypeInfo& t = TypeOf<Light>();

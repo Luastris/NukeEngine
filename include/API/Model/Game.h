@@ -61,6 +61,9 @@ public:
 	// takes effect on the NEXT launch (the renderer then composes the window transparent).
 	[[nuke::func]] static void SetTransparent(bool transparent);
 	[[nuke::func]] static void SetOpacity(double opacity);        // whole-window 0..1 (live)
+	// Vertical sync: true = cap FPS to the display refresh (no tearing), false = uncapped.
+	// Applies LIVE in both hosts (it's just present pacing) and persists for the next launch.
+	[[nuke::func]] static void SetVSync(bool on);
 
 	[[nuke::func]] static int        WindowWidth();
 	[[nuke::func]] static int        WindowHeight();
@@ -68,6 +71,7 @@ public:
 	[[nuke::func]] static bool       IsBorderless();
 	[[nuke::func]] static bool       IsTransparent();
 	[[nuke::func]] static double     Opacity();
+	[[nuke::func]] static bool       IsVSync();
 };
 
 }  // namespace nuke

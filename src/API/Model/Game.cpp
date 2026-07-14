@@ -97,11 +97,23 @@ void Game::SetOpacity(double opacity)
 	ApplyAndSaveWindow();
 }
 
+void Game::SetVSync(bool on)
+{
+	Config* c = Config::getSingleton();
+	c->window.vsync = on;
+	c->saveWindow();   // persist for next launch (both hosts)
+	// Unlike the geometry setters, vsync applies LIVE even in the editor — it's only the
+	// present pacing of whatever window the renderer drives, not the game's window layout.
+	AppInstance* app = AppInstance::GetSingleton();
+	if (app->render) app->render->setVSync(on);
+}
+
 int        Game::WindowWidth()   { return Config::getSingleton()->window.w; }
 int        Game::WindowHeight()  { return Config::getSingleton()->window.h; }
 WindowMode Game::GetWindowMode() { return (WindowMode)Config::getSingleton()->window.mode; }
 bool       Game::IsBorderless()  { return !Config::getSingleton()->window.decorated; }
 bool   Game::IsTransparent() { return Config::getSingleton()->window.transparent; }
 double Game::Opacity()       { return Config::getSingleton()->window.opacity; }
+bool   Game::IsVSync()       { return Config::getSingleton()->window.vsync; }
 
 }  // namespace nuke
