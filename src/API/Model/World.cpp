@@ -14,6 +14,7 @@
 #include "API/Model/ReflectionProbe.h" // scene-captured reflection cubemap
 #include "API/Model/Time.h"       // animated-texture (GIF) frame advance + fixed-step accumulator
 #include "API/Model/Sprite.h"     // 2D sprite quads (drawn after opaque, back-to-front)
+#include "API/Model/Canvas.h"     // 2D layout container (WorldSpace rect + editor gizmo)
 #include "API/Model/Collider.h"   // physics: shape components -> iPhysics bodies
 #include "API/Model/Jobs.h"       // PumpMain each game-thread frame (2.4)
 #include "API/Model/Rigidbody.h"  // physics: dynamic/kinematic body settings
@@ -790,21 +791,56 @@ static void DrawCollected(std::vector<DrawItem>& items, const Vector3& camPos, i
 	}
 }
 
-// --- Sprites (Sprite component): unlit textured quads, drawn after the opaque/transparent meshes,
-// sorted back-to-front. Plane mode uses the atom's right/up; Billboard faces the camera. -----------
-static void CollectSprites(bc::list<Atom*>& gos, std::vector<Sprite*>& out)
+// --- Sprites (Sprite component): unlit textured quads. WORLD sprites (standalone or under a
+// WorldSpace canvas) draw after the meshes, back-to-front. SCREEN sprites (under a ScreenSpace
+// canvas) draw in the canvas's reference-pixel space via drawSpriteScreen. -------------------------
+struct ScreenSpr { Sprite* sp; Canvas* cv; };
+static void GatherSprites(bc::list<Atom*>& gos, Canvas* ctx, std::vector<Sprite*>& world, std::vector<ScreenSpr>& screen)
 {
 	for (Atom* go : gos)
 	{
 		if (!go) continue;
-		if (Sprite* sp = go->GetComponent<Sprite>()) if (sp->enabled) out.push_back(sp);
-		CollectSprites(go->children, out);
+		Canvas* here = go->GetComponent<Canvas>();
+		Canvas* cur  = here ? here : ctx;   // a canvas re-parents the coordinate space for its subtree
+		if (Sprite* sp = go->GetComponent<Sprite>())
+			if (sp->enabled)
+			{
+				if (cur && cur->mode != CanvasMode::WorldSpace) screen.push_back({ sp, cur });
+				else                                            world.push_back(sp);
+			}
+		GatherSprites(go->children, cur, world, screen);
 	}
 }
 static void DrawSprites(bc::list<Atom*>& hierarchy, const NukeCameraDesc& d, const Vector3& camPos, iRender* r)
 {
 	std::vector<Sprite*> sprites;
-	CollectSprites(hierarchy, sprites);
+	std::vector<ScreenSpr> screen;
+	GatherSprites(hierarchy, nullptr, sprites, screen);
+
+	// --- SCREEN-space canvas sprites: rect in canvas reference pixels (centre-origin; child offset =
+	// its position relative to the canvas), queue = the canvas's Render Queue (before/after post). ---
+	if (!screen.empty())
+	{
+		std::stable_sort(screen.begin(), screen.end(), [](const ScreenSpr& a, const ScreenSpr& b) { return a.cv->sortOrder < b.cv->sortOrder; });
+		for (ScreenSpr& s : screen)
+		{
+			Sprite* sp = s.sp; Canvas* cv = s.cv;
+			if (!sp->transform || sp->textureGuid.empty()) continue;
+			if (!sp->tex || sp->tex->guid != sp->textureGuid) sp->tex = ResDB::getSingleton()->GetTexture(sp->textureGuid);
+			if (!sp->tex) continue;
+			Vector3 spos = sp->transform->globalPosition();
+			Vector3 cpos = cv->transform ? cv->transform->globalPosition() : Vector3();
+			Vector3 sc   = sp->transform->globalScale();
+			float rect[4]    = { (float)(spos.x - cpos.x), (float)(spos.y - cpos.y), sp->width * (float)sc.x, sp->height * (float)sc.y };
+			float refSize[2] = { cv->width, cv->height };
+			float u0 = sp->u0, v0 = sp->v0, u1 = sp->u1, v1 = sp->v1;
+			if (sp->flipX) std::swap(u0, u1);
+			if (sp->flipY) std::swap(v0, v1);
+			float uvr[4] = { u0, v0, u1, v1 };
+			float tn[4]  = { sp->tint.r, sp->tint.g, sp->tint.b, sp->tint.a };
+			r->drawSpriteScreen(sp->tex, rect, refSize, uvr, tn, cv->renderQueue == CanvasQueue::AfterPost ? 1 : 0);
+		}
+	}
 	if (sprites.empty()) return;
 
 	// Camera basis for billboards (re-orthogonalized, same convention as the renderer's look-at).
@@ -847,6 +883,33 @@ static void DrawSprites(bc::list<Atom*>& hierarchy, const NukeCameraDesc& d, con
 		float uvr[4] = { u0, v0, u1, v1 };
 		float tn[4]  = { sp->tint.r, sp->tint.g, sp->tint.b, sp->tint.a };
 		r->drawSprite(sp->tex, c, rv, upv, uvr, tn);
+	}
+}
+
+// Editor-only: draw a WorldSpace canvas's rectangle as debug lines so its bounds are visible.
+static void DrawCanvasGizmos(bc::list<Atom*>& gos, iRender* r)
+{
+	for (Atom* go : gos)
+	{
+		if (!go) continue;
+		if (Canvas* cv = go->GetComponent<Canvas>())
+			if (cv->mode == CanvasMode::WorldSpace && cv->transform)
+			{
+				Transform* t = cv->transform;
+				Vector3 p = t->globalPosition(), R = t->right(), U = t->up();
+				float hw = cv->width * 0.5f, hh = cv->height * 0.5f;
+				auto corner = [&](float sx, float sy, float* o) {
+					o[0] = (float)(p.x + sx * hw * R.x + sy * hh * U.x);
+					o[1] = (float)(p.y + sx * hw * R.y + sy * hh * U.y);
+					o[2] = (float)(p.z + sx * hw * R.z + sy * hh * U.z);
+				};
+				float c00[3], c10[3], c11[3], c01[3];
+				corner(-1, -1, c00); corner(1, -1, c10); corner(1, 1, c11); corner(-1, 1, c01);
+				const float col[4] = { 0.30f, 0.70f, 1.0f, 1.0f };
+				r->drawDebugLine(c00, c10, col); r->drawDebugLine(c10, c11, col);
+				r->drawDebugLine(c11, c01, col); r->drawDebugLine(c01, c00, col);
+			}
+		DrawCanvasGizmos(go->children, r);
 	}
 }
 
@@ -1316,6 +1379,7 @@ void World::Render(iRender* r)
 			CollectMeshes(*hierarchy, items);
 			DrawCollected(items, cp, r, settings.frustumCull);
 			DrawSprites(*hierarchy, d, cp, r);   // 2D sprites: after opaque, back-to-front, depth-tested
+			if (editor) DrawCanvasGizmos(*hierarchy, r);   // WorldSpace canvas bounds (editor gizmo)
 		}
 		// Selection highlight (editor only): outline the selected object after the scene.
 		if (editor)

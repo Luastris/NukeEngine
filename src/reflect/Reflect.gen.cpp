@@ -8,6 +8,7 @@
 #include "API/Model/AudioListener.h"
 #include "API/Model/AudioSource.h"
 #include "API/Model/Camera.h"
+#include "API/Model/Canvas.h"
 #include "API/Model/Clock.h"
 #include "API/Model/Collider.h"
 #include "API/Model/DebugDraw.h"
@@ -193,6 +194,16 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("SetOrthoSize", &Camera::SetOrthoSize));
 		t.methods.push_back(MakeMethod("GetOrthoSize", &Camera::GetOrthoSize));
 		t.create = []() -> void* { return new Camera(); };
+	}
+	{
+		TypeInfo& t = TypeOf<Canvas>();
+		t.base = "Component";
+		t.fields.push_back(MakeField("mode", &Canvas::mode, "", "Mode", 0.0f, 0.0f, "WorldSpace,ScreenSpaceOverlay,ScreenSpaceCamera"));
+		t.fields.push_back(MakeField("renderQueue", &Canvas::renderQueue, "", "Render Queue", 0.0f, 0.0f, "WithWorld,AfterPost"));
+		t.fields.push_back(MakeField("width", &Canvas::width, "", "Width"));
+		t.fields.push_back(MakeField("height", &Canvas::height, "", "Height"));
+		t.fields.push_back(MakeField("sortOrder", &Canvas::sortOrder, "", "Sort Order"));
+		t.create = []() -> void* { return new Canvas(); };
 	}
 	{
 		TypeInfo& t = TypeOf<Clock>();

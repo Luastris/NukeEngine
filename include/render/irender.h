@@ -397,6 +397,14 @@ public:
     virtual void drawSprite(Texture* tex, const float center[3], const float right[3], const float up[3],
                             const float uv[4], const float tint[4]) {}
 
+    // Draw a SCREEN-space sprite (a HUD/Canvas quad). `rect` = {centreX, centreY, width, height} in the
+    // canvas's REFERENCE pixels (origin = screen centre, +y up); `refSize` = {refW, refH} — the renderer
+    // fits that reference rectangle to the actual target (uniform scale) and maps to the screen. `afterPost`
+    // 0 = drawn with the scene BEFORE post (post can distort it); 1 = drawn crisp on the final image after
+    // post. Batched like drawSprite. Call between beginCamera/endCamera.
+    virtual void drawSpriteScreen(Texture* tex, const float rect[4], const float refSize[2],
+                                  const float uv[4], const float tint[4], int afterPost) {}
+
     // ABI: new virtuals are appended at the END of the class, NEVER inserted mid-vtable —
     // plugins are separate DLLs built at different times, and an inserted slot shifts every
     // later one (an old NukeGUI.dll calling getScrollDelta through a shifted slot landed in

@@ -202,6 +202,7 @@
     <ClInclude Include="include\API\Model\ReflectionProbe.h" />
     <ClInclude Include="include\API\Model\Sprite.h" />
     <ClInclude Include="include\API\Model\SpriteAnimator.h" />
+    <ClInclude Include="include\API\Model\Canvas.h" />
     <ClInclude Include="include\API\Model\Material.h" />
     <ClInclude Include="include\API\Model\Math.h" />
     <ClInclude Include="include\API\Model\AnimClip.h" />
@@ -282,6 +283,7 @@
     <ClCompile Include="src\API\Model\ReflectionProbe.cpp" />
     <ClCompile Include="src\API\Model\Sprite.cpp" />
     <ClCompile Include="src\API\Model\SpriteAnimator.cpp" />
+    <ClCompile Include="src\API\Model\Canvas.cpp" />
     <ClCompile Include="src\API\Model\Material.cpp" />
     <ClCompile Include="src\API\Model\Math.cpp" />
     <ClCompile Include="src\API\Model\AnimClip.cpp" />
