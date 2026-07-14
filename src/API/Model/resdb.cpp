@@ -171,7 +171,7 @@ void ResDB::HotReloadShaders(iRender* r)
 static bool RendererInternalShader(const std::string& name)
 {
 	return name == "ui" || name == "shadow" || name == "sky" || name == "post" || name == "debug"
-	    || name == "sprite"
+	    || name == "sprite" || name == "decal"
 	    || name.rfind("outline", 0) == 0;
 }
 

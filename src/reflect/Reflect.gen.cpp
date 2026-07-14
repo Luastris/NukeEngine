@@ -12,6 +12,7 @@
 #include "API/Model/Clock.h"
 #include "API/Model/Collider.h"
 #include "API/Model/DebugDraw.h"
+#include "API/Model/Decal.h"
 #include "API/Model/Environment.h"
 #include "API/Model/Game.h"
 #include "API/Model/Light.h"
@@ -239,6 +240,16 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("WireCapsule", &DebugDraw::WireCapsule));
 		t.methods.push_back(MakeMethod("WireCone", &DebugDraw::WireCone));
 		t.methods.push_back(MakeMethod("WireCircle", &DebugDraw::WireCircle));
+	}
+	{
+		TypeInfo& t = TypeOf<Decal>();
+		t.base = "Component";
+		t.fields.push_back(MakeField("textureGuid", &Decal::textureGuid, "texture", "Texture"));
+		t.fields.push_back(MakeField("mode", &Decal::mode, "", "Mode", 0.0f, 0.0f, "Albedo,Light Projector"));
+		t.fields.push_back(MakeField("tint", &Decal::tint, "", "Tint"));
+		t.fields.push_back(MakeField("intensity", &Decal::intensity, "", "Intensity", 0.0f, 8.0f));
+		t.fields.push_back(MakeField("angleFade", &Decal::angleFade, "", "Angle Fade", 0.0f, 1.0f));
+		t.create = []() -> void* { return new Decal(); };
 	}
 	{
 		TypeInfo& t = TypeOf<Environment>();

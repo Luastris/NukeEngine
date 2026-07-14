@@ -405,6 +405,14 @@ public:
     virtual void drawSpriteScreen(Texture* tex, const float rect[4], const float refSize[2],
                                   const float uv[4], const float tint[4], int afterPost) {}
 
+    // Composite a screen-space decal onto the scene colour AFTER the opaque pass. The decal is a BOX
+    // (world pos + rotation quat + scale = box size); the renderer reconstructs each covered surface
+    // from the depth prepass, projects `tex` along the box's local +Z, and alpha-blends (mode 0 =
+    // Albedo) or adds (mode 1 = Light Projector). Requires the depth prepass to have run this camera
+    // (the engine forces it when a decal is present). No-op if the backend has no decal pipeline.
+    virtual void drawDecal(Texture* tex, const float pos[3], const float quat[4], const float scale[3],
+                           const float tint[4], float intensity, float angleFade, int mode) {}
+
     // ABI: new virtuals are appended at the END of the class, NEVER inserted mid-vtable —
     // plugins are separate DLLs built at different times, and an inserted slot shifts every
     // later one (an old NukeGUI.dll calling getScrollDelta through a shifted slot landed in

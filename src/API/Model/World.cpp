@@ -15,6 +15,7 @@
 #include "API/Model/Time.h"       // animated-texture (GIF) frame advance + fixed-step accumulator
 #include "API/Model/Sprite.h"     // 2D sprite quads (drawn after opaque, back-to-front)
 #include "API/Model/Canvas.h"     // 2D layout container (WorldSpace rect + editor gizmo)
+#include "API/Model/Decal.h"      // screen-space decals (composited from the depth prepass)
 #include "API/Model/Collider.h"   // physics: shape components -> iPhysics bodies
 #include "API/Model/Jobs.h"       // PumpMain each game-thread frame (2.4)
 #include "API/Model/Rigidbody.h"  // physics: dynamic/kinematic body settings
@@ -913,6 +914,33 @@ static void DrawCanvasGizmos(bc::list<Atom*>& gos, iRender* r)
 	}
 }
 
+// --- Decals (Decal component): screen-space, composited onto the opaque colour from the depth prepass. ---
+static void CollectDecals(bc::list<Atom*>& gos, std::vector<Decal*>& out)
+{
+	for (Atom* go : gos)
+	{
+		if (!go) continue;
+		if (Decal* d = go->GetComponent<Decal>()) if (d->enabled) out.push_back(d);
+		CollectDecals(go->children, out);
+	}
+}
+static void DrawDecals(std::vector<Decal*>& decals, iRender* r)
+{
+	for (Decal* dc : decals)
+	{
+		if (!dc->transform || dc->textureGuid.empty()) continue;
+		if (!dc->tex || dc->tex->guid != dc->textureGuid) dc->tex = ResDB::getSingleton()->GetTexture(dc->textureGuid);
+		if (!dc->tex) continue;
+		Transform* t = dc->transform;
+		Vector3 p = t->globalPosition(); Quaternion q = t->globalRotation(); Vector3 s = t->globalScale();
+		float pos[3]   = { (float)p.x, (float)p.y, (float)p.z };
+		float quat[4]  = { (float)q.x, (float)q.y, (float)q.z, (float)q.w };
+		float scale[3] = { (float)s.x, (float)s.y, (float)s.z };
+		float tn[4]    = { dc->tint.r, dc->tint.g, dc->tint.b, dc->tint.a };
+		r->drawDecal(dc->tex, pos, quat, scale, tn, dc->intensity, dc->angleFade, (int)dc->mode);
+	}
+}
+
 // Depth-only traversal for the shadow pass: every enabled mesh whose material casts shadows
 // (null material = casts by default). Transparency is handled in the renderer (alpha-dither).
 static void RenderShadowMeshes(bc::list<Atom*>& gos, iRender* r)
@@ -1364,8 +1392,10 @@ void World::Render(iRender* r)
 
 		r->setCameraTAA(hasTAA);   // enable jitter + history for this camera (advances the jitter when on)
 
-		// SSR / RT reflections / TAA need scene depth (+ normals for SSR) — a single-sample prepass before colour.
-		if (hasSSR || hasTAA)
+		// Decals reconstruct surfaces from the depth prepass, so their presence also forces it.
+		std::vector<Decal*> decals; CollectDecals(*hierarchy, decals);
+		// SSR / RT reflections / TAA / decals need scene depth (+ normals for SSR) — a single-sample prepass before colour.
+		if (hasSSR || hasTAA || !decals.empty())
 		{
 			r->beginGBufferPass(d);
 			std::vector<DrawItem> gitems; CollectMeshes(*hierarchy, gitems);
@@ -1378,6 +1408,7 @@ void World::Render(iRender* r)
 			std::vector<DrawItem> items;
 			CollectMeshes(*hierarchy, items);
 			DrawCollected(items, cp, r, settings.frustumCull);
+			DrawDecals(decals, r);               // screen-space decals: composite onto the scene from the depth prepass
 			DrawSprites(*hierarchy, d, cp, r);   // 2D sprites: after opaque, back-to-front, depth-tested
 			if (editor) DrawCanvasGizmos(*hierarchy, r);   // WorldSpace canvas bounds (editor gizmo)
 		}
