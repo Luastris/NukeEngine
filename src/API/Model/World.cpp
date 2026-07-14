@@ -1140,6 +1140,22 @@ void World::Render(iRender* r)
 		d.fov   = (float)cam->fov * 0.01745329252f; // degrees -> radians
 		d.nearZ = cam->_near;
 		d.farZ  = cam->_far;
+		// Projection: ease the runtime blend toward the target (Perspective 0 / Orthographic 1)
+		// so SetProjection / the editor toggle animate smoothly; hand the blend + size to the renderer.
+		{
+			float tgt = (cam->projection == Projection::Orthographic) ? 1.0f : 0.0f;
+			if (!cam->projBlendInit) { cam->projBlend = tgt; cam->projBlendInit = true; }   // no open-time animation
+			else if (cam->projTransition <= 0.0f) cam->projBlend = tgt;                     // instant
+			else
+			{
+				float step = (float)Time::getSingleton()->delta * cam->projTransition;
+				if (step > 1.0f) step = 1.0f;
+				cam->projBlend += (tgt - cam->projBlend) * step;
+				if (fabsf(tgt - cam->projBlend) < 0.0005f) cam->projBlend = tgt;             // snap when settled
+			}
+			d.ortho     = cam->projBlend;
+			d.orthoSize = cam->orthoSize;
+		}
 
 		// This camera's post-process chain: the effects on the PostProcess component sitting on the same atom
 		// (shared transform). Each effect = a custom post-shader pipeline + its packed PostParams bytes.

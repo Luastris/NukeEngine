@@ -261,6 +261,11 @@ void Camera::Update() {
 	ProcessKeyboard();
 }
 
+void Camera::SetProjection(Projection p) { projection = p; }   // World::Render eases projBlend toward it
+Projection Camera::GetProjection()       { return projection; }
+void   Camera::SetOrthoSize(double size) { orthoSize = (float)size; }
+double Camera::GetOrthoSize()            { return orthoSize; }
+
 void Camera::Reset() {}
 void Camera::Pause() {}
 

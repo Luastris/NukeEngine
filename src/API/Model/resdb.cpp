@@ -16,6 +16,8 @@ ResDB::ResDB()
 	Mesh* cube  = Mesh::CreateCube();   cube->guid  = "builtin:cube";   RegisterMesh(cube);
 	Mesh* plane = Mesh::CreatePlane();  plane->guid = "builtin:plane";  RegisterMesh(plane);
 	Mesh* sphere= Mesh::CreateSphere(); sphere->guid= "builtin:sphere"; RegisterMesh(sphere);
+	Mesh* cyl   = Mesh::CreateCylinder(); cyl->guid  = "builtin:cylinder"; RegisterMesh(cyl);
+	Mesh* caps  = Mesh::CreateCapsule();  caps->guid = "builtin:capsule";  RegisterMesh(caps);
 
 	// Default material (white) so a MeshRenderer always has something to point at.
 	Material* def = new Material();

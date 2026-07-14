@@ -263,6 +263,104 @@ Mesh* Mesh::CreateSphere() {
 	return m;
 }
 
+// A helper shared by cylinder/capsule generation: append one triangle-souped quad (a,b,c,d)
+// as two tris (a,b,c)(a,c,d) — the SAME winding CreateSphere uses (a=upper, b=lower, c=lower
+// next, d=upper next), so all built-in primitives face out consistently.
+namespace {
+struct PV { float p[3], n[3], uv[2]; };
+inline void PushQuad(std::vector<float>& v, std::vector<float>& n, std::vector<float>& uv,
+                     const PV& a, const PV& b, const PV& c, const PV& d)
+{
+	const PV* order[6] = { &a, &b, &c, &a, &c, &d };
+	for (const PV* q : order)
+	{
+		v.push_back(q->p[0]);  v.push_back(q->p[1]);  v.push_back(q->p[2]);
+		n.push_back(q->n[0]);  n.push_back(q->n[1]);  n.push_back(q->n[2]);
+		uv.push_back(q->uv[0]); uv.push_back(q->uv[1]);
+	}
+}
+}  // namespace
+
+Mesh* Mesh::CreateCylinder() {
+	Mesh* m = new Mesh();
+	const int   SE = 24;              // radial sectors
+	const float R = 0.5f, h = 0.5f;   // radius, half-height (unit: Ø1, height 1)
+	const float PI = 3.14159265358979f;
+	std::vector<float> v, n, uv;
+	for (int se = 0; se < SE; ++se)
+	{
+		float t0 = 2*PI*se/SE, t1 = 2*PI*(se+1)/SE;
+		float c0 = cosf(t0), s0 = sinf(t0), c1 = cosf(t1), s1 = sinf(t1);
+		float u0 = (float)se/SE, u1 = (float)(se+1)/SE;
+		// side wall (radial normals)
+		PV a{{R*c0, h,R*s0},{c0,0,s0},{u0,1}}, b{{R*c0,-h,R*s0},{c0,0,s0},{u0,0}};
+		PV c{{R*c1,-h,R*s1},{c1,0,s1},{u1,0}}, d{{R*c1, h,R*s1},{c1,0,s1},{u1,1}};
+		PushQuad(v, n, uv, a, b, c, d);
+		// top cap (+Y): center, rim@se, rim@se+1 (sphere north-pole winding)
+		PV tc{{0, h,0},{0,1,0},{0.5f,0.5f}};
+		PV tr0{{R*c0, h,R*s0},{0,1,0},{0.5f+0.5f*c0,0.5f+0.5f*s0}};
+		PV tr1{{R*c1, h,R*s1},{0,1,0},{0.5f+0.5f*c1,0.5f+0.5f*s1}};
+		PushQuad(v, n, uv, tc, tr0, tr1, tr1);   // d==c => second tri degenerates, one triangle kept
+		// bottom cap (-Y): rim@se, center, rim@se+1 (sphere south-pole winding)
+		PV bc{{0,-h,0},{0,-1,0},{0.5f,0.5f}};
+		PV br0{{R*c0,-h,R*s0},{0,-1,0},{0.5f+0.5f*c0,0.5f+0.5f*s0}};
+		PV br1{{R*c1,-h,R*s1},{0,-1,0},{0.5f+0.5f*c1,0.5f+0.5f*s1}};
+		PushQuad(v, n, uv, br0, bc, br1, br1);
+	}
+	m->numVerts    = (int)(v.size() / 3);
+	m->vertexArray = new float[v.size()];  memcpy(m->vertexArray, v.data(), v.size() * sizeof(float));
+	m->normalArray = new float[n.size()];  memcpy(m->normalArray, n.data(), n.size() * sizeof(float));
+	m->uvArray     = new float[uv.size()]; memcpy(m->uvArray, uv.data(), uv.size() * sizeof(float));
+	strcpy(m->name, "Cylinder");
+	return m;
+}
+
+Mesh* Mesh::CreateCapsule() {
+	Mesh* m = new Mesh();
+	const int   SE = 24, ST = 8;      // radial sectors, stacks per hemisphere
+	const float R = 0.5f, ch = 0.5f;  // radius, cylinder HALF-height (total height = 2*ch + 2*R = 2)
+	const float PI = 3.14159265358979f;
+	std::vector<float> v, n, uv;
+	// a point on a hemisphere of radius R centred at (0,yc,0): dir = (sinφcosθ, cosφ, sinφsinθ),
+	// pos = centre + R*dir, normal = dir.
+	auto vert = [&](float phi, float th, float yc, float u, float vv) -> PV {
+		float d[3] = { sinf(phi)*cosf(th), cosf(phi), sinf(phi)*sinf(th) };
+		return PV{{R*d[0], yc + R*d[1], R*d[2]}, {d[0],d[1],d[2]}, {u,vv}};
+	};
+	for (int se = 0; se < SE; ++se)
+	{
+		float t0 = 2*PI*se/SE, t1 = 2*PI*(se+1)/SE;
+		float u0 = (float)se/SE, u1 = (float)(se+1)/SE;
+		float c0 = cosf(t0), s0 = sinf(t0), c1 = cosf(t1), s1 = sinf(t1);
+		// top hemisphere: φ 0..π/2, centre +ch
+		for (int st = 0; st < ST; ++st)
+		{
+			float p0 = (PI*0.5f)*st/ST, p1 = (PI*0.5f)*(st+1)/ST;
+			float v0 = 1.0f - 0.1f*st/ST, v1 = 1.0f - 0.1f*(st+1)/ST;
+			PushQuad(v, n, uv, vert(p0,t0,ch,u0,v0), vert(p1,t0,ch,u0,v1),
+			                   vert(p1,t1,ch,u1,v1), vert(p0,t1,ch,u1,v0));
+		}
+		// middle cylinder wall: y +ch..-ch, radial normals
+		PV a{{R*c0, ch,R*s0},{c0,0,s0},{u0,0.9f}}, b{{R*c0,-ch,R*s0},{c0,0,s0},{u0,0.1f}};
+		PV c{{R*c1,-ch,R*s1},{c1,0,s1},{u1,0.1f}}, d{{R*c1, ch,R*s1},{c1,0,s1},{u1,0.9f}};
+		PushQuad(v, n, uv, a, b, c, d);
+		// bottom hemisphere: φ π/2..π, centre -ch
+		for (int st = 0; st < ST; ++st)
+		{
+			float p0 = PI*0.5f + (PI*0.5f)*st/ST, p1 = PI*0.5f + (PI*0.5f)*(st+1)/ST;
+			float v0 = 0.1f - 0.1f*st/ST, v1 = 0.1f - 0.1f*(st+1)/ST;
+			PushQuad(v, n, uv, vert(p0,t0,-ch,u0,v0), vert(p1,t0,-ch,u0,v1),
+			                   vert(p1,t1,-ch,u1,v1), vert(p0,t1,-ch,u1,v0));
+		}
+	}
+	m->numVerts    = (int)(v.size() / 3);
+	m->vertexArray = new float[v.size()];  memcpy(m->vertexArray, v.data(), v.size() * sizeof(float));
+	m->normalArray = new float[n.size()];  memcpy(m->normalArray, n.data(), n.size() * sizeof(float));
+	m->uvArray     = new float[uv.size()]; memcpy(m->uvArray, uv.data(), uv.size() * sizeof(float));
+	strcpy(m->name, "Capsule");
+	return m;
+}
+
 // ---- native .numesh (binary) -------------------------------------------------
 // Layout: magic "NUMESH\0\0" | u32 version | u32 nameLen + name | u32 guidLen + guid |
 //         i32 numVerts | f32 pos[3N] | u8 hasNormals (+ f32 nrm[3N]) | u8 hasUV (+ f32 uv[2N])

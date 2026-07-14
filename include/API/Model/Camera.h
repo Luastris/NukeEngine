@@ -10,6 +10,16 @@
 
 namespace nuke {
 
+// Camera projection kind. A REFLECTED enum (typed in C#/Lua, like WindowMode): SetProjection/
+// GetProjection take/return it; the inspector shows it as a combo via the prop's enum= hint.
+enum class Projection : int { Perspective = 0, Orthographic = 1 };
+template<> struct NukeEnumInfo<Projection>
+{
+	static constexpr bool reflected = true;
+	static const char* Name() { return "Projection"; }
+	static void Register() { Reflect_RegisterEnum("Projection", { "Perspective", "Orthographic" }); }
+};
+
 class NUKEENGINE_API Camera : public Component
 {
 	NUKE_CLASS(Camera, Component)
@@ -26,6 +36,14 @@ public:
     [[nuke::prop]] float fov = 90;
     [[nuke::prop]] float _near = 0.3f;
     [[nuke::prop]] float _far = 10000;
+    // Projection: perspective (uses fov) or orthographic (uses orthoSize = half-height in world
+    // units). projTransition is the ease speed toward the target when it changes (0 = instant);
+    // the actual blend is animated per-frame in World::Render so switching is smooth.
+    [[nuke::prop(label="Projection", enum="Perspective,Orthographic")]] Projection projection = Projection::Perspective;
+    [[nuke::prop(label="Ortho Size")]] float orthoSize = 5.0f;
+    [[nuke::prop(label="Proj Transition")]] float projTransition = 8.0f;
+    float projBlend = 0.0f;        // runtime 0=perspective..1=orthographic (eased; not serialized)
+    bool  projBlendInit = false;   // first frame snaps the blend to the target (no open-time animation)
 	unsigned long int renderLayers;
     [[nuke::prop]] bool freeMode = false;
 
@@ -65,6 +83,12 @@ public:
 
 	void ProcessKeyboard();
 
+
+	// Reflected camera API (C#/Lua). Setting the projection animates the switch (per projTransition).
+	[[nuke::func]] void       SetProjection(Projection p);
+	[[nuke::func]] Projection GetProjection();
+	[[nuke::func]] void       SetOrthoSize(double size);
+	[[nuke::func]] double     GetOrthoSize();
 
 	void Init(Atom* parent);
 	void FixedUpdate();

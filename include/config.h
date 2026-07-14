@@ -150,6 +150,11 @@ public:
     // echo — in the editor the in-app Console panel still shows everything (cout is tee'd into
     // the log ring); in the Player it discards the output entirely. config/main.json "logToConsole".
     bool logToConsole = true;
+    // Enable the D3D12 GPU validation layer + DRED breadcrumbs (Debug builds only; a heavy per-command
+    // cost — can more than halve FPS). Off by default; turn it on ONLY to diagnose a renderer crash /
+    // device-removed. config/main.json "gpuValidation" (works for double-click launches, unlike the
+    // NUKE_GPU_VALIDATION env var which needs a terminal). Either the config flag OR the env var enables it.
+    bool gpuValidation = false;
 	void reload(Config* instance);
 	// Show/hide the process's OWN OS console window (driven by window.showConsole). NO-OP if
 	// the console is SHARED with a launching terminal (>1 attached process) so it never hides

@@ -78,6 +78,11 @@ struct NukeCameraDesc
     float    fov   = 1.0472f;                   // vertical FOV (radians, ~60deg)
     float    nearZ = 0.1f;
     float    farZ  = 1000.0f;
+    // Projection blend: 0 = perspective (use fov), 1 = orthographic (use orthoSize as the view
+    // half-height in world units). Values in between blend the two projection matrices — the
+    // engine animates it for a smooth perspective<->ortho transition.
+    float    ortho     = 0.0f;
+    float    orthoSize = 5.0f;
 };
 
 // Backend-neutral window description, filled by the app from its config and passed
@@ -101,6 +106,7 @@ struct WindowDesc
     bool  transparent = false;  // per-pixel alpha to the desktop (DirectComposition swap chain)
     float opacity     = 1.0f;   // whole-window opacity 0..1 (cheap, always works — live-settable)
     int   backend     = 0;      // 0 = D3D11, 1 = D3D12 (chosen at launch; D3D12 enables ray tracing)
+    bool  gpuValidation = false; // Debug: turn on the D3D12 validation layer + DRED (heavy; off by default)
 };
 
 class iRender

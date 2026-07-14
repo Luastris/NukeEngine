@@ -179,10 +179,17 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("fov", &Camera::fov));
 		t.fields.push_back(MakeField("_near", &Camera::_near));
 		t.fields.push_back(MakeField("_far", &Camera::_far));
+		t.fields.push_back(MakeField("projection", &Camera::projection, "", "Projection", 0.0f, 0.0f, "Perspective,Orthographic"));
+		t.fields.push_back(MakeField("orthoSize", &Camera::orthoSize, "", "Ortho Size"));
+		t.fields.push_back(MakeField("projTransition", &Camera::projTransition, "", "Proj Transition"));
 		t.fields.push_back(MakeField("freeMode", &Camera::freeMode));
 		t.fields.push_back(MakeField("depth", &Camera::depth));
 		t.fields.push_back(MakeField("background", &Camera::background, "", "Background"));
 		t.fields.push_back(MakeField("targetTexGuid", &Camera::targetTexGuid, "texture", "Target Texture"));
+		t.methods.push_back(MakeMethod("SetProjection", &Camera::SetProjection));
+		t.methods.push_back(MakeMethod("GetProjection", &Camera::GetProjection));
+		t.methods.push_back(MakeMethod("SetOrthoSize", &Camera::SetOrthoSize));
+		t.methods.push_back(MakeMethod("GetOrthoSize", &Camera::GetOrthoSize));
 		t.create = []() -> void* { return new Camera(); };
 	}
 	{

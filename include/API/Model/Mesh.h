@@ -85,6 +85,8 @@ public:
 	static Mesh* CreateCube();
 	static Mesh* CreatePlane();
 	static Mesh* CreateSphere();
+	static Mesh* CreateCylinder();
+	static Mesh* CreateCapsule();
 
 	// Native asset format (.numesh): binary header + interleaved-free vertex/normal/uv arrays.
 	// Import converts external files (OBJ/FBX/...) into these so nothing references the source

@@ -162,6 +162,7 @@ void Config::reload(Config* instance)
 
     instance->physicsCore  = root.value("physicsCore",  instance->physicsCore);
     instance->logToConsole = root.value("logToConsole", instance->logToConsole);
+    instance->gpuValidation = root.value("gpuValidation", instance->gpuValidation);
 
     if (root.contains("jobs") && root["jobs"].is_object())
     {
