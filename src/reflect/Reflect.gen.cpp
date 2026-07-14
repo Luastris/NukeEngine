@@ -437,8 +437,6 @@ bool NukeReflectInit() {
 	{
 		TypeInfo& t = TypeOf<SpriteAnimator>();
 		t.base = "Component";
-		t.fields.push_back(MakeField("columns", &SpriteAnimator::columns, "", "Columns", 1.0f, 64.0f));
-		t.fields.push_back(MakeField("rows", &SpriteAnimator::rows, "", "Rows", 1.0f, 64.0f));
 		t.fields.push_back(MakeField("firstFrame", &SpriteAnimator::firstFrame, "", "First Frame"));
 		t.fields.push_back(MakeField("frameCount", &SpriteAnimator::frameCount, "", "Frame Count"));
 		t.fields.push_back(MakeField("fps", &SpriteAnimator::fps, "", "FPS", 0.0f, 120.0f));
@@ -456,10 +454,24 @@ bool NukeReflectInit() {
 		t.base = "Object";
 		t.fields.push_back(MakeField("width", &Texture::width, "", "Width"));
 		t.fields.push_back(MakeField("height", &Texture::height, "", "Height"));
-		t.fields.push_back(MakeField("usage", &Texture::usage, "", "Usage", 0.0f, 0.0f, "Color,Normal,Data,Emissive"));
+		t.fields.push_back(MakeField("usage", &Texture::usage, "", "Usage", 0.0f, 0.0f, "Color,Normal,Data,Emissive,Sprite"));
 		t.fields.push_back(MakeField("invertGreen", &Texture::invertGreen, "", "Invert Green"));
+		t.fields.push_back(MakeField("spriteColumns", &Texture::spriteColumns, "", "Sprite Columns", 1.0f, 256.0f));
+		t.fields.push_back(MakeField("spriteRows", &Texture::spriteRows, "", "Sprite Rows", 1.0f, 256.0f));
+		t.fields.push_back(MakeField("spriteMarginLeft", &Texture::spriteMarginLeft, "", "Margin Left"));
+		t.fields.push_back(MakeField("spriteMarginRight", &Texture::spriteMarginRight, "", "Margin Right"));
+		t.fields.push_back(MakeField("spriteMarginTop", &Texture::spriteMarginTop, "", "Margin Top"));
+		t.fields.push_back(MakeField("spriteMarginBottom", &Texture::spriteMarginBottom, "", "Margin Bottom"));
+		t.fields.push_back(MakeField("spriteSpacingX", &Texture::spriteSpacingX, "", "Sprite Spacing X"));
+		t.fields.push_back(MakeField("spriteSpacingY", &Texture::spriteSpacingY, "", "Sprite Spacing Y"));
+		t.fields.push_back(MakeField("sliceLeft", &Texture::sliceLeft, "", "Slice Left"));
+		t.fields.push_back(MakeField("sliceRight", &Texture::sliceRight, "", "Slice Right"));
+		t.fields.push_back(MakeField("sliceTop", &Texture::sliceTop, "", "Slice Top"));
+		t.fields.push_back(MakeField("sliceBottom", &Texture::sliceBottom, "", "Slice Bottom"));
+		t.methods.push_back(MakeMethod("SpriteCount", &Texture::SpriteCount));
 		t.methods.push_back(MakeMethod("GuessUsage", &Texture::GuessUsage));
 		t.methods.push_back(MakeMethod("Recompress", &Texture::Recompress));
+		t.methods.push_back(MakeMethod("ApplyChromaKey", &Texture::ApplyChromaKey));
 		t.create = []() -> void* { return new Texture(); };
 	}
 	{

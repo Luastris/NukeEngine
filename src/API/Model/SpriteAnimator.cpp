@@ -1,5 +1,7 @@
 #include "API/Model/SpriteAnimator.h"
 #include "API/Model/Sprite.h"
+#include "API/Model/Texture.h"   // tex->width/height + sprite grid (Usage=Sprite)
+#include "API/Model/resdb.h"     // resolve the sprite's texture (grid lives on it)
 #include "API/Model/Time.h"
 
 namespace nuke {
@@ -16,10 +18,21 @@ void SpriteAnimator::Init(Atom* parent)
 	Apply();
 }
 
+// The sprite's texture (only when flagged Usage=Sprite) owns the grid. Resolves the texture on demand so
+// the grid is available even before the first render (editor preview).
+Texture* SpriteAnimator::SheetTex() const
+{
+	Sprite* sp = atom ? atom->GetComponent<Sprite>() : nullptr;
+	if (!sp) return nullptr;
+	if (!sp->tex && !sp->textureGuid.empty()) sp->tex = ResDB::getSingleton()->GetTexture(sp->textureGuid);
+	return (sp->tex && sp->tex->usage == Texture::UsageSprite) ? sp->tex : nullptr;
+}
+
 int SpriteAnimator::Count() const
 {
-	int cols = columns > 0 ? columns : 1, rws = rows > 0 ? rows : 1;
-	int avail = cols * rws - (firstFrame > 0 ? firstFrame : 0);
+	Texture* t = SheetTex();
+	int total = t ? t->SpriteCount() : 1;
+	int avail = total - (firstFrame > 0 ? firstFrame : 0);
 	int c = (frameCount > 0) ? frameCount : avail;
 	if (c > avail) c = avail;
 	return c > 0 ? c : 1;
@@ -29,15 +42,15 @@ void SpriteAnimator::Apply()
 {
 	Sprite* sp = atom ? atom->GetComponent<Sprite>() : nullptr;
 	if (!sp) return;
-	const int cols = columns > 0 ? columns : 1;
-	const int rws  = rows    > 0 ? rows    : 1;
+	Texture* t = SheetTex();
 	int cell = firstFrame + (current % Count());
-	if (cell >= cols * rws) cell = cols * rws - 1;
-	if (cell < 0) cell = 0;
-	int cx = cell % cols, cy = cell / cols;
-	float w = 1.0f / cols, h = 1.0f / rws;
-	float u0 = cx * w, u1 = u0 + w;
-	float v0 = cy * h, v1 = v0 + h;
+	int x0 = 0, y0 = 0, cw = 0, ch = 0;
+	if (!t || !t->SpriteCellRect(cell, x0, y0, cw, ch)) { sp->SetFrame(0, 0, 1, 1); return; }
+	// Inset the cell by HALF a texel on every side: linear filtering otherwise samples the neighbouring
+	// cell at the edge (the classic sprite-sheet "bleed" — bits of the next frame poking in).
+	float iu = 0.5f, iv = 0.5f;
+	float u0 = (x0 + iu) / (float)t->width,  u1 = (x0 + cw - iu) / (float)t->width;
+	float v0 = (y0 + iv) / (float)t->height, v1 = (y0 + ch - iv) / (float)t->height;
 	sp->SetFrame(u0, v0, u1, v1);
 }
 

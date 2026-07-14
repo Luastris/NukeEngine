@@ -940,6 +940,42 @@ static void DrawDecals(std::vector<Decal*>& decals, iRender* r)
 		r->drawDecal(dc->tex, pos, quat, scale, tn, dc->intensity, dc->angleFade, (int)dc->mode);
 	}
 }
+// Editor-only: draw a decal's oriented box (wireframe) + its projection axis, so its bounds are visible.
+// Decal bounds are drawn ONLY for the selected atom (unlike an always-on overlay) — a scene full of
+// decals would otherwise be a cage of orange boxes. `sel` is the editor's selected atom.
+static void DrawDecalGizmos(bc::list<Atom*>& gos, iRender* r, Atom* sel)
+{
+	for (Atom* go : gos)
+	{
+		if (!go) continue;
+		if (go == sel)
+		if (Decal* dc = go->GetComponent<Decal>())
+			if (dc->transform)
+			{
+				Transform* t = dc->transform;
+				Vector3 p = t->globalPosition(), R = t->right(), U = t->up(), F = t->direction(), s = t->globalScale();
+				float hx = 0.5f*(float)s.x, hy = 0.5f*(float)s.y, hz = 0.5f*(float)s.z;
+				float c[8][3]; int idx = 0;
+				for (float sz : {-1.f, 1.f}) for (float sy : {-1.f, 1.f}) for (float sx : {-1.f, 1.f})
+				{
+					c[idx][0] = (float)(p.x + sx*hx*R.x + sy*hy*U.x + sz*hz*F.x);
+					c[idx][1] = (float)(p.y + sx*hx*R.y + sy*hy*U.y + sz*hz*F.y);
+					c[idx][2] = (float)(p.z + sx*hx*R.z + sy*hy*U.z + sz*hz*F.z);
+					++idx;
+				}
+				const float col[4] = { 1.0f, 0.5f, 0.2f, 1.0f };   // orange box
+				auto ln = [&](int a, int b) { r->drawDebugLine(c[a], c[b], col); };
+				ln(0,1); ln(2,3); ln(4,5); ln(6,7);   // along X (bit0)
+				ln(0,2); ln(1,3); ln(4,6); ln(5,7);   // along Y (bit1)
+				ln(0,4); ln(1,5); ln(2,6); ln(3,7);   // along Z (bit2)
+				float ctr[3] = { (float)p.x, (float)p.y, (float)p.z };
+				float tip[3] = { (float)(p.x + F.x*hz), (float)(p.y + F.y*hz), (float)(p.z + F.z*hz) };
+				const float acol[4] = { 1.0f, 0.9f, 0.3f, 1.0f };   // projection axis (+Z)
+				r->drawDebugLine(ctr, tip, acol);
+			}
+		DrawDecalGizmos(go->children, r, sel);
+	}
+}
 
 // Depth-only traversal for the shadow pass: every enabled mesh whose material casts shadows
 // (null material = casts by default). Transparency is handled in the renderer (alpha-dither).
@@ -1411,6 +1447,7 @@ void World::Render(iRender* r)
 			DrawDecals(decals, r);               // screen-space decals: composite onto the scene from the depth prepass
 			DrawSprites(*hierarchy, d, cp, r);   // 2D sprites: after opaque, back-to-front, depth-tested
 			if (editor) DrawCanvasGizmos(*hierarchy, r);   // WorldSpace canvas bounds (editor gizmo)
+			if (editor) DrawDecalGizmos(*hierarchy, r, AppInstance::GetSingleton()->selectedInHieararchy);   // only the SELECTED decal
 		}
 		// Selection highlight (editor only): outline the selected object after the scene.
 		if (editor)

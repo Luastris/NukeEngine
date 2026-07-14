@@ -139,6 +139,58 @@ bool Texture::Recompress(int targetFormat)
 	return true;
 }
 
+bool Texture::ApplyChromaKey(int kr, int kg, int kb, int tol)
+{
+	if (renderTexture || frameCount > 1 || width <= 0 || height <= 0) return false;
+	std::vector<uint8_t> rgba = decodeMip0(this);
+	if (rgba.empty()) return false;
+	if (tol < 0) tol = 0;
+	auto ab = [](int v){ return v < 0 ? -v : v; };
+	for (size_t i = 0; i + 3 < rgba.size(); i += 4)
+		if (ab((int)rgba[i] - kr) <= tol && ab((int)rgba[i + 1] - kg) <= tol && ab((int)rgba[i + 2] - kb) <= tol)
+			rgba[i + 3] = 0;
+	if (format == FMT_BC1 || format == FMT_BC3 || format == FMT_BC5)   // keep it compressed, but in a format that carries alpha
+	{
+		std::vector<uint8_t> enc;
+		mipCount = encodeBC(enc, std::move(rgba), width, height, FMT_BC3);
+		pixels.swap(enc); format = FMT_BC3;
+	}
+	else { pixels.swap(rgba); format = FMT_RGBA8; mipCount = 1; }
+	return true;
+}
+
+int Texture::SpriteCount() const
+{
+	int c = spriteColumns > 0 ? spriteColumns : 1;
+	int r = spriteRows    > 0 ? spriteRows    : 1;
+	return c * r;
+}
+
+// Cell math is intentionally in PIXELS (the natural unit for a sheet with margin/spacing) and rounds the
+// derived cell size down, so a grid whose margins/spacing don't divide the texture exactly still tiles
+// without accumulating drift into the last cell. SpriteAnimator converts the rect to UV (with a half-texel
+// inset); the slicer editor draws it directly.
+bool Texture::SpriteCellRect(int index, int& x0, int& y0, int& cw, int& ch) const
+{
+	int cols = spriteColumns > 0 ? spriteColumns : 1;
+	int rows = spriteRows    > 0 ? spriteRows    : 1;
+	if (width <= 0 || height <= 0) return false;
+	int ml = spriteMarginLeft < 0 ? 0 : spriteMarginLeft, mr = spriteMarginRight  < 0 ? 0 : spriteMarginRight;
+	int mt = spriteMarginTop  < 0 ? 0 : spriteMarginTop,  mb = spriteMarginBottom < 0 ? 0 : spriteMarginBottom;
+	int sx = spriteSpacingX   < 0 ? 0 : spriteSpacingX,   sy = spriteSpacingY     < 0 ? 0 : spriteSpacingY;
+	int gridW = width  - ml - mr - (cols - 1) * sx;
+	int gridH = height - mt - mb - (rows - 1) * sy;
+	if (gridW <= 0 || gridH <= 0) return false;
+	int cellW = gridW / cols, cellH = gridH / rows;
+	if (cellW <= 0 || cellH <= 0) return false;
+	int n = cols * rows; if (index < 0) index = 0; if (index >= n) index = n - 1;
+	int cx = index % cols, cy = index / cols;
+	x0 = ml + cx * (cellW + sx);
+	y0 = mt + cy * (cellH + sy);
+	cw = cellW; ch = cellH;
+	return true;
+}
+
 namespace bfs = boost::filesystem;
 
 Texture::Texture(char* path) {
@@ -176,7 +228,7 @@ int Texture::GuessUsage(const std::string& filename)
 
 namespace {
 	const char kMagic[8] = { 'N','U','T','E','X','\0','\0','\0' };
-	const uint32_t kVersion = 6;   // v2: rt; v3: format+mips; v4: frames; v5: usage; v6: invertGreen
+	const uint32_t kVersion = 9;   // v2..v7 as before; v8: symmetric margin/spacing+9-slice; v9: per-side margins
 }
 
 bool Texture::SaveToFile(const std::string& path) const
@@ -194,6 +246,12 @@ bool Texture::SaveToFile(const std::string& path) const
 	for (int k = 0; k < fc; ++k) { int32_t d = (k < (int)frameDelaysMs.size()) ? frameDelaysMs[k] : 100; o.write((const char*)&d, 4); }
 	int32_t u = usage; o.write((const char*)&u, 4);                                                         // v5
 	uint8_t ig = invertGreen ? 1 : 0; o.write((const char*)&ig, 1);                                          // v6
+	int32_t sc = spriteColumns < 1 ? 1 : spriteColumns, sr = spriteRows < 1 ? 1 : spriteRows;               // v7
+	o.write((const char*)&sc, 4); o.write((const char*)&sr, 4);
+	int32_t v9[] = { spriteMarginLeft, spriteMarginRight, spriteMarginTop, spriteMarginBottom,             // v9: per-side margins
+	                 spriteSpacingX, spriteSpacingY, sliceLeft, sliceRight, sliceTop, sliceBottom };
+	for (int32_t& v : v9) { if (v < 0) v = 0; }
+	o.write((const char*)v9, sizeof(v9));
 	uint32_t bytes = (uint32_t)pixels.size(); o.write((const char*)&bytes, 4);
 	if (bytes) o.write((const char*)pixels.data(), bytes);
 	return (bool)o;
@@ -232,6 +290,15 @@ Texture* Texture::LoadFromStream(std::istream& i)
 	}
 	if (version >= 5) { int32_t u = 0; i.read((char*)&u, 4); t->usage = (Texture::Usage)u; }   // v5: semantic usage
 	if (version >= 6) { uint8_t ig = 1; i.read((char*)&ig, 1); t->invertGreen = (ig != 0); }   // v6: normal green convention
+	if (version >= 7) { int32_t sc = 1, sr = 1; i.read((char*)&sc, 4); i.read((char*)&sr, 4); t->spriteColumns = sc < 1 ? 1 : sc; t->spriteRows = sr < 1 ? 1 : sr; }   // v7: sprite grid
+	if (version == 8) { int32_t v8[8] = { 0 }; i.read((char*)v8, sizeof(v8));                                                                                           // v8: symmetric margins
+		t->spriteMarginLeft = t->spriteMarginRight = v8[0]; t->spriteMarginTop = t->spriteMarginBottom = v8[1];
+		t->spriteSpacingX = v8[2]; t->spriteSpacingY = v8[3];
+		t->sliceLeft = v8[4]; t->sliceRight = v8[5]; t->sliceTop = v8[6]; t->sliceBottom = v8[7]; }
+	else if (version >= 9) { int32_t v9[10] = { 0 }; i.read((char*)v9, sizeof(v9));                                                                                     // v9: per-side margins
+		t->spriteMarginLeft = v9[0]; t->spriteMarginRight = v9[1]; t->spriteMarginTop = v9[2]; t->spriteMarginBottom = v9[3];
+		t->spriteSpacingX = v9[4]; t->spriteSpacingY = v9[5];
+		t->sliceLeft = v9[6]; t->sliceRight = v9[7]; t->sliceTop = v9[8]; t->sliceBottom = v9[9]; }
 	uint32_t bytes = 0; i.read((char*)&bytes, 4);
 	if (bytes) { t->pixels.resize(bytes); i.read((char*)t->pixels.data(), bytes); }
 	if (!i && !i.eof()) { delete t; return nullptr; }

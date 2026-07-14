@@ -32,11 +32,46 @@ public:
     // Semantic usage (drives color-space, compression choice, normal green-flip). Set at import — from the assimp
     // texture type (model import) or a filename-suffix heuristic (bare image drop/picker); overridable in the asset
     // inspector. Color/Emissive = sRGB source; Normal/Data = linear; Normal -> BC5.
-    enum Usage { UsageColor = 0, UsageNormal = 1, UsageData = 2, UsageEmissive = 3 };
-    [[nuke::prop(label="Usage", enum="Color,Normal,Data,Emissive")]] Usage usage = UsageColor;   // serialized in the .nutex (v5)
+    // Sprite = a colour texture flagged as a sprite/sprite-sheet — carries slicing (grid) metadata so
+    // every Sprite using it shares one setup instead of configuring each atom. Colour-space/compression
+    // is like Color (sRGB, not BC5).
+    enum Usage { UsageColor = 0, UsageNormal = 1, UsageData = 2, UsageEmissive = 3, UsageSprite = 4 };
+    [[nuke::prop(label="Usage", enum="Color,Normal,Data,Emissive,Sprite")]] Usage usage = UsageColor;   // serialized in the .nutex (v5)
     [[nuke::prop(label="Invert Green")]] bool invertGreen = true;                // normal maps only: green convention (true = OpenGL +Y, flip; false = DirectX) — .nutex v6
+    // Sprite-sheet grid (Usage=Sprite): the texture is a columns×rows grid of cells; a SpriteAnimator
+    // reads this to slice frames (so the setup lives on the texture, shared by all sprites). Configured in
+    // the Sprite Slicer editor (not the inspector). Margin = border in PIXELS before the first cell;
+    // spacing = gap in PIXELS between cells — needed because real sheets are rarely a clean whole-texture
+    // division, and ignoring padding makes frames "drift". Cell size is DERIVED so the grid tiles exactly.
+    // .nutex v7 = cols/rows; v8 = margin/spacing + 9-slice.
+    [[nuke::prop(label="Sprite Columns", min=1, max=256)]] int spriteColumns = 1;
+    [[nuke::prop(label="Sprite Rows",    min=1, max=256)]] int spriteRows    = 1;
+    // Per-side margin in PIXELS (border before the grid on each edge — draggable in the slicer, so each
+    // side is independent; real sheets aren't always symmetric).
+    [[nuke::prop(label="Margin Left",   min=0)]] int spriteMarginLeft   = 0;
+    [[nuke::prop(label="Margin Right",  min=0)]] int spriteMarginRight  = 0;
+    [[nuke::prop(label="Margin Top",    min=0)]] int spriteMarginTop    = 0;
+    [[nuke::prop(label="Margin Bottom", min=0)]] int spriteMarginBottom = 0;
+    [[nuke::prop(label="Sprite Spacing X", min=0)]] int spriteSpacingX = 0;   // px gap between columns
+    [[nuke::prop(label="Sprite Spacing Y", min=0)]] int spriteSpacingY = 0;   // px gap between rows
+    // 9-slice borders in PIXELS (fixed insets from each edge) — future UI stretching keeps corners intact.
+    [[nuke::prop(label="Slice Left",   min=0)]] int sliceLeft   = 0;
+    [[nuke::prop(label="Slice Right",  min=0)]] int sliceRight  = 0;
+    [[nuke::prop(label="Slice Top",    min=0)]] int sliceTop    = 0;
+    [[nuke::prop(label="Slice Bottom", min=0)]] int sliceBottom = 0;
+
+    [[nuke::func]] int  SpriteCount() const;   // spriteColumns * spriteRows (>=1)
+    // Pixel rect of sprite cell `index` (row-major, 0 = top-left), accounting for margin+spacing.
+    // Returns false (and leaves outputs untouched) if the grid is degenerate. Single source of truth
+    // shared by SpriteAnimator (UV slicing) and the Sprite Slicer editor (overlay drawing). Not reflected
+    // (reference out-params don't cross the script seam) — engine/editor call it directly.
+    bool SpriteCellRect(int index, int& x0, int& y0, int& cw, int& ch) const;
     [[nuke::func]] static int GuessUsage(const std::string& filename);   // filename-suffix heuristic -> Usage
     [[nuke::func]] bool Recompress(int targetFormat);     // decode mip0 -> re-encode to FMT_BC1/BC3/BC5 (inspector override)
+    // Background removal: every pixel within `tolerance` (per-channel, 0..255) of (r,g,b) becomes fully
+    // transparent. Decodes mip0, keys, then re-encodes (BC formats -> BC3 to carry alpha; RGBA8 stays RGBA8).
+    // Static/single-frame textures only. Used for sprites shot on a flat chroma background (jpg/png).
+    [[nuke::func]] bool ApplyChromaKey(int r, int g, int b, int tolerance);
     // Decode mip0 (frame 0 for animated textures) to a tight width*height*4 RGBA8 buffer —
     // CPU-side preview/inspection (the editor uploads it via iRender::createTexture2D).
     std::vector<unsigned char> DecodeRGBA() const;
