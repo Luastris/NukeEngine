@@ -86,6 +86,9 @@ public:
 	// Ray-pick the nearest Atom (with a MeshRenderer) hit by a world-space ray.
 	// Returns nullptr on miss. Used by the editor viewport for click-to-select.
 	[[nuke::func]] Atom* Pick(const Vector3& origin, const Vector3& dir);
+	// Same, but also reports the hit distance along `dir` (normalized) — used by spawn-on-surface.
+	// NOT named Pick(): an overload would make &World::Pick ambiguous for the reflection codegen.
+	Atom* PickDist(const Vector3& origin, const Vector3& dir, float& outDist);
 
 	// Text (.nuworld JSON) scene serialization via reflection. The editor camera is
 	// excluded from save and preserved across load (it is editor infrastructure).

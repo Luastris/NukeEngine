@@ -157,14 +157,16 @@ static void PickRec(bc::list<Atom*>& gos, const glm::vec3& ro, const glm::vec3& 
 	}
 }
 
-Atom* World::Pick(const Vector3& origin, const Vector3& dir)
+Atom* World::PickDist(const Vector3& origin, const Vector3& dir, float& outDist)
 {
 	glm::vec3 ro((float)origin.x, (float)origin.y, (float)origin.z);
 	glm::vec3 rd = glm::normalize(glm::vec3((float)dir.x, (float)dir.y, (float)dir.z));
 	float bestDist = 1e30f; Atom* best = nullptr;
 	if (hierarchy) PickRec(*hierarchy, ro, rd, bestDist, best);
+	outDist = bestDist;
 	return best;
 }
+Atom* World::Pick(const Vector3& origin, const Vector3& dir) { float d; return PickDist(origin, dir, d); }
 
 World::~World()
 {
