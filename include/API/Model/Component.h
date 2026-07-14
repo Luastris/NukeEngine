@@ -12,7 +12,14 @@ class Transform;
 class Script;
 class Camera;
 class Light;
+class iRender;     // scene-render hook (OnRender) — POD seam, forward-declared to keep this header light
 struct TypeInfo;   // reflection
+
+// Phases the scene-render hook fires during a camera pass (see World::Render). A component draws via
+// iRender seams using its own transform — the camera's view/proj is already bound. This is how MODULE
+// components (particles, custom draws) get into the render without World::Render hardcoding them; the
+// core Sprite/Decal keep their own batched path.
+enum class RenderPhase { Opaque = 0, Transparent = 1, Overlay = 2 };
 
 // A dynamic, per-instance property value (e.g. a script's exported var). Pure data — no
 // UI, no engine logic; the editor draws these, the runtime just carries them.
@@ -77,6 +84,12 @@ public:
 	// of its atom when the playhead crosses a clip event. GAME thread, game lock held —
 	// scripting components may enter their VM directly (same contract as OnGUI).
 	virtual void OnAnimEvent(const char* name) {}
+
+	// Scene-render hook: World::Render calls this for every ENABLED component at each RenderPhase during a
+	// camera pass. Default no-op — a component that draws overrides it and issues iRender seam calls
+	// (drawSprite/drawDecal/drawDebugLine/...) using its own transform. Lets module components render
+	// without the engine's render loop knowing them. ABI: new virtuals are appended at the END.
+	virtual void OnRender(iRender* /*r*/, RenderPhase /*phase*/) {}
 };
 }  // namespace nuke
 

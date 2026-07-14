@@ -979,6 +979,20 @@ static void DrawDecalGizmos(bc::list<Atom*>& gos, iRender* r, Atom* sel)
 	}
 }
 
+// Scene-render hook: fire Component::OnRender for every enabled component at `phase`. This is the seam
+// module components (particles, custom draws) use to render — the engine's render loop no longer needs
+// to hardcode each feature. The camera's view/proj is already bound; components draw via iRender seams.
+static void DrawComponentHooks(bc::list<Atom*>& gos, iRender* r, RenderPhase phase)
+{
+	for (auto atom : gos)
+	{
+		if (!atom) continue;
+		for (Component* c : atom->components)
+			if (c && c->enabled) c->OnRender(r, phase);
+		DrawComponentHooks(atom->children, r, phase);
+	}
+}
+
 // Depth-only traversal for the shadow pass: every enabled mesh whose material casts shadows
 // (null material = casts by default). Transparency is handled in the renderer (alpha-dither).
 static void RenderShadowMeshes(bc::list<Atom*>& gos, iRender* r)
@@ -1446,10 +1460,13 @@ void World::Render(iRender* r)
 			std::vector<DrawItem> items;
 			CollectMeshes(*hierarchy, items);
 			DrawCollected(items, cp, r, settings.frustumCull);
+			DrawComponentHooks(*hierarchy, r, RenderPhase::Opaque);        // module components: opaque draws
 			DrawDecals(decals, r);               // screen-space decals: composite onto the scene from the depth prepass
 			DrawSprites(*hierarchy, d, cp, r);   // 2D sprites: after opaque, back-to-front, depth-tested
+			DrawComponentHooks(*hierarchy, r, RenderPhase::Transparent);   // module components: blended draws (particles, etc.)
 			if (editor) DrawCanvasGizmos(*hierarchy, r);   // WorldSpace canvas bounds (editor gizmo)
 			if (editor) DrawDecalGizmos(*hierarchy, r, AppInstance::GetSingleton()->selectedInHieararchy);   // only the SELECTED decal
+			DrawComponentHooks(*hierarchy, r, RenderPhase::Overlay);       // module components: on-top overlays / gizmos
 		}
 		// Selection highlight (editor only): outline the selected object after the scene.
 		if (editor)
