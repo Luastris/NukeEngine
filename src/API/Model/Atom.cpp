@@ -17,7 +17,7 @@ Atom::Atom(const char* name) : name(name), transform(this)
 
 Atom::~Atom()
 {
-	Reflect_DropObject(&transform);   // script handles wrapping this transform go stale-safe dead
+	Reflect_DropObject(&transform);   // script handles wrapping this transform atom stale-safe dead
 }
 
 std::string Atom::GetName()
@@ -85,7 +85,7 @@ void Atom::Update()
 void Atom::SetParent(Atom* newparent) {
 	// Detach from the old location + attach to the new one (nullptr = scene root), via the active
 	// world's Reparent — which also guards against cycles.
-	AppInstance::GetSingleton()->currentScene->Reparent(this, newparent);
+	AppInstance::GetSingleton()->currentWorld->Reparent(this, newparent);
 }
 
 Atom* Atom::GetParent()
@@ -105,7 +105,7 @@ void Atom::Destroy()
 	// DEFERRED, whole-subtree: the world removes + deletes it at the end of Update — never
 	// mid-traversal (the old immediate `free(this)` corrupted the running iteration and
 	// crashed on root atoms). Safe to call from scripts, contacts, even on `self`.
-	if (World* w = AppInstance::GetSingleton()->currentScene)
+	if (World* w = AppInstance::GetSingleton()->currentWorld)
 		w->QueueDestroy((long)id.id);
 }
 }  // namespace nuke

@@ -14,16 +14,16 @@ namespace nuke {
 // raycast (FixedUpdate logic) must not clobber each other's results.
 static thread_local RayHit tl_lastHit;
 
-// bodyId -> Collider, by walking the live world (queries are occasional; no cache to go stale).
+// bodyId -> Collider, by walking the live world (queries are occasional; no cache to atom stale).
 static Collider* FindColliderByBody(bc::list<Atom*>& gos, uint64_t body)
 {
-	for (Atom* go : gos)
+	for (Atom* atom : gos)
 	{
-		if (!go) continue;
-		if (Collider* col = go->GetComponent<Collider>())
+		if (!atom) continue;
+		if (Collider* col = atom->GetComponent<Collider>())
 			if (col->bodyId == body) return col;
-		if (!go->children.empty())
-			if (Collider* c = FindColliderByBody(go->children, body)) return c;
+		if (!atom->children.empty())
+			if (Collider* c = FindColliderByBody(atom->children, body)) return c;
 	}
 	return nullptr;
 }
@@ -34,7 +34,7 @@ bool Physics::Raycast(const Vector3& from, const Vector3& dir, double maxDist)
 {
 	tl_lastHit = RayHit{};
 	iPhysics* p = GetService<iPhysics>();
-	World* w = AppInstance::GetSingleton()->currentScene;
+	World* w = AppInstance::GetSingleton()->currentWorld;
 	if (!p || !w) return false;
 
 	float f[3] = { (float)from.x, (float)from.y, (float)from.z };
@@ -56,7 +56,7 @@ bool Physics::Raycast(const Vector3& from, const Vector3& dir, double maxDist)
 static bool FinishCast(bool hit, uint64_t body, const float point[3], const float normal[3], const Vector3& from)
 {
 	if (!hit) return false;
-	World* w = AppInstance::GetSingleton()->currentScene;
+	World* w = AppInstance::GetSingleton()->currentWorld;
 	Collider* col = w ? FindColliderByBody(w->GetHierarchy(), body) : nullptr;
 	tl_lastHit.atom   = col ? col->atom : nullptr;
 	tl_lastHit.point  = Vector3(point[0], point[1], point[2]);
@@ -111,7 +111,7 @@ static int OverlapCommon(const NukeShapeDesc& s, const Vector3& center, const Qu
 {
 	tl_overlap.clear();
 	iPhysics* p = GetService<iPhysics>();
-	World* w = AppInstance::GetSingleton()->currentScene;
+	World* w = AppInstance::GetSingleton()->currentWorld;
 	if (!p || !w) return 0;
 	float pos[3] = { (float)center.x, (float)center.y, (float)center.z };
 	float q[4]   = { (float)rot.x, (float)rot.y, (float)rot.z, (float)rot.w };

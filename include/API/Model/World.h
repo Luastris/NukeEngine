@@ -20,7 +20,7 @@ class NUKEENGINE_API World
 protected:
 	bc::list<Atom*> *hierarchy = nullptr;
 public:
-	[[nuke::prop]] std::string name = "Default scene";
+	[[nuke::prop]] std::string name = "Default world";
 
 	// World-level render settings (edited in the World Settings window, saved in .nuworld -> "settings").
 	// Shadow GLOBALS (which lights cast is per-Light); pushed to the renderer each frame in Render().
@@ -49,7 +49,7 @@ public:
 	[[nuke::func]] Atom* Get(const std::string& name);
 	[[nuke::func]] Atom* GetById(long id);     // recursive lookup by stable atom id
 	bc::list<Atom*>& GetHierarchy();
-	[[nuke::func]] void Add(Atom* go);
+	[[nuke::func]] void Add(Atom* atom);
 	// Create an empty atom at the world root (fresh stable id) — THE script-side factory
 	// (scripts can't `new`). Parent afterwards via Reparent/atom:SetParent.
 	[[nuke::func]] Atom* CreateAtom(const std::string& name);

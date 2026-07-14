@@ -17,7 +17,7 @@ public:
     [[nuke::prop]] Quaternion rotation;   // quaternion (no gimbal lock)
     [[nuke::prop]] Vector3 eulerHint;     // last euler (deg), stable inspector display
     [[nuke::prop]] Vector3 scale = {1,1,1};
-    Atom *go = nullptr;
+    Atom *atom = nullptr;
 
 
 	Transform(Atom* parent);

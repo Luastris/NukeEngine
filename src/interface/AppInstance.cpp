@@ -57,7 +57,7 @@ bool AppInstance::ReadContent(const std::string& relPath, std::string& out) cons
 
 bool AppInstance::OpenWorld(const std::string& relPath)
 {
-	if (relPath.empty() || !currentScene) return false;
+	if (relPath.empty() || !currentWorld) return false;
 	// Mid-tick call (a script's Game.LoadWorld inside Update/FixedUpdate): loading NOW
 	// would replace the hierarchy the tick is iterating. Queue it — World::Update applies
 	// it at the frame boundary. `true` = accepted (a missing world logs on apply).
@@ -120,7 +120,7 @@ bool AppInstance::OpenWorld(const std::string& relPath)
 					}
 			}
 			selectedInHieararchy = nullptr;
-			currentScene->LoadFromString(layers.size() > 1 ? World::MergeWorldLayers(layers, deps, basis, names)
+			currentWorld->LoadFromString(layers.size() > 1 ? World::MergeWorldLayers(layers, deps, basis, names)
 			                                               : layers[0]);
 			currentWorldPath = relPath;
 			NameWorldFromPath(relPath);
@@ -129,7 +129,7 @@ bool AppInstance::OpenWorld(const std::string& relPath)
 		return false;
 	}
 	selectedInHieararchy = nullptr;
-	currentScene->LoadFromFile(full);
+	currentWorld->LoadFromFile(full);
 	currentWorldPath = relPath;
 	NameWorldFromPath(relPath);
 	return true;
@@ -140,32 +140,32 @@ bool AppInstance::OpenWorld(const std::string& relPath)
 // default. An explicitly named world (LoadFromString set it) is left untouched.
 void AppInstance::NameWorldFromPath(const std::string& relPath)
 {
-	if (currentScene && currentScene->name.empty())
-		currentScene->name = boost::filesystem::path(relPath).stem().string();
+	if (currentWorld && currentWorld->name.empty())
+		currentWorld->name = boost::filesystem::path(relPath).stem().string();
 }
 
 bool AppInstance::SaveWorld(const std::string& relPath)
 {
-	if (relPath.empty() || !currentScene) return false;
+	if (relPath.empty() || !currentWorld) return false;
 	std::string full = WorldFullPath(relPath);   // forced into content (no cwd fallback on save)
 	boost::system::error_code ec;
 	boost::filesystem::path p(full);
 	if (p.has_parent_path()) boost::filesystem::create_directories(p.parent_path(), ec);
-	currentScene->SaveToFile(full);
+	currentWorld->SaveToFile(full);
 	currentWorldPath = relPath;
 	return true;
 }
 
 void AppInstance::NewWorld()
 {
-	if (currentScene) currentScene->Clear();   // empties the world but keeps the editor camera
+	if (currentWorld) currentWorld->Clear();   // empties the world but keeps the editor camera
 	currentWorldPath.clear();
 	selectedInHieararchy = nullptr;
 }
 
 AppInstance::AppInstance()
 {
-	//currentScene = new World();
+	//currentWorld = new World();
 	keyboard = KeyBoard::getSingleton();
 	mouse = Mouse::getSingleton();
 	//render = iRender::getSingleton();
@@ -175,7 +175,7 @@ AppInstance::AppInstance()
 		menuStrip = new MenuStrip();
 	if (!editorWindows)
 		editorWindows = new bc::map<string, bst::function<void()>>();
-	cout << "[EditorInstance]\t" << "Current scene is: " << currentScene << "(" << currentScene->name << ")" << ", Hierarchy is: " << &currentScene->GetHierarchy() << endl;
+	cout << "[EditorInstance]\t" << "Current scene is: " << currentWorld << "(" << currentWorld->name << ")" << ", Hierarchy is: " << &currentWorld->GetHierarchy() << endl;
 }
 AppInstance::~AppInstance() {}
 
@@ -201,7 +201,7 @@ void AppInstance::UpdateThread()
 	{
 		try
 		{
-			currentScene->Update();
+			currentWorld->Update();
 			boost::this_thread::sleep(boost::posix_time::milliseconds(40));
 		}
 		catch (const std::exception&)
@@ -243,7 +243,7 @@ void AppInstance::FixedThread()
 	bch::steady_clock::time_point next = bch::steady_clock::now();
 	while (fixedThreadRun)
 	{
-		World* w = currentScene;
+		World* w = currentWorld;
 		const double dt = (w && w->settings.fixedDt > 0.0001f) ? w->settings.fixedDt : 1.0 / 60.0;
 		if (w && playState == 1)
 		{

@@ -47,7 +47,7 @@ public:
 
 
 
-	World* currentScene = new World();
+	World* currentWorld = new World();
     KeyBoard* keyboard = nullptr;
     Mouse* mouse = nullptr;
 	Config* config = nullptr;
@@ -75,10 +75,10 @@ public:
 	std::string pendingWorldLoad;
 	std::string WorldFullPath(const std::string& relPath) const;   // canonical content path for a world
 	bool        ReadContent(const std::string& relPath, std::string& out) const; // bytes via all layers (pak = memory)
-	bool        OpenWorld(const std::string& relPath); // load a world from content into currentScene
+	bool        OpenWorld(const std::string& relPath); // load a world from content into currentWorld
 	void        NameWorldFromPath(const std::string& relPath); // name an unnamed world from its file stem
-	bool        SaveWorld(const std::string& relPath); // save currentScene to content (creates dirs)
-	void        NewWorld();                            // replace currentScene with a fresh empty world
+	bool        SaveWorld(const std::string& relPath); // save currentWorld to content (creates dirs)
+	void        NewWorld();                            // replace currentWorld with a fresh empty world
 
 	bool isEditor();
 	void setEditor(bool editor);

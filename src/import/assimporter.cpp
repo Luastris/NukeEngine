@@ -189,7 +189,7 @@ AssImporter::~AssImporter() {}
 
 Atom* AssImporter::ImportObject(aiNode* node, const aiScene* scene) {
 	ResDB* res = ResDB::getSingleton();
-	auto go = new Atom(node->mName.C_Str());
+	auto atom = new Atom(node->mName.C_Str());
 	for (int i = 0; i < node->mNumMeshes; i++) {
 		auto cmesh = node->mMeshes[i];
 		Atom* ngo = new Atom(scene->mMeshes[cmesh]->mName.C_Str());
@@ -205,12 +205,12 @@ Atom* AssImporter::ImportObject(aiNode* node, const aiScene* scene) {
 		mr->mesh = m;
 		mr->mat = mat->Clone();   // owned instance; the asset `mat` stays the shared template in ResDB
 		ngo->AddComponent(mr);
-		go->AddChild(ngo);
+		atom->AddChild(ngo);
 	}
 	for (int i = 0; i < node->mNumChildren; i++) {
-		go->AddChild(ImportObject(node->mChildren[i], scene));
+		atom->AddChild(ImportObject(node->mChildren[i], scene));
 	}
-	return go;
+	return atom;
 }
 
 void AssImporter::Import(const char* path) {
@@ -262,11 +262,11 @@ static Atom* BuildPrefabNode(aiNode* node, const aiScene* sc,
                              const std::vector<std::string>& matGuids,
                              const std::string& firstClipGuid = std::string())
 {
-	Atom* go = new Atom(node->mName.C_Str());
+	Atom* atom = new Atom(node->mName.C_Str());
 
 	aiVector3D pos, scl; aiQuaternion rot;
 	node->mTransformation.Decompose(scl, rot, pos);
-	Transform& t = go->GetTransform();
+	Transform& t = atom->GetTransform();
 	t.position.x = pos.x; t.position.y = pos.y; t.position.z = pos.z;
 	t.rotation.x = rot.x; t.rotation.y = rot.y; t.rotation.z = rot.z; t.rotation.w = rot.w;
 	t.scale.x    = scl.x; t.scale.y    = scl.y; t.scale.z    = scl.z;
@@ -286,11 +286,11 @@ static Atom* BuildPrefabNode(aiNode* node, const aiScene* sc,
 			an->clipGuid = firstClipGuid;   // "" when the file carries no clips
 			child->AddComponent(an);
 		}
-		go->AddChild(child);
+		atom->AddChild(child);
 	}
 	for (unsigned int i = 0; i < node->mNumChildren; ++i)
-		go->AddChild(BuildPrefabNode(node->mChildren[i], sc, meshGuids, matGuids, firstClipGuid));
-	return go;
+		atom->AddChild(BuildPrefabNode(node->mChildren[i], sc, meshGuids, matGuids, firstClipGuid));
+	return atom;
 }
 
 // Decode a texture (external file, or assimp-embedded "*N") to RGBA8 and write a .nutex asset.

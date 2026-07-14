@@ -27,10 +27,10 @@ public:
 	static EditorInstance* GetSingleton() 
 	{
 		static EditorInstance instance;
-		/*if (!instance.currentScene)
-			instance.currentScene = new World();
-		if (!instance.currentScene->hierarchy)
-			instance.currentScene->hierarchy = new bc::list<Atom*>();*/
+		/*if (!instance.currentWorld)
+			instance.currentWorld = new World();
+		if (!instance.currentWorld->hierarchy)
+			instance.currentWorld->hierarchy = new bc::list<Atom*>();*/
 		return &instance;
 	}
 };

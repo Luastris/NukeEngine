@@ -144,8 +144,8 @@ void EnablePlugin(NUKEModule* m)
 
 	// Live upgrade: turn any inert placeholders of this plugin's types back into real
 	// components now that the type is available again.
-	if (g_instance && g_instance->currentScene)
-		g_instance->currentScene->RestorePluginComponents(m->moduleFile);
+	if (g_instance && g_instance->currentWorld)
+		g_instance->currentWorld->RestorePluginComponents(m->moduleFile);
 
 	// Service providers register their interface instance under the service name. Loader-
 	// bound (not done by the plugin itself) so provide/revoke can never get out of sync
@@ -169,8 +169,8 @@ void DisablePlugin(NUKEModule* m)
 
 	// Live downgrade FIRST (while the type's reflection + vtable are still valid): convert this
 	// plugin's live components into inert placeholders so nothing dangles after it goes away.
-	if (g_instance && g_instance->currentScene)
-		g_instance->currentScene->ConvertPluginToUnknown(m->moduleFile);
+	if (g_instance && g_instance->currentWorld)
+		g_instance->currentWorld->ConvertPluginToUnknown(m->moduleFile);
 
 	m->Shutdown();   // tears down windows/menus etc.; sets stopped = true
 	m->loaded = false;

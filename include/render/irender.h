@@ -192,7 +192,7 @@ public:
     virtual void rawMouse(double xpos, double ypos) = 0;
     virtual void mouseEnterLeave(int entered) = 0;
 
-    // NOTE: new virtuals go HERE, at the END of the interface — never mid-vtable. Inserting a
+    // NOTE: new virtuals atom HERE, at the END of the interface — never mid-vtable. Inserting a
     // virtual earlier shifts every following slot, silently breaking any iRender consumer that
     // wasn't rebuilt (e.g. NukeImGui calling setOnGUI/renderDrawLists at the wrong offsets).
     //

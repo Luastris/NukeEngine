@@ -119,7 +119,7 @@ Component* Reflect_AddComponent(Atom* atom, const std::string& typeName)
 
 Component* Reflect_ResolveComponent(unsigned long atomId, unsigned long componentId)
 {
-	World* w = AppInstance::GetSingleton()->currentScene;
+	World* w = AppInstance::GetSingleton()->currentWorld;
 	if (!w) return nullptr;
 	Atom* a = w->GetById((long)atomId);
 	if (!a) return nullptr;

@@ -36,7 +36,7 @@
 #include "API/Model/resdb.h"
 #include "API/Model/UnknownComponent.h"
 #include "API/Model/Prefab.h"
-#include "interface/AppInstance.h"   // Prefabs::Instantiate reads content through the host
+#include "interface/AppInstance.h"   // Prefabs::Spawn reads content through the host
 #include "interface/Modular.h"
 #include "reflect/ReflectJson.h"
 #include <boost/filesystem/fstream.hpp>
@@ -82,14 +82,14 @@ static bool RayAABB(const glm::vec3& o, const glm::vec3& d, const glm::vec3& mn,
 
 static void PickRec(bc::list<Atom*>& gos, const glm::vec3& ro, const glm::vec3& rd, float& bestDist, Atom*& best)
 {
-	for (auto go : gos)
+	for (auto atom : gos)
 	{
-		if (auto* mr = go->GetComponent<MeshRenderer>())
+		if (auto* mr = atom->GetComponent<MeshRenderer>())
 		{
 			Mesh* m = mr->mesh;
 			if (m && m->vertexArray && m->numVerts > 0)
 			{
-				Transform& t = go->GetTransform();
+				Transform& t = atom->GetTransform();
 				Vector3 p = t.globalPosition(); Quaternion q = t.globalRotation(); Vector3 s = t.globalScale();
 				glm::mat4 world = glm::translate(glm::mat4(1.0f), glm::vec3((float)p.x, (float)p.y, (float)p.z))
 				                * glm::mat4_cast(ToGlmQ(q))
@@ -108,16 +108,16 @@ static void PickRec(bc::list<Atom*>& gos, const glm::vec3& ro, const glm::vec3& 
 				{
 					glm::vec3 worldHit = glm::vec3(world * glm::vec4(lo + tLocal * ld, 1.0f));
 					float dist = glm::length(worldHit - ro);
-					if (dist < bestDist) { bestDist = dist; best = go; }
+					if (dist < bestDist) { bestDist = dist; best = atom; }
 				}
 			}
 		}
 		// Sprites have no mesh — pick their textured quad (else clicks pass straight through).
-		if (auto* sp = go->GetComponent<Sprite>())
+		if (auto* sp = atom->GetComponent<Sprite>())
 		{
 			if (sp->enabled)
 			{
-				Transform& t = go->GetTransform();
+				Transform& t = atom->GetTransform();
 				Vector3 p = t.globalPosition(), s = t.globalScale();
 				float halfW = sp->width  * 0.5f * (float)s.x;
 				float halfH = sp->height * 0.5f * (float)s.y;
@@ -148,12 +148,12 @@ static void PickRec(bc::list<Atom*>& gos, const glm::vec3& ro, const glm::vec3& 
 					{
 						glm::vec3 d = (ro + tHit * rd) - qc;
 						if (fabsf(glm::dot(d, rgt)) <= halfW && fabsf(glm::dot(d, up)) <= halfH && tHit < bestDist)
-						{ bestDist = tHit; best = go; }
+						{ bestDist = tHit; best = atom; }
 					}
 				}
 			}
 		}
-		if (go->children.size() > 0) PickRec(go->children, ro, rd, bestDist, best);
+		if (atom->children.size() > 0) PickRec(atom->children, ro, rd, bestDist, best);
 	}
 }
 
@@ -170,7 +170,7 @@ Atom* World::Pick(const Vector3& origin, const Vector3& dir) { float d; return P
 
 World::~World()
 {
-	Reflect_DropObject(this);   // script handles to this world go stale-safe dead
+	Reflect_DropObject(this);   // script handles to this world atom stale-safe dead
 }
 
 static Atom* FindByName(Atom* node, const std::string& name)
@@ -185,11 +185,11 @@ static Atom* FindByName(Atom* node, const std::string& name)
 Atom* World::Get(const std::string& name)
 {
 	// Whole-tree lookup, roots first (a root match always wins over a nested one).
-	for (auto go : GetHierarchy())
-		if (go->GetName() == name)
-			return go;
-	for (auto go : GetHierarchy())
-		if (Atom* r = FindByName(go, name))
+	for (auto atom : GetHierarchy())
+		if (atom->GetName() == name)
+			return atom;
+	for (auto atom : GetHierarchy())
+		if (Atom* r = FindByName(atom, name))
 			return r;
 	return nullptr;
 }
@@ -205,8 +205,8 @@ static Atom* FindById(Atom* node, long id)
 
 Atom* World::GetById(long id)
 {
-	for (Atom* go : GetHierarchy())
-		if (Atom* r = FindById(go, id)) return r;
+	for (Atom* atom : GetHierarchy())
+		if (Atom* r = FindById(atom, id)) return r;
 	return nullptr;
 }
 
@@ -215,9 +215,9 @@ bc::list<Atom*>& World::GetHierarchy()
 	return *hierarchy;
 }
 
-void World::Add(Atom* go)
+void World::Add(Atom* atom)
 {
-	hierarchy->push_back(go);
+	hierarchy->push_back(atom);
 }
 
 Atom* World::CreateAtom(const std::string& name)
@@ -258,9 +258,9 @@ void World::Update()
 	}
 	AppInstance* app = AppInstance::GetSingleton();
 	app->worldTickActive = true;   // scripts' Game.LoadWorld queues instead of reloading mid-loop
-	for (Atom* go : *hierarchy)
+	for (Atom* atom : *hierarchy)
 	{
-		go->Update();
+		atom->Update();
 	}
 	app->worldTickActive = false;
 	// Flush deferred destruction (Atom::Destroy / world:QueueDestroy) at a SAFE point —
@@ -295,13 +295,13 @@ void World::Update()
 // Fills `bodyMap` (bodyId -> Collider) for contact-event dispatch after the step.
 static void SyncBodies(bc::list<Atom*>& gos, iPhysics* p, std::map<uint64_t, Collider*>& bodyMap, float dt)
 {
-	for (Atom* go : gos)
+	for (Atom* atom : gos)
 	{
-		if (!go) continue;
-		if (Collider* col = go->GetComponent<Collider>())
+		if (!atom) continue;
+		if (Collider* col = atom->GetComponent<Collider>())
 		{
-			Rigidbody* rb = go->GetComponent<Rigidbody>();
-			Transform& t = go->GetTransform();
+			Rigidbody* rb = atom->GetComponent<Rigidbody>();
+			Transform& t = atom->GetTransform();
 
 			// Motion type changed live (Rigidbody added/removed, Kinematic toggled in the
 			// inspector mid-play)? Recreate — e.g. MoveKinematic on a stale STATIC body is
@@ -347,11 +347,11 @@ static void SyncBodies(bc::list<Atom*>& gos, iPhysics* p, std::map<uint64_t, Col
 				std::vector<float> scaledVerts;
 				if (col->shape == Collider::S_Mesh)
 				{
-					MeshRenderer* mr = go->GetComponent<MeshRenderer>();
+					MeshRenderer* mr = atom->GetComponent<MeshRenderer>();
 					Mesh* mesh = mr ? mr->mesh : nullptr;
 					if (!mesh || !mesh->vertexArray || mesh->numVerts < 3)
 					{
-						std::cout << "[World]\t\t\tmesh collider on '" << go->name
+						std::cout << "[World]\t\t\tmesh collider on '" << atom->name
 						          << "' has no sibling MeshRenderer mesh - skipped" << std::endl;
 						continue;
 					}
@@ -490,8 +490,8 @@ static void SyncBodies(bc::list<Atom*>& gos, iPhysics* p, std::map<uint64_t, Col
 			if (col->bodyId)
 				bodyMap[col->bodyId] = col;
 		}
-		if (!go->children.empty())
-			SyncBodies(go->children, p, bodyMap, dt);
+		if (!atom->children.empty())
+			SyncBodies(atom->children, p, bodyMap, dt);
 	}
 }
 
@@ -532,17 +532,17 @@ static void DispatchContacts(iPhysics* p, const std::map<uint64_t, Collider*>& b
 // Write simulated poses back into the Transforms of DYNAMIC bodies.
 static void PullDynamicPoses(bc::list<Atom*>& gos, iPhysics* p)
 {
-	for (Atom* go : gos)
+	for (Atom* atom : gos)
 	{
-		if (!go) continue;
-		Collider* col = go->GetComponent<Collider>();
-		Rigidbody* rb = go->GetComponent<Rigidbody>();
+		if (!atom) continue;
+		Collider* col = atom->GetComponent<Collider>();
+		Rigidbody* rb = atom->GetComponent<Rigidbody>();
 		if (col && rb && !rb->isKinematic && col->bodyId)
 		{
 			float fp[3], fq[4];
 			if (p->getBodyPose(col->bodyId, fp, fq))
 			{
-				Transform& t = go->GetTransform();
+				Transform& t = atom->GetTransform();
 				t.SetGlobal(Vector3(fp[0], fp[1], fp[2]),
 				            Quaternion(fq[0], fq[1], fq[2], fq[3]),
 				            t.globalScale());
@@ -559,8 +559,8 @@ static void PullDynamicPoses(bc::list<Atom*>& gos, iPhysics* p)
 				col->hasSync = true;
 			}
 		}
-		if (!go->children.empty())
-			PullDynamicPoses(go->children, p);
+		if (!atom->children.empty())
+			PullDynamicPoses(atom->children, p);
 	}
 }
 
@@ -594,8 +594,8 @@ void World::FixedUpdate()
 			PullDynamicPoses(*hierarchy, p);
 			DispatchContacts(p, bodyMap);    // OnCollision/OnTrigger hooks — DIRECT, incl. scripts
 		}
-		for (Atom* go : *hierarchy)          // the EXISTING fixed chain: Atom -> components
-			go->FixedUpdate();               // (scripts' fixedUpdate runs HERE, under the lock)
+		for (Atom* atom : *hierarchy)          // the EXISTING fixed chain: Atom -> components
+			atom->FixedUpdate();               // (scripts' fixedUpdate runs HERE, under the lock)
 		app->worldTickActive = false;
 	}
 }
@@ -604,23 +604,23 @@ void World::FixedUpdate()
 
 static void CollectCameras(bc::list<Atom*>& gos, std::vector<Camera*>& out)
 {
-	for (auto go : gos)
+	for (auto atom : gos)
 	{
-		if (auto* c = go->GetComponent<Camera>())
+		if (auto* c = atom->GetComponent<Camera>())
 			if (c->enabled) out.push_back(c);   // a disabled camera renders nothing
-		if (go->children.size() > 0)
-			CollectCameras(go->children, out);
+		if (atom->children.size() > 0)
+			CollectCameras(atom->children, out);
 	}
 }
 
 static void CollectLights(bc::list<Atom*>& gos, std::vector<Light*>& out)
 {
-	for (auto go : gos)
+	for (auto atom : gos)
 	{
-		if (auto* l = go->GetComponent<Light>())
+		if (auto* l = atom->GetComponent<Light>())
 			if (l->enabled) out.push_back(l);
-		if (go->children.size() > 0)
-			CollectLights(go->children, out);
+		if (atom->children.size() > 0)
+			CollectLights(atom->children, out);
 	}
 }
 
@@ -628,12 +628,12 @@ static void CollectLights(bc::list<Atom*>& gos, std::vector<Light*>& out)
 // world has none — the caller falls back to the first camera.
 static Transform* FindAudioListener(bc::list<Atom*>& gos)
 {
-	for (auto go : gos)
+	for (auto atom : gos)
 	{
-		if (auto* l = go->GetComponent<AudioListener>())
+		if (auto* l = atom->GetComponent<AudioListener>())
 			if (l->enabled && l->transform) return l->transform;
-		if (!go->children.empty())
-			if (Transform* t = FindAudioListener(go->children)) return t;
+		if (!atom->children.empty())
+			if (Transform* t = FindAudioListener(atom->children)) return t;
 	}
 	return nullptr;
 }
@@ -641,31 +641,31 @@ static Transform* FindAudioListener(bc::list<Atom*>& gos)
 // Post-process components (one may sit beside each Camera on the same atom — matched by shared transform).
 static void CollectPostProcess(bc::list<Atom*>& gos, std::vector<PostProcess*>& out)
 {
-	for (auto go : gos)
+	for (auto atom : gos)
 	{
-		if (auto* p = go->GetComponent<PostProcess>())
+		if (auto* p = atom->GetComponent<PostProcess>())
 			if (p->enabled) out.push_back(p);
-		if (go->children.size() > 0)
-			CollectPostProcess(go->children, out);
+		if (atom->children.size() > 0)
+			CollectPostProcess(atom->children, out);
 	}
 }
 
 static ReflectionProbe* FindReflectionProbe(bc::list<Atom*>& gos)
 {
-	for (auto go : gos)
+	for (auto atom : gos)
 	{
-		if (auto* p = go->GetComponent<ReflectionProbe>()) if (p->enabled) return p;
-		if (go->children.size() > 0) if (ReflectionProbe* p = FindReflectionProbe(go->children)) return p;
+		if (auto* p = atom->GetComponent<ReflectionProbe>()) if (p->enabled) return p;
+		if (atom->children.size() > 0) if (ReflectionProbe* p = FindReflectionProbe(atom->children)) return p;
 	}
 	return nullptr;
 }
 
 static Environment* FindEnvironment(bc::list<Atom*>& gos)
 {
-	for (auto go : gos)
+	for (auto atom : gos)
 	{
-		if (auto* e = go->GetComponent<Environment>()) if (e->enabled) return e;
-		if (go->children.size() > 0) if (Environment* e = FindEnvironment(go->children)) return e;
+		if (auto* e = atom->GetComponent<Environment>()) if (e->enabled) return e;
+		if (atom->children.size() > 0) if (Environment* e = FindEnvironment(atom->children)) return e;
 	}
 	return nullptr;
 }
@@ -676,12 +676,12 @@ struct DrawItem { Mesh* mesh; Material* mat; float pos[3], quat[4], scale[3]; Ve
 
 static void CollectMeshes(bc::list<Atom*>& gos, std::vector<DrawItem>& out)
 {
-	for (auto go : gos)
+	for (auto atom : gos)
 	{
-		if (auto* mr = go->GetComponent<MeshRenderer>())
+		if (auto* mr = atom->GetComponent<MeshRenderer>())
 			if (mr->enabled && mr->mesh)
 			{
-				Transform& t = go->GetTransform();
+				Transform& t = atom->GetTransform();
 				Vector3    p = t.globalPosition();
 				Quaternion q = t.globalRotation();
 				Vector3    s = t.globalScale();
@@ -699,8 +699,8 @@ static void CollectMeshes(bc::list<Atom*>& gos, std::vector<DrawItem>& out)
 				for (int k = 0; k < 3; ++k) it.prevScale[k] = mr->prevScale[k];
 				out.push_back(it);
 			}
-		if (go->children.size() > 0)
-			CollectMeshes(go->children, out);
+		if (atom->children.size() > 0)
+			CollectMeshes(atom->children, out);
 	}
 }
 
@@ -744,18 +744,18 @@ static void CameraVP(iRender* r, float vp[16])
 // motion vectors. Runs once per frame (transforms are camera-independent), after all cameras have rendered.
 static void UpdatePrevTransforms(bc::list<Atom*>& gos)
 {
-	for (auto go : gos)
+	for (auto atom : gos)
 	{
-		if (auto* mr = go->GetComponent<MeshRenderer>())
+		if (auto* mr = atom->GetComponent<MeshRenderer>())
 		{
-			Transform& t = go->GetTransform();
+			Transform& t = atom->GetTransform();
 			Vector3 p = t.globalPosition(); Quaternion q = t.globalRotation(); Vector3 s = t.globalScale();
 			mr->prevPos[0] = (float)p.x; mr->prevPos[1] = (float)p.y; mr->prevPos[2] = (float)p.z;
 			mr->prevQuat[0] = (float)q.x; mr->prevQuat[1] = (float)q.y; mr->prevQuat[2] = (float)q.z; mr->prevQuat[3] = (float)q.w;
 			mr->prevScale[0] = (float)s.x; mr->prevScale[1] = (float)s.y; mr->prevScale[2] = (float)s.z;
 			mr->hasPrev = true;
 		}
-		UpdatePrevTransforms(go->children);
+		UpdatePrevTransforms(atom->children);
 	}
 }
 
@@ -800,18 +800,18 @@ static void DrawCollected(std::vector<DrawItem>& items, const Vector3& camPos, i
 struct ScreenSpr { Sprite* sp; Canvas* cv; };
 static void GatherSprites(bc::list<Atom*>& gos, Canvas* ctx, std::vector<Sprite*>& world, std::vector<ScreenSpr>& screen)
 {
-	for (Atom* go : gos)
+	for (Atom* atom : gos)
 	{
-		if (!go) continue;
-		Canvas* here = go->GetComponent<Canvas>();
+		if (!atom) continue;
+		Canvas* here = atom->GetComponent<Canvas>();
 		Canvas* cur  = here ? here : ctx;   // a canvas re-parents the coordinate space for its subtree
-		if (Sprite* sp = go->GetComponent<Sprite>())
+		if (Sprite* sp = atom->GetComponent<Sprite>())
 			if (sp->enabled)
 			{
 				if (cur && cur->mode != CanvasMode::WorldSpace) screen.push_back({ sp, cur });
 				else                                            world.push_back(sp);
 			}
-		GatherSprites(go->children, cur, world, screen);
+		GatherSprites(atom->children, cur, world, screen);
 	}
 }
 static void DrawSprites(bc::list<Atom*>& hierarchy, const NukeCameraDesc& d, const Vector3& camPos, iRender* r)
@@ -892,10 +892,10 @@ static void DrawSprites(bc::list<Atom*>& hierarchy, const NukeCameraDesc& d, con
 // Editor-only: draw a WorldSpace canvas's rectangle as debug lines so its bounds are visible.
 static void DrawCanvasGizmos(bc::list<Atom*>& gos, iRender* r)
 {
-	for (Atom* go : gos)
+	for (Atom* atom : gos)
 	{
-		if (!go) continue;
-		if (Canvas* cv = go->GetComponent<Canvas>())
+		if (!atom) continue;
+		if (Canvas* cv = atom->GetComponent<Canvas>())
 			if (cv->mode == CanvasMode::WorldSpace && cv->transform)
 			{
 				Transform* t = cv->transform;
@@ -912,18 +912,18 @@ static void DrawCanvasGizmos(bc::list<Atom*>& gos, iRender* r)
 				r->drawDebugLine(c00, c10, col); r->drawDebugLine(c10, c11, col);
 				r->drawDebugLine(c11, c01, col); r->drawDebugLine(c01, c00, col);
 			}
-		DrawCanvasGizmos(go->children, r);
+		DrawCanvasGizmos(atom->children, r);
 	}
 }
 
 // --- Decals (Decal component): screen-space, composited onto the opaque colour from the depth prepass. ---
 static void CollectDecals(bc::list<Atom*>& gos, std::vector<Decal*>& out)
 {
-	for (Atom* go : gos)
+	for (Atom* atom : gos)
 	{
-		if (!go) continue;
-		if (Decal* d = go->GetComponent<Decal>()) if (d->enabled) out.push_back(d);
-		CollectDecals(go->children, out);
+		if (!atom) continue;
+		if (Decal* d = atom->GetComponent<Decal>()) if (d->enabled) out.push_back(d);
+		CollectDecals(atom->children, out);
 	}
 }
 static void DrawDecals(std::vector<Decal*>& decals, iRender* r)
@@ -947,11 +947,11 @@ static void DrawDecals(std::vector<Decal*>& decals, iRender* r)
 // decals would otherwise be a cage of orange boxes. `sel` is the editor's selected atom.
 static void DrawDecalGizmos(bc::list<Atom*>& gos, iRender* r, Atom* sel)
 {
-	for (Atom* go : gos)
+	for (Atom* atom : gos)
 	{
-		if (!go) continue;
-		if (go == sel)
-		if (Decal* dc = go->GetComponent<Decal>())
+		if (!atom) continue;
+		if (atom == sel)
+		if (Decal* dc = atom->GetComponent<Decal>())
 			if (dc->transform)
 			{
 				Transform* t = dc->transform;
@@ -975,7 +975,7 @@ static void DrawDecalGizmos(bc::list<Atom*>& gos, iRender* r, Atom* sel)
 				const float acol[4] = { 1.0f, 0.9f, 0.3f, 1.0f };   // projection axis (+Z)
 				r->drawDebugLine(ctr, tip, acol);
 			}
-		DrawDecalGizmos(go->children, r, sel);
+		DrawDecalGizmos(atom->children, r, sel);
 	}
 }
 
@@ -983,13 +983,13 @@ static void DrawDecalGizmos(bc::list<Atom*>& gos, iRender* r, Atom* sel)
 // (null material = casts by default). Transparency is handled in the renderer (alpha-dither).
 static void RenderShadowMeshes(bc::list<Atom*>& gos, iRender* r)
 {
-	for (auto go : gos)
+	for (auto atom : gos)
 	{
-		if (auto* mr = go->GetComponent<MeshRenderer>())
+		if (auto* mr = atom->GetComponent<MeshRenderer>())
 		{
 			if (mr->enabled && mr->mesh && (!mr->mat || mr->mat->castShadows))
 			{
-				Transform& t = go->GetTransform();
+				Transform& t = atom->GetTransform();
 				Vector3    p = t.globalPosition();
 				Quaternion q = t.globalRotation();
 				Vector3    s = t.globalScale();
@@ -999,8 +999,8 @@ static void RenderShadowMeshes(bc::list<Atom*>& gos, iRender* r)
 				r->renderShadowObject(mr->mesh, pos, quat, scale, mr->mat);
 			}
 		}
-		if (go->children.size() > 0)
-			RenderShadowMeshes(go->children, r);
+		if (atom->children.size() > 0)
+			RenderShadowMeshes(atom->children, r);
 	}
 }
 
@@ -1122,7 +1122,7 @@ void World::Render(iRender* r)
 	// Advance animated textures (GIF) by real frame time — the renderer samples Texture::curFrame.
 	// Only the CURRENT scene advances them: auxiliary worlds rendered in the same frame (the
 	// editor's asset preview) must not double-step the global animation clock.
-	if (this == AppInstance::GetSingleton()->currentScene)
+	if (this == AppInstance::GetSingleton()->currentWorld)
 	{
 		double dtMs = Time::getSingleton()->delta * 1000.0;
 		for (Texture* t : ResDB::getSingleton()->textures)
@@ -1152,7 +1152,7 @@ void World::Render(iRender* r)
 	// World::Update only runs in play mode, so the pump can't live there — the editor's
 	// Preview bus and the analysis must work in edit mode too). Listener = the first
 	// enabled AudioListener, else the first camera; game pause halts Music/SFX voices.
-	if (this == AppInstance::GetSingleton()->currentScene)
+	if (this == AppInstance::GetSingleton()->currentWorld)
 		if (iAudio* au = GetService<iAudio>())
 		{
 			au->init();   // idempotent (first call opens the device)
@@ -1473,15 +1473,15 @@ void World::Render(iRender* r)
 
 // --- scene serialization (.nuworld JSON via reflection) ---
 
-static void SaveAtom(Atom* go, json& j)
+static void SaveAtom(Atom* atom, json& j)
 {
-	j["name"] = go->GetName();
-	j["id"]   = go->id.id;   // stable identity (survives the scene rebuild on PIE stop / reload)
-	if (!go->prefabGuid.empty()) j["prefab"] = go->prefabGuid;   // instance link to a .nuprefab
-	Transform& t = go->GetTransform();
+	j["name"] = atom->GetName();
+	j["id"]   = atom->id.id;   // stable identity (survives the scene rebuild on PIE stop / reload)
+	if (!atom->prefabGuid.empty()) j["prefab"] = atom->prefabGuid;   // instance link to a .nuprefab
+	Transform& t = atom->GetTransform();
 	if (TypeInfo* tti = t.GetType())
 		SaveObject(*tti, &t, j["transform"]);
-	for (Component* c : go->components)
+	for (Component* c : atom->components)
 	{
 		if (UnknownComponent* uc = dynamic_cast<UnknownComponent*>(c))
 		{
@@ -1538,7 +1538,7 @@ static void SaveAtom(Atom* go, json& j)
 		cj["cid"]     = c->id.id;
 		j["components"].push_back(cj);
 	}
-	for (Atom* ch : go->children)
+	for (Atom* ch : atom->children)
 	{
 		json chj;
 		SaveAtom(ch, chj);
@@ -1548,13 +1548,13 @@ static void SaveAtom(Atom* go, json& j)
 
 static Atom* LoadAtom(const json& j)
 {
-	Atom* go = new Atom(j.value("name", std::string("Atom")).c_str());
-	if (j.contains("id")) { go->id.id = j["id"].get<long>(); ID::observe(go->id.id); }   // keep the saved identity
-	go->prefabGuid = j.value("prefab", std::string());       // instance link (if any)
-	go->modOrigin  = j.value("__mod", std::string());        // merge provenance (runtime only)
+	Atom* atom = new Atom(j.value("name", std::string("Atom")).c_str());
+	if (j.contains("id")) { atom->id.id = j["id"].get<long>(); ID::observe(atom->id.id); }   // keep the saved identity
+	atom->prefabGuid = j.value("prefab", std::string());       // instance link (if any)
+	atom->modOrigin  = j.value("__mod", std::string());        // merge provenance (runtime only)
 	if (j.contains("transform"))
 	{
-		Transform& t = go->GetTransform();
+		Transform& t = atom->GetTransform();
 		if (TypeInfo* tti = t.GetType())
 			LoadObject(*tti, &t, j["transform"]);
 	}
@@ -1570,7 +1570,7 @@ static Atom* LoadAtom(const json& j)
 				c->id.id   = cj.value("cid", c->id.id); ID::observe(c->id.id);
 				c->modOrigin = cj.value("__mod", std::string());   // merge provenance (runtime only)
 				if (cj.contains("props")) LoadObject(*ti, c, cj["props"]);
-				go->AddComponent(c);             // Init() wires transform/owner + clones the material instance
+				atom->AddComponent(c);             // Init() wires transform/owner + clones the material instance
 				// Apply saved material-instance overrides onto the cloned instance (after Init).
 				if (MeshRenderer* mr = dynamic_cast<MeshRenderer*>(c))
 					if (cj.contains("material") && cj["material"].is_object())
@@ -1622,13 +1622,13 @@ static Atom* LoadAtom(const json& j)
 				uc->id.id   = cj.value("cid", uc->id.id); ID::observe(uc->id.id);
 				if (cj.contains("props")) uc->rawProps = cj["props"].dump();
 				uc->requiredPlugin = cj.value("plugin", std::string(PluginForType(type)));
-				go->AddComponent(uc);
+				atom->AddComponent(uc);
 			}
 		}
 	if (j.contains("children"))
 		for (const json& chj : j["children"])
-			LoadAtom(chj)->SetParent(go);
-	return go;
+			LoadAtom(chj)->SetParent(atom);
+	return atom;
 }
 
 // --- live plugin (un)load: swap an atom's components between real <-> inert placeholder ---
@@ -1736,10 +1736,10 @@ std::string PrefabGuidFromString(const std::string& text)
 
 // Script-facing prefab spawn: content bytes through the engine's layered resolution
 // (raw project or mounted pak + mods) -> reconstruct -> add to the current world root.
-Atom* Prefabs::Instantiate(const std::string& contentRelPath)
+Atom* Prefabs::Spawn(const std::string& contentRelPath)
 {
 	AppInstance* app = AppInstance::GetSingleton();
-	if (!app || !app->currentScene || contentRelPath.empty()) return nullptr;
+	if (!app || !app->currentWorld || contentRelPath.empty()) return nullptr;
 	std::string text;
 	if (!app->ReadContent(contentRelPath, text) || text.empty())
 	{
@@ -1752,9 +1752,9 @@ Atom* Prefabs::Instantiate(const std::string& contentRelPath)
 		std::cout << "[Prefab]\t\tInstantiate: '" << contentRelPath << "' is not a valid prefab" << std::endl;
 		return nullptr;
 	}
-	app->currentScene->LockGame();   // scripts spawn mid-frame — same contract as CreateAtom
-	app->currentScene->Add(a);
-	app->currentScene->UnlockGame();
+	app->currentWorld->LockGame();   // scripts spawn mid-frame — same contract as CreateAtom
+	app->currentWorld->Add(a);
+	app->currentWorld->UnlockGame();
 	return a;
 }
 
@@ -1832,11 +1832,11 @@ std::string World::SaveToString()
 		{"gravity", { settings.gravity[0], settings.gravity[1], settings.gravity[2] }},
 		{"fixedDt", settings.fixedDt} };
 	j["atoms"] = json::array();
-	for (Atom* go : *hierarchy)
+	for (Atom* atom : *hierarchy)
 	{
-		if (go->GetName() == "Editor Camera") continue;   // editor infra, not part of the scene
+		if (atom->GetName() == "Editor Camera") continue;   // editor infra, not part of the scene
 		json gj;
-		SaveAtom(go, gj);
+		SaveAtom(atom, gj);
 		j["atoms"].push_back(gj);
 	}
 	return j.dump(2);
@@ -1846,17 +1846,17 @@ std::string World::SaveToString()
 // round-trips before the fix): atom ids must be globally unique; component ids unique within their atom.
 static void FixDuplicateIds(bc::list<Atom*>& gos, std::set<unsigned long>& seenAtoms)
 {
-	for (Atom* go : gos)
+	for (Atom* atom : gos)
 	{
-		if (go->id.id == 0 || seenAtoms.count(go->id.id)) go->id.generate();
-		seenAtoms.insert(go->id.id);
+		if (atom->id.id == 0 || seenAtoms.count(atom->id.id)) atom->id.generate();
+		seenAtoms.insert(atom->id.id);
 		std::set<unsigned long> seenComps;
-		for (Component* c : go->components)
+		for (Component* c : atom->components)
 		{
 			if (c->id.id == 0 || seenComps.count(c->id.id)) c->id.generate();
 			seenComps.insert(c->id.id);
 		}
-		FixDuplicateIds(go->children, seenAtoms);
+		FixDuplicateIds(atom->children, seenAtoms);
 	}
 }
 

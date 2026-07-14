@@ -36,7 +36,7 @@ public:
 	// layered resolution (raw project or mounted pak + mods), fresh stable ids, components
 	// resolved like a world load. Returns the new root atom (null on failure); place it
 	// via its Transform, parent it via SetParent/Reparent.
-	[[nuke::func]] static Atom* Instantiate(const std::string& contentRelPath);
+	[[nuke::func]] static Atom* Spawn(const std::string& contentRelPath);
 };
 
 }  // namespace nuke

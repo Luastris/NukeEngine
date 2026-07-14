@@ -8,7 +8,7 @@
 
 namespace nuke {
 
-World* Game::GetWorld() { return AppInstance::GetSingleton()->currentScene; }
+World* Game::GetWorld() { return AppInstance::GetSingleton()->currentWorld; }
 
 bool Game::LoadWorld(const std::string& contentRelPath)
 {

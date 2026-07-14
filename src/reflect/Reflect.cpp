@@ -119,7 +119,7 @@ void LoadObject(const TypeInfo& ti, void* obj, const json& j)
 Atom* Reflect_AtomById(unsigned long id)
 {
     if (!id) return nullptr;
-    World* w = AppInstance::GetSingleton()->currentScene;
+    World* w = AppInstance::GetSingleton()->currentWorld;
     return w ? w->GetById((long)id) : nullptr;
 }
 

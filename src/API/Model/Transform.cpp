@@ -28,7 +28,7 @@ Transform::Transform(Atom* parent)
 
 void Transform::Init(Atom* parent)
 {
-	go = parent;
+	atom = parent;
 }
 
 Vector3 Transform::forward()
@@ -114,7 +114,7 @@ void Transform::Reset()
 // World position = parentPos + parentRot * (parentScale ⊙ localPos) — so children orbit/scale with the
 // parent (the old version just ADDED positions, ignoring parent rotation/scale).
 Vector3 Transform::globalPosition() {
-	Atom* p = this->go ? this->go->GetParent() : nullptr;
+	Atom* p = this->atom ? this->atom->GetParent() : nullptr;
 	if (!p) return this->position;
 	Transform& pt = p->GetTransform();
 	Vector3   ps = pt.globalScale();
@@ -125,19 +125,19 @@ Vector3 Transform::globalPosition() {
 }
 
 Quaternion Transform::globalRotation() {
-	return (this->go && this->go->GetParent())
-		? FromGlm(ToGlm(this->go->GetParent()->GetTransform().globalRotation()) * ToGlm(this->rotation))
+	return (this->atom && this->atom->GetParent())
+		? FromGlm(ToGlm(this->atom->GetParent()->GetTransform().globalRotation()) * ToGlm(this->rotation))
 		: this->rotation;
 }
 
 Vector3 Transform::globalScale() {
-	return Vector3((this->go && this->go->GetParent()) ? (this->scale * this->go->GetParent()->GetTransform().globalScale()) : (this->scale));
+	return Vector3((this->atom && this->atom->GetParent()) ? (this->scale * this->atom->GetParent()->GetTransform().globalScale()) : (this->scale));
 }
 
 // Set this transform so its WORLD pose equals (wp, wr, ws), computing the local values relative to the
 // current parent (exact inverse of globalPosition/Rotation/Scale). Used by the gizmo + reparent-keep-world.
 void Transform::SetGlobal(const Vector3& wp, const Quaternion& wr, const Vector3& ws) {
-	Atom* p = this->go ? this->go->GetParent() : nullptr;
+	Atom* p = this->atom ? this->atom->GetParent() : nullptr;
 	if (!p) { this->position = wp; this->rotation = wr; this->scale = ws; return; }
 	Transform& pt = p->GetTransform();
 	Vector3    pp = pt.globalPosition(); Quaternion pr = pt.globalRotation(); Vector3 ps = pt.globalScale();

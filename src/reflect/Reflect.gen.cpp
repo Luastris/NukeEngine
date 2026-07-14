@@ -378,7 +378,7 @@ bool NukeReflectInit() {
 	{
 		TypeInfo& t = TypeOf<Prefabs>();
 		t.base = "Object";
-		t.methods.push_back(MakeMethod("Instantiate", &Prefabs::Instantiate));
+		t.methods.push_back(MakeMethod("Spawn", &Prefabs::Spawn));
 	}
 	{
 		TypeInfo& t = TypeOf<ReflectionProbe>();

@@ -10,7 +10,7 @@ MeshRenderer::MeshRenderer() : Component("MeshRenderer"), mesh(nullptr), mat(nul
 void MeshRenderer::Init(Atom* parent) {
 	transform = &parent->GetTransform();
 	parent->components.push_back(this);
-	// Resolve the mesh by GUID; clone the material asset into an owned INSTANCE (scene edits go on
+	// Resolve the mesh by GUID; clone the material asset into an owned INSTANCE (scene edits atom on
 	// the instance, the .numat stays untouched). World load applies saved overrides after this.
 	if (!mesh && !meshGuid.empty()) mesh = ResDB::getSingleton()->GetMesh(meshGuid);
 	if (!mat && !matGuid.empty())
