@@ -1,4 +1,5 @@
 #include "import/assimporter.h"
+#include "interface/Importers.h"   // plugin importer registry (dispatched from ImportAny)
 #include "API/Model/Prefab.h"
 #include "API/Model/Transform.h"
 #include "API/Model/Texture.h"
@@ -694,11 +695,38 @@ bool AssImporter::ImportAudio(const char* srcPath, const char* destDir)
 	return true;
 }
 
+// --- plugin importer registry (interface/Importers.h) --------------------------------
+static std::vector<AssetImporter>& importerReg() { static std::vector<AssetImporter> v; return v; }
+
+void RegisterImporter(const AssetImporter& imp)
+{
+	for (const AssetImporter& e : importerReg())   // dedup by label (re-enabling a plugin re-registers)
+		if (e.label == imp.label) return;
+	importerReg().push_back(imp);
+}
+const std::vector<AssetImporter>& AssetImporters() { return importerReg(); }
+void ImporterDefer(const std::function<void()>& fn) { AssImporter::Reg(fn); }   // -> main thread (see AssImporter::Reg)
+const AssetImporter* ImporterForExt(const std::string& ext)
+{
+	std::string want = ext;
+	for (char& c : want) c = (char)std::tolower((unsigned char)c);
+	for (const AssetImporter& e : importerReg())
+		for (const std::string& x : e.exts)
+		{
+			std::string xl = x; for (char& c : xl) c = (char)std::tolower((unsigned char)c);
+			if (xl == want) return &e;
+		}
+	return nullptr;
+}
+
 bool AssImporter::ImportAny(const char* srcPath, const char* destDir)
 {
 	if (!srcPath || !*srcPath) return false;
 	std::string ext = bfs::path(srcPath).extension().string();
 	for (char& c : ext) c = (char)std::tolower((unsigned char)c);
+	// Plugin importers win — they fill format gaps (EPS/PSD/custom) OR deliberately override a built-in.
+	if (const AssetImporter* imp = ImporterForExt(ext))
+		return imp->import ? imp->import(srcPath, destDir) : false;
 	static const char* kImg[] = { ".png", ".jpg", ".jpeg", ".tga", ".bmp", ".psd", ".gif", ".hdr", ".pic", ".ppm", ".pgm" };
 	for (const char* e : kImg)
 		if (ext == e) return !ImportImage(srcPath, destDir).empty();
