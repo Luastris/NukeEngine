@@ -139,16 +139,44 @@ bool Texture::Recompress(int targetFormat)
 	return true;
 }
 
-bool Texture::ApplyChromaKey(int kr, int kg, int kb, int tol)
+bool Texture::ApplyChromaKey(int kr, int kg, int kb, int tol, bool outsideOnly)
 {
 	if (renderTexture || frameCount > 1 || width <= 0 || height <= 0) return false;
 	std::vector<uint8_t> rgba = decodeMip0(this);
 	if (rgba.empty()) return false;
 	if (tol < 0) tol = 0;
 	auto ab = [](int v){ return v < 0 ? -v : v; };
-	for (size_t i = 0; i + 3 < rgba.size(); i += 4)
-		if (ab((int)rgba[i] - kr) <= tol && ab((int)rgba[i + 1] - kg) <= tol && ab((int)rgba[i + 2] - kb) <= tol)
-			rgba[i + 3] = 0;
+	auto match = [&](size_t p){ size_t i = p * 4;
+		return ab((int)rgba[i] - kr) <= tol && ab((int)rgba[i + 1] - kg) <= tol && ab((int)rgba[i + 2] - kb) <= tol; };
+	const int W = width, H = height;
+	if (!outsideOnly)
+	{
+		for (size_t p = 0, n = (size_t)W * H; p < n; ++p) if (match(p)) rgba[p * 4 + 3] = 0;
+	}
+	else
+	{
+		// Flood-fill the background inward from every border pixel: only key-coloured pixels REACHABLE
+		// from the edge through other key-coloured pixels are cleared, so enclosed regions survive.
+		std::vector<uint8_t> vis((size_t)W * H, 0);
+		std::vector<int> stack;
+		auto visit = [&](int x, int y) {
+			int p = y * W + x;
+			if (vis[p]) return;
+			vis[p] = 1;
+			if (match((size_t)p)) { rgba[(size_t)p * 4 + 3] = 0; stack.push_back(p); }
+		};
+		for (int x = 0; x < W; ++x) { visit(x, 0); visit(x, H - 1); }
+		for (int y = 0; y < H; ++y) { visit(0, y); visit(W - 1, y); }
+		while (!stack.empty())
+		{
+			int p = stack.back(); stack.pop_back();
+			int x = p % W, y = p / W;
+			if (x > 0)     visit(x - 1, y);
+			if (x < W - 1) visit(x + 1, y);
+			if (y > 0)     visit(x, y - 1);
+			if (y < H - 1) visit(x, y + 1);
+		}
+	}
 	if (format == FMT_BC1 || format == FMT_BC3 || format == FMT_BC5)   // keep it compressed, but in a format that carries alpha
 	{
 		std::vector<uint8_t> enc;

@@ -68,10 +68,11 @@ public:
     bool SpriteCellRect(int index, int& x0, int& y0, int& cw, int& ch) const;
     [[nuke::func]] static int GuessUsage(const std::string& filename);   // filename-suffix heuristic -> Usage
     [[nuke::func]] bool Recompress(int targetFormat);     // decode mip0 -> re-encode to FMT_BC1/BC3/BC5 (inspector override)
-    // Background removal: every pixel within `tolerance` (per-channel, 0..255) of (r,g,b) becomes fully
-    // transparent. Decodes mip0, keys, then re-encodes (BC formats -> BC3 to carry alpha; RGBA8 stays RGBA8).
-    // Static/single-frame textures only. Used for sprites shot on a flat chroma background (jpg/png).
-    [[nuke::func]] bool ApplyChromaKey(int r, int g, int b, int tolerance);
+    // Background removal: pixels within `tolerance` (per-channel, 0..255) of (r,g,b) become fully transparent.
+    // outsideOnly=true keys ONLY the background connected to the image border (4-way flood fill from the
+    // edges) — enclosed same-colour regions (e.g. white eyes) are kept; false keys every matching pixel.
+    // Decodes mip0, keys, re-encodes (BC -> BC3 to carry alpha; RGBA8 stays RGBA8). Single-frame only.
+    [[nuke::func]] bool ApplyChromaKey(int r, int g, int b, int tolerance, bool outsideOnly);
     // Decode mip0 (frame 0 for animated textures) to a tight width*height*4 RGBA8 buffer —
     // CPU-side preview/inspection (the editor uploads it via iRender::createTexture2D).
     std::vector<unsigned char> DecodeRGBA() const;
