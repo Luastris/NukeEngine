@@ -13,6 +13,7 @@
 #include "API/Model/Shader.h"     // post-effect shader props (pack PostParams per stage)
 #include "API/Model/ReflectionProbe.h" // scene-captured reflection cubemap
 #include "API/Model/Time.h"       // animated-texture (GIF) frame advance + fixed-step accumulator
+#include "API/Model/Sprite.h"     // 2D sprite quads (drawn after opaque, back-to-front)
 #include "API/Model/Collider.h"   // physics: shape components -> iPhysics bodies
 #include "API/Model/Jobs.h"       // PumpMain each game-thread frame (2.4)
 #include "API/Model/Rigidbody.h"  // physics: dynamic/kinematic body settings
@@ -106,6 +107,47 @@ static void PickRec(bc::list<Atom*>& gos, const glm::vec3& ro, const glm::vec3& 
 					glm::vec3 worldHit = glm::vec3(world * glm::vec4(lo + tLocal * ld, 1.0f));
 					float dist = glm::length(worldHit - ro);
 					if (dist < bestDist) { bestDist = dist; best = go; }
+				}
+			}
+		}
+		// Sprites have no mesh — pick their textured quad (else clicks pass straight through).
+		if (auto* sp = go->GetComponent<Sprite>())
+		{
+			if (sp->enabled)
+			{
+				Transform& t = go->GetTransform();
+				Vector3 p = t.globalPosition(), s = t.globalScale();
+				float halfW = sp->width  * 0.5f * (float)s.x;
+				float halfH = sp->height * 0.5f * (float)s.y;
+				glm::vec3 center((float)p.x, (float)p.y, (float)p.z), rgt, up;
+				if (sp->mode == SpriteMode::Billboard)
+				{
+					// Face the ray (≈ the camera): build a screen-facing basis perpendicular to rd.
+					glm::vec3 n = -rd;
+					glm::vec3 uref = (fabsf(glm::dot(glm::vec3(0, 1, 0), rd)) > 0.99f) ? glm::vec3(1, 0, 0) : glm::vec3(0, 1, 0);
+					rgt = glm::normalize(glm::cross(uref, n));
+					up  = glm::normalize(glm::cross(n, rgt));
+				}
+				else
+				{
+					Vector3 R = t.right(), U = t.up();
+					rgt = glm::normalize(glm::vec3((float)R.x, (float)R.y, (float)R.z));
+					up  = glm::normalize(glm::vec3((float)U.x, (float)U.y, (float)U.z));
+				}
+				// Quad centre = atom origin shifted by the pivot (matches DrawSprites).
+				float px = 1.0f - 2.0f * sp->pivotX, py = 1.0f - 2.0f * sp->pivotY;
+				glm::vec3 qc = center + rgt * (halfW * px) + up * (halfH * py);
+				glm::vec3 n  = glm::normalize(glm::cross(rgt, up));
+				float denom = glm::dot(n, rd);
+				if (fabsf(denom) > 1e-6f)
+				{
+					float tHit = glm::dot(qc - ro, n) / denom;   // rd is normalized -> tHit is distance
+					if (tHit > 0.0f)
+					{
+						glm::vec3 d = (ro + tHit * rd) - qc;
+						if (fabsf(glm::dot(d, rgt)) <= halfW && fabsf(glm::dot(d, up)) <= halfH && tHit < bestDist)
+						{ bestDist = tHit; best = go; }
+					}
 				}
 			}
 		}
@@ -748,6 +790,66 @@ static void DrawCollected(std::vector<DrawItem>& items, const Vector3& camPos, i
 	}
 }
 
+// --- Sprites (Sprite component): unlit textured quads, drawn after the opaque/transparent meshes,
+// sorted back-to-front. Plane mode uses the atom's right/up; Billboard faces the camera. -----------
+static void CollectSprites(bc::list<Atom*>& gos, std::vector<Sprite*>& out)
+{
+	for (Atom* go : gos)
+	{
+		if (!go) continue;
+		if (Sprite* sp = go->GetComponent<Sprite>()) if (sp->enabled) out.push_back(sp);
+		CollectSprites(go->children, out);
+	}
+}
+static void DrawSprites(bc::list<Atom*>& hierarchy, const NukeCameraDesc& d, const Vector3& camPos, iRender* r)
+{
+	std::vector<Sprite*> sprites;
+	CollectSprites(hierarchy, sprites);
+	if (sprites.empty()) return;
+
+	// Camera basis for billboards (re-orthogonalized, same convention as the renderer's look-at).
+	Vector3 camF(d.camFwd[0], d.camFwd[1], d.camFwd[2]);
+	Vector3 camU0(d.camUp[0], d.camUp[1], d.camUp[2]);
+	double rx = camU0.y*camF.z - camU0.z*camF.y, ry = camU0.z*camF.x - camU0.x*camF.z, rz = camU0.x*camF.y - camU0.y*camF.x;
+	double rl = std::sqrt(rx*rx + ry*ry + rz*rz); if (rl < 1e-9) rl = 1.0;
+	Vector3 camR(rx/rl, ry/rl, rz/rl);
+	Vector3 camU(camF.y*camR.z - camF.z*camR.y, camF.z*camR.x - camF.x*camR.z, camF.x*camR.y - camF.y*camR.x);
+
+	auto d2 = [&](const Vector3& p) { double dx=p.x-camPos.x, dy=p.y-camPos.y, dz=p.z-camPos.z; return dx*dx+dy*dy+dz*dz; };
+	std::sort(sprites.begin(), sprites.end(), [&](Sprite* a, Sprite* b) {
+		Vector3 pa = a->transform ? a->transform->globalPosition() : Vector3();
+		Vector3 pb = b->transform ? b->transform->globalPosition() : Vector3();
+		return d2(pa) > d2(pb);   // farthest first
+	});
+
+	for (Sprite* sp : sprites)
+	{
+		if (!sp->transform || sp->textureGuid.empty()) continue;
+		if (!sp->tex || sp->tex->guid != sp->textureGuid) sp->tex = ResDB::getSingleton()->GetTexture(sp->textureGuid);
+		if (!sp->tex) continue;
+
+		Transform* t = sp->transform;
+		Vector3 pos = t->globalPosition(), sc = t->globalScale();
+		float halfW = sp->width  * 0.5f * (float)sc.x;
+		float halfH = sp->height * 0.5f * (float)sc.y;
+		Vector3 rU = (sp->mode == SpriteMode::Billboard) ? camR : t->right();
+		Vector3 uU = (sp->mode == SpriteMode::Billboard) ? camU : t->up();
+		float rv[3]  = { (float)rU.x*halfW, (float)rU.y*halfW, (float)rU.z*halfW };
+		float upv[3] = { (float)uU.x*halfH, (float)uU.y*halfH, (float)uU.z*halfH };
+		// The atom origin sits at the pivot; shift the quad centre so the pivot lands on the atom.
+		float px = 1.0f - 2.0f*sp->pivotX, py = 1.0f - 2.0f*sp->pivotY;
+		float c[3] = { (float)pos.x + rv[0]*px + upv[0]*py,
+		               (float)pos.y + rv[1]*px + upv[1]*py,
+		               (float)pos.z + rv[2]*px + upv[2]*py };
+		float u0 = sp->u0, v0 = sp->v0, u1 = sp->u1, v1 = sp->v1;
+		if (sp->flipX) std::swap(u0, u1);
+		if (sp->flipY) std::swap(v0, v1);
+		float uvr[4] = { u0, v0, u1, v1 };
+		float tn[4]  = { sp->tint.r, sp->tint.g, sp->tint.b, sp->tint.a };
+		r->drawSprite(sp->tex, c, rv, upv, uvr, tn);
+	}
+}
+
 // Depth-only traversal for the shadow pass: every enabled mesh whose material casts shadows
 // (null material = casts by default). Transparency is handled in the renderer (alpha-dither).
 static void RenderShadowMeshes(bc::list<Atom*>& gos, iRender* r)
@@ -1213,6 +1315,7 @@ void World::Render(iRender* r)
 			std::vector<DrawItem> items;
 			CollectMeshes(*hierarchy, items);
 			DrawCollected(items, cp, r, settings.frustumCull);
+			DrawSprites(*hierarchy, d, cp, r);   // 2D sprites: after opaque, back-to-front, depth-tested
 		}
 		// Selection highlight (editor only): outline the selected object after the scene.
 		if (editor)

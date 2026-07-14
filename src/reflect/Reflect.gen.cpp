@@ -24,6 +24,8 @@
 #include "API/Model/ReflectionProbe.h"
 #include "API/Model/Rigidbody.h"
 #include "API/Model/Shader.h"
+#include "API/Model/Sprite.h"
+#include "API/Model/SpriteAnimator.h"
 #include "API/Model/Texture.h"
 #include "API/Model/Time.h"
 #include "API/Model/Transform.h"
@@ -391,6 +393,41 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("name", &Shader::name, "", "Name"));
 		t.fields.push_back(MakeField("isPost", &Shader::isPost, "", "Post Effect"));
 		t.create = []() -> void* { return new Shader(); };
+	}
+	{
+		TypeInfo& t = TypeOf<Sprite>();
+		t.base = "Component";
+		t.fields.push_back(MakeField("textureGuid", &Sprite::textureGuid, "texture", "Texture"));
+		t.fields.push_back(MakeField("tint", &Sprite::tint, "", "Tint"));
+		t.fields.push_back(MakeField("width", &Sprite::width, "", "Width"));
+		t.fields.push_back(MakeField("height", &Sprite::height, "", "Height"));
+		t.fields.push_back(MakeField("pivotX", &Sprite::pivotX, "", "Pivot X", 0.0f, 1.0f));
+		t.fields.push_back(MakeField("pivotY", &Sprite::pivotY, "", "Pivot Y", 0.0f, 1.0f));
+		t.fields.push_back(MakeField("mode", &Sprite::mode, "", "Mode", 0.0f, 0.0f, "Plane,Billboard"));
+		t.fields.push_back(MakeField("flipX", &Sprite::flipX, "", "Flip X"));
+		t.fields.push_back(MakeField("flipY", &Sprite::flipY, "", "Flip Y"));
+		t.methods.push_back(MakeMethod("SetTint", &Sprite::SetTint));
+		t.methods.push_back(MakeMethod("SetSize", &Sprite::SetSize));
+		t.methods.push_back(MakeMethod("SetPivot", &Sprite::SetPivot));
+		t.methods.push_back(MakeMethod("SetFrame", &Sprite::SetFrame));
+		t.create = []() -> void* { return new Sprite(); };
+	}
+	{
+		TypeInfo& t = TypeOf<SpriteAnimator>();
+		t.base = "Component";
+		t.fields.push_back(MakeField("columns", &SpriteAnimator::columns, "", "Columns", 1.0f, 64.0f));
+		t.fields.push_back(MakeField("rows", &SpriteAnimator::rows, "", "Rows", 1.0f, 64.0f));
+		t.fields.push_back(MakeField("firstFrame", &SpriteAnimator::firstFrame, "", "First Frame"));
+		t.fields.push_back(MakeField("frameCount", &SpriteAnimator::frameCount, "", "Frame Count"));
+		t.fields.push_back(MakeField("fps", &SpriteAnimator::fps, "", "FPS", 0.0f, 120.0f));
+		t.fields.push_back(MakeField("loop", &SpriteAnimator::loop, "", "Loop"));
+		t.fields.push_back(MakeField("playOnStart", &SpriteAnimator::playOnStart, "", "Play On Start"));
+		t.methods.push_back(MakeMethod("Play", &SpriteAnimator::Play));
+		t.methods.push_back(MakeMethod("Stop", &SpriteAnimator::Stop));
+		t.methods.push_back(MakeMethod("IsPlaying", &SpriteAnimator::IsPlaying));
+		t.methods.push_back(MakeMethod("SetFrame", &SpriteAnimator::SetFrame));
+		t.methods.push_back(MakeMethod("CurrentFrame", &SpriteAnimator::CurrentFrame));
+		t.create = []() -> void* { return new SpriteAnimator(); };
 	}
 	{
 		TypeInfo& t = TypeOf<Texture>();

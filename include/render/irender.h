@@ -389,6 +389,14 @@ public:
     virtual void setVSync(bool on) {}
     virtual bool getVSync() { return true; }
 
+    // Draw a textured, unlit, alpha-blended quad (a 2D sprite) in the CURRENT camera pass, after
+    // opaque geometry. The engine computes the quad's world basis — `center` + the half-extent
+    // vectors `right`/`up` (so billboard vs in-plane is decided engine-side) — plus the UV region
+    // `uv`={u0,v0,u1,v1} (atlas cell / flip) and RGBA `tint`. Depth-tested, no depth write. No-op
+    // if the backend has no sprite pipeline. Call between beginCamera/endCamera.
+    virtual void drawSprite(Texture* tex, const float center[3], const float right[3], const float up[3],
+                            const float uv[4], const float tint[4]) {}
+
     // ABI: new virtuals are appended at the END of the class, NEVER inserted mid-vtable —
     // plugins are separate DLLs built at different times, and an inserted slot shifts every
     // later one (an old NukeGUI.dll calling getScrollDelta through a shifted slot landed in
