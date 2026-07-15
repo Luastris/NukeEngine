@@ -36,6 +36,7 @@ public:
 	[[nuke::prop(label="Mode", enum="Plane,Billboard")]] SpriteMode mode = SpriteMode::Plane;
 	[[nuke::prop(label="Flip X")]] bool flipX = false;
 	[[nuke::prop(label="Flip Y")]] bool flipY = false;
+	// (nine-slice lives ON THE TEXTURE — Texture::nineSlice + slice borders, set in the slicer.)
 
 	// Runtime UV region [u0,v0,u1,v1] within the texture — full frame by default. Sprite animation
 	// (SpriteAnimator) drives this to show atlas cells. Not serialized (comes from the frame/anim).

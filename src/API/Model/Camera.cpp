@@ -13,10 +13,6 @@ Camera::Camera(iRender* renderer) : Component("Camera")
 {
 	this->renderer = renderer;
 	this->renderer->transform = transform;
-	renderLayers = NUKEE_LAYER_DEFAULT | NUKEE_LAYER_SKY | NUKEE_LAYER_WATER;
-#ifdef EDITOR
-	renderLayers |= NUKEE_LAYER_EDITOR;
-#endif // EDITOR
 	renderer->width = this->r_width;
 	renderer->height = this->r_height;
 	renderer->fov = fov;
@@ -265,6 +261,8 @@ void Camera::SetProjection(Projection p) { projection = p; }   // World::Render 
 Projection Camera::GetProjection()       { return projection; }
 void   Camera::SetOrthoSize(double size) { orthoSize = (float)size; }
 double Camera::GetOrthoSize()            { return orthoSize; }
+void   Camera::SetLayerMask(double mask) { layerMask = (int)(long long)mask; }
+double Camera::GetLayerMask()            { return (double)(unsigned int)layerMask; }
 
 void Camera::Reset() {}
 void Camera::Pause() {}

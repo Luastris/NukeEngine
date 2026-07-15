@@ -413,6 +413,13 @@ public:
     virtual void drawDecal(Texture* tex, const float pos[3], const float quat[4], const float scale[3],
                            const float tint[4], float intensity, float angleFade, int mode) {}
 
+    // drawSpriteScreen with an explicit SCALE MODE — how the canvas's reference resolution maps onto
+    // the target: 0 Fit (uniform, letterboxed), 1 Stretch (corners = screen corners), 2 Expand
+    // (uniform, covers/crops), 3 FitWidth, 4 FitHeight. The old method behaves as mode 0.
+    virtual void drawSpriteScreenEx(Texture* tex, const float rect[4], const float refSize[2],
+                                    const float uv[4], const float tint[4], int afterPost, int scaleMode)
+    { drawSpriteScreen(tex, rect, refSize, uv, tint, afterPost); }
+
     // ABI: new virtuals are appended at the END of the class, NEVER inserted mid-vtable —
     // plugins are separate DLLs built at different times, and an inserted slot shifts every
     // later one (an old NukeGUI.dll calling getScrollDelta through a shifted slot landed in

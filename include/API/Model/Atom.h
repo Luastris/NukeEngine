@@ -37,7 +37,9 @@ public:
 	ID id;
 	std::string prefabGuid;   // if set, this atom is an INSTANCE of that prefab (manual apply/reset only)
 
-	int layer = Layer::L_DEFAULT;
+	// Render layer INDEX (0..31, see nuke::Layers): cameras render an atom only when their
+	// layerMask has this bit set. 0 = "Default"; 31 is conventionally the editor's own objects.
+	int layer = 0;
 
     bc::list<Component*> components = bc::list<Component*>();
     bc::list<Atom*> children = bc::list<Atom*>();
@@ -51,6 +53,8 @@ public:
 	[[nuke::func]] std::string GetTag();
 	[[nuke::func]] void SetName(const std::string& name);
 	[[nuke::func]] void SetTag(const std::string& tag);
+	[[nuke::func]] void   SetLayer(double index);   // render layer index 0..31 (clamped; see nuke::Layers)
+	[[nuke::func]] double GetLayer();
 	Transform& GetTransform();
 	
 	template<class T>

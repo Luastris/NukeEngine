@@ -15,6 +15,7 @@
 #include "API/Model/Decal.h"
 #include "API/Model/Environment.h"
 #include "API/Model/Game.h"
+#include "API/Model/Layers.h"
 #include "API/Model/Light.h"
 #include "API/Model/Log.h"
 #include "API/Model/Material.h"
@@ -23,8 +24,10 @@
 #include "API/Model/Physics.h"
 #include "API/Model/PostProcess.h"
 #include "API/Model/Prefab.h"
+#include "API/Model/RectAnchor.h"
 #include "API/Model/ReflectionProbe.h"
 #include "API/Model/Rigidbody.h"
+#include "API/Model/Screen.h"
 #include "API/Model/Shader.h"
 #include "API/Model/Sprite.h"
 #include "API/Model/SpriteAnimator.h"
@@ -118,6 +121,8 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("GetTag", &Atom::GetTag));
 		t.methods.push_back(MakeMethod("SetName", &Atom::SetName));
 		t.methods.push_back(MakeMethod("SetTag", &Atom::SetTag));
+		t.methods.push_back(MakeMethod("SetLayer", &Atom::SetLayer));
+		t.methods.push_back(MakeMethod("GetLayer", &Atom::GetLayer));
 		t.methods.push_back(MakeMethod("SetParent", &Atom::SetParent));
 		t.methods.push_back(MakeMethod("GetParent", &Atom::GetParent));
 		t.methods.push_back(MakeMethod("AddChild", &Atom::AddChild));
@@ -187,6 +192,7 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("projection", &Camera::projection, "", "Projection", 0.0f, 0.0f, "Perspective,Orthographic"));
 		t.fields.push_back(MakeField("orthoSize", &Camera::orthoSize, "", "Ortho Size"));
 		t.fields.push_back(MakeField("projTransition", &Camera::projTransition, "", "Proj Transition"));
+		t.fields.push_back(MakeField("layerMask", &Camera::layerMask, "", "Layer Mask"));
 		t.fields.push_back(MakeField("freeMode", &Camera::freeMode));
 		t.fields.push_back(MakeField("depth", &Camera::depth));
 		t.fields.push_back(MakeField("background", &Camera::background, "", "Background"));
@@ -195,6 +201,8 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("GetProjection", &Camera::GetProjection));
 		t.methods.push_back(MakeMethod("SetOrthoSize", &Camera::SetOrthoSize));
 		t.methods.push_back(MakeMethod("GetOrthoSize", &Camera::GetOrthoSize));
+		t.methods.push_back(MakeMethod("SetLayerMask", &Camera::SetLayerMask));
+		t.methods.push_back(MakeMethod("GetLayerMask", &Camera::GetLayerMask));
 		t.create = []() -> void* { return new Camera(); };
 	}
 	{
@@ -204,7 +212,10 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("renderQueue", &Canvas::renderQueue, "", "Render Queue", 0.0f, 0.0f, "WithWorld,AfterPost"));
 		t.fields.push_back(MakeField("width", &Canvas::width, "", "Width"));
 		t.fields.push_back(MakeField("height", &Canvas::height, "", "Height"));
+		t.fields.push_back(MakeField("scaling", &Canvas::scaling, "", "Scaling", 0.0f, 0.0f, "Fit,Stretch,Expand,FitWidth,FitHeight"));
+		t.fields.push_back(MakeField("pixelsPerUnit", &Canvas::pixelsPerUnit, "", "Pixels Per Unit"));
 		t.fields.push_back(MakeField("sortOrder", &Canvas::sortOrder, "", "Sort Order"));
+		t.fields.push_back(MakeField("targetCamera", &Canvas::targetCamera, "Camera", "Camera"));
 		t.create = []() -> void* { return new Canvas(); };
 	}
 	{
@@ -301,6 +312,14 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("IsVSync", &Game::IsVSync));
 	}
 	{
+		TypeInfo& t = TypeOf<Layers>();
+		t.base = "Object";
+		t.methods.push_back(MakeMethod("Name", &Layers::Name));
+		t.methods.push_back(MakeMethod("IndexOf", &Layers::IndexOf));
+		t.methods.push_back(MakeMethod("MaskOf", &Layers::MaskOf));
+		t.methods.push_back(MakeMethod("SetName", &Layers::SetName));
+	}
+	{
 		TypeInfo& t = TypeOf<Light>();
 		t.base = "Component";
 		t.fields.push_back(MakeField("type", &Light::type, "", "Type", 0.0f, 0.0f, "Directional,Point,Spot"));
@@ -382,6 +401,19 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("Spawn", &Prefabs::Spawn));
 	}
 	{
+		TypeInfo& t = TypeOf<RectAnchor>();
+		t.base = "Component";
+		t.fields.push_back(MakeField("left", &RectAnchor::left, "", "Left"));
+		t.fields.push_back(MakeField("right", &RectAnchor::right, "", "Right"));
+		t.fields.push_back(MakeField("top", &RectAnchor::top, "", "Top"));
+		t.fields.push_back(MakeField("bottom", &RectAnchor::bottom, "", "Bottom"));
+		t.fields.push_back(MakeField("distLeft", &RectAnchor::distLeft, "", "Dist Left"));
+		t.fields.push_back(MakeField("distRight", &RectAnchor::distRight, "", "Dist Right"));
+		t.fields.push_back(MakeField("distTop", &RectAnchor::distTop, "", "Dist Top"));
+		t.fields.push_back(MakeField("distBottom", &RectAnchor::distBottom, "", "Dist Bottom"));
+		t.create = []() -> void* { return new RectAnchor(); };
+	}
+	{
 		TypeInfo& t = TypeOf<ReflectionProbe>();
 		t.base = "Component";
 		t.fields.push_back(MakeField("resolution", &ReflectionProbe::resolution, "", "Resolution", 0.0f, 0.0f, "64,128,256,512"));
@@ -409,6 +441,13 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("SetAngularVelocity", &Rigidbody::SetAngularVelocity));
 		t.methods.push_back(MakeMethod("AngularVelocity", &Rigidbody::AngularVelocity));
 		t.create = []() -> void* { return new Rigidbody(); };
+	}
+	{
+		TypeInfo& t = TypeOf<Screen>();
+		t.base = "Object";
+		t.methods.push_back(MakeMethod("Width", &Screen::Width));
+		t.methods.push_back(MakeMethod("Height", &Screen::Height));
+		t.methods.push_back(MakeMethod("Aspect", &Screen::Aspect));
 	}
 	{
 		TypeInfo& t = TypeOf<Shader>();
@@ -465,6 +504,7 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("spriteMarginBottom", &Texture::spriteMarginBottom, "", "Margin Bottom"));
 		t.fields.push_back(MakeField("spriteSpacingX", &Texture::spriteSpacingX, "", "Sprite Spacing X"));
 		t.fields.push_back(MakeField("spriteSpacingY", &Texture::spriteSpacingY, "", "Sprite Spacing Y"));
+		t.fields.push_back(MakeField("nineSlice", &Texture::nineSlice, "", "Nine Slice"));
 		t.fields.push_back(MakeField("sliceLeft", &Texture::sliceLeft, "", "Slice Left"));
 		t.fields.push_back(MakeField("sliceRight", &Texture::sliceRight, "", "Slice Right"));
 		t.fields.push_back(MakeField("sliceTop", &Texture::sliceTop, "", "Slice Top"));

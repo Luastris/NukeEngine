@@ -44,8 +44,13 @@ public:
     [[nuke::prop(label="Proj Transition")]] float projTransition = 8.0f;
     float projBlend = 0.0f;        // runtime 0=perspective..1=orthographic (eased; not serialized)
     bool  projBlendInit = false;   // first frame snaps the blend to the target (no open-time animation)
-	unsigned long int renderLayers;
+    // Render-layer MASK: bit i = this camera renders atoms with Atom::layer == i (see nuke::Layers).
+    // -1 = everything. The inspector draws it as a named multi-select (CamComponent override).
+    [[nuke::prop(label="Layer Mask")]] int layerMask = -1;
     [[nuke::prop]] bool freeMode = false;
+    // Set by the EDITOR on its own camera (not serialized): screen-space canvases are NOT pinned to
+    // this camera — they render as editable world-plane rectangles instead (see World::DrawSprites).
+    bool editorCamera = false;
 
     // Per-camera render contract (see World::Render).
     uint64_t renderTarget = 0;                       // iRender RT id; 0 = backbuffer
@@ -89,6 +94,9 @@ public:
 	[[nuke::func]] Projection GetProjection();
 	[[nuke::func]] void       SetOrthoSize(double size);
 	[[nuke::func]] double     GetOrthoSize();
+	// Render-layer mask (bitmask over nuke::Layers indices; compose with Layers.MaskOf("UI,FX")).
+	[[nuke::func]] void       SetLayerMask(double mask);
+	[[nuke::func]] double     GetLayerMask();
 
 	void Init(Atom* parent);
 	void FixedUpdate();

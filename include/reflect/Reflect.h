@@ -37,6 +37,10 @@ enum class FT { Unknown, Bool, Int, Float, Double, String, Vec2, Vec3, Vec4, Qua
 // AtomRef <-> live atom (defined in Reflect.cpp; walks the CURRENT world by stable id).
 NUKEENGINE_API Atom*         Reflect_AtomById(unsigned long id);
 NUKEENGINE_API unsigned long Reflect_AtomId(Atom* a);
+// AtomRef PROPS ([[nuke::prop]] Atom* fields) serialize as stable ids; loading queues a fixup that
+// resolves once the whole hierarchy exists (World::Load* / prefab instantiation call Resolve).
+NUKEENGINE_API void Reflect_QueueAtomRefFixup(Atom** slot, unsigned long id);
+NUKEENGINE_API void Reflect_ResolveAtomRefs();
 
 // ObjectRef <-> live reflected instance (defined in ReflectBind.cpp — the object-handle
 // table). Reflect_ObjectPtr is IS-A checked: the handle's type must be `typeName` or

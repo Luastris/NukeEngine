@@ -256,7 +256,7 @@ int Texture::GuessUsage(const std::string& filename)
 
 namespace {
 	const char kMagic[8] = { 'N','U','T','E','X','\0','\0','\0' };
-	const uint32_t kVersion = 9;   // v2..v7 as before; v8: symmetric margin/spacing+9-slice; v9: per-side margins
+	const uint32_t kVersion = 10;   // v2..v7 as before; v8: symmetric margin/spacing+9-slice; v9: per-side margins; v10: nineSlice flag
 }
 
 bool Texture::SaveToFile(const std::string& path) const
@@ -280,6 +280,7 @@ bool Texture::SaveToFile(const std::string& path) const
 	                 spriteSpacingX, spriteSpacingY, sliceLeft, sliceRight, sliceTop, sliceBottom };
 	for (int32_t& v : v9) { if (v < 0) v = 0; }
 	o.write((const char*)v9, sizeof(v9));
+	uint8_t ns = nineSlice ? 1 : 0; o.write((const char*)&ns, 1);   // v10: nine-slice enabled
 	uint32_t bytes = (uint32_t)pixels.size(); o.write((const char*)&bytes, 4);
 	if (bytes) o.write((const char*)pixels.data(), bytes);
 	return (bool)o;
@@ -327,6 +328,7 @@ Texture* Texture::LoadFromStream(std::istream& i)
 		t->spriteMarginLeft = v9[0]; t->spriteMarginRight = v9[1]; t->spriteMarginTop = v9[2]; t->spriteMarginBottom = v9[3];
 		t->spriteSpacingX = v9[4]; t->spriteSpacingY = v9[5];
 		t->sliceLeft = v9[6]; t->sliceRight = v9[7]; t->sliceTop = v9[8]; t->sliceBottom = v9[9]; }
+	if (version >= 10) { uint8_t ns = 0; i.read((char*)&ns, 1); t->nineSlice = (ns != 0); }   // v10
 	uint32_t bytes = 0; i.read((char*)&bytes, 4);
 	if (bytes) { t->pixels.resize(bytes); i.read((char*)t->pixels.data(), bytes); }
 	if (!i && !i.eof()) { delete t; return nullptr; }

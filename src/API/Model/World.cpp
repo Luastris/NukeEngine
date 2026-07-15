@@ -15,6 +15,7 @@
 #include "API/Model/Time.h"       // animated-texture (GIF) frame advance + fixed-step accumulator
 #include "API/Model/Sprite.h"     // 2D sprite quads (drawn after opaque, back-to-front)
 #include "API/Model/Canvas.h"     // 2D layout container (WorldSpace rect + editor gizmo)
+#include "API/Model/RectAnchor.h" // canvas anchors/layout (applied before rendering)
 #include "API/Model/Decal.h"      // screen-space decals (composited from the depth prepass)
 #include "API/Model/Collider.h"   // physics: shape components -> iPhysics bodies
 #include "API/Model/Jobs.h"       // PumpMain each game-thread frame (2.4)
@@ -81,10 +82,43 @@ static bool RayAABB(const glm::vec3& o, const glm::vec3& d, const glm::vec3& mn,
 	return tHit >= 0.0f;
 }
 
-static void PickRec(bc::list<Atom*>& gos, const glm::vec3& ro, const glm::vec3& rd, float& bestDist, Atom*& best)
+// Ray vs an oriented rectangle (centre qc, unit half-axes rgt/up, half extents halfW/halfH).
+static bool RayQuad(const glm::vec3& ro, const glm::vec3& rd, const glm::vec3& qc,
+                    const glm::vec3& rgt, const glm::vec3& up, float halfW, float halfH, float& outT)
+{
+	glm::vec3 n = glm::normalize(glm::cross(rgt, up));
+	float denom = glm::dot(n, rd);
+	if (fabsf(denom) <= 1e-6f) return false;
+	float tHit = glm::dot(qc - ro, n) / denom;   // rd is normalized -> tHit is distance
+	if (tHit <= 0.0f) return false;
+	glm::vec3 d = (ro + tHit * rd) - qc;
+	if (fabsf(glm::dot(d, rgt)) > halfW || fabsf(glm::dot(d, up)) > halfH) return false;
+	outT = tHit;
+	return true;
+}
+
+static void PickRec(bc::list<Atom*>& gos, const glm::vec3& ro, const glm::vec3& rd, float& bestDist, Atom*& best,
+                    Canvas* ctx = nullptr)
 {
 	for (auto atom : gos)
 	{
+		// A canvas re-parents the coordinate space for its subtree (same rule as rendering).
+		Canvas* here = atom->GetComponent<Canvas>();
+		Canvas* cur  = here ? here : ctx;
+		// The canvas ITSELF is pickable by its rectangle (world units; screen-space at 1/ppu px —
+		// the same plane the editor camera renders it on).
+		if (here && here->transform)
+		{
+			const float es = (here->mode == CanvasMode::WorldSpace) ? 1.0f : here->PxToWorld();
+			Transform* t = here->transform;
+			Vector3 p = t->globalPosition(), R = t->right(), U = t->up();
+			glm::vec3 c((float)p.x, (float)p.y, (float)p.z);
+			glm::vec3 rgt = glm::normalize(glm::vec3((float)R.x, (float)R.y, (float)R.z));
+			glm::vec3 up  = glm::normalize(glm::vec3((float)U.x, (float)U.y, (float)U.z));
+			float tHit;
+			if (RayQuad(ro, rd, c, rgt, up, here->width * 0.5f * es, here->height * 0.5f * es, tHit) && tHit < bestDist)
+			{ bestDist = tHit; best = atom; }
+		}
 		if (auto* mr = atom->GetComponent<MeshRenderer>())
 		{
 			Mesh* m = mr->mesh;
@@ -114,6 +148,8 @@ static void PickRec(bc::list<Atom*>& gos, const glm::vec3& ro, const glm::vec3& 
 			}
 		}
 		// Sprites have no mesh — pick their textured quad (else clicks pass straight through).
+		// Canvas children pick WHERE THEY RENDER: screen-space children sit on the canvas's editor
+		// plane at their true world offsets (WYSIWYG), world-canvas children pinned to the plane.
 		if (auto* sp = atom->GetComponent<Sprite>())
 		{
 			if (sp->enabled)
@@ -123,7 +159,30 @@ static void PickRec(bc::list<Atom*>& gos, const glm::vec3& ro, const glm::vec3& 
 				float halfW = sp->width  * 0.5f * (float)s.x;
 				float halfH = sp->height * 0.5f * (float)s.y;
 				glm::vec3 center((float)p.x, (float)p.y, (float)p.z), rgt, up;
-				if (sp->mode == SpriteMode::Billboard)
+				bool onCanvas = false;
+				if (cur && cur != here && cur->transform)   // a child of a canvas (not the canvas atom itself)
+				{
+					Transform* ct = cur->transform;
+					Vector3 cp = ct->globalPosition(), R = ct->right(), U = ct->up();
+					rgt = glm::normalize(glm::vec3((float)R.x, (float)R.y, (float)R.z));
+					up  = glm::normalize(glm::vec3((float)U.x, (float)U.y, (float)U.z));
+					glm::vec3 c0((float)cp.x, (float)cp.y, (float)cp.z);
+					if (cur->mode != CanvasMode::WorldSpace)
+					{
+						// Editor plane mapping (matches DrawSprites' editor path): children keep their
+						// TRUE world offsets/sizes on the plane (px = world*ppu, plane = px/ppu -> 1:1).
+						const float dx = (float)(p.x - cp.x), dy = (float)(p.y - cp.y);
+						center = c0 + rgt * dx + up * dy;
+					}
+					else
+					{
+						// World canvas: position projected onto the plane (Z pinned).
+						glm::vec3 dv = center - c0;
+						center = c0 + rgt * glm::dot(dv, rgt) + up * glm::dot(dv, up);
+					}
+					onCanvas = true;
+				}
+				else if (sp->mode == SpriteMode::Billboard)
 				{
 					// Face the ray (≈ the camera): build a screen-facing basis perpendicular to rd.
 					glm::vec3 n = -rd;
@@ -137,24 +196,17 @@ static void PickRec(bc::list<Atom*>& gos, const glm::vec3& ro, const glm::vec3& 
 					rgt = glm::normalize(glm::vec3((float)R.x, (float)R.y, (float)R.z));
 					up  = glm::normalize(glm::vec3((float)U.x, (float)U.y, (float)U.z));
 				}
-				// Quad centre = atom origin shifted by the pivot (matches DrawSprites).
-				float px = 1.0f - 2.0f * sp->pivotX, py = 1.0f - 2.0f * sp->pivotY;
+				// Quad centre = atom origin shifted by the pivot (matches DrawSprites). Canvas
+				// children draw centre-on-origin (no pivot shift in the canvas paths).
+				float px = onCanvas ? 0.0f : 1.0f - 2.0f * sp->pivotX;
+				float py = onCanvas ? 0.0f : 1.0f - 2.0f * sp->pivotY;
 				glm::vec3 qc = center + rgt * (halfW * px) + up * (halfH * py);
-				glm::vec3 n  = glm::normalize(glm::cross(rgt, up));
-				float denom = glm::dot(n, rd);
-				if (fabsf(denom) > 1e-6f)
-				{
-					float tHit = glm::dot(qc - ro, n) / denom;   // rd is normalized -> tHit is distance
-					if (tHit > 0.0f)
-					{
-						glm::vec3 d = (ro + tHit * rd) - qc;
-						if (fabsf(glm::dot(d, rgt)) <= halfW && fabsf(glm::dot(d, up)) <= halfH && tHit < bestDist)
-						{ bestDist = tHit; best = atom; }
-					}
-				}
+				float tHit;
+				if (RayQuad(ro, rd, qc, rgt, up, halfW, halfH, tHit) && tHit < bestDist)
+				{ bestDist = tHit; best = atom; }
 			}
 		}
-		if (atom->children.size() > 0) PickRec(atom->children, ro, rd, bestDist, best);
+		if (atom->children.size() > 0) PickRec(atom->children, ro, rd, bestDist, best, cur);
 	}
 }
 
@@ -676,10 +728,15 @@ static Environment* FindEnvironment(bc::list<Atom*>& gos)
 struct DrawItem { Mesh* mesh; Material* mat; float pos[3], quat[4], scale[3]; Vector3 wpos; int blend; bool inReflections;
                   float prevPos[3], prevQuat[4], prevScale[3]; bool hasPrev; };   // prev transform for TAA velocity
 
-static void CollectMeshes(bc::list<Atom*>& gos, std::vector<DrawItem>& out)
+// Render-layer filter: bit i of `mask` = render atoms with Atom::layer == i (see nuke::Layers).
+// The default (all bits) keeps the GLOBAL passes (shadows, probes, the RT scene) layer-blind.
+static inline bool LayerVisible(Atom* atom, unsigned int mask) { return (mask >> (atom->layer & 31)) & 1u; }
+
+static void CollectMeshes(bc::list<Atom*>& gos, std::vector<DrawItem>& out, unsigned int mask = 0xFFFFFFFFu)
 {
 	for (auto atom : gos)
 	{
+		if (LayerVisible(atom, mask))
 		if (auto* mr = atom->GetComponent<MeshRenderer>())
 			if (mr->enabled && mr->mesh)
 			{
@@ -702,7 +759,7 @@ static void CollectMeshes(bc::list<Atom*>& gos, std::vector<DrawItem>& out)
 				out.push_back(it);
 			}
 		if (atom->children.size() > 0)
-			CollectMeshes(atom->children, out);
+			CollectMeshes(atom->children, out, mask);
 	}
 }
 
@@ -799,33 +856,140 @@ static void DrawCollected(std::vector<DrawItem>& items, const Vector3& camPos, i
 // --- Sprites (Sprite component): unlit textured quads. WORLD sprites (standalone or under a
 // WorldSpace canvas) draw after the meshes, back-to-front. SCREEN sprites (under a ScreenSpace
 // canvas) draw in the canvas's reference-pixel space via drawSpriteScreen. -------------------------
+
+// Standalone WORLD sprites have no canvas pixel basis — nine-slice borders (texture px) convert to
+// world units through this constant (matches the default canvas Pixels Per Unit).
+static const float kSpritePxToWorld = 1.0f / 100.0f;
+
+// Nine-slice grid: 3x3 sub-rects (centre-origin offsets + sizes in OUTPUT units) and the matching
+// UV grid lines. Borders come from the texture's slice insets (pre-swapped for flips by the caller),
+// converted to output units via pxToOut and shrunk proportionally when the output is smaller than
+// the borders themselves. Returns false when there is nothing to slice.
+struct NinePatch { float rx[3], rw[3], ry[3], rh[3]; float u[4], v[4]; };
+static bool BuildNinePatch(Texture* tex, int sl, int sr, int st, int sb,
+                           float u0, float v0, float u1, float v1,
+                           float outW, float outH, float pxToOut, NinePatch& np)
+{
+	if (!tex || tex->width <= 0 || tex->height <= 0) return false;
+	if (sl <= 0 && sr <= 0 && st <= 0 && sb <= 0) return false;
+	if (outW <= 0.0f || outH <= 0.0f) return false;
+	const float cellW = fabsf(u1 - u0) * tex->width, cellH = fabsf(v1 - v0) * tex->height;
+	if (cellW < 1.0f || cellH < 1.0f) return false;
+
+	float bl = sl * pxToOut, br = sr * pxToOut, bt = st * pxToOut, bb = sb * pxToOut;
+	if (bl + br > outW && bl + br > 0.0f) { float s = outW / (bl + br); bl *= s; br *= s; }
+	if (bt + bb > outH && bt + bb > 0.0f) { float s = outH / (bt + bb); bt *= s; bb *= s; }
+
+	np.rw[0] = bl; np.rw[2] = br; np.rw[1] = outW - bl - br; if (np.rw[1] < 0.0f) np.rw[1] = 0.0f;
+	np.rx[0] = -outW * 0.5f + bl * 0.5f;
+	np.rx[1] = -outW * 0.5f + bl + np.rw[1] * 0.5f;
+	np.rx[2] =  outW * 0.5f - br * 0.5f;
+	// rows bottom -> top (index 0 = bottom strip)
+	np.rh[0] = bb; np.rh[2] = bt; np.rh[1] = outH - bb - bt; if (np.rh[1] < 0.0f) np.rh[1] = 0.0f;
+	np.ry[0] = -outH * 0.5f + bb * 0.5f;
+	np.ry[1] = -outH * 0.5f + bb + np.rh[1] * 0.5f;
+	np.ry[2] =  outH * 0.5f - bt * 0.5f;
+
+	const float fl = sl / cellW, fr = sr / cellW, ft = st / cellH, fb = sb / cellH;
+	np.u[0] = u0; np.u[1] = u0 + (u1 - u0) * fl; np.u[2] = u1 - (u1 - u0) * fr; np.u[3] = u1;
+	np.v[0] = v0; np.v[1] = v0 + (v1 - v0) * ft; np.v[2] = v1 - (v1 - v0) * fb; np.v[3] = v1;   // v grows downward
+	return true;
+}
+
+// Emit one SCREEN sprite — a single rect, or the 3x3 nine-slice grid when enabled (flips swap the
+// border sides so mirrored art keeps its corners).
+static void EmitScreenSprite(iRender* r, Sprite* sp, const float rect[4], const float refSize[2],
+                             const float uvr[4], const float tn[4], int queue, int scaleMode)
+{
+	NinePatch np;
+	const int sl = sp->flipX ? sp->tex->sliceRight  : sp->tex->sliceLeft;
+	const int sr = sp->flipX ? sp->tex->sliceLeft   : sp->tex->sliceRight;
+	const int st = sp->flipY ? sp->tex->sliceBottom : sp->tex->sliceTop;
+	const int sb = sp->flipY ? sp->tex->sliceTop    : sp->tex->sliceBottom;
+	if (sp->tex->nineSlice && BuildNinePatch(sp->tex, sl, sr, st, sb, uvr[0], uvr[1], uvr[2], uvr[3],
+	                                    rect[2], rect[3], 1.0f /* 1 texture px = 1 reference px */, np))
+	{
+		for (int c = 0; c < 3; ++c)
+			for (int rr = 0; rr < 3; ++rr)
+			{
+				if (np.rw[c] <= 0.0f || np.rh[rr] <= 0.0f) continue;
+				float r2[4]  = { rect[0] + np.rx[c], rect[1] + np.ry[rr], np.rw[c], np.rh[rr] };
+				float uv2[4] = { np.u[c], np.v[2 - rr], np.u[c + 1], np.v[3 - rr] };
+				r->drawSpriteScreenEx(sp->tex, r2, refSize, uv2, tn, queue, scaleMode);
+			}
+		return;
+	}
+	r->drawSpriteScreenEx(sp->tex, rect, refSize, uvr, tn, queue, scaleMode);
+}
+
+// Emit one WORLD-quad sprite (centre + UNIT axes + half extents) — single quad, or the nine-slice
+// grid. pxToOut converts the texture's slice pixels into the quad's units (world/editor plane).
+static void EmitWorldSprite(iRender* r, Sprite* sp, const Vector3& center, const Vector3& Rn, const Vector3& Un,
+                            float halfW, float halfH, float pxToOut, const float uvr[4], const float tn[4])
+{
+	NinePatch np;
+	const int sl = sp->flipX ? sp->tex->sliceRight  : sp->tex->sliceLeft;
+	const int sr = sp->flipX ? sp->tex->sliceLeft   : sp->tex->sliceRight;
+	const int st = sp->flipY ? sp->tex->sliceBottom : sp->tex->sliceTop;
+	const int sb = sp->flipY ? sp->tex->sliceTop    : sp->tex->sliceBottom;
+	if (sp->tex->nineSlice && BuildNinePatch(sp->tex, sl, sr, st, sb, uvr[0], uvr[1], uvr[2], uvr[3],
+	                                    halfW * 2.0f, halfH * 2.0f, pxToOut, np))
+	{
+		for (int c = 0; c < 3; ++c)
+			for (int rr = 0; rr < 3; ++rr)
+			{
+				if (np.rw[c] <= 0.0f || np.rh[rr] <= 0.0f) continue;
+				float c3[3]  = { (float)(center.x + Rn.x * np.rx[c] + Un.x * np.ry[rr]),
+				                 (float)(center.y + Rn.y * np.rx[c] + Un.y * np.ry[rr]),
+				                 (float)(center.z + Rn.z * np.rx[c] + Un.z * np.ry[rr]) };
+				float rv2[3]  = { (float)Rn.x * np.rw[c] * 0.5f, (float)Rn.y * np.rw[c] * 0.5f, (float)Rn.z * np.rw[c] * 0.5f };
+				float upv2[3] = { (float)Un.x * np.rh[rr] * 0.5f, (float)Un.y * np.rh[rr] * 0.5f, (float)Un.z * np.rh[rr] * 0.5f };
+				float uv2[4]  = { np.u[c], np.v[2 - rr], np.u[c + 1], np.v[3 - rr] };
+				r->drawSprite(sp->tex, c3, rv2, upv2, uv2, tn);
+			}
+		return;
+	}
+	float rv[3]  = { (float)Rn.x * halfW, (float)Rn.y * halfW, (float)Rn.z * halfW };
+	float upv[3] = { (float)Un.x * halfH, (float)Un.y * halfH, (float)Un.z * halfH };
+	float cc[3]  = { (float)center.x, (float)center.y, (float)center.z };
+	r->drawSprite(sp->tex, cc, rv, upv, uvr, tn);
+}
+
 struct ScreenSpr { Sprite* sp; Canvas* cv; };
-static void GatherSprites(bc::list<Atom*>& gos, Canvas* ctx, std::vector<Sprite*>& world, std::vector<ScreenSpr>& screen)
+static void GatherSprites(bc::list<Atom*>& gos, Canvas* ctx, std::vector<ScreenSpr>& world, std::vector<ScreenSpr>& screen,
+                          unsigned int mask)
 {
 	for (Atom* atom : gos)
 	{
 		if (!atom) continue;
 		Canvas* here = atom->GetComponent<Canvas>();
 		Canvas* cur  = here ? here : ctx;   // a canvas re-parents the coordinate space for its subtree
-		if (Sprite* sp = atom->GetComponent<Sprite>())
-			if (sp->enabled)
-			{
-				if (cur && cur->mode != CanvasMode::WorldSpace) screen.push_back({ sp, cur });
-				else                                            world.push_back(sp);
-			}
-		GatherSprites(atom->children, cur, world, screen);
+		if (LayerVisible(atom, mask))
+			if (Sprite* sp = atom->GetComponent<Sprite>())
+				if (sp->enabled)
+				{
+					if (cur && cur->mode != CanvasMode::WorldSpace) screen.push_back({ sp, cur });
+					else                                            world.push_back({ sp, cur });   // cur = WorldSpace canvas or null
+				}
+		GatherSprites(atom->children, cur, world, screen, mask);
 	}
 }
-static void DrawSprites(bc::list<Atom*>& hierarchy, const NukeCameraDesc& d, const Vector3& camPos, iRender* r)
+static void DrawSprites(bc::list<Atom*>& hierarchy, const NukeCameraDesc& d, const Vector3& camPos, iRender* r,
+                        Camera* cam, unsigned int mask)
 {
-	std::vector<Sprite*> sprites;
+	std::vector<ScreenSpr> sprites;
 	std::vector<ScreenSpr> screen;
-	GatherSprites(hierarchy, nullptr, sprites, screen);
+	GatherSprites(hierarchy, nullptr, sprites, screen, mask);
 
 	// --- SCREEN-space canvas sprites: rect in canvas reference pixels (centre-origin; child offset =
-	// its position relative to the canvas), queue = the canvas's Render Queue (before/after post). ---
+	// its position relative to the canvas, Z IGNORED — children are pinned to the canvas surface),
+	// queue = the canvas's Render Queue (before/after post). Optional camera binding: a canvas with
+	// `targetCamera` set draws only for that camera. The EDITOR camera is the exception: it never
+	// pins screen-space canvases to itself — they render as world-plane rectangles at the canvas
+	// transform (1 ref px = 1/ppu world units) so they can be seen, picked and edited. ---
 	if (!screen.empty())
 	{
+		const bool editorCam = cam && cam->editorCamera;
 		std::stable_sort(screen.begin(), screen.end(), [](const ScreenSpr& a, const ScreenSpr& b) { return a.cv->sortOrder < b.cv->sortOrder; });
 		for (ScreenSpr& s : screen)
 		{
@@ -836,14 +1000,39 @@ static void DrawSprites(bc::list<Atom*>& hierarchy, const NukeCameraDesc& d, con
 			Vector3 spos = sp->transform->globalPosition();
 			Vector3 cpos = cv->transform ? cv->transform->globalPosition() : Vector3();
 			Vector3 sc   = sp->transform->globalScale();
-			float rect[4]    = { (float)(spos.x - cpos.x), (float)(spos.y - cpos.y), sp->width * (float)sc.x, sp->height * (float)sc.y };
-			float refSize[2] = { cv->width, cv->height };
 			float u0 = sp->u0, v0 = sp->v0, u1 = sp->u1, v1 = sp->v1;
 			if (sp->flipX) std::swap(u0, u1);
 			if (sp->flipY) std::swap(v0, v1);
 			float uvr[4] = { u0, v0, u1, v1 };
 			float tn[4]  = { sp->tint.r, sp->tint.g, sp->tint.b, sp->tint.a };
-			r->drawSpriteScreen(sp->tex, rect, refSize, uvr, tn, cv->renderQueue == CanvasQueue::AfterPost ? 1 : 0);
+
+			// Children keep world-authored units: positions/sizes convert to reference pixels
+			// through the canvas's pixelsPerUnit (a width-1 sprite = ppu pixels, never 1 px).
+			const float ppu = cv->pixelsPerUnit > 0.01f ? cv->pixelsPerUnit : 100.0f;
+			if (editorCam)
+			{
+				// World-plane preview: the canvas rect lives at its transform; children sit on the
+				// plane at their TRUE world offsets/sizes (px = world*ppu, plane = px/ppu -> always
+				// exactly 1:1 with the world, whatever ppu is — drags never over/undershoot).
+				if (!cv->transform) continue;
+				Vector3 R = cv->transform->right(), U = cv->transform->up();
+				const float dx = (float)(spos.x - cpos.x), dy = (float)(spos.y - cpos.y);
+				const float hw = sp->width  * 0.5f * (float)sc.x;
+				const float hh = sp->height * 0.5f * (float)sc.y;
+				Vector3 c(cpos.x + R.x * dx + U.x * dy,
+				          cpos.y + R.y * dx + U.y * dy,
+				          cpos.z + R.z * dx + U.z * dy);
+				// nine-slice px on the plane: 1 texture px = 1 reference px = 1/ppu world units
+				EmitWorldSprite(r, sp, c, R, U, hw, hh, 1.0f / ppu, uvr, tn);
+				continue;
+			}
+			// Camera binding: a bound canvas draws ONLY for its camera (compare by owning atom).
+			if (cv->targetCamera && (!cam || cv->targetCamera != cam->atom)) continue;
+			float rect[4]    = { (float)(spos.x - cpos.x) * ppu, (float)(spos.y - cpos.y) * ppu,
+			                     sp->width * (float)sc.x * ppu, sp->height * (float)sc.y * ppu };
+			float refSize[2] = { cv->width, cv->height };
+			EmitScreenSprite(r, sp, rect, refSize, uvr, tn,
+			                 cv->renderQueue == CanvasQueue::AfterPost ? 1 : 0, (int)cv->scaling);
 		}
 	}
 	if (sprites.empty()) return;
@@ -857,14 +1046,15 @@ static void DrawSprites(bc::list<Atom*>& hierarchy, const NukeCameraDesc& d, con
 	Vector3 camU(camF.y*camR.z - camF.z*camR.y, camF.z*camR.x - camF.x*camR.z, camF.x*camR.y - camF.y*camR.x);
 
 	auto d2 = [&](const Vector3& p) { double dx=p.x-camPos.x, dy=p.y-camPos.y, dz=p.z-camPos.z; return dx*dx+dy*dy+dz*dz; };
-	std::sort(sprites.begin(), sprites.end(), [&](Sprite* a, Sprite* b) {
-		Vector3 pa = a->transform ? a->transform->globalPosition() : Vector3();
-		Vector3 pb = b->transform ? b->transform->globalPosition() : Vector3();
+	std::sort(sprites.begin(), sprites.end(), [&](const ScreenSpr& a, const ScreenSpr& b) {
+		Vector3 pa = a.sp->transform ? a.sp->transform->globalPosition() : Vector3();
+		Vector3 pb = b.sp->transform ? b.sp->transform->globalPosition() : Vector3();
 		return d2(pa) > d2(pb);   // farthest first
 	});
 
-	for (Sprite* sp : sprites)
+	for (ScreenSpr& ws : sprites)
 	{
+		Sprite* sp = ws.sp;
 		if (!sp->transform || sp->textureGuid.empty()) continue;
 		if (!sp->tex || sp->tex->guid != sp->textureGuid) sp->tex = ResDB::getSingleton()->GetTexture(sp->textureGuid);
 		if (!sp->tex) continue;
@@ -875,34 +1065,119 @@ static void DrawSprites(bc::list<Atom*>& hierarchy, const NukeCameraDesc& d, con
 		float halfH = sp->height * 0.5f * (float)sc.y;
 		Vector3 rU = (sp->mode == SpriteMode::Billboard) ? camR : t->right();
 		Vector3 uU = (sp->mode == SpriteMode::Billboard) ? camU : t->up();
-		float rv[3]  = { (float)rU.x*halfW, (float)rU.y*halfW, (float)rU.z*halfW };
-		float upv[3] = { (float)uU.x*halfH, (float)uU.y*halfH, (float)uU.z*halfH };
+		// Children of a WORLD-SPACE canvas are PINNED to its surface: position projected onto the
+		// canvas plane (the out-of-plane component removed) and the quad lies in the plane.
+		if (ws.cv && ws.cv->transform)
+		{
+			Transform* ct = ws.cv->transform;
+			Vector3 cp = ct->globalPosition(), R = ct->right(), U = ct->up();
+			Vector3 dv(pos.x - cp.x, pos.y - cp.y, pos.z - cp.z);
+			double du = dv.x*R.x + dv.y*R.y + dv.z*R.z;
+			double dvU = dv.x*U.x + dv.y*U.y + dv.z*U.z;
+			pos = Vector3(cp.x + R.x*du + U.x*dvU, cp.y + R.y*du + U.y*dvU, cp.z + R.z*du + U.z*dvU);
+			rU = R; uU = U;   // in-plane orientation (billboard doesn't apply on a canvas)
+		}
 		// The atom origin sits at the pivot; shift the quad centre so the pivot lands on the atom.
 		float px = 1.0f - 2.0f*sp->pivotX, py = 1.0f - 2.0f*sp->pivotY;
-		float c[3] = { (float)pos.x + rv[0]*px + upv[0]*py,
-		               (float)pos.y + rv[1]*px + upv[1]*py,
-		               (float)pos.z + rv[2]*px + upv[2]*py };
+		Vector3 c(pos.x + rU.x*halfW*px + uU.x*halfH*py,
+		          pos.y + rU.y*halfW*px + uU.y*halfH*py,
+		          pos.z + rU.z*halfW*px + uU.z*halfH*py);
 		float u0 = sp->u0, v0 = sp->v0, u1 = sp->u1, v1 = sp->v1;
 		if (sp->flipX) std::swap(u0, u1);
 		if (sp->flipY) std::swap(v0, v1);
 		float uvr[4] = { u0, v0, u1, v1 };
 		float tn[4]  = { sp->tint.r, sp->tint.g, sp->tint.b, sp->tint.a };
-		r->drawSprite(sp->tex, c, rv, upv, uvr, tn);
+		EmitWorldSprite(r, sp, c, rU, uU, halfW, halfH, kSpritePxToWorld, uvr, tn);
 	}
 }
 
-// Editor-only: draw a WorldSpace canvas's rectangle as debug lines so its bounds are visible.
+// --- Canvas layout: apply RectAnchor components before rendering (edit mode included) --------------
+// Per-side anchors (see RectAnchor.h): every enabled side pins the element's matching EDGE at its
+// captured distance from that canvas side; two opposite sides pinned = the element stretches with
+// the canvas (its Sprite width/height follow). Distances/coords are in canvas units — reference px
+// on a screen canvas (transform units * pixelsPerUnit), world units on a world canvas. Placement
+// pins the element to the canvas SURFACE (Z never drifts).
+static void ApplyCanvasLayouts(bc::list<Atom*>& gos, Canvas* ctx)
+{
+	for (Atom* atom : gos)
+	{
+		if (!atom) continue;
+		Canvas* here = atom->GetComponent<Canvas>();
+		Canvas* cur  = here ? here : ctx;
+		if (cur && cur != here && cur->transform)
+			if (RectAnchor* ra = atom->GetComponent<RectAnchor>())
+				if (ra->enabled && (ra->left || ra->right || ra->top || ra->bottom))
+				{
+					const bool  world = (cur->mode == CanvasMode::WorldSpace);
+					const float ppu = world ? 1.0f : (cur->pixelsPerUnit > 0.01f ? cur->pixelsPerUnit : 100.0f);
+					const float hw = cur->width * 0.5f, hh = cur->height * 0.5f;
+
+					Transform* ct = cur->transform;
+					Transform& t  = atom->GetTransform();
+					Vector3 cp = ct->globalPosition();
+					Vector3 gpos = t.globalPosition();
+					Vector3 gsc  = t.globalScale();
+					Vector3 R = ct->right(), U = ct->up();
+
+					// Current centre in canvas units (centre-origin).
+					float cx, cy;
+					if (world)
+					{
+						Vector3 d(gpos.x - cp.x, gpos.y - cp.y, gpos.z - cp.z);
+						cx = (float)(d.x*R.x + d.y*R.y + d.z*R.z);
+						cy = (float)(d.x*U.x + d.y*U.y + d.z*U.z);
+					}
+					else { cx = (float)(gpos.x - cp.x) * ppu; cy = (float)(gpos.y - cp.y) * ppu; }
+
+					// Element size in canvas units (its Sprite; anchors on a sprite-less atom pin the point).
+					Sprite* sp = atom->GetComponent<Sprite>();
+					float w = sp ? sp->width  * (float)gsc.x * ppu : 0.0f;
+					float h = sp ? sp->height * (float)gsc.y * ppu : 0.0f;
+
+					if (ra->left && ra->right)        // both edges pinned -> stretch with the canvas
+					{
+						w  = cur->width - ra->distLeft - ra->distRight; if (w < 1.0f) w = 1.0f;
+						cx = -hw + ra->distLeft + w * 0.5f;
+						if (sp) sp->width = w / (ppu * (float)(gsc.x != 0.0 ? gsc.x : 1.0));
+					}
+					else if (ra->left)  cx = -hw + ra->distLeft  + w * 0.5f;
+					else if (ra->right) cx =  hw - ra->distRight - w * 0.5f;
+
+					if (ra->bottom && ra->top)
+					{
+						h  = cur->height - ra->distBottom - ra->distTop; if (h < 1.0f) h = 1.0f;
+						cy = -hh + ra->distBottom + h * 0.5f;
+						if (sp) sp->height = h / (ppu * (float)(gsc.y != 0.0 ? gsc.y : 1.0));
+					}
+					else if (ra->bottom) cy = -hh + ra->distBottom + h * 0.5f;
+					else if (ra->top)    cy =  hh - ra->distTop    - h * 0.5f;
+
+					Vector3 gp;
+					if (world)
+						gp = Vector3(cp.x + R.x*cx + U.x*cy, cp.y + R.y*cx + U.y*cy, cp.z + R.z*cx + U.z*cy);
+					else
+						gp = Vector3(cp.x + cx / ppu, cp.y + cy / ppu, cp.z);   // transform units; Z pinned
+					t.SetGlobal(gp, t.globalRotation(), gsc);
+				}
+		ApplyCanvasLayouts(atom->children, cur);
+	}
+}
+
+// Editor-only: draw every canvas's rectangle as debug lines so its bounds are visible and it can be
+// laid out. WorldSpace rects are in world units; screen-space rects show the reference resolution on
+// the canvas's world plane at 1/ppu (the same mapping the editor camera renders children with).
 static void DrawCanvasGizmos(bc::list<Atom*>& gos, iRender* r)
 {
 	for (Atom* atom : gos)
 	{
 		if (!atom) continue;
 		if (Canvas* cv = atom->GetComponent<Canvas>())
-			if (cv->mode == CanvasMode::WorldSpace && cv->transform)
+			if (cv->transform)
 			{
+				const float es = (cv->mode == CanvasMode::WorldSpace) ? 1.0f : cv->PxToWorld();
 				Transform* t = cv->transform;
 				Vector3 p = t->globalPosition(), R = t->right(), U = t->up();
-				float hw = cv->width * 0.5f, hh = cv->height * 0.5f;
+				float hw = cv->width * 0.5f * es, hh = cv->height * 0.5f * es;
 				auto corner = [&](float sx, float sy, float* o) {
 					o[0] = (float)(p.x + sx * hw * R.x + sy * hh * U.x);
 					o[1] = (float)(p.y + sx * hw * R.y + sy * hh * U.y);
@@ -919,13 +1194,14 @@ static void DrawCanvasGizmos(bc::list<Atom*>& gos, iRender* r)
 }
 
 // --- Decals (Decal component): screen-space, composited onto the opaque colour from the depth prepass. ---
-static void CollectDecals(bc::list<Atom*>& gos, std::vector<Decal*>& out)
+static void CollectDecals(bc::list<Atom*>& gos, std::vector<Decal*>& out, unsigned int mask = 0xFFFFFFFFu)
 {
 	for (Atom* atom : gos)
 	{
 		if (!atom) continue;
+		if (LayerVisible(atom, mask))
 		if (Decal* d = atom->GetComponent<Decal>()) if (d->enabled) out.push_back(d);
-		CollectDecals(atom->children, out);
+		CollectDecals(atom->children, out, mask);
 	}
 }
 static void DrawDecals(std::vector<Decal*>& decals, iRender* r)
@@ -984,14 +1260,15 @@ static void DrawDecalGizmos(bc::list<Atom*>& gos, iRender* r, Atom* sel)
 // Scene-render hook: fire Component::OnRender for every enabled component at `phase`. This is the seam
 // module components (particles, custom draws) use to render — the engine's render loop no longer needs
 // to hardcode each feature. The camera's view/proj is already bound; components draw via iRender seams.
-static void DrawComponentHooks(bc::list<Atom*>& gos, iRender* r, RenderPhase phase)
+static void DrawComponentHooks(bc::list<Atom*>& gos, iRender* r, RenderPhase phase, unsigned int mask = 0xFFFFFFFFu)
 {
 	for (auto atom : gos)
 	{
 		if (!atom) continue;
-		for (Component* c : atom->components)
-			if (c && c->enabled) c->OnRender(r, phase);
-		DrawComponentHooks(atom->children, r, phase);
+		if (LayerVisible(atom, mask))
+			for (Component* c : atom->components)
+				if (c && c->enabled) c->OnRender(r, phase);
+		DrawComponentHooks(atom->children, r, phase, mask);
 	}
 }
 
@@ -1127,6 +1404,10 @@ static void EmitSelectionGizmos(Atom* a)
 void World::Render(iRender* r)
 {
 	if (!r) return;
+
+	// Canvas anchors/layout FIRST (edit mode included): anchored elements follow their canvas's
+	// rectangle before anything gathers their transforms this frame.
+	ApplyCanvasLayouts(*hierarchy, nullptr);
 
 	// Editor gizmos for the selection (edit mode only; lines live for one frame).
 	{
@@ -1446,13 +1727,16 @@ void World::Render(iRender* r)
 
 		r->setCameraTAA(hasTAA);   // enable jitter + history for this camera (advances the jitter when on)
 
+		// Render-layer mask: this camera renders only atoms whose layer bit is set (see nuke::Layers).
+		const unsigned int camMask = (unsigned int)cam->layerMask;
+
 		// Decals reconstruct surfaces from the depth prepass, so their presence also forces it.
-		std::vector<Decal*> decals; CollectDecals(*hierarchy, decals);
+		std::vector<Decal*> decals; CollectDecals(*hierarchy, decals, camMask);
 		// SSR / RT reflections / TAA / decals need scene depth (+ normals for SSR) — a single-sample prepass before colour.
 		if (hasSSR || hasTAA || !decals.empty())
 		{
 			r->beginGBufferPass(d);
-			std::vector<DrawItem> gitems; CollectMeshes(*hierarchy, gitems);
+			std::vector<DrawItem> gitems; CollectMeshes(*hierarchy, gitems, camMask);
 			DrawGBuffer(gitems, r, settings.frustumCull);
 			r->endGBufferPass();
 		}
@@ -1460,15 +1744,15 @@ void World::Render(iRender* r)
 		r->beginCamera(d);
 		{
 			std::vector<DrawItem> items;
-			CollectMeshes(*hierarchy, items);
+			CollectMeshes(*hierarchy, items, camMask);
 			DrawCollected(items, cp, r, settings.frustumCull);
-			DrawComponentHooks(*hierarchy, r, RenderPhase::Opaque);        // module components: opaque draws
+			DrawComponentHooks(*hierarchy, r, RenderPhase::Opaque, camMask);        // module components: opaque draws
 			DrawDecals(decals, r);               // screen-space decals: composite onto the scene from the depth prepass
-			DrawSprites(*hierarchy, d, cp, r);   // 2D sprites: after opaque, back-to-front, depth-tested
-			DrawComponentHooks(*hierarchy, r, RenderPhase::Transparent);   // module components: blended draws (particles, etc.)
-			if (editor) DrawCanvasGizmos(*hierarchy, r);   // WorldSpace canvas bounds (editor gizmo)
+			DrawSprites(*hierarchy, d, cp, r, cam, camMask);   // 2D sprites: after opaque, back-to-front, depth-tested
+			DrawComponentHooks(*hierarchy, r, RenderPhase::Transparent, camMask);   // module components: blended draws (particles, etc.)
+			if (editor) DrawCanvasGizmos(*hierarchy, r);   // canvas bounds (editor gizmo; screen-space at 1/ppu)
 			if (editor) DrawDecalGizmos(*hierarchy, r, AppInstance::GetSingleton()->selectedInHieararchy);   // only the SELECTED decal
-			DrawComponentHooks(*hierarchy, r, RenderPhase::Overlay);       // module components: on-top overlays / gizmos
+			DrawComponentHooks(*hierarchy, r, RenderPhase::Overlay, camMask);       // module components: on-top overlays / gizmos
 		}
 		// Selection highlight (editor only): outline the selected object after the scene.
 		if (editor)
@@ -1497,6 +1781,7 @@ static void SaveAtom(Atom* atom, json& j)
 	j["name"] = atom->GetName();
 	j["id"]   = atom->id.id;   // stable identity (survives the scene rebuild on PIE stop / reload)
 	if (!atom->prefabGuid.empty()) j["prefab"] = atom->prefabGuid;   // instance link to a .nuprefab
+	if (atom->layer != 0) j["layer"] = atom->layer;                  // render layer index (0 = Default, omitted)
 	Transform& t = atom->GetTransform();
 	if (TypeInfo* tti = t.GetType())
 		SaveObject(*tti, &t, j["transform"]);
@@ -1571,6 +1856,7 @@ static Atom* LoadAtom(const json& j)
 	if (j.contains("id")) { atom->id.id = j["id"].get<long>(); ID::observe(atom->id.id); }   // keep the saved identity
 	atom->prefabGuid = j.value("prefab", std::string());       // instance link (if any)
 	atom->modOrigin  = j.value("__mod", std::string());        // merge provenance (runtime only)
+	atom->layer      = std::max(0, std::min(31, j.value("layer", 0)));   // render layer index
 	if (j.contains("transform"))
 	{
 		Transform& t = atom->GetTransform();
@@ -1733,6 +2019,7 @@ Atom* LoadPrefabFromString(const std::string& text)
 	if (j.is_discarded()) return nullptr;
 	Atom* a = LoadAtom(j);
 	RegenIds(a);                         // instances are unique — don't share the prefab's saved ids
+	Reflect_ResolveAtomRefs();           // AtomRef props inside the subtree (world-external ids -> null)
 	return a;
 }
 
@@ -1790,7 +2077,9 @@ Atom* LoadAtomFromString(const std::string& data)
 	if (data.empty()) return nullptr;
 	json j = json::parse(data, nullptr, false);
 	if (j.is_discarded()) return nullptr;
-	return LoadAtom(j);
+	Atom* a = LoadAtom(j);
+	Reflect_ResolveAtomRefs();   // AtomRef props in the restored subtree (undo/merge paths)
+	return a;
 }
 
 // --- undo support: remove an atom subtree by id; insert one at a placement (parentId 0 = root) ---
@@ -2222,6 +2511,7 @@ void World::LoadFromString(const std::string& data)
 			Add(LoadAtom(gj));
 	std::set<unsigned long> seen;
 	FixDuplicateIds(*hierarchy, seen);   // heal any colliding ids from old saves / duplicates
+	Reflect_ResolveAtomRefs();           // AtomRef props: ids -> live atoms, now that everything exists
 }
 
 void World::Clear()

@@ -64,6 +64,26 @@ std::vector<std::string> Reflect_AllEnumNames()
     return out;
 }
 
+// --- AtomRef prop fixup: refs load as stable ids and resolve AFTER the whole world exists ------------
+// LoadField can't resolve an Atom* immediately (the target atom may not be loaded yet), so it queues
+// the slot + id here; World::Load* / prefab instantiation call Reflect_ResolveAtomRefs() once the
+// hierarchy is complete. Unresolvable ids become null.
+static std::vector<std::pair<Atom**, unsigned long>>& pendingAtomRefs()
+{
+    static std::vector<std::pair<Atom**, unsigned long>> v;
+    return v;
+}
+void Reflect_QueueAtomRefFixup(Atom** slot, unsigned long id)
+{
+    if (slot) pendingAtomRefs().push_back({ slot, id });
+}
+void Reflect_ResolveAtomRefs()
+{
+    for (auto& p : pendingAtomRefs())
+        *p.first = Reflect_AtomById(p.second);
+    pendingAtomRefs().clear();
+}
+
 // --- single value <-> json by tag ---
 void SaveField(FT t, const void* a, json& j)
 {
@@ -79,6 +99,7 @@ void SaveField(FT t, const void* a, json& j)
         case FT::Vec4: { auto v = (const Vector4*)a;    j = { v->x, v->y, v->z, v->w }; } break;
         case FT::Quat: { auto v = (const Quaternion*)a; j = { v->x, v->y, v->z, v->w }; } break;
         case FT::Color:{ auto v = (const Color*)a;      j = { v->r, v->g, v->b, v->a }; } break;
+        case FT::AtomRef: j = (unsigned long long)Reflect_AtomId(*(Atom* const*)a); break;   // stable id (0 = null)
         default: break;
     }
 }
@@ -97,6 +118,12 @@ void LoadField(FT t, void* a, const json& j)
         case FT::Vec4: { auto v = (Vector4*)a;    v->x = j.at(0); v->y = j.at(1); v->z = j.at(2); v->w = j.at(3); } break;
         case FT::Quat: { auto v = (Quaternion*)a; v->x = j.at(0); v->y = j.at(1); v->z = j.at(2); v->w = j.at(3); } break;
         case FT::Color:{ auto v = (Color*)a;      v->r = j.at(0); v->g = j.at(1); v->b = j.at(2); v->a = j.at(3); } break;
+        case FT::AtomRef:   // resolve AFTER the world finishes loading (the target may not exist yet)
+        {
+            *(Atom**)a = nullptr;
+            unsigned long id = (unsigned long)j.get<unsigned long long>();
+            if (id) Reflect_QueueAtomRefFixup((Atom**)a, id);
+        } break;
         default: break;
     }
 }

@@ -54,7 +54,10 @@ public:
     [[nuke::prop(label="Margin Bottom", min=0)]] int spriteMarginBottom = 0;
     [[nuke::prop(label="Sprite Spacing X", min=0)]] int spriteSpacingX = 0;   // px gap between columns
     [[nuke::prop(label="Sprite Spacing Y", min=0)]] int spriteSpacingY = 0;   // px gap between rows
-    // 9-slice borders in PIXELS (fixed insets from each edge) — future UI stretching keeps corners intact.
+    // 9-slice borders in PIXELS (fixed insets from each edge). When `nineSlice` is on, EVERY sprite
+    // drawing this texture stretches nine-sliced (corners keep size, edges stretch one axis, the
+    // centre both). The whole setup lives ON THE TEXTURE (the asset) — sprites just use it.
+    [[nuke::prop(label="Nine Slice")]] bool nineSlice = false;
     [[nuke::prop(label="Slice Left",   min=0)]] int sliceLeft   = 0;
     [[nuke::prop(label="Slice Right",  min=0)]] int sliceRight  = 0;
     [[nuke::prop(label="Slice Top",    min=0)]] int sliceTop    = 0;

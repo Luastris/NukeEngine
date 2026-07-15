@@ -40,6 +40,17 @@ void Atom::SetTag(const std::string& tag)
 	this->tag = tag;
 }
 
+void Atom::SetLayer(double index)
+{
+	int i = (int)index;
+	layer = i < 0 ? 0 : (i > 31 ? 31 : i);
+}
+
+double Atom::GetLayer()
+{
+	return (double)layer;
+}
+
 Transform& Atom::GetTransform()
 {
 	return transform;
