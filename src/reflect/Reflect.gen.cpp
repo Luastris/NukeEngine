@@ -32,6 +32,7 @@
 #include "API/Model/Time.h"
 #include "API/Model/Transform.h"
 #include "API/Model/World.h"
+#include "input/Input.h"
 #include "interface/iGUI.h"
 
 namespace nuke {
@@ -517,6 +518,30 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("Clear", &World::Clear));
 		t.methods.push_back(MakeMethod("Reparent", &World::Reparent));
 		t.methods.push_back(MakeMethod("ReparentBefore", &World::ReparentBefore));
+	}
+	{
+		TypeInfo& t = TypeOf<Input>();
+		t.base = "Object";
+		t.methods.push_back(MakeMethod("Pressed", &Input::Pressed));
+		t.methods.push_back(MakeMethod("Held", &Input::Held));
+		t.methods.push_back(MakeMethod("Released", &Input::Released));
+		t.methods.push_back(MakeMethod("Tapped", &Input::Tapped));
+		t.methods.push_back(MakeMethod("LongPressed", &Input::LongPressed));
+		t.methods.push_back(MakeMethod("DoublePressed", &Input::DoublePressed));
+		t.methods.push_back(MakeMethod("Value", &Input::Value));
+		t.methods.push_back(MakeMethod("Axis2", &Input::Axis2));
+		t.methods.push_back(MakeMethod("PushContext", &Input::PushContext));
+		t.methods.push_back(MakeMethod("PopContext", &Input::PopContext));
+		t.methods.push_back(MakeMethod("SetContextActive", &Input::SetContextActive));
+		t.methods.push_back(MakeMethod("ContextActive", &Input::ContextActive));
+		t.methods.push_back(MakeMethod("SetControl", &Input::SetControl));
+		t.methods.push_back(MakeMethod("Control", &Input::Control));
+		t.methods.push_back(MakeMethod("MapJson", &Input::MapJson));
+		t.methods.push_back(MakeMethod("ControlsJson", &Input::ControlsJson));
+		t.methods.push_back(MakeMethod("RebindJson", &Input::RebindJson));
+		t.methods.push_back(MakeMethod("ClearUserBindings", &Input::ClearUserBindings));
+		t.methods.push_back(MakeMethod("SaveUserBindings", &Input::SaveUserBindings));
+		t.methods.push_back(MakeMethod("LoadUserBindings", &Input::LoadUserBindings));
 	}
 	{
 		TypeInfo& t = TypeOf<Gui>();

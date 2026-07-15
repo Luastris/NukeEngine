@@ -3,6 +3,7 @@
 #include "API/Model/Package.h"   // packed-content scan (3.2)
 #include "API/Model/Prefab.h"   // PrefabGuid (register prefab guid<->path)
 #include "render/irender.h"
+#include "input/Input.h"         // .nuinput content -> gameplay input system
 #include <boost/filesystem.hpp>
 #include <iostream>
 
@@ -383,6 +384,10 @@ void ResDB::LoadContentEntry(const std::string& rel, const std::string& bytes)
 		RegisterTexture(tx);
 		std::cout << "[ResDB]	loaded texture '" << tx->guid << "' (pak)" << std::endl;
 	}
+	else if (ext == ".nuinput")
+	{
+		if (Input::LoadAssetFromString(bytes)) std::cout << "[ResDB]	loaded input map (pak) '" << rel << "'" << std::endl;
+	}
 	else if (ext == ".nuanim")
 	{
 		AnimClip* c = AnimClip::LoadFromMemory(bytes);
@@ -483,6 +488,10 @@ void ResDB::LoadContentFile(const std::string& path)
 		RegisterTexture(tx);
 		SetAssetPath(tx->guid, path);
 		std::cout << "[ResDB]	loaded texture '" << tx->guid << "' (" << tx->width << "x" << tx->height << ")" << std::endl;
+	}
+	else if (ext == ".nuinput")   // gameplay input map (actions/contexts/bindings) -> Input system, not a GUID'd asset
+	{
+		if (Input::LoadAsset(path)) std::cout << "[ResDB]	loaded input map '" << p.filename().string() << "'" << std::endl;
 	}
 	else if (ext == ".nuanim")
 	{

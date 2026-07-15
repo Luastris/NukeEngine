@@ -37,6 +37,7 @@
 #include "API/Model/UnknownComponent.h"
 #include "API/Model/Prefab.h"
 #include "interface/AppInstance.h"   // Prefabs::Spawn reads content through the host
+#include "input/Input.h"             // per-frame input evaluation (Input::Update)
 #include "interface/Modular.h"
 #include "reflect/ReflectJson.h"
 #include <boost/filesystem/fstream.hpp>
@@ -258,6 +259,7 @@ void World::Update()
 	}
 	AppInstance* app = AppInstance::GetSingleton();
 	app->worldTickActive = true;   // scripts' Game.LoadWorld queues instead of reloading mid-loop
+	Input::Update(Time::getSingleton()->delta);   // evaluate input once per tick, BEFORE scripts query it
 	for (Atom* atom : *hierarchy)
 	{
 		atom->Update();

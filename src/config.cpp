@@ -138,7 +138,7 @@ void Config::reload(Config* instance)
         win.w           = w.value("width",       win.w);
         win.h           = w.value("height",      win.h);
         win.mainFont    = w.value("mainFont",    win.mainFont);
-        win.title       = w.value("title",       win.title);
+        // (a legacy "title" key is ignored — the window title is not config, see NukeWindow)
         win.decorated   = w.value("decorated",   win.decorated);
         win.resizable   = w.value("resizable",   win.resizable);
         win.floating    = w.value("floating",    win.floating);
@@ -182,12 +182,16 @@ void Config::reload(Config* instance)
     }
 }
 
-void Config::saveWindow()
+void Config::saveWindow() { saveWindowTo("./config/main.json"); }
+
+// Persist the window block into an arbitrary json file (read-modify-write). The editor routes the
+// GAME's window settings (Game.Set* from scripts) to <project>/window.json through this — they are
+// game data and must never flip the EDITOR's own config/main.json (see Game.cpp).
+void Config::saveWindowTo(const std::string& path)
 {
-    bfs::path configDir("config");
+    bfs::path cfg(path);
     boost::system::error_code ec;
-    if (!bfs::exists(configDir, ec)) bfs::create_directory(configDir, ec);
-    bfs::path cfg("./config/main.json");
+    if (cfg.has_parent_path()) bfs::create_directories(cfg.parent_path(), ec);
 
     // Read-modify-write: preserve every other section (theme is large; raytracing/jobs too).
     json root = json::object();
@@ -197,7 +201,7 @@ void Config::saveWindow()
     w["width"]       = window.w;
     w["height"]      = window.h;
     if (!window.mainFont.empty()) w["mainFont"] = window.mainFont;
-    w["title"]       = window.title;
+    w.erase("title");   // legacy key: the window title is not config (editor = fixed, game = project name)
     w["decorated"]   = window.decorated;
     w["resizable"]   = window.resizable;
     w["floating"]    = window.floating;
@@ -211,7 +215,7 @@ void Config::saveWindow()
     w["showConsole"] = window.showConsole;
 
     bfs::ofstream out(cfg, std::ios::trunc);
-    if (!out) { cout << PREFIX_CONF << "saveWindow: cannot write config/main.json" << endl; return; }
+    if (!out) { cout << PREFIX_CONF << "saveWindow: cannot write " << path << endl; return; }
     out << root.dump(2);
     cout << PREFIX_CONF << "window config saved (mode=" << window.mode << ", " << window.w << "x" << window.h << ")" << endl;
 }

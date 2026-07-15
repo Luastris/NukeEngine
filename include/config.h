@@ -21,7 +21,9 @@ struct NukeWindow{
     std::string mainFont;
     // OS window properties (applied by the renderer at window creation). Mostly for
     // the game window; the editor leaves them at defaults (normal decorated window).
-    std::string title = "NukeEngine";
+    // NOTE: no `title` here — the window TITLE is not config: the editor is always
+    // "NukeEngine Editor" and the game window carries the PROJECT's name (game.nuproj
+    // "name", bound at packaging), see the hosts' main.cpp.
     bool  decorated   = true;    // false => borderless
     bool  resizable   = true;
     bool  floating    = false;   // always-on-top
@@ -164,6 +166,9 @@ public:
 	// every other section (theme, raytracing, jobs, physicsCore) exactly as on disk. Used by
 	// the runtime window API (Game.Set*) so a game's chosen video settings survive relaunch.
 	void saveWindow();
+	// Same, into an arbitrary json file — the editor routes GAME window settings (PIE scripts) to
+	// <project>/window.json so they never touch the EDITOR's own config/main.json.
+	void saveWindowTo(const std::string& path);
 	static Config* getSingleton();
 };
 }  // namespace nuke

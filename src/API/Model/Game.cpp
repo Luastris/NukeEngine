@@ -3,6 +3,7 @@
 #include "interface/AppInstance.h"
 #include "config.h"
 #include "render/irender.h"
+#include <boost/filesystem.hpp>   // project dir for the game's window.json (editor)
 #include <algorithm>
 #include <iostream>
 
@@ -40,25 +41,39 @@ void Game::Quit()
 
 // --- window control ------------------------------------------------------------------------
 namespace {
+// The game's window settings are GAME DATA. In the editor they go to <project>/window.json
+// (Package Project merges it into the shipped config) — NEVER into the editor's own
+// config/main.json: a PIE script calling e.g. Game.SetTransparent(true) must not flip the
+// EDITOR's window on its next launch (this exact hijack kept re-enabling transparency).
+void SaveGameWindow()
+{
+	Config* c = Config::getSingleton();
+	AppInstance* app = AppInstance::GetSingleton();
+	if (!app->isEditor()) { c->saveWindow(); return; }   // the game owns its own config/main.json
+	if (app->contentRoot.empty())
+	{
+		std::cout << "[Game]\t\twindow settings NOT saved (no project loaded)" << std::endl;
+		return;
+	}
+	boost::filesystem::path proj = boost::filesystem::path(app->contentRoot).parent_path();
+	c->saveWindowTo((proj / "window.json").string());
+	std::cout << "[Game]\t\twindow settings saved to the project (editor config untouched)" << std::endl;
+}
+
 // Persist the window config + apply it to the live window. Live-apply is skipped in the
-// editor (the window there is the EDITOR's, not the game's), but the config IS saved so the
-// packaged game / next launch picks it up.
+// editor (the window there is the EDITOR's, not the game's).
 void ApplyAndSaveWindow()
 {
 	Config* c = Config::getSingleton();
 	NukeWindow& win = c->window;
 	win.fullscreen = win.mode != 0;   // keep the legacy mirror consistent
-	c->saveWindow();
+	SaveGameWindow();
 
 	AppInstance* app = AppInstance::GetSingleton();
-	if (app->isEditor())
-	{
-		std::cout << "[Game]\t\twindow config saved (live change skipped in the editor; applies to the game)" << std::endl;
-		return;
-	}
+	if (app->isEditor()) return;
 	if (!app->render) return;
 	WindowDesc d;
-	d.w = win.w; d.h = win.h; d.title = win.title.c_str();
+	d.w = win.w; d.h = win.h; d.title = nullptr;   // title is not config; applyWindow leaves it alone
 	d.decorated = win.decorated; d.resizable = win.resizable;
 	d.floating  = win.floating;  d.maximized = win.maximized;
 	d.mode = win.mode; d.fullscreen = win.fullscreen;
@@ -101,7 +116,7 @@ void Game::SetVSync(bool on)
 {
 	Config* c = Config::getSingleton();
 	c->window.vsync = on;
-	c->saveWindow();   // persist for next launch (both hosts)
+	SaveGameWindow();   // persist for next launch (project-side in the editor)
 	// Unlike the geometry setters, vsync applies LIVE even in the editor — it's only the
 	// present pacing of whatever window the renderer drives, not the game's window layout.
 	AppInstance* app = AppInstance::GetSingleton();
