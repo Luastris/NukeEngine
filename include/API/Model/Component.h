@@ -49,6 +49,12 @@ public:
     std::string modOrigin;
 	Transform* transform = nullptr;
 	Atom* atom = nullptr;   // owning Atom (back-reference), set by the component's Init
+	// Tick INTERVAL (6.8): Update() runs every Nth frame (1 = every frame, today's default).
+	// Staggered by the component id, so a colony of same-interval components spreads across
+	// frames instead of spiking on the same one. Serialized next to `enabled`; editable in
+	// the inspector; scripts: the component proxy's `tickEvery`. FixedUpdate is NOT affected
+	// (physics cadence is sacred).
+	int tickEvery = 1;
     char* name;
     Component(const char* _name = "Component") : name((char*)_name){}
 	virtual void Init(Atom* parent) = 0;
@@ -97,6 +103,13 @@ public:
 	// payload)`, CSharpScript → C# `OnEvent(string, string)`). Default no-op; filter by name.
 	// ABI: appended at the END of the vtable.
 	virtual void OnEvent(const std::string& /*name*/, const std::string& /*payload*/) {}
+
+	// Save is about to serialize this component (SaveAtom, right before the reflected props
+	// are read): components whose LIVE state lives outside the props re-encode it here —
+	// the Tilemap packs its cell layers into its hidden data prop, script components (6.6)
+	// pull live script fields back into `props`. Keep it cheap; called on every world save.
+	// ABI: appended at the END of the vtable.
+	virtual void OnBeforeSave() {}
 };
 }  // namespace nuke
 

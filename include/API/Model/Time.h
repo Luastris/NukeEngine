@@ -61,6 +61,7 @@ public:
 	// keep animating). Gameplay-side systems (Animator in play, calendar) consume this.
 	double gameDelta = 0.0;
 	double scale = 1.0;      // Game.SetTimeScale: 0 frozen .. fast-forward (clamped in Game)
+	unsigned long long frame = 0;   // frame counter (tick-interval stagger, 6.8)
 	void NewFrame();         // call once per rendered frame (from the host loop)
 
 	// Game-to-real ratio: game seconds advanced per (scaled) real second.

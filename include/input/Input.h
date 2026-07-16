@@ -42,6 +42,12 @@ public:
 	[[nuke::func]] static void  SetControl(const std::string& id, float value);   // feed a control (0/1 or -1..1)
 	[[nuke::func]] static float Control(const std::string& id);                   // current raw value
 
+	// ---- reflected CURSOR (6.7): raw pixel position in GAME-SCREEN space -----------------------------
+	// Same space as Screen.Width/Height: the viewport panel in the editor (PIE), the window in the
+	// player — top-left origin. Feed it to Camera.ScreenRayOrigin/Dir for click-to-world picking.
+	[[nuke::func]] static double MouseX();
+	[[nuke::func]] static double MouseY();
+
 	// ---- reflected USER REMAPS (an in-game rebind screen, written in scripts) -------------------------
 	// Reflection can't marshal InputBinding/vectors, so the model crosses as JSON strings (same schema
 	// as .nuinput). MapJson = the LIVE model (actions/contexts/bindings incl. applied user overrides) to

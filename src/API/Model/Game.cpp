@@ -1,7 +1,10 @@
 #include "API/Model/Game.h"
 #include "API/Model/World.h"
 #include "API/Model/Time.h"
+#include "API/Model/Package.h"       // packed vs raw decides the save dir (6.6)
 #include "interface/AppInstance.h"
+#include <boost/dll.hpp>             // program_location (the dist exe carries the game name)
+#include <boost/filesystem/fstream.hpp>
 #include "config.h"
 #include "render/irender.h"
 #include <boost/filesystem.hpp>   // project dir for the game's window.json (editor)
@@ -26,6 +29,70 @@ void Game::SetPaused(bool paused)
 	AppInstance* app = AppInstance::GetSingleton();
 	if (app->playState == 0) return;   // edit mode: PIE start/stop is the editor's call
 	app->playState = paused ? 2 : 1;
+}
+
+// The game's save directory (6.6). Editor + raw dev player: `<project>/saves` (beside the
+// content — versionable, easy to wipe). Packaged player: `%APPDATA%/<exe stem>/saves` (the
+// dist exe carries the game's name), never inside Program Files.
+static boost::filesystem::path SaveDir()
+{
+	AppInstance* app = AppInstance::GetSingleton();
+	namespace bfs = boost::filesystem;
+	if (app->isEditor() || Package::MountedCount() == 0)
+	{
+		bfs::path content = app->contentRoot.empty() ? bfs::path("project/content") : bfs::path(app->contentRoot);
+		return content.parent_path() / "saves";
+	}
+	const char* appdata = std::getenv("APPDATA");
+	boost::system::error_code ec;
+	bfs::path exe = boost::dll::program_location(ec);
+	std::string game = ec ? std::string("NukeGame") : exe.stem().string();
+	return bfs::path(appdata ? appdata : ".") / game / "saves";
+}
+
+bool Game::SaveGame(const std::string& slot)
+{
+	if (slot.empty()) return false;
+	AppInstance* app = AppInstance::GetSingleton();
+	if (!app->currentWorld) return false;
+	namespace bfs = boost::filesystem;
+	boost::system::error_code ec;
+	bfs::path dir = SaveDir();
+	bfs::create_directories(dir, ec);
+	bfs::path file = dir / (slot + ".nusave");
+	bfs::ofstream f(file, std::ios::binary);
+	if (!f) { std::cout << "[Game]\t\tSaveGame: cannot write " << file.string() << std::endl; return false; }
+	f << app->currentWorld->SaveToString();   // triggers OnBeforeSave across all components
+	std::cout << "[Game]\t\tsaved '" << slot << "' -> " << file.string() << std::endl;
+	return true;
+}
+
+bool Game::LoadGame(const std::string& slot)
+{
+	namespace bfs = boost::filesystem;
+	boost::system::error_code ec;
+	bfs::path file = SaveDir() / (slot + ".nusave");
+	if (!bfs::exists(file, ec)) { std::cout << "[Game]\t\tLoadGame: no such save '" << slot << "'" << std::endl; return false; }
+	// Queue to the frame boundary — a script calls this MID-TICK over the very hierarchy
+	// the load replaces (same rule as Game.LoadWorld).
+	AppInstance::GetSingleton()->pendingSaveLoad = bfs::absolute(file).string();
+	return true;
+}
+
+std::string Game::ListSaves()
+{
+	namespace bfs = boost::filesystem;
+	boost::system::error_code ec;
+	bfs::path dir = SaveDir();
+	if (!bfs::exists(dir, ec)) return "";
+	std::vector<std::pair<std::time_t, std::string>> slots;
+	for (bfs::directory_iterator it(dir, ec), end; it != end && !ec; it.increment(ec))
+		if (it->path().extension() == ".nusave")
+			slots.push_back({ bfs::last_write_time(it->path(), ec), it->path().stem().string() });
+	std::sort(slots.begin(), slots.end(), [](auto& a, auto& b) { return a.first > b.first; });   // newest first
+	std::string out;
+	for (auto& s : slots) { if (!out.empty()) out += "\n"; out += s.second; }
+	return out;
 }
 
 void Game::SetTimeScale(double scale)

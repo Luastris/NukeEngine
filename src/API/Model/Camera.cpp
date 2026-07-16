@@ -3,7 +3,10 @@
 #include "API/Model/Atom.h"
 #include "API/Model/Transform.h"
 #include "API/Model/Texture.h"
+#include "API/Model/Screen.h"   // screen->world rays live in game-screen pixel space (6.7)
 #include "interface/AppInstance.h"
+#include <cmath>
+#include <algorithm>
 
 namespace nuke {
 
@@ -263,6 +266,54 @@ void   Camera::SetOrthoSize(double size) { orthoSize = (float)size; }
 double Camera::GetOrthoSize()            { return orthoSize; }
 void   Camera::SetLayerMask(double mask) { layerMask = (int)(long long)mask; }
 double Camera::GetLayerMask()            { return (double)(unsigned int)layerMask; }
+
+// --- screen -> world (6.7) -----------------------------------------------------------------
+// Mirrors the renderer's projection exactly (incl. the live persp<->ortho blend): NDC from
+// game-screen pixels over Screen dims; perspective spreads DIRECTION from the camera origin,
+// orthographic spreads ORIGIN across the view rectangle with a fixed direction.
+
+Vector3 Camera::ScreenRayOrigin(double px, double py)
+{
+	if (!transform) return Vector3(0, 0, 0);
+	const double w = std::max(1.0, Screen::Width()), h = std::max(1.0, Screen::Height());
+	const double ndcx = px / w * 2.0 - 1.0;
+	const double ndcy = 1.0 - py / h * 2.0;   // top-left pixel origin -> +y up NDC
+	Vector3 p = transform->globalPosition();
+	if (projBlend >= 0.5f)   // orthographic: parallel rays, origin slides over the view rect
+	{
+		const double oh = (orthoSize > 1e-4f) ? orthoSize : 1.0;
+		const double ow = oh * (w / h);
+		Vector3 r = transform->right(), u = transform->up();
+		return Vector3(p.x + ndcx * ow * r.x + ndcy * oh * u.x,
+		               p.y + ndcx * ow * r.y + ndcy * oh * u.y,
+		               p.z + ndcx * ow * r.z + ndcy * oh * u.z);
+	}
+	return p;
+}
+
+Vector3 Camera::ScreenRayDir(double px, double py)
+{
+	if (!transform) return Vector3(0, 0, 1);
+	Vector3 f = transform->direction();
+	if (projBlend >= 0.5f) return f;   // orthographic: fixed direction
+	const double w = std::max(1.0, Screen::Width()), h = std::max(1.0, Screen::Height());
+	const double ndcx = px / w * 2.0 - 1.0;
+	const double ndcy = 1.0 - py / h * 2.0;
+	const double thf = std::tan((double)fov * 0.5 * 0.017453292519943295);
+	Vector3 r = transform->right(), u = transform->up();
+	Vector3 d(f.x + ndcx * thf * (w / h) * r.x + ndcy * thf * u.x,
+	          f.y + ndcx * thf * (w / h) * r.y + ndcy * thf * u.y,
+	          f.z + ndcx * thf * (w / h) * r.z + ndcy * thf * u.z);
+	const double len = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
+	if (len > 1e-12) { d.x /= len; d.y /= len; d.z /= len; }
+	return d;
+}
+
+Vector3 Camera::ScreenToWorldPoint(double px, double py, double depth)
+{
+	Vector3 o = ScreenRayOrigin(px, py), d = ScreenRayDir(px, py);
+	return Vector3(o.x + d.x * depth, o.y + d.y * depth, o.z + d.z * depth);
+}
 
 void Camera::Reset() {}
 void Camera::Pause() {}

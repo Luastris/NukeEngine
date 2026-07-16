@@ -14,6 +14,8 @@
 #include "API/Model/ReflectionProbe.h" // scene-captured reflection cubemap
 #include "API/Model/Time.h"       // animated-texture (GIF) frame advance + fixed-step accumulator
 #include "API/Model/Events.h"     // event bus pump (6.3) + calendar/schedule world serialization
+#include "API/Model/Profiler.h"   // per-phase frame timings (6.8)
+#include "API/Model/StatusBar.h"  // live profiler line in the editor status bar
 #include "API/Model/Sprite.h"     // 2D sprite quads (drawn after opaque, back-to-front)
 #include "API/Model/Canvas.h"     // 2D layout container (WorldSpace rect + editor gizmo)
 #include "API/Model/RectAnchor.h" // canvas anchors/layout (applied before rendering)
@@ -300,6 +302,7 @@ void World::UnlockGame() { gameLock.unlock(); }
 
 void World::Update()
 {
+	Profiler::Scope profScope("update");   // scripts + events + traversal (6.8)
 	Jobs::PumpMain();   // deliver background-job results on the game thread (2.4)
 	static int slowLog = 0;
 	auto t0 = boost::chrono::steady_clock::now();
@@ -358,6 +361,15 @@ void World::Update()
 		std::cout << "[World]\t\t\t" << "Game.LoadWorld -> '" << path << "'" << std::endl;
 		if (!app->OpenWorld(path))
 			std::cout << "[World]\t\t\t" << "Game.LoadWorld: world '" << path << "' not found" << std::endl;
+	}
+	// Savegame load (Game.LoadGame, 6.6): a full runtime snapshot from the save dir —
+	// LoadFromFile restores atoms + calendar + event schedule + script/tilemap state.
+	if (!app->pendingSaveLoad.empty())
+	{
+		std::string path;
+		path.swap(app->pendingSaveLoad);
+		std::cout << "[World]\t\t\t" << "Game.LoadGame -> '" << path << "'" << std::endl;
+		LoadFromFile(path);
 	}
 }
 
@@ -639,6 +651,7 @@ static void PullDynamicPoses(bc::list<Atom*>& gos, iPhysics* p)
 
 void World::FixedUpdate()
 {
+	Profiler::Scope profScope("fixed");   // one physics/fixed step (6.8)
 	// ONE fixed step. The CADENCE lives in AppInstance::FixedThread (fixed frequency,
 	// frame-independent) — this function must not know about frames or accumulate time.
 	// Locking: world phases hold the game lock; the Jolt solve itself runs OUTSIDE it,
@@ -1453,6 +1466,22 @@ static void EmitSelectionGizmos(Atom* a)
 void World::Render(iRender* r)
 {
 	if (!r) return;
+	Profiler::Scope profScope("render");   // CPU side of the render pass (6.8)
+
+	// Live profiler line (updated ~2×/s from the REAL world only): the status bar shows the
+	// phase trio everywhere the bar exists; scripts read the same numbers via Profiler.Ms.
+	if (!auxiliary)
+	{
+		static double lastPush = 0.0;
+		if (Time::getSingleton()->elapsed - lastPush > 0.5)
+		{
+			lastPush = Time::getSingleton()->elapsed;
+			char buf[128];
+			snprintf(buf, sizeof(buf), "upd %.2f | fix %.2f | rnd %.2f ms",
+			         Profiler::Ms("update"), Profiler::Ms("fixed"), Profiler::Ms("render"));
+			StatusBar::Set("profiler", buf);
+		}
+	}
 
 	// Canvas anchors/layout FIRST (edit mode included): anchored elements follow their canvas's
 	// rectangle before anything gathers their transforms this frame.
@@ -1858,6 +1887,7 @@ static void SaveAtom(Atom* atom, json& j)
 		}
 		TypeInfo* ti = c->GetType();
 		if (!ti) continue;                       // unreflected component — skip
+		c->OnBeforeSave();                       // live-state components re-encode into their props first
 		json cj;
 		cj["type"] = ti->name;
 		SaveObject(*ti, c, cj["props"]);
@@ -1895,6 +1925,7 @@ static void SaveAtom(Atom* atom, json& j)
 		const char* pl = PluginForType(ti->name);   // tag which plugin a component requires
 		if (pl && pl[0]) cj["plugin"] = pl;
 		cj["enabled"] = c->enabled;
+		if (c->tickEvery > 1) cj["tick"] = c->tickEvery;   // tick interval (6.8; 1 = default, omitted)
 		cj["cid"]     = c->id.id;
 		j["components"].push_back(cj);
 	}
@@ -1927,7 +1958,8 @@ static Atom* LoadAtom(const json& j)
 			if (ti && ti->create && IsTypeActive(type))
 			{
 				Component* c = (Component*)ti->create();
-				c->enabled = cj.value("enabled", true);
+				c->enabled   = cj.value("enabled", true);
+				c->tickEvery = cj.value("tick", 1);   // tick interval (6.8)
 				c->id.id   = cj.value("cid", c->id.id); ID::observe(c->id.id);
 				c->modOrigin = cj.value("__mod", std::string());   // merge provenance (runtime only)
 				if (cj.contains("props")) LoadObject(*ti, c, cj["props"]);

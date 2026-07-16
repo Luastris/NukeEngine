@@ -26,6 +26,7 @@
 #include "API/Model/Physics.h"
 #include "API/Model/PostProcess.h"
 #include "API/Model/Prefab.h"
+#include "API/Model/Profiler.h"
 #include "API/Model/Rand.h"
 #include "API/Model/RectAnchor.h"
 #include "API/Model/ReflectionProbe.h"
@@ -221,6 +222,9 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("GetOrthoSize", &Camera::GetOrthoSize));
 		t.methods.push_back(MakeMethod("SetLayerMask", &Camera::SetLayerMask));
 		t.methods.push_back(MakeMethod("GetLayerMask", &Camera::GetLayerMask));
+		t.methods.push_back(MakeMethod("ScreenRayOrigin", &Camera::ScreenRayOrigin));
+		t.methods.push_back(MakeMethod("ScreenRayDir", &Camera::ScreenRayDir));
+		t.methods.push_back(MakeMethod("ScreenToWorldPoint", &Camera::ScreenToWorldPoint));
 		t.create = []() -> void* { return new Camera(); };
 	}
 	{
@@ -326,6 +330,9 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("SetTimeScale", &Game::SetTimeScale));
 		t.methods.push_back(MakeMethod("GetTimeScale", &Game::GetTimeScale));
 		t.methods.push_back(MakeMethod("Quit", &Game::Quit));
+		t.methods.push_back(MakeMethod("SaveGame", &Game::SaveGame));
+		t.methods.push_back(MakeMethod("LoadGame", &Game::LoadGame));
+		t.methods.push_back(MakeMethod("ListSaves", &Game::ListSaves));
 		t.methods.push_back(MakeMethod("SetResolution", &Game::SetResolution));
 		t.methods.push_back(MakeMethod("SetWindowMode", &Game::SetWindowMode));
 		t.methods.push_back(MakeMethod("SetBorderless", &Game::SetBorderless));
@@ -439,6 +446,12 @@ bool NukeReflectInit() {
 		TypeInfo& t = TypeOf<Prefabs>();
 		t.base = "Object";
 		t.methods.push_back(MakeMethod("Spawn", &Prefabs::Spawn));
+	}
+	{
+		TypeInfo& t = TypeOf<Profiler>();
+		t.base = "Object";
+		t.methods.push_back(MakeMethod("Ms", &Profiler::Ms));
+		t.methods.push_back(MakeMethod("Phases", &Profiler::Phases));
 	}
 	{
 		TypeInfo& t = TypeOf<Rand>();
@@ -643,6 +656,8 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("ContextActive", &Input::ContextActive));
 		t.methods.push_back(MakeMethod("SetControl", &Input::SetControl));
 		t.methods.push_back(MakeMethod("Control", &Input::Control));
+		t.methods.push_back(MakeMethod("MouseX", &Input::MouseX));
+		t.methods.push_back(MakeMethod("MouseY", &Input::MouseY));
 		t.methods.push_back(MakeMethod("MapJson", &Input::MapJson));
 		t.methods.push_back(MakeMethod("ControlsJson", &Input::ControlsJson));
 		t.methods.push_back(MakeMethod("RebindJson", &Input::RebindJson));

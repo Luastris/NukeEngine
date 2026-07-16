@@ -73,6 +73,9 @@ public:
 	// World::Update applies it at the frame boundary, after its traversal.
 	bool        worldTickActive = false;
 	std::string pendingWorldLoad;
+	// SAVEGAME load (Game.LoadGame, 6.6): an ABSOLUTE .nusave path, applied by World::Update
+	// at the frame boundary via LoadFromFile — same mid-tick safety rule as pendingWorldLoad.
+	std::string pendingSaveLoad;
 	std::string WorldFullPath(const std::string& relPath) const;   // canonical content path for a world
 	bool        ReadContent(const std::string& relPath, std::string& out) const; // bytes via all layers (pak = memory)
 	bool        OpenWorld(const std::string& relPath); // load a world from content into currentWorld

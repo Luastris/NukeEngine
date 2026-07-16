@@ -1,4 +1,5 @@
 #include "API/Model/Atom.h"
+#include "API/Model/Time.h"          // tick-interval gating reads the global frame counter (6.8)
 #include "interface/AppInstance.h"   // SetParent delegates to the active world's Reparent
 #include "reflect/ReflectBind.h"     // Reflect_DropObject: transform handles die with the atom
 #include <iostream>
@@ -86,10 +87,15 @@ void Atom::Update()
 		if (child)
 			child->Update();
 	}
+	// Tick intervals (6.8): a component with tickEvery N runs every Nth frame, STAGGERED by
+	// its id — 500 pawns at N=5 tick ~100 per frame instead of all spiking on the same one.
+	const unsigned long long frame = Time::getSingleton()->frame;
 	for (auto cmp : components)
 	{
-		if (cmp && cmp->enabled)
-			cmp->Update();
+		if (!cmp || !cmp->enabled) continue;
+		if (cmp->tickEvery > 1 && (frame + (unsigned long long)cmp->id.id) % (unsigned long long)cmp->tickEvery != 0)
+			continue;
+		cmp->Update();
 	}
 }
 

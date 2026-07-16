@@ -53,6 +53,17 @@ public:
 	// (stopping PIE is an editor command).
 	[[nuke::func]] static void Quit();
 
+	// --- SAVEGAMES (6.6): full runtime snapshots, distinct from world ASSETS ----------------
+	// SaveGame serializes the RUNNING world — atoms, live script state (per each class's
+	// SaveMode), tilemap layers, the game calendar and the pending event schedule — into
+	// `<slot>.nusave` in the game's SAVE DIR, never into content: the editor/dev player uses
+	// `<project>/saves/`, the packaged player `%APPDATA%/<game>/saves/`. LoadGame applies at
+	// the frame boundary (safe from a running script). ListSaves returns newline-separated
+	// slot names, newest first.
+	[[nuke::func]] static bool        SaveGame(const std::string& slot);
+	[[nuke::func]] static bool        LoadGame(const std::string& slot);
+	[[nuke::func]] static std::string ListSaves();
+
 	// --- WINDOW control (a game's video-settings menu) -------------------------------------
 	// Every setter: updates the window CONFIG, PERSISTS it (config/main.json's window block,
 	// leaving the rest intact) so the NEXT launch honours it, and applies it LIVE through the

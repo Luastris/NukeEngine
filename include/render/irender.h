@@ -432,6 +432,12 @@ public:
     virtual void drawDebugLineDepth(const float a[3], const float b[3], const float color[4])
     { drawDebugLine(a, b, color); }
 
+    // BULK sprite append (tilemap chunks, 6.4): verts = vertCount × 9 floats
+    // {x,y,z, u,v, r,g,b,a} — pre-baked quads (two CCW triangles each), the exact layout
+    // drawSprite builds one quad at a time. Joins the same per-texture batch (consecutive
+    // same-texture runs = one draw call). Call between beginCamera/endCamera.
+    virtual void drawSpriteRun(Texture* tex, const float* verts, int vertCount) {}
+
     // ABI: new virtuals are appended at the END of the class, NEVER inserted mid-vtable —
     // plugins are separate DLLs built at different times, and an inserted slot shifts every
     // later one (an old NukeGUI.dll calling getScrollDelta through a shifted slot landed in

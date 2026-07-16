@@ -101,6 +101,18 @@ public:
 	[[nuke::func]] void       SetLayerMask(double mask);
 	[[nuke::func]] double     GetLayerMask();
 
+	// --- screen -> world (6.7): the click-to-world pair for Input.MouseX/Y ------------------
+	// px/py are GAME-SCREEN pixels (Screen.Width/Height space, top-left origin — exactly what
+	// Input.MouseX/Y return). Ortho-aware: follows the camera's live projection blend, so the
+	// ray matches what this camera actually renders. Origin varies in ortho (parallel rays);
+	// direction varies in perspective. World.Pick / Physics.Raycast / Tilemap.PickCell consume
+	// the (origin, dir) pair directly.
+	[[nuke::func]] Vector3 ScreenRayOrigin(double px, double py);
+	[[nuke::func]] Vector3 ScreenRayDir(double px, double py);
+	// The world point `depth` units along that ray (e.g. cursor on the z=0 gameplay plane:
+	// use Tilemap.PickCell instead; for a fixed camera distance this is the quick answer).
+	[[nuke::func]] Vector3 ScreenToWorldPoint(double px, double py, double depth);
+
 	void Init(Atom* parent);
 	void FixedUpdate();
 	void Update();

@@ -1,4 +1,6 @@
 #include "input/Input.h"
+#include "interface/AppInstance.h"   // MouseX/Y: renderer cursor + game-screen offset (6.7)
+#include "render/irender.h"
 #include <nlohmann/json.hpp>
 #include <boost/filesystem.hpp>
 #include <boost/filesystem/fstream.hpp>
@@ -61,6 +63,27 @@ static const ActionValueType actionType(const std::string& a)
 // ---- raw feed / providers ----------------------------------------------------------------------------
 void Input::SetControl(const std::string& id, float value) { g_controls[id].value = value; }
 float Input::Control(const std::string& id) { auto it = g_controls.find(id); return it == g_controls.end() ? 0.0f : it->second.value; }
+
+// Cursor in GAME-SCREEN pixels (6.7): the renderer's window cursor shifted by the game
+// screen's top-left (the editor viewport panel offset; 0,0 in the player). Same space as
+// Screen.Width/Height — pairs with Camera.ScreenRayOrigin/Dir for click-to-world.
+double Input::MouseX()
+{
+	AppInstance* app = AppInstance::GetSingleton();
+	if (!app->render) return 0;
+	double x = 0, y = 0;
+	app->render->getCursorPos(x, y);
+	return x - app->uiX;
+}
+
+double Input::MouseY()
+{
+	AppInstance* app = AppInstance::GetSingleton();
+	if (!app->render) return 0;
+	double x = 0, y = 0;
+	app->render->getCursorPos(x, y);
+	return y - app->uiY;
+}
 void Input::RegisterProvider(const std::string& name, std::function<void()> poll)
 {
 	for (auto& p : g_providers) if (p.first == name) { p.second = poll; return; }

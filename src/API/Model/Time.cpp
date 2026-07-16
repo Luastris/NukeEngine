@@ -54,6 +54,7 @@ void Time::NewFrame()
 	}
 	last = now;
 	have = true;
+	++frame;   // tick-interval stagger (6.8)
 	// Game clock: scaled while PLAYING; equal to real time in edit mode so editor previews
 	// (animators in asset editors, etc.) never freeze on the game-speed setting.
 	const bool playing = AppInstance::GetSingleton()->playState == 1;

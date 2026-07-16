@@ -226,6 +226,7 @@
     <ClInclude Include="include\API\Model\Texture.h" />
     <ClInclude Include="include\API\Model\Time.h" />
     <ClInclude Include="include\API\Model\Events.h" />
+    <ClInclude Include="include\API\Model\Profiler.h" />
     <ClInclude Include="include\API\Model\Rand.h" />
     <ClInclude Include="include\API\Model\Noise.h" />
     <ClInclude Include="include\API\Model\Transform.h" />
@@ -314,6 +315,7 @@
     <ClCompile Include="src\API\Model\Texture.cpp" />
     <ClCompile Include="src\API\Model\Time.cpp" />
     <ClCompile Include="src\API\Model\Events.cpp" />
+    <ClCompile Include="src\API\Model\Profiler.cpp" />
     <ClCompile Include="src\API\Model\Rand.cpp" />
     <ClCompile Include="src\API\Model\Noise.cpp" />
     <ClCompile Include="src\API\Model\Transform.cpp" />
