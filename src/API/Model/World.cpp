@@ -667,6 +667,24 @@ static void CollectCameras(bc::list<Atom*>& gos, std::vector<Camera*>& out)
 	}
 }
 
+// The game's view camera (UE "possess"): the first ENABLED camera whose mainCamera flag is set;
+// if none is marked, the first enabled camera in hierarchy order (a single camera = itself).
+// Editor infrastructure cameras never qualify. Callers: PIE game-camera view, audio listener
+// fallback, scripts (World.GetMainCamera).
+Camera* World::GetMainCamera()
+{
+	std::vector<Camera*> cams;
+	CollectCameras(*hierarchy, cams);
+	Camera* first = nullptr;
+	for (Camera* c : cams)
+	{
+		if (c->editorCamera) continue;
+		if (c->mainCamera) return c;
+		if (!first) first = c;
+	}
+	return first;
+}
+
 static void CollectLights(bc::list<Atom*>& gos, std::vector<Light*>& out)
 {
 	for (auto atom : gos)
@@ -1166,7 +1184,10 @@ static void ApplyCanvasLayouts(bc::list<Atom*>& gos, Canvas* ctx)
 // Editor-only: draw every canvas's rectangle as debug lines so its bounds are visible and it can be
 // laid out. WorldSpace rects are in world units; screen-space rects show the reference resolution on
 // the canvas's world plane at 1/ppu (the same mapping the editor camera renders children with).
-static void DrawCanvasGizmos(bc::list<Atom*>& gos, iRender* r)
+// Quiet by default: an unselected canvas gets a thin gray DEPTH-TESTED frame (scene geometry hides
+// it); only the SELECTED canvas gets the bright on-top highlight. Drawn ONLY in the editor camera's
+// pass (never in camera previews / possessed PIE view / render-texture cameras).
+static void DrawCanvasGizmos(bc::list<Atom*>& gos, iRender* r, Atom* sel)
 {
 	for (Atom* atom : gos)
 	{
@@ -1185,11 +1206,20 @@ static void DrawCanvasGizmos(bc::list<Atom*>& gos, iRender* r)
 				};
 				float c00[3], c10[3], c11[3], c01[3];
 				corner(-1, -1, c00); corner(1, -1, c10); corner(1, 1, c11); corner(-1, 1, c01);
-				const float col[4] = { 0.30f, 0.70f, 1.0f, 1.0f };
-				r->drawDebugLine(c00, c10, col); r->drawDebugLine(c10, c11, col);
-				r->drawDebugLine(c11, c01, col); r->drawDebugLine(c01, c00, col);
+				if (atom == sel)
+				{
+					const float col[4] = { 0.30f, 0.70f, 1.0f, 1.0f };   // selection highlight, on top
+					r->drawDebugLine(c00, c10, col); r->drawDebugLine(c10, c11, col);
+					r->drawDebugLine(c11, c01, col); r->drawDebugLine(c01, c00, col);
+				}
+				else
+				{
+					const float col[4] = { 0.5f, 0.5f, 0.5f, 1.0f };     // thin gray, occluded by the scene
+					r->drawDebugLineDepth(c00, c10, col); r->drawDebugLineDepth(c10, c11, col);
+					r->drawDebugLineDepth(c11, c01, col); r->drawDebugLineDepth(c01, c00, col);
+				}
 			}
-		DrawCanvasGizmos(atom->children, r);
+		DrawCanvasGizmos(atom->children, r, sel);
 	}
 }
 
@@ -1454,7 +1484,12 @@ void World::Render(iRender* r)
 		{
 			au->init();   // idempotent (first call opens the device)
 			Transform* ears = FindAudioListener(*hierarchy);
-			if (!ears && !cams.empty() && cams[0]->transform) ears = cams[0]->transform;
+			if (!ears)   // no listener -> the game's main camera (same rule as the view), else any camera
+			{
+				Camera* mc = GetMainCamera();
+				if (!mc && !cams.empty()) mc = cams[0];
+				if (mc && mc->transform) ears = mc->transform;
+			}
 			if (ears)
 			{
 				Vector3 p = ears->globalPosition(), f = ears->direction(), u = ears->up();
@@ -1750,7 +1785,9 @@ void World::Render(iRender* r)
 			DrawDecals(decals, r);               // screen-space decals: composite onto the scene from the depth prepass
 			DrawSprites(*hierarchy, d, cp, r, cam, camMask);   // 2D sprites: after opaque, back-to-front, depth-tested
 			DrawComponentHooks(*hierarchy, r, RenderPhase::Transparent, camMask);   // module components: blended draws (particles, etc.)
-			if (editor) DrawCanvasGizmos(*hierarchy, r);   // canvas bounds (editor gizmo; screen-space at 1/ppu)
+			// Canvas bounds: editor-CAMERA pass only (not previews / possessed PIE / RT cams);
+			// gray depth-tested by default, highlighted only for the selected canvas.
+			if (editor && cam->editorCamera) DrawCanvasGizmos(*hierarchy, r, AppInstance::GetSingleton()->selectedInHieararchy);
 			if (editor) DrawDecalGizmos(*hierarchy, r, AppInstance::GetSingleton()->selectedInHieararchy);   // only the SELECTED decal
 			DrawComponentHooks(*hierarchy, r, RenderPhase::Overlay, camMask);       // module components: on-top overlays / gizmos
 		}

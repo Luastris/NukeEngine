@@ -420,6 +420,18 @@ public:
                                     const float uv[4], const float tint[4], int afterPost, int scaleMode)
     { drawSpriteScreen(tex, rect, refSize, uv, tint, afterPost); }
 
+    // Global scene fill mode: true = draw world geometry as wireframe (editor viewport draw-mode
+    // toggle). Affects mesh rendering only — sky, sprites, UI and post keep their pipelines.
+    virtual void setWireframe(bool on) {}
+    virtual bool getWireframe() { return false; }
+
+    // DEPTH-TESTED debug line: drawn inside the current camera pass against the scene depth, so
+    // geometry occludes it (quiet gizmos — e.g. unselected canvas frames). drawDebugLine stays the
+    // on-top overlay flavor (selection highlights). Call between beginCamera/endCamera; the batch
+    // is consumed by that camera's pass. Backends without the pass fall back to the overlay line.
+    virtual void drawDebugLineDepth(const float a[3], const float b[3], const float color[4])
+    { drawDebugLine(a, b, color); }
+
     // ABI: new virtuals are appended at the END of the class, NEVER inserted mid-vtable —
     // plugins are separate DLLs built at different times, and an inserted slot shifts every
     // later one (an old NukeGUI.dll calling getScrollDelta through a shifted slot landed in

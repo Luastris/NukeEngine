@@ -132,6 +132,13 @@ struct Field {
     float fmin = 0.0f, fmax = 0.0f;
     // [[nuke::prop(enum="A,B,C")]] on an int field -> the inspector draws a dropdown; the int is the index.
     std::vector<std::string> enumLabels;
+    // [[nuke::prop(tip="...")]] -> the inspector shows this as a tooltip when the field is hovered.
+    // Every non-obvious prop should carry one — a bare numeric box with no explanation is banned.
+    std::string tip;
+    // [[nuke::prop(widget="...")]] -> the inspector draws a NAMED custom widget instead of the
+    // type-default one. Known: "layers" (int = bitmask over nuke::Layers -> named multi-select).
+    // Unknown names fall back to the default widget, so plugins degrade gracefully.
+    std::string widget;
 };
 
 // ---- language-neutral value (reflection <-> scripting boundary) --------------------

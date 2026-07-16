@@ -11,6 +11,7 @@
 namespace nuke {
 
 class iRender;
+class Camera;
 
 class NUKEENGINE_API World
 {
@@ -82,6 +83,12 @@ private:
 	boost::recursive_mutex gameLock;
 	std::vector<long> destroyQueue;   // QueueDestroy ids; flushed at the end of Update (under gameLock)
 public:
+
+	// The camera the GAME is viewed through (UE "possess"): the one whose Main Camera flag is
+	// set, else the world's FIRST camera in hierarchy order (a single camera = itself). Editor
+	// infrastructure cameras (Camera::editorCamera) never count. Used by PIE's game-camera view,
+	// the player, the audio listener — and available to scripts (World.GetMainCamera).
+	[[nuke::func]] Camera* GetMainCamera();
 
 	// Ray-pick the nearest Atom (with a MeshRenderer) hit by a world-space ray.
 	// Returns nullptr on miss. Used by the editor viewport for click-to-select.
