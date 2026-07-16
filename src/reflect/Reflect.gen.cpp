@@ -14,6 +14,7 @@
 #include "API/Model/DebugDraw.h"
 #include "API/Model/Decal.h"
 #include "API/Model/Environment.h"
+#include "API/Model/Events.h"
 #include "API/Model/Game.h"
 #include "API/Model/Layers.h"
 #include "API/Model/Light.h"
@@ -21,9 +22,11 @@
 #include "API/Model/Material.h"
 #include "API/Model/Mesh.h"
 #include "API/Model/MeshRenderer.h"
+#include "API/Model/Noise.h"
 #include "API/Model/Physics.h"
 #include "API/Model/PostProcess.h"
 #include "API/Model/Prefab.h"
+#include "API/Model/Rand.h"
 #include "API/Model/RectAnchor.h"
 #include "API/Model/ReflectionProbe.h"
 #include "API/Model/Rigidbody.h"
@@ -303,6 +306,15 @@ bool NukeReflectInit() {
 		t.create = []() -> void* { return new Environment(); };
 	}
 	{
+		TypeInfo& t = TypeOf<Events>();
+		t.base = "Object";
+		t.methods.push_back(MakeMethod("Emit", &Events::Emit));
+		t.methods.push_back(MakeMethod("After", &Events::After));
+		t.methods.push_back(MakeMethod("Every", &Events::Every));
+		t.methods.push_back(MakeMethod("Cancel", &Events::Cancel));
+		t.methods.push_back(MakeMethod("PendingCount", &Events::PendingCount));
+	}
+	{
 		TypeInfo& t = TypeOf<Game>();
 		t.base = "Object";
 		t.methods.push_back(MakeMethod("GetWorld", &Game::GetWorld));
@@ -311,6 +323,8 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("IsPlaying", &Game::IsPlaying));
 		t.methods.push_back(MakeMethod("IsPaused", &Game::IsPaused));
 		t.methods.push_back(MakeMethod("SetPaused", &Game::SetPaused));
+		t.methods.push_back(MakeMethod("SetTimeScale", &Game::SetTimeScale));
+		t.methods.push_back(MakeMethod("GetTimeScale", &Game::GetTimeScale));
 		t.methods.push_back(MakeMethod("Quit", &Game::Quit));
 		t.methods.push_back(MakeMethod("SetResolution", &Game::SetResolution));
 		t.methods.push_back(MakeMethod("SetWindowMode", &Game::SetWindowMode));
@@ -387,6 +401,17 @@ bool NukeReflectInit() {
 		t.create = []() -> void* { return new MeshRenderer(); };
 	}
 	{
+		TypeInfo& t = TypeOf<Noise>();
+		t.base = "Object";
+		t.methods.push_back(MakeMethod("Perlin2", &Noise::Perlin2));
+		t.methods.push_back(MakeMethod("Perlin3", &Noise::Perlin3));
+		t.methods.push_back(MakeMethod("Fbm", &Noise::Fbm));
+		t.methods.push_back(MakeMethod("Voronoi2", &Noise::Voronoi2));
+		t.methods.push_back(MakeMethod("CellId2", &Noise::CellId2));
+		t.methods.push_back(MakeMethod("WarpX", &Noise::WarpX));
+		t.methods.push_back(MakeMethod("WarpY", &Noise::WarpY));
+	}
+	{
 		TypeInfo& t = TypeOf<Physics>();
 		t.base = "Object";
 		t.methods.push_back(MakeMethod("Available", &Physics::Available));
@@ -414,6 +439,18 @@ bool NukeReflectInit() {
 		TypeInfo& t = TypeOf<Prefabs>();
 		t.base = "Object";
 		t.methods.push_back(MakeMethod("Spawn", &Prefabs::Spawn));
+	}
+	{
+		TypeInfo& t = TypeOf<Rand>();
+		t.base = "Object";
+		t.methods.push_back(MakeMethod("Seed", &Rand::Seed));
+		t.methods.push_back(MakeMethod("Value", &Rand::Value));
+		t.methods.push_back(MakeMethod("Range", &Rand::Range));
+		t.methods.push_back(MakeMethod("RangeInt", &Rand::RangeInt));
+		t.methods.push_back(MakeMethod("Chance", &Rand::Chance));
+		t.methods.push_back(MakeMethod("Gauss", &Rand::Gauss));
+		t.methods.push_back(MakeMethod("State", &Rand::State));
+		t.methods.push_back(MakeMethod("SetState", &Rand::SetState));
 	}
 	{
 		TypeInfo& t = TypeOf<RectAnchor>();
@@ -535,6 +572,20 @@ bool NukeReflectInit() {
 		t.base = "Object";
 		t.methods.push_back(MakeMethod("Elapsed", &Time::Elapsed));
 		t.methods.push_back(MakeMethod("Delta", &Time::Delta));
+		t.methods.push_back(MakeMethod("UnscaledDelta", &Time::UnscaledDelta));
+		t.methods.push_back(MakeMethod("TotalGameSeconds", &Time::TotalGameSeconds));
+		t.methods.push_back(MakeMethod("TimeOfDay", &Time::TimeOfDay));
+		t.methods.push_back(MakeMethod("Second", &Time::Second));
+		t.methods.push_back(MakeMethod("Minute", &Time::Minute));
+		t.methods.push_back(MakeMethod("Hour", &Time::Hour));
+		t.methods.push_back(MakeMethod("Day", &Time::Day));
+		t.methods.push_back(MakeMethod("Month", &Time::Month));
+		t.methods.push_back(MakeMethod("Year", &Time::Year));
+		t.methods.push_back(MakeMethod("DayOfYear", &Time::DayOfYear));
+		t.methods.push_back(MakeMethod("DayOfWeek", &Time::DayOfWeek));
+		t.methods.push_back(MakeMethod("GameToReal", &Time::GameToReal));
+		t.methods.push_back(MakeMethod("SetGameToReal", &Time::SetGameToReal));
+		t.methods.push_back(MakeMethod("SetDate", &Time::SetDate));
 	}
 	{
 		TypeInfo& t = TypeOf<Transform>();

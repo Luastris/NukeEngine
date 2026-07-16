@@ -3,6 +3,7 @@
 #define BOOST_CHRONO_HEADER_ONLY
 #include "interface/AppInstance.h"
 #include "API/Model/World.h"
+#include "API/Model/Time.h"      // fixed-thread cadence scales with Game.SetTimeScale
 #include "API/Model/Package.h"   // packed-content resolve (3.2)
 #include <map>                   // mod-name -> layer index (world-merge baselines)
 #include <boost/chrono.hpp>
@@ -245,7 +246,13 @@ void AppInstance::FixedThread()
 	{
 		World* w = currentWorld;
 		const double dt = (w && w->settings.fixedDt > 0.0001f) ? w->settings.fixedDt : 1.0 / 60.0;
-		if (w && playState == 1)
+		// Game speed (Game.SetTimeScale): one FixedUpdate is always ONE fixedDt of GAME time,
+		// so at scale s the cadence runs s× faster in real time (2x = twice the steps per
+		// real second — the sim fast-forwards without changing the step size). Scale 0 =
+		// frozen: no steps at all, idle at the base cadence waiting for unpause.
+		const double s = Time::getSingleton()->scale;
+		const bool   frozen = s <= 0.0001;
+		if (w && playState == 1 && !frozen)
 		{
 			const bch::steady_clock::time_point t0 = bch::steady_clock::now();
 			try { w->FixedUpdate(); }
@@ -256,7 +263,8 @@ void AppInstance::FixedThread()
 			const double stepMs = bch::duration_cast<bch::duration<double, boost::milli>>(bch::steady_clock::now() - t0).count();
 			if (stepMs > 50.0) cout << "[FixedThread]	SLOW step: " << stepMs << " ms" << endl;
 		}
-		next += bch::nanoseconds((long long)(dt * 1e9));
+		const double realDt = (playState == 1 && !frozen) ? dt / s : dt;
+		next += bch::nanoseconds((long long)((realDt < 0.001 ? 0.001 : realDt) * 1e9));
 		const bch::steady_clock::time_point now = bch::steady_clock::now();
 		if (next < now) next = now;   // fell behind (hitch/debugger): resume cadence, no burst catch-up
 		boost::this_thread::sleep_until(next);

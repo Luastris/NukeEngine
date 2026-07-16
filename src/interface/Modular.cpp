@@ -41,6 +41,52 @@ bool IsTypeActive(const std::string& type)
 	return IsPluginLoaded(it->second);
 }
 
+// Import ONE plugin DLL into the pool. Skips non-plugins (no "plugin" export) and file
+// names already discovered (the host's own modules/ wins over a same-named project module).
+NUKEModule* DiscoverModuleFile(const std::string& absPath)
+{
+	bfs::path p(absPath);
+	auto ext = p.extension().string();
+	if (ext != ".dll" && ext != ".so") return nullptr;
+	const std::string file = p.filename().string();
+	for (auto& m : g_modules)
+		if (m && m->moduleFile == file) return nullptr;   // already in the pool
+	try
+	{
+		// Extension plugins export an unmangled "plugin" symbol — skip any other DLL
+		// (module dependencies like glfw3.dll live in the same directory).
+		boost::dll::shared_library lib(p.string());
+		if (!lib.has("plugin"))
+			return nullptr;
+
+		auto plugin = boost::dll::import_symbol<NUKEModule>(p.string(), "plugin");
+		plugin->modulePath = p.generic_string();
+		plugin->moduleFile = file;
+		plugin->loaded     = false;
+		g_modules.push_back(plugin);
+		cout << "[Modular]\tdiscovered plugin '" << plugin->title << "' from "
+		     << plugin->moduleFile << endl;
+		return plugin.get();
+	}
+	catch (const std::exception& e)
+	{
+		cout << "[Modular]\tfailed to load " << file << ": " << e.what() << endl;
+		return nullptr;
+	}
+}
+
+void DiscoverModulesIn(const std::string& dir)
+{
+	boost::system::error_code ec;
+	if (dir.empty() || !bfs::exists(bfs::path(dir), ec)) return;
+	for (bfs::directory_iterator it(dir, ec), end; it != end && !ec; it.increment(ec))
+	{
+		if (bfs::is_directory(it->path()))
+			continue;
+		DiscoverModuleFile(it->path().string());
+	}
+}
+
 // Discovery only: import every plugin DLL (so the manager has its metadata) into the shared
 // pool, but do NOT activate any. The caller activates the project's chosen plugins.
 void InitModules(AppInstance* instance)
@@ -53,35 +99,33 @@ void InitModules(AppInstance* instance)
 		cout << "directory created!" << endl;
 	}
 
-	for (auto& p : boost::filesystem::directory_iterator(bfs::current_path().concat("/modules")))
-	{
-		if (bfs::is_directory(p.path()))
-			continue;
-		auto ext = p.path().extension().string();
-		if (ext != ".dll" && ext != ".so")
-			continue;
-		try
-		{
-			// Extension plugins export an unmangled "plugin" symbol; render modules export
-			// "renderModule" instead — skip those (and any other non-plugin DLL).
-			boost::dll::shared_library lib(p.path().string());
-			if (!lib.has("plugin"))
-				continue;
+	DiscoverModulesIn(bfs::path(bfs::current_path().concat("/modules")).string());
+}
 
-			auto plugin = boost::dll::import_symbol<NUKEModule>(p.path().string(), "plugin");
-			plugin->modulePath = p.path().generic_string();
-			plugin->moduleFile = p.path().filename().string();
-			plugin->loaded     = false;
-			g_modules.push_back(plugin);
-			cout << "[Modular]\tdiscovered plugin '" << plugin->title << "' from "
-			     << plugin->moduleFile << endl;
-		}
-		catch (const std::exception& e)
+// Phase 6.0: unload a module's DLL so a rebuild can overwrite the file. The pool's
+// shared_ptr is the lock — dropping it frees the library (boost::dll). PHASE_BOOT
+// providers (the renderer) can never be torn down mid-run.
+bool UnloadModuleDll(const std::string& moduleFile)
+{
+	for (size_t i = 0; i < g_modules.size(); ++i)
+	{
+		auto& m = g_modules[i];
+		if (!m || m->moduleFile != moduleFile) continue;
+		if (m->phase() == PHASE_BOOT)
 		{
-			cout << "[Modular]\tfailed to load " << p.path().filename().string()
-			     << ": " << e.what() << endl;
+			cout << "[Modular]\t'" << moduleFile << "' is a boot-phase provider — restart to swap it" << endl;
+			return false;
 		}
+		if (m->loaded) DisablePlugin(m.get());   // live components -> UnknownComponent placeholders
+		const long uses = m.use_count();
+		if (uses > 1)
+			cout << "[Modular]\tWARNING: '" << moduleFile << "' has " << (uses - 1)
+			     << " extra reference(s) — the DLL stays locked until they drop" << endl;
+		g_modules.erase(g_modules.begin() + i);
+		cout << "[Modular]\tunloaded '" << moduleFile << "' (file unlocked for rebuild)" << endl;
+		return true;
 	}
+	return false;
 }
 
 NUKEModule* ActiveServiceProvider(const char* service)

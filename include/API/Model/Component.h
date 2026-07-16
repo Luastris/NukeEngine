@@ -90,6 +90,13 @@ public:
 	// (drawSprite/drawDecal/drawDebugLine/...) using its own transform. Lets module components render
 	// without the engine's render loop knowing them. ABI: new virtuals are appended at the END.
 	virtual void OnRender(iRender* /*r*/, RenderPhase /*phase*/) {}
+
+	// Event-bus delivery (nuke::Events, Phase 6.3): every queued event reaches every ENABLED
+	// component once per frame from World::Update. GAME thread, game lock held — scripting
+	// components may enter their VM directly (ScriptComponent → Lua `onEvent(self, name,
+	// payload)`, CSharpScript → C# `OnEvent(string, string)`). Default no-op; filter by name.
+	// ABI: appended at the END of the vtable.
+	virtual void OnEvent(const std::string& /*name*/, const std::string& /*payload*/) {}
 };
 }  // namespace nuke
 

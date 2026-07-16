@@ -33,6 +33,26 @@ NUKEENGINE_API bc::vector<std::shared_ptr<NUKEModule>>& GetModules();
 NUKEENGINE_API void InitModules(AppInstance* instance);
 NUKEENGINE_API void UnloadModules();
 
+// Discover plugins from ONE extra directory into the shared pool (same import as
+// InitModules; a DLL whose file name is already in the pool is skipped — the host's own
+// modules/ wins). This is how PROJECT-LOCAL game modules (<project>/modules, Phase 6.0)
+// join the pool: the editor calls it at project open and after a game-module build.
+NUKEENGINE_API void DiscoverModulesIn(const std::string& dir);
+
+// C++ game-module rebuild cycle (Phase 6.0). A discovered DLL is file-LOCKED for the whole
+// session (the pool holds its boost::dll library), so a rebuild must first UNLOAD it:
+//   UnloadModuleDll(file)  — disable if loaded (components -> UnknownComponent placeholders)
+//                            and DROP it from the pool; the last reference frees the DLL and
+//                            the build can overwrite the file. Refuses PHASE_BOOT providers.
+//                            NOTE: the caller must not hold shared_ptr copies (plugin window
+//                            selection etc.) or the file stays locked.
+//   DiscoverModuleFile(p)  — import ONE dll path back into the pool (returns null on failure;
+//                            replaces nothing — call UnloadModuleDll first). Enable the
+//                            result with EnablePlugin: live UnknownComponent placeholders of
+//                            its types restore automatically.
+NUKEENGINE_API bool        UnloadModuleDll(const std::string& moduleFile);
+NUKEENGINE_API NUKEModule* DiscoverModuleFile(const std::string& absPath);
+
 // Activate / deactivate a discovered plugin at any time (the manager's checkboxes + the
 // per-project load list drive these). Enable = OnLoad() (sync, registers types) +
 // service registration (queryService -> Services_Provide) + Run() (background).

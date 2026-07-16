@@ -13,6 +13,7 @@
 #include "API/Model/Shader.h"     // post-effect shader props (pack PostParams per stage)
 #include "API/Model/ReflectionProbe.h" // scene-captured reflection cubemap
 #include "API/Model/Time.h"       // animated-texture (GIF) frame advance + fixed-step accumulator
+#include "API/Model/Events.h"     // event bus pump (6.3) + calendar/schedule world serialization
 #include "API/Model/Sprite.h"     // 2D sprite quads (drawn after opaque, back-to-front)
 #include "API/Model/Canvas.h"     // 2D layout container (WorldSpace rect + editor gizmo)
 #include "API/Model/RectAnchor.h" // canvas anchors/layout (applied before rendering)
@@ -312,6 +313,24 @@ void World::Update()
 	AppInstance* app = AppInstance::GetSingleton();
 	app->worldTickActive = true;   // scripts' Game.LoadWorld queues instead of reloading mid-loop
 	Input::Update(Time::getSingleton()->delta);   // evaluate input once per tick, BEFORE scripts query it
+	// Game calendar: advance by the speed-scaled frame delta (6.1) — rolls hours/days and
+	// emits the time.* events. Then pump the event bus (6.3): due scheduled entries + queued
+	// emits are delivered to native subscribers and every enabled component's OnEvent hook.
+	Time::getSingleton()->Advance(Time::getSingleton()->gameDelta);
+	Events::Pump([this](const std::string& n, const std::string& p)
+	{
+		std::function<void(bc::list<Atom*>&)> deliver = [&](bc::list<Atom*>& gos)
+		{
+			for (Atom* atom : gos)
+			{
+				if (!atom) continue;
+				for (Component* c : atom->components)
+					if (c && c->enabled) c->OnEvent(n, p);
+				deliver(atom->children);
+			}
+		};
+		deliver(*hierarchy);
+	});
 	for (Atom* atom : *hierarchy)
 	{
 		atom->Update();
@@ -2176,6 +2195,17 @@ std::string World::SaveToString()
 		{"shadowSoftness", settings.shadowSoftness}, {"frustumCull", settings.frustumCull},
 		{"gravity", { settings.gravity[0], settings.gravity[1], settings.gravity[2] }},
 		{"fixedDt", settings.fixedDt} };
+	// Game clock (6.1/6.3): capture the LIVE calendar + the pending event schedule, so a
+	// savegame resumes at the exact in-game moment with its incidents still due. Only the
+	// REAL world owns the clock — auxiliary preview worlds must never capture/clobber it.
+	if (!auxiliary)
+	{
+		Time* t = Time::getSingleton();
+		j["calendar"] = { {"gtr", t->gtr}, {"year", t->year}, {"month", t->month}, {"day", t->day},
+		                  {"hour", t->hour}, {"minute", t->minute}, {"sec", t->sec},
+		                  {"totalgt", t->totalgt}, {"totalgd", t->totalgd} };
+		j["events"] = Events::SaveJson();
+	}
 	j["atoms"] = json::array();
 	for (Atom* atom : *hierarchy)
 	{
@@ -2531,6 +2561,26 @@ void World::LoadFromString(const std::string& data)
 		if (s.contains("gravity") && s["gravity"].is_array() && s["gravity"].size() == 3)
 			for (int i = 0; i < 3; ++i) settings.gravity[i] = s["gravity"][i].get<float>();
 		settings.fixedDt = s.value("fixedDt", settings.fixedDt);
+	}
+	// Game clock (6.1/6.3): restore the calendar + the pending event schedule. Only the REAL
+	// world touches the global clock — auxiliary preview worlds (asset editors) skip it. A
+	// world without a calendar block (pre-6.1 or fresh) resets the schedule instead of
+	// inheriting the previous world's pending incidents.
+	if (!auxiliary)
+	{
+		if (j.contains("calendar") && j["calendar"].is_object())
+		{
+			const json& c = j["calendar"];
+			Time* t = Time::getSingleton();
+			t->Init(c.value("gtr", t->gtr), c.value("day", 1), c.value("month", 1), c.value("year", 2000),
+			        c.value("hour", 8), c.value("minute", 0), c.value("sec", 0));
+			t->totalgt = c.value("totalgt", 0.0);
+			t->totalgd = c.value("totalgd", (long long unsigned int)0);
+		}
+		if (j.contains("events") && j["events"].is_string())
+			Events::LoadJson(j["events"].get<std::string>());
+		else
+			Events::ResetSchedule();
 	}
 	// The old atoms are dropped WITHOUT component Destroy (fast path), so their physics
 	// bodies would leak — wipe the whole simulation; new colliders re-create lazily.

@@ -41,6 +41,13 @@ public:
 	// starting/stopping PIE is the EDITOR's action, not the game's.
 	[[nuke::func]] static void SetPaused(bool paused);
 
+	// Game SPEED (colony-sim fast-forward): scales Time.Delta(), the game calendar and the
+	// fixed physics cadence. 0 = frozen world that still takes orders (Update keeps running —
+	// unlike SetPaused, which halts Update entirely), 1 = normal, 2/3 = fast-forward.
+	// Clamped to [0..8]. Edit mode ignores the scale (previews run real-time).
+	[[nuke::func]] static void   SetTimeScale(double scale);
+	[[nuke::func]] static double GetTimeScale();
+
 	// End the game: in the Player the window closes and the main loop returns (clean
 	// shutdown). In the editor a game cannot close the host — logged and ignored
 	// (stopping PIE is an editor command).

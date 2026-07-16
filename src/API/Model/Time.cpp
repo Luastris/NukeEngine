@@ -1,13 +1,44 @@
-#include "API/Model/Time.h"
-
+// Header-only boost.chrono BEFORE any include that may pull boost (AppInstance.h does) —
+// the lib flavor double-defines steady_clock::now inside the engine DLL.
 #define BOOST_CHRONO_HEADER_ONLY
 #define BOOST_ERROR_CODE_HEADER_ONLY
+#include "API/Model/Time.h"
+#include "API/Model/Events.h"
+#include "interface/AppInstance.h"
 #include <boost/chrono.hpp>
 
 namespace nuke {
 
-double Time::Elapsed() { return getSingleton()->elapsed; }
-double Time::Delta()   { return getSingleton()->delta; }
+double Time::Elapsed()       { return getSingleton()->elapsed; }
+double Time::Delta()         { return getSingleton()->gameDelta; }
+double Time::UnscaledDelta() { return getSingleton()->delta; }
+
+double Time::TotalGameSeconds() { return getSingleton()->totalgt; }
+double Time::TimeOfDay()        { return getSingleton()->tod; }
+int    Time::Second()           { return getSingleton()->sec; }
+int    Time::Minute()           { return getSingleton()->minute; }
+int    Time::Hour()             { return getSingleton()->hour; }
+int    Time::Day()              { return getSingleton()->day; }
+int    Time::Month()            { return getSingleton()->month; }
+int    Time::Year()             { return getSingleton()->year; }
+int    Time::DayOfYear()        { return getSingleton()->doy; }
+int    Time::DayOfWeek()        { return getSingleton()->dow; }
+double Time::GameToReal()       { return getSingleton()->gtr; }
+
+void Time::SetGameToReal(double gameSecondsPerRealSecond)
+{
+	Time* t = getSingleton();
+	t->gtr = gameSecondsPerRealSecond > 0.0 ? gameSecondsPerRealSecond : t->gtr;
+}
+
+void Time::SetDate(int year, int month, int day, int hour, int minute)
+{
+	Time* t = getSingleton();
+	t->Init(t->gtr, day, month, year, hour, minute, 0);
+	t->totalgt = 0.0;
+	t->totalgd = 0;
+	t->secCarry = 0.0;
+}
 
 void Time::NewFrame()
 {
@@ -18,15 +49,36 @@ void Time::NewFrame()
 	if (have)
 	{
 		delta = boost::chrono::duration<double>(now - last).count();
+		if (delta > 0.25) delta = 0.25;   // hitch/debugger clamp — no giant catch-up steps
 		elapsed += delta;
 	}
 	last = now;
 	have = true;
+	// Game clock: scaled while PLAYING; equal to real time in edit mode so editor previews
+	// (animators in asset editors, etc.) never freeze on the game-speed setting.
+	const bool playing = AppInstance::GetSingleton()->playState == 1;
+	gameDelta = playing ? delta * scale : delta;
 }
 
 Time::Time() {}
 
 Time::~Time() {}
+
+// Advance the calendar by gameDeltaSeconds of GAME-CLOCK time (already speed-scaled):
+// game-world seconds = gameDeltaSeconds × gtr, ticked through the date chain whole-second
+// at a time (at gtr=60 and 3x speed that's ~180 iterations/frame at 60fps — trivial).
+void Time::Advance(double gameDeltaSeconds)
+{
+	if (gameDeltaSeconds <= 0.0) return;
+	secCarry += gameDeltaSeconds * gtr;
+	while (secCarry >= 1.0)
+	{
+		secCarry -= 1.0;
+		Tick();
+	}
+	// Sub-second precision for schedulers/shaders: totalgt/tod include the fraction.
+	tod = (sec + minute * 60 + hour * 3600 + secCarry) / 86400.0;
+}
 
 void Time::TickMonth()
 {
@@ -36,6 +88,9 @@ void Time::TickMonth()
 		month = 1;
 		woy = 1;
 	}
+	else
+		month++;
+	Events::EmitEngine("time.newMonth", "");
 }
 
 void Time::TickDay()
@@ -65,6 +120,7 @@ void Time::TickDay()
 	dow++;
 	doy++;
 	totalgd++;
+	Events::EmitEngine("time.newDay", "");
 }
 
 void Time::TickHour()
@@ -75,6 +131,7 @@ void Time::TickHour()
 		TickDay();
 		hour = 0;
 	}
+	Events::EmitEngine("time.newHour", "");
 }
 
 void Time::TickMinute()
@@ -95,18 +152,14 @@ void Time::TickSecond()
 		TickMinute();
 		sec = 0;
 	}
-	tod = (sec + minute * 60 + hour * 3600) / 24 * 3600;
+	tod = (sec + minute * 60 + hour * 3600) / 86400.0;
 }
 
-//Ticker
+// One game second, frame-driven (Advance() calls this; no sleeping — the old blocking
+// wall-clock ticker is gone, the calendar rides the frame loop now).
 void Time::Tick()
 {
-	int toSleep = 1000 * gtr;
-#ifdef WIN32
-	Sleep(toSleep);
-#else
-	usleep(toSleep);
-#endif
+	totalgt += 1.0;
 	TickSecond();
 }
 
@@ -152,7 +205,7 @@ int Time::CalcWeekOfYear(int dayofyear)
 
 void Time::Init()
 {
-	gtr = 0.05;
+	gtr = 60.0;
 	day = 1;
 	year = 2000;
 	month = 1;
@@ -165,7 +218,9 @@ void Time::Init(double gtr, int day, int month, int year)
 	this->day = day;
 	this->year = year;
 	this->month = month;
-	woy = 1;
+	doy = CalcDayOfYear(day, month, year);
+	woy = CalcWeekOfYear(doy);
+	dow = ((doy - 1) % 7) + 1;
 }
 
 void Time::Init(double gtr, int day, int month, int year, int hour)
@@ -184,10 +239,6 @@ void Time::Init(double gtr, int day, int month, int year, int hour, int minute, 
 {
 	this->Init(gtr, day, month, year, hour, minute);
 	this->sec = sec;
-}
-
-void Time::Run()
-{
-	Tick();
+	tod = (sec + minute * 60 + hour * 3600) / 86400.0;
 }
 }  // namespace nuke

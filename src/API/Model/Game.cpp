@@ -1,5 +1,6 @@
 #include "API/Model/Game.h"
 #include "API/Model/World.h"
+#include "API/Model/Time.h"
 #include "interface/AppInstance.h"
 #include "config.h"
 #include "render/irender.h"
@@ -26,6 +27,15 @@ void Game::SetPaused(bool paused)
 	if (app->playState == 0) return;   // edit mode: PIE start/stop is the editor's call
 	app->playState = paused ? 2 : 1;
 }
+
+void Game::SetTimeScale(double scale)
+{
+	if (scale < 0.0) scale = 0.0;
+	if (scale > 8.0) scale = 8.0;
+	Time::getSingleton()->scale = scale;
+}
+
+double Game::GetTimeScale() { return Time::getSingleton()->scale; }
 
 void Game::Quit()
 {
