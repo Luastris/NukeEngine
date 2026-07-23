@@ -3,6 +3,7 @@
 #include "API/Model/Package.h"   // packed-content scan (3.2)
 #include "API/Model/Prefab.h"   // PrefabGuid (register prefab guid<->path)
 #include "render/irender.h"
+#include "interface/AppInstance.h"   // GuidForContentPath: content root + ResolveContent
 #include "input/Input.h"         // .nuinput content -> gameplay input system
 #include <boost/filesystem.hpp>
 #include <iostream>
@@ -172,7 +173,7 @@ void ResDB::HotReloadShaders(iRender* r)
 static bool RendererInternalShader(const std::string& name)
 {
 	return name == "ui" || name == "shadow" || name == "sky" || name == "post" || name == "debug"
-	    || name == "sprite" || name == "decal"
+	    || name == "sprite" || name == "sprite_lit" || name == "decal"
 	    || name.rfind("outline", 0) == 0;
 }
 
@@ -238,6 +239,44 @@ std::string ResDB::GuidForPath(const std::string& path) const
 {
 	auto it = guidByPath.find(path);
 	return it != guidByPath.end() ? it->second : std::string();
+}
+
+// Normalize a path for form-insensitive comparison: generic slashes + case-folded, and cut
+// down to the content-relative tail when the path lives under the content root.
+static std::string NormForContent(const std::string& p, const std::string& contentRoot)
+{
+	std::string g = bfs::path(p).generic_string();
+	if (!contentRoot.empty())
+	{
+		std::string cr = bfs::path(contentRoot).generic_string();
+		if (!cr.empty() && cr.back() != '/') cr += '/';
+		if (g.size() > cr.size() && _strnicmp(g.c_str(), cr.c_str(), cr.size()) == 0)
+			g = g.substr(cr.size());
+	}
+	for (char& c : g) c = (char)std::tolower((unsigned char)c);
+	return g;
+}
+
+std::string ResDB::GuidForContentPath(const std::string& contentRel) const
+{
+	if (contentRel.empty()) return std::string();
+	// Fast paths first: the exact reference, then the resolved absolute form.
+	std::string g = GuidForPath(contentRel);
+	if (!g.empty()) return g;
+	AppInstance* app = AppInstance::GetSingleton();
+	const std::string abs = app->ResolveContent(contentRel);
+	if (!abs.empty())
+	{
+		g = GuidForPath(abs);
+		if (!g.empty()) return g;
+	}
+	// Form-insensitive: compare content-relative normalized tails. Registered paths come from
+	// scans/imports (absolute, native slashes) - a few hundred entries, a load-time-rare call.
+	const std::string want = NormForContent(contentRel, std::string());
+	for (const auto& kv : guidByPath)
+		if (NormForContent(kv.first, app->contentRoot) == want)
+			return kv.second;
+	return std::string();
 }
 
 void ResDB::HotReloadAssets(iRender* r)
@@ -484,7 +523,17 @@ void ResDB::LoadContentFile(const std::string& path)
 	{
 		Texture* tx = Texture::LoadFromFile(path);
 		if (!tx) { std::cout << "[ResDB]	failed to load " << p.filename().string() << std::endl; return; }
-		if (tx->guid.empty() || texByGuid.count(tx->guid)) { delete tx; return; }
+		if (tx->guid.empty()) { delete tx; return; }
+		if (texByGuid.count(tx->guid))
+		{
+			// A silently skipped duplicate = an asset that never registers -> everything
+			// referencing it by path stays invisible with no error. Scream. (Typical cause: a
+			// file copied on disk - the GUID is embedded, so the copy collides.)
+			std::cout << "[ResDB]	DUPLICATE GUID '" << tx->guid << "': '" << path
+			          << "' collides with '" << PathForGuid(tx->guid)
+			          << "' - file SKIPPED (re-import or re-save one of them)" << std::endl;
+			delete tx; return;
+		}
 		RegisterTexture(tx);
 		SetAssetPath(tx->guid, path);
 		std::cout << "[ResDB]	loaded texture '" << tx->guid << "' (" << tx->width << "x" << tx->height << ")" << std::endl;

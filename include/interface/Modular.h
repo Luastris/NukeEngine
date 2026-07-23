@@ -28,6 +28,13 @@ namespace nuke {
 // empty copy, so the plugin manager would never see what InitModules loaded.
 NUKEENGINE_API bc::vector<std::shared_ptr<NUKEModule>>& GetModules();
 
+// The ABI level a discovered module's DLL was built against (its exported nuke_module_abi;
+// 1 for DLLs that predate the stamp). GUARD every call to a vtable-appended NUKEModule
+// virtual with this — e.g. `ModuleAbi(m) >= 2 && m->editorTool()` — so a stale project
+// module degrades to the virtual's default instead of crashing the host (its shorter
+// vtable has no such slot). Levels are documented beside NUKE_MODULE_ABI.
+NUKEENGINE_API int ModuleAbi(const NUKEModule* m);
+
 // InitModules now only DISCOVERS plugins (imports them for metadata) into the shared pool —
 // it does NOT activate them. Activate the project's chosen plugins with EnablePlugin().
 NUKEENGINE_API void InitModules(AppInstance* instance);

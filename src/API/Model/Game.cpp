@@ -10,6 +10,9 @@
 #include <boost/filesystem.hpp>   // project dir for the game's window.json (editor)
 #include <algorithm>
 #include <iostream>
+#include <mutex>                  // screenshot request handoff (update thread -> render)
+#define STB_IMAGE_WRITE_IMPLEMENTATION   // Screenshot encoder (the only engine TU with it)
+#include <stb_image_write.h>
 
 namespace nuke {
 
@@ -207,5 +210,53 @@ bool       Game::IsBorderless()  { return !Config::getSingleton()->window.decora
 bool   Game::IsTransparent() { return Config::getSingleton()->window.transparent; }
 double Game::Opacity()       { return Config::getSingleton()->window.opacity; }
 bool   Game::IsVSync()       { return Config::getSingleton()->window.vsync; }
+
+// Queue the request: the capture happens at the END of World::Render (FlushScreenshot) —
+// there the frame is fully drawn. Capturing here (mid-Update, before this frame renders)
+// would read a stale/undefined rotated backbuffer. Mutex: the request may be set from a
+// script on the update/fixed thread while the render thread consumes it.
+static std::mutex gShotMx;
+
+bool Game::Screenshot(const std::string& file)
+{
+	AppInstance* app = AppInstance::GetSingleton();
+	if (!app->render || file.empty()) return false;
+	std::lock_guard<std::mutex> lk(gShotMx);
+	app->pendingScreenshot = file;
+	return true;
+}
+
+// Called by World::Render after every camera finished (the image is complete). The PIE
+// viewport RT in the editor (AppInstance::uiTarget), the backbuffer in the player.
+void Game::FlushScreenshot()
+{
+	AppInstance* app = AppInstance::GetSingleton();
+	std::string file;
+	{
+		std::lock_guard<std::mutex> lk(gShotMx);
+		if (app->pendingScreenshot.empty()) return;
+		file.swap(app->pendingScreenshot);
+	}
+	if (!app->render) return;
+	int w = 0, h = 0;
+	std::vector<uint8_t> rgba;
+	if (!app->render->captureTarget((uint64_t)app->uiTarget, w, h, rgba) || w <= 0 || h <= 0)
+	{
+		std::cout << "[Game]\t\tScreenshot: capture failed" << std::endl;
+		return;
+	}
+	std::string ext;
+	{
+		size_t dot = file.find_last_of('.');
+		if (dot != std::string::npos) ext = file.substr(dot + 1);
+		for (char& c : ext) c = (char)std::tolower((unsigned char)c);
+	}
+	int ok = 0;
+	if (ext == "bmp")      ok = stbi_write_bmp(file.c_str(), w, h, 4, rgba.data());
+	else if (ext == "tga") ok = stbi_write_tga(file.c_str(), w, h, 4, rgba.data());
+	else                   ok = stbi_write_png(file.c_str(), w, h, 4, rgba.data(), w * 4);
+	std::cout << "[Game]\t\tScreenshot " << (ok ? "saved: " : "FAILED: ") << file
+	          << " (" << w << "x" << h << ")" << std::endl;
+}
 
 }  // namespace nuke

@@ -90,6 +90,14 @@ public:
 	[[nuke::func]] static bool       IsTransparent();
 	[[nuke::func]] static double     Opacity();
 	[[nuke::func]] static bool       IsVSync();
+
+	// Save the CURRENT game image (the PIE viewport in the editor, the backbuffer in the
+	// player) to an image file. QUEUED: the capture happens at the end of this frame's
+	// render, when the image is complete. Format by extension: .png / .bmp / .tga (anything
+	// else = png). Relative paths resolve against the working directory. SLOW (GPU flush +
+	// readback) — a screenshot/photo-mode/verification facility.
+	[[nuke::func]] static bool Screenshot(const std::string& file);
+	static void FlushScreenshot();   // host-side: World::Render calls it once per frame
 };
 
 }  // namespace nuke

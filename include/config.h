@@ -34,7 +34,7 @@ struct NukeWindow{
     bool  fullscreen  = false;
     bool  transparent = false;   // per-pixel alpha (creation-time; applied on next launch)
     float opacity     = 1.0f;    // whole-window opacity 0..1
-    int   backend     = 0;       // render backend: 0 = D3D11, 1 = D3D12 (D3D12 enables ray tracing; restart to apply)
+    int   backend     = 0;       // render backend: 0 = D3D11, 1 = D3D12 (ray tracing), 2 = Vulkan (editor default; restart to apply)
     bool  vsync       = true;    // vertical sync on the main present: true = cap to display refresh (no tearing),
                                  // false = uncapped FPS. Live-toggleable (Game.SetVSync). config/main.json "vsync".
     // Show the process's own OS console window (the black log window). false hides it at

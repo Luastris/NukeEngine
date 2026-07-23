@@ -153,7 +153,8 @@ void Config::reload(Config* instance)
         win.backend     = w.value("backend",     win.backend);
         win.vsync       = w.value("vsync",       win.vsync);
         win.showConsole = w.value("showConsole", win.showConsole);
-        cout << PREFIX_CONF << "Window size = [" << win.w << "x" << win.h << "]  backend=" << (win.backend == 1 ? "D3D12" : "D3D11") << endl;
+        cout << PREFIX_CONF << "Window size = [" << win.w << "x" << win.h << "]  backend="
+             << (win.backend == 1 ? "D3D12" : win.backend == 2 ? "Vulkan" : "D3D11") << endl;
         cout << PREFIX_CONF << "FONT IS " << win.mainFont << endl;
     }
 

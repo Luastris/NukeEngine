@@ -101,7 +101,13 @@ public:
     void        SetAssetPath(const std::string& guid, const std::string& path);
     void        MoveAssetPath(const std::string& oldPath, const std::string& newPath);  // on file rename/move
     std::string PathForGuid(const std::string& guid) const;   // "" if unknown
-    std::string GuidForPath(const std::string& path) const;   // "" if unknown
+    std::string GuidForPath(const std::string& path) const;   // "" if unknown (EXACT key match)
+    // Path-FORM-insensitive lookup for a CONTENT-RELATIVE reference ("Tilesets/atlas.nutex"):
+    // registered keys are whatever the scan/import produced (absolute, native slashes), so an
+    // exact GuidForPath on the relative form never matches. This resolves the reference against
+    // the content root and compares NORMALIZED (generic slashes, case-folded, relative-to-content
+    // when possible). Use it wherever assets are referenced by content path.
+    std::string GuidForContentPath(const std::string& contentRel) const;
 
     // Live cleanup when a resource is deleted: drop it from the DB so it vanishes from pickers; and
     // reset any LOADED material that references a guid back to defaults + re-Resolve (so the running

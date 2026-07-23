@@ -14,8 +14,19 @@ namespace nuke {
 static bc::vector<std::shared_ptr<NUKEModule>> g_modules;
 static AppInstance* g_instance = nullptr;   // host, captured at discovery (for EnablePlugin)
 static std::map<std::string, std::string> g_typePlugin;   // component type -> owning dll name
+static std::map<const NUKEModule*, int> g_moduleAbi;      // per-DLL ABI stamp (see NUKEEInteface.h)
 
 bc::vector<std::shared_ptr<NUKEModule>>& GetModules() { return g_modules; }
+
+// The ABI level a module's DLL was built against (its exported nuke_module_abi, read at
+// discovery; 1 when the DLL predates the stamp). Callers of vtable-appended virtuals guard
+// with this so a stale module DEGRADES (new virtual = its default) instead of crashing the
+// host on a vtable slot the DLL doesn't have.
+int ModuleAbi(const NUKEModule* m)
+{
+	auto it = g_moduleAbi.find(m);
+	return (it != g_moduleAbi.end()) ? it->second : 1;
+}
 
 // Which plugin (dll name) provides a component type, or "" for engine built-ins. Learned by
 // diffing the reflection registry around each plugin's OnLoad().
@@ -53,16 +64,27 @@ NUKEModule* DiscoverModuleFile(const std::string& absPath)
 		if (m && m->moduleFile == file) return nullptr;   // already in the pool
 	try
 	{
-		// Extension plugins export an unmangled "plugin" symbol — skip any other DLL
-		// (module dependencies like glfw3.dll live in the same directory).
-		boost::dll::shared_library lib(p.string());
+		// Extension plugins export an unmangled "plugin" symbol — skip any other DLL.
+		// ALTERED SEARCH PATH: a module's DLL dependencies resolve from the MODULE'S OWN
+		// directory first (a game module linking NukeTilemap.dll finds it beside itself in
+		// modules/ — the default search only looks next to the EXE).
+		boost::dll::shared_library lib(p.string(), boost::dll::load_mode::load_with_altered_search_path);
 		if (!lib.has("plugin"))
 			return nullptr;
 
-		auto plugin = boost::dll::import_symbol<NUKEModule>(p.string(), "plugin");
+		auto plugin = boost::dll::import_symbol<NUKEModule>(p.string(), "plugin",
+			boost::dll::load_mode::load_with_altered_search_path);
 		plugin->modulePath = p.generic_string();
 		plugin->moduleFile = file;
 		plugin->loaded     = false;
+		// ABI stamp: how new a NUKEModule vtable this DLL carries. No stamp = level 1
+		// (built before it existed) — appended virtuals must not be called on it.
+		int abi = 1;
+		if (lib.has("nuke_module_abi")) abi = lib.get<const int>("nuke_module_abi");
+		g_moduleAbi[plugin.get()] = abi;
+		if (abi < NUKE_MODULE_ABI)
+			cout << "[Modular]\tplugin '" << plugin->title << "' has ABI " << abi << " (engine "
+			     << NUKE_MODULE_ABI << ") — rebuild it to use the newer module hooks" << endl;
 		g_modules.push_back(plugin);
 		cout << "[Modular]\tdiscovered plugin '" << plugin->title << "' from "
 		     << plugin->moduleFile << endl;
@@ -121,6 +143,7 @@ bool UnloadModuleDll(const std::string& moduleFile)
 		if (uses > 1)
 			cout << "[Modular]\tWARNING: '" << moduleFile << "' has " << (uses - 1)
 			     << " extra reference(s) — the DLL stays locked until they drop" << endl;
+		g_moduleAbi.erase(m.get());   // the rebuilt DLL re-registers its stamp at discovery
 		g_modules.erase(g_modules.begin() + i);
 		cout << "[Modular]\tunloaded '" << moduleFile << "' (file unlocked for rebuild)" << endl;
 		return true;
@@ -225,14 +248,15 @@ void UnloadModules()
 {
 	// Two passes: runtime plugins first, boot providers (the renderer) LAST — a scripting
 	// or GUI plugin's Shutdown may still touch the renderer; the reverse can't happen.
+	// FULL DisablePlugin per module (not a bare Shutdown): the live-component downgrade must
+	// run so module-owned components DIE (and e.g. unsubscribe their Events lambdas) before
+	// g_modules.clear() frees the DLLs — else engine statics hold std::functions whose code
+	// is gone and the CRT teardown segfaults (hit by NukeNativeRim's RimGame subscriptions).
 	for (int phase : { PHASE_RUNTIME, PHASE_BOOT })
 		for (auto i : g_modules)
 		{
 			if (!i || !i->loaded || i->phase() != phase) continue;
-			if (*i->provides())
-				Services_RevokeIface(i->provides(), i->queryService());   // this instance only
-			i->Shutdown();
-			i->loaded = false;
+			DisablePlugin(i.get());
 		}
 	g_modules.clear();
 }

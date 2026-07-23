@@ -100,6 +100,10 @@ void SaveField(FT t, const void* a, json& j)
         case FT::Quat: { auto v = (const Quaternion*)a; j = { v->x, v->y, v->z, v->w }; } break;
         case FT::Color:{ auto v = (const Color*)a;      j = { v->r, v->g, v->b, v->a }; } break;
         case FT::AtomRef: j = (unsigned long long)Reflect_AtomId(*(Atom* const*)a); break;   // stable id (0 = null)
+        case FT::IntList:    j = *(const std::vector<int>*)a; break;
+        case FT::FloatList:  j = *(const std::vector<float>*)a; break;
+        case FT::DoubleList: j = *(const std::vector<double>*)a; break;
+        case FT::StringList: j = *(const std::vector<std::string>*)a; break;
         default: break;
     }
 }
@@ -124,6 +128,10 @@ void LoadField(FT t, void* a, const json& j)
             unsigned long id = (unsigned long)j.get<unsigned long long>();
             if (id) Reflect_QueueAtomRefFixup((Atom**)a, id);
         } break;
+        case FT::IntList:    if (j.is_array()) *(std::vector<int>*)a         = j.get<std::vector<int>>(); break;
+        case FT::FloatList:  if (j.is_array()) *(std::vector<float>*)a       = j.get<std::vector<float>>(); break;
+        case FT::DoubleList: if (j.is_array()) *(std::vector<double>*)a      = j.get<std::vector<double>>(); break;
+        case FT::StringList: if (j.is_array()) *(std::vector<std::string>*)a = j.get<std::vector<std::string>>(); break;
         default: break;
     }
 }

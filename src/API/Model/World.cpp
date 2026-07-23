@@ -15,6 +15,7 @@
 #include "API/Model/Time.h"       // animated-texture (GIF) frame advance + fixed-step accumulator
 #include "API/Model/Events.h"     // event bus pump (6.3) + calendar/schedule world serialization
 #include "API/Model/Profiler.h"   // per-phase frame timings (6.8)
+#include "API/Model/Game.h"       // FlushScreenshot: queued Game.Screenshot fires post-render
 #include "API/Model/StatusBar.h"  // live profiler line in the editor status bar
 #include "API/Model/Sprite.h"     // 2D sprite quads (drawn after opaque, back-to-front)
 #include "API/Model/Canvas.h"     // 2D layout container (WorldSpace rect + editor gizmo)
@@ -1706,6 +1707,10 @@ void World::Render(iRender* r)
 		float pos[3] = { (float)pp.x, (float)pp.y, (float)pp.z };
 		if (probe->cubeId && (!probe->captured || probe->realtime || probe->bake))
 		{
+			// One line per NON-realtime capture: brackets the 6-face render in the log, so a
+			// GPU fault during capture is attributable (realtime probes would spam).
+			if (!probe->realtime)
+				cout << "[World]\t\t\tprobe capture begin (res " << probe->Res() << ")" << endl;
 			std::vector<DrawItem> items; CollectMeshes(*hierarchy, items);   // no cull for capture
 			for (int f = 0; f < 6; ++f)
 			{
@@ -1713,6 +1718,8 @@ void World::Render(iRender* r)
 				for (auto& it : items) if (it.blend == 0) r->renderObject(it.mesh, it.mat, it.pos, it.quat, it.scale);
 				r->endCubeFace(probe->cubeId, f);
 			}
+			if (!probe->realtime)
+				cout << "[World]\t\t\tprobe capture done" << endl;
 			probe->captured = true; probe->bake = false;
 		}
 		float boxHalf[3] = { 0, 0, 0 };
@@ -1857,6 +1864,7 @@ void World::Render(iRender* r)
 		r->endCamera();
 	}
 	UpdatePrevTransforms(*hierarchy);   // snapshot transforms for next frame's TAA motion vectors
+	Game::FlushScreenshot();            // queued Game.Screenshot: the frame is complete HERE
 }
 
 // --- scene serialization (.nuworld JSON via reflection) ---
@@ -2042,6 +2050,10 @@ static void DowngradeAtom(Atom* a, const std::string& dll)
 		uc->atom           = a;
 		uc->transform      = &a->GetTransform();
 		*it = uc;            // replace in place (preserves order)
+		// FULL teardown, not just the destructor: Destroy() is the component's lifecycle hook
+		// (native Events unsubscribes etc. live there) — skipping it leaked module-code
+		// std::functions into engine statics and segfaulted the CRT teardown after DLL unload.
+		c->Destroy();
 		delete c;
 	}
 	for (Atom* ch : a->children) DowngradeAtom(ch, dll);
@@ -2614,17 +2626,30 @@ void World::LoadFromString(const std::string& data)
 		else
 			Events::ResetSchedule();
 	}
-	// The old atoms are dropped WITHOUT component Destroy (fast path), so their physics
-	// bodies would leak — wipe the whole simulation; new colliders re-create lazily.
+	// The old atoms get a FULL teardown (Component::Destroy + delete): a leaked component
+	// keeps its module-owned resources alive — a game module's native Events subscriptions
+	// (std::functions whose CODE lives in the module DLL) then outlive the DLL and segfault
+	// the CRT teardown. Physics/audio still reset wholesale (bodies/voices re-create lazily).
 	// gameLock: the fixed thread must not step a hierarchy that is being torn down.
 	boost::recursive_mutex::scoped_lock fixedGuard(gameLock);
 	if (iPhysics* p = GetService<iPhysics>()) p->reset();
 	if (iAudio* au = GetService<iAudio>()) au->reset();   // world switch — silence game voices
+	AppInstance::GetSingleton()->selectedInHieararchy = nullptr;   // editor selection would dangle
+	std::function<void(Atom*)> hardDestroy = [&](Atom* a)
+	{
+		if (!a) return;
+		for (Atom* ch : a->children) hardDestroy(ch);
+		a->children.clear();
+		for (Component* c : a->components) if (c) { c->Destroy(); delete c; }
+		a->components.clear();
+		delete a;
+	};
 	for (auto it = hierarchy->begin(); it != hierarchy->end(); )   // keep editor camera, drop the rest
 	{
 		if ((*it)->GetName() == "Editor Camera") ++it;
-		else it = hierarchy->erase(it);
+		else { Atom* a = *it; it = hierarchy->erase(it); hardDestroy(a); }
 	}
+	destroyQueue.clear();   // pending deferred destroys referenced the just-freed atoms
 	if (j.contains("atoms"))
 		for (const json& gj : j["atoms"])
 			Add(LoadAtom(gj));

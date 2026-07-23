@@ -38,4 +38,29 @@ const AssetCreator* AssetCreatorForExt(const std::string& ext)
 	return nullptr;
 }
 
+// ---- module-supplied asset editors (the type's owner brings the tooling) ---------------
+
+static std::vector<std::pair<std::string, std::function<void(const std::string&)>>>& edReg()
+{
+	static std::vector<std::pair<std::string, std::function<void(const std::string&)>>> v;
+	return v;
+}
+
+void RegisterAssetEditor(const std::string& ext, std::function<void(const std::string&)> open)
+{
+	if (ext.empty() || !open) return;
+	const std::string key = LowerExt(ext);
+	for (auto& e : edReg())
+		if (e.first == key) { e.second = std::move(open); return; }   // re-enable: refresh the hook
+	edReg().push_back({ key, std::move(open) });
+}
+
+const std::function<void(const std::string&)>* AssetEditorForExt(const std::string& ext)
+{
+	const std::string want = LowerExt(ext);
+	for (auto& e : edReg())
+		if (e.first == want) return &e.second;
+	return nullptr;
+}
+
 }  // namespace nuke

@@ -32,7 +32,9 @@ class Atom;   // AtomRef values resolve through the live world (Reflect_AtomById
 // ObjectRef = a pointer to ANY reflected (NUKE_CLASS) instance, carried as its engine
 // OBJECT-HANDLE id (ReflectBind's table) — World*, Transform*, Clock*, Mesh*, ... become
 // legal [[nuke::func]] parameter/return types with zero per-class glue.
-enum class FT { Unknown, Bool, Int, Float, Double, String, Vec2, Vec3, Vec4, Quat, Color, AtomRef, ObjectRef };
+// ABI: values are compiled into module DLLs — append new tags at the END, never mid-enum.
+enum class FT { Unknown, Bool, Int, Float, Double, String, Vec2, Vec3, Vec4, Quat, Color, AtomRef, ObjectRef,
+                IntList, FloatList, DoubleList, StringList };   // std::vector<T> props (arrays in the inspector)
 
 // AtomRef <-> live atom (defined in Reflect.cpp; walks the CURRENT world by stable id).
 NUKEENGINE_API Atom*         Reflect_AtomById(unsigned long id);
@@ -116,6 +118,10 @@ template<> constexpr FT FieldTypeOf<Vector4>()     { return FT::Vec4; }
 template<> constexpr FT FieldTypeOf<Quaternion>()  { return FT::Quat; }
 template<> constexpr FT FieldTypeOf<Color>()       { return FT::Color; }
 template<> constexpr FT FieldTypeOf<Atom*>()       { return FT::AtomRef; }
+template<> constexpr FT FieldTypeOf<std::vector<int>>()         { return FT::IntList; }
+template<> constexpr FT FieldTypeOf<std::vector<float>>()       { return FT::FloatList; }
+template<> constexpr FT FieldTypeOf<std::vector<double>>()      { return FT::DoubleList; }
+template<> constexpr FT FieldTypeOf<std::vector<std::string>>() { return FT::StringList; }
 
 struct Field {
     std::string name;

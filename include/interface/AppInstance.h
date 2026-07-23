@@ -112,6 +112,11 @@ public:
 	void StopFixedThread();
 	void FixedThread();               // thread body (public for the thread bind, not for calling)
 	volatile bool fixedThreadRun = false;
+
+	// Pending screenshot request (Game.Screenshot): captured at the END of World::Render -
+	// the frame is fully drawn there; capturing from a script (mid-Update, pre-render) would
+	// read a stale/undefined rotated backbuffer. (ABI: appended at the END of the class.)
+	std::string pendingScreenshot;
 };
 
 }  // namespace nuke

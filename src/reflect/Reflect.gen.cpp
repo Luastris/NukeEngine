@@ -346,6 +346,7 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("IsTransparent", &Game::IsTransparent));
 		t.methods.push_back(MakeMethod("Opacity", &Game::Opacity));
 		t.methods.push_back(MakeMethod("IsVSync", &Game::IsVSync));
+		t.methods.push_back(MakeMethod("Screenshot", &Game::Screenshot));
 	}
 	{
 		TypeInfo& t = TypeOf<Layers>();

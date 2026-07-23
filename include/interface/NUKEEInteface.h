@@ -9,6 +9,20 @@
 #include <vector>
 #include "AppInstance.h"
 
+// ---- Module ABI level ---------------------------------------------------------------------
+// New NUKEModule virtuals append at the END of the vtable, which keeps the prefix stable —
+// but a module DLL built BEFORE an append has a SHORTER vtable, and calling the new slot on
+// it jumps into garbage (a stale project module must degrade, not crash the host). So the
+// header stamps every module DLL that compiles against it with its ABI level (an exported
+// int the loader reads at discovery — see ModuleAbi in Modular.h), and hosts guard calls to
+// appended virtuals with `ModuleAbi(m) >= <level of the virtual>`.
+// DLLs with no stamp (built before it existed) report level 1.
+// Bump this when appending a virtual, and tag the virtual with its level:
+//   1 — provides/phase/queryService/cookContent/sharedService/shipExtras
+//   2 — editorTool
+#define NUKE_MODULE_ABI 2
+extern "C" { __declspec(dllexport) __declspec(selectany) int nuke_module_abi = NUKE_MODULE_ABI; }
+
 namespace nuke {
 
 // When a plugin must be brought up. PHASE_BOOT providers (e.g. the renderer) are enabled
@@ -55,7 +69,9 @@ public:
 	//plugin leaves its types unregistered and its components stay inert placeholders.
 	virtual void OnLoad() {}
 
-	//Function for run plugin. Runs in the background thread.
+	//Function for run plugin. Runs in the background thread — NOT the game/UI thread.
+	//Main-thread state (PushWindow/PopWindow, the world, ResDB) must NOT be touched here
+	//directly: defer through Jobs::RunOnMain (drained once per frame on the game thread).
 	virtual void Run(AppInstance* instance) = 0;
 
 	//Returns true if mod has settings
@@ -124,6 +140,14 @@ public:
 	virtual void shipExtras(const char* projectDir,
 	                        std::vector<std::string>& pakFiles,
 	                        std::vector<std::pair<std::string, std::string>>& distFiles) {}
+
+	// EDITOR TOOLING module (an editor-only companion supplying asset editors/panels for a
+	// runtime module's file types — e.g. NukeTilemapEditor for NukeTilemap's .nutile).
+	// The editor host enables these UNCONDITIONALLY (not part of a project's plugin list —
+	// tooling availability must not depend on per-project toggles); they never ship with a
+	// game (they import NukeImGui, which packaging already excludes).
+	// ABI 2: callers must guard with ModuleAbi(m) >= 2 (see the ABI note at the top).
+	virtual bool editorTool() { return false; }
 };
 
 }  // namespace nuke

@@ -2,6 +2,7 @@
 #define IRENDER_H
 #include <boost/function.hpp>
 #include <cstdint>
+#include <vector>
 #include <API/Model/Transform.h>
 #include <API/Model/Mesh.h>
 #include "UIDrawData.h"
@@ -437,6 +438,20 @@ public:
     // drawSprite builds one quad at a time. Joins the same per-texture batch (consecutive
     // same-texture runs = one draw call). Call between beginCamera/endCamera.
     virtual void drawSpriteRun(Texture* tex, const float* verts, int vertCount) {}
+
+    // Read a target's pixels back as tightly packed RGBA8 (top-left origin). rtId 0 = the
+    // swap-chain backbuffer (the LAST completed frame); else an id from createRenderTarget —
+    // its LDR post output, i.e. exactly the image shown/composited. SLOW (GPU flush + staging
+    // copy + map): a screenshot/verification facility, never a per-frame path.
+    virtual bool captureTarget(uint64_t rtId, int& w, int& h, std::vector<uint8_t>& rgba) { return false; }
+
+    // LIT bulk sprite append (tilemap layers with normal maps): drawSpriteRun plus a NORMAL
+    // map — the run is Lambert-lit by the scene's light list, with the quad plane's tangent
+    // basis derived from the first quad (a run shares one plane). `normalFlipY`: true = the
+    // map is OpenGL-authored (+Y up, flip green — the import default), false = DirectX.
+    // Backends without a lit sprite pipeline fall back to the unlit run.
+    virtual void drawSpriteRunLit(Texture* tex, Texture* normal, const float* verts, int vertCount,
+                                  bool normalFlipY) { drawSpriteRun(tex, verts, vertCount); }
 
     // ABI: new virtuals are appended at the END of the class, NEVER inserted mid-vtable —
     // plugins are separate DLLs built at different times, and an inserted slot shifts every

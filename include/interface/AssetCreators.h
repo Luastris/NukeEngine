@@ -38,6 +38,16 @@ NUKEENGINE_API const std::vector<AssetCreator>& AssetCreators();
 // The browser / file editor / inspector resolve a file's type through this.
 NUKEENGINE_API const AssetCreator* AssetCreatorForExt(const std::string& ext);
 
+// MODULE-SUPPLIED ASSET EDITORS: the module that OWNS a file type registers the editor for
+// it too (an editor-only companion module, e.g. NukeTilemapEditor for NukeTilemap's
+// .nutile) — the editor core stays format-blind. Double-click / "Open in Editor" route
+// through this registry FIRST; the callback opens (or focuses) the module's own editor
+// window for that file. Order-independent with the type registration itself.
+NUKEENGINE_API void RegisterAssetEditor(const std::string& ext,
+                                        std::function<void(const std::string& path)> open);
+NUKEENGINE_API const std::function<void(const std::string& path)>*
+                    AssetEditorForExt(const std::string& ext);
+
 }  // namespace nuke
 
 #endif // !NUKEE_ASSET_CREATORS_H
