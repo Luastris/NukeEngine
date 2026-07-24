@@ -106,6 +106,13 @@ public:
 	// parses (+merges) on a background job and hands the document over — the game thread then
 	// skips the parse (the heavy part) and only instantiates atoms.
 	void LoadFromJson(const nlohmann::json& j);
+	// The same load split into PHASES for incremental (budgeted) activation — the world can
+	// grow over frames instead of appearing in one hitch (AppInstance::ContinueWorldActivation):
+	// header + old-world teardown, then root atoms one by one, then the finalize pass.
+	// LoadFromJson = all three in a single call.
+	void  LoadHeaderFromJson(const nlohmann::json& j);    // name/settings/calendar + teardown
+	Atom* AddAtomFromJson(const nlohmann::json& atomJ);   // instantiate ONE root atom (its subtree)
+	void  FinalizeIncrementalLoad();                      // duplicate-id heal + AtomRef resolve
 	// Merge every mounted layer's copy of ONE world (Package::ReadAll order: base first,
 	// mods above). Each layer is diffed against the BASE (atoms by id, components by cid)
 	// and the diffs apply bottom-up — two mods editing the same world MERGE instead of the

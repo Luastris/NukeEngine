@@ -6,7 +6,10 @@
 #include "API/Model/Time.h"      // fixed-thread cadence scales with Game.SetTimeScale
 #include "API/Model/Package.h"   // packed-content resolve (3.2)
 #include "API/Model/Jobs.h"      // async world load runs on the engine pool
+#include "API/Model/Events.h"    // incremental activation emits world.atomActivated events
+#include "reflect/Reflect.h"     // per-slice AtomRef resolve while the world grows
 #include <nlohmann/json.hpp>     // background parse of the staged world document
+#include <algorithm>             // stable_sort (activation origin ordering)
 #include <map>                   // mod-name -> layer index (world-merge baselines)
 #include <boost/chrono.hpp>
 #include <boost/filesystem.hpp>
@@ -139,6 +142,7 @@ bool AppInstance::OpenWorld(const std::string& relPath)
 		pendingWorldLoad = relPath;
 		return true;
 	}
+	FlushWorldActivation();   // a still-growing world completes before a synchronous load replaces it
 	std::string data;
 	if (!ComposeWorldData(relPath, data)) return false;
 	selectedInHieararchy = nullptr;
@@ -228,6 +232,11 @@ void AppInstance::CancelWorldLoadAsync()
 	asyncLoadActivate = false;
 	asyncLoadState = 0;
 	asyncLoadProgress = 0.f;
+	// A GROWING world is dropped as-is (partial) — the only cancel site outside gameplay is
+	// PIE stop, which restores the edit scene wholesale right after.
+	activationActive = false;
+	activationQueue.clear();
+	activationDoc.reset();
 }
 
 void AppInstance::ApplyAsyncWorldLoad()
@@ -245,12 +254,114 @@ void AppInstance::ApplyAsyncWorldLoad()
 	asyncLoadProgress = 0.f;
 	++asyncLoadGen;
 	if (!doc) return;
+	// A new world superseding one still GROWING: the header teardown below wipes its atoms
+	// anyway — just drop the leftover queue so it can't keep instantiating into the new world.
+	activationActive = false;
+	activationQueue.clear();
+	activationDoc.reset();
+
 	selectedInHieararchy = nullptr;
-	currentWorld->LoadFromJson(*doc);   // pre-parsed: the game thread only instantiates
+	if (activationBudgetMs <= 0.f)
+	{
+		currentWorld->LoadFromJson(*doc);   // pre-parsed: the game thread only instantiates
+		currentWorldPath = path;
+		NameWorldFromPath(path);
+		std::cout << "[World]\t\t\t" << "async world activated: '" << path << "'" << std::endl;
+		return;
+	}
+	// INCREMENTAL activation: swap to the world header now (old world torn down, calendar/
+	// settings applied), then let the world GROW — root atoms instantiate over the next
+	// frames within the ms budget, optionally ordered outward from the activation origin.
+	currentWorld->LoadHeaderFromJson(*doc);
 	currentWorldPath = path;
 	NameWorldFromPath(path);
-	std::cout << "[World]\t\t\t" << "async world activated: '" << path << "'" << std::endl;
+	activationDoc = doc;
+	activationPath = path;
+	activationQueue.clear();
+	if (doc->contains("atoms"))
+		for (const nlohmann::json& gj : (*doc)["atoms"])
+			activationQueue.push_back(&gj);
+	if (activationOriginSet)
+	{
+		const float ox = activationOrigin[0], oy = activationOrigin[1], oz = activationOrigin[2];
+		auto dist2 = [&](const nlohmann::json* aj) -> double
+		{
+			if (!aj->contains("transform")) return 1e30;
+			const nlohmann::json& tr = (*aj)["transform"];
+			if (!tr.contains("position") || !tr["position"].is_array() || tr["position"].size() < 3) return 1e30;
+			const double dx = tr["position"][0].get<double>() - ox;
+			const double dy = tr["position"][1].get<double>() - oy;
+			const double dz = tr["position"][2].get<double>() - oz;
+			return dx * dx + dy * dy + dz * dz;
+		};
+		std::stable_sort(activationQueue.begin(), activationQueue.end(),
+		                 [&](const nlohmann::json* a, const nlohmann::json* b) { return dist2(a) < dist2(b); });
+	}
+	activationTotal = (int)activationQueue.size();
+	activationDone = 0;
+	activationActive = true;
+	std::cout << "[World]\t\t\t" << "async world activating incrementally: '" << path << "' ("
+	          << activationTotal << " root atoms, " << activationBudgetMs << " ms/frame)" << std::endl;
+	ContinueWorldActivation();   // first slice THIS frame — the origin-nearest atoms pop in at once
 }
+
+// --- incremental activation (the "world grows around the player" pattern) --------------
+
+void   AppInstance::SetWorldActivationBudget(double ms) { activationBudgetMs = ms < 0.0 ? 0.f : (float)ms; }
+double AppInstance::GetWorldActivationBudget()          { return activationBudgetMs; }
+
+void AppInstance::SetWorldActivationOrigin(float x, float y, float z)
+{
+	activationOrigin[0] = x; activationOrigin[1] = y; activationOrigin[2] = z;
+	activationOriginSet = true;
+}
+
+void AppInstance::ClearWorldActivationOrigin() { activationOriginSet = false; }
+
+double AppInstance::WorldActivationProgress()
+{
+	if (!activationActive) return -1.0;
+	return activationTotal > 0 ? (double)activationDone / (double)activationTotal : 1.0;
+}
+
+void AppInstance::ContinueWorldActivation(bool ignoreBudget)
+{
+	if (!activationActive || !currentWorld) return;
+	const auto t0 = boost::chrono::steady_clock::now();
+	while (activationDone < activationTotal)
+	{
+		const nlohmann::json* aj = activationQueue[activationDone];
+		Atom* a = currentWorld->AddAtomFromJson(*aj);
+		++activationDone;
+		if (a)
+		{
+			// The GAME drives the appearance effect (wireframe fade / particles / goo) —
+			// the engine only announces the atom. Payload keys: id (stable), name.
+			nlohmann::json p{ { "id", (long long)a->id.id }, { "name", a->GetName() } };
+			Events::Emit("world.atomActivated", p.dump());
+		}
+		if (!ignoreBudget && activationDone < activationTotal)
+		{
+			const double ms = boost::chrono::duration_cast<boost::chrono::duration<double, boost::milli>>(
+				boost::chrono::steady_clock::now() - t0).count();
+			if (ms >= activationBudgetMs) break;
+		}
+	}
+	// Refs to atoms that exist RESOLVE progressively; the rest hook up as their targets appear.
+	Reflect_ResolveAtomRefs();
+	if (activationDone >= activationTotal)
+	{
+		activationActive = false;
+		activationQueue.clear();
+		activationDoc.reset();
+		currentWorld->FinalizeIncrementalLoad();
+		nlohmann::json p{ { "path", activationPath } };
+		Events::Emit("world.activationComplete", p.dump());
+		std::cout << "[World]\t\t\t" << "async world activated: '" << activationPath << "' (incremental)" << std::endl;
+	}
+}
+
+void AppInstance::FlushWorldActivation() { ContinueWorldActivation(true); }
 
 // A world with no authored name (older files / never named) reads its name from the file
 // stem, so Game.GetWorld().Name is meaningful ("MusicVisTest") instead of the constructor

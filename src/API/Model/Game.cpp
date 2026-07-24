@@ -30,6 +30,13 @@ bool   Game::LoadWorldReady()      { return AppInstance::GetSingleton()->WorldLo
 bool   Game::ActivateLoadedWorld() { return AppInstance::GetSingleton()->ActivateLoadedWorld(); }
 void   Game::CancelLoadWorld()     { AppInstance::GetSingleton()->CancelWorldLoadAsync(); }
 
+// Incremental activation (task #148): budgeted growth, optionally outward from a point.
+void   Game::SetWorldActivationBudget(double msPerFrame) { AppInstance::GetSingleton()->SetWorldActivationBudget(msPerFrame); }
+double Game::GetWorldActivationBudget()                  { return AppInstance::GetSingleton()->GetWorldActivationBudget(); }
+void   Game::SetWorldActivationOrigin(const Vector3& worldPos) { AppInstance::GetSingleton()->SetWorldActivationOrigin((float)worldPos.x, (float)worldPos.y, (float)worldPos.z); }
+void   Game::ClearWorldActivationOrigin()                { AppInstance::GetSingleton()->ClearWorldActivationOrigin(); }
+double Game::WorldActivationProgress()                   { return AppInstance::GetSingleton()->WorldActivationProgress(); }
+
 bool Game::IsEditor()  { return AppInstance::GetSingleton()->isEditor(); }
 bool Game::IsPlaying() { return AppInstance::GetSingleton()->playState == 1; }
 bool Game::IsPaused()  { return AppInstance::GetSingleton()->playState == 2; }

@@ -49,6 +49,23 @@ public:
 	[[nuke::func]] static bool   ActivateLoadedWorld();  // swap at the frame boundary; false if not ready
 	[[nuke::func]] static void   CancelLoadWorld();      // drop the loading/staged world
 
+	// --- INCREMENTAL activation (the "world grows around the player" pattern) ---------------
+	// With a budget set (ms of instantiation per frame), ActivateLoadedWorld swaps to the
+	// world header instantly and then GROWS it: root atoms pop in over the following frames,
+	// optionally ordered outward from the activation origin (set it to the player's spawn).
+	// Already-created atoms live normally while the rest stream in — scripts run, physics
+	// works. Spawn EFFECTS (wireframe fade, particles, "forming from goo") are the game's:
+	// subscribe to the events the engine emits per appearance (script onEvent hook):
+	//   "world.atomActivated"      payload {"id":<atomId>,"name":"<name>"}  — one per root atom
+	//   "world.activationComplete" payload {"path":"<world path>"}
+	// Budget 0 (default) = the whole world in one frame (no events). The budget controls the
+	// GROWTH SPEED — 0.5 ms is a slow cinematic assembly, 5 ms a quick stream-in.
+	[[nuke::func]] static void   SetWorldActivationBudget(double msPerFrame);
+	[[nuke::func]] static double GetWorldActivationBudget();
+	[[nuke::func]] static void   SetWorldActivationOrigin(const Vector3& worldPos);
+	[[nuke::func]] static void   ClearWorldActivationOrigin();
+	[[nuke::func]] static double WorldActivationProgress();   // -1 = not growing, else 0..1 instantiated
+
 	[[nuke::func]] static bool IsEditor();     // running inside the editor host (plugins/game may branch)
 	[[nuke::func]] static bool IsPlaying();    // play mode active (PIE playing / Player)
 	[[nuke::func]] static bool IsPaused();     // play mode paused (PIE pause)

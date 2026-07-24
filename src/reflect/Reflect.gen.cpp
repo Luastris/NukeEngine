@@ -366,6 +366,11 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("LoadWorldReady", &Game::LoadWorldReady));
 		t.methods.push_back(MakeMethod("ActivateLoadedWorld", &Game::ActivateLoadedWorld));
 		t.methods.push_back(MakeMethod("CancelLoadWorld", &Game::CancelLoadWorld));
+		t.methods.push_back(MakeMethod("SetWorldActivationBudget", &Game::SetWorldActivationBudget));
+		t.methods.push_back(MakeMethod("GetWorldActivationBudget", &Game::GetWorldActivationBudget));
+		t.methods.push_back(MakeMethod("SetWorldActivationOrigin", &Game::SetWorldActivationOrigin));
+		t.methods.push_back(MakeMethod("ClearWorldActivationOrigin", &Game::ClearWorldActivationOrigin));
+		t.methods.push_back(MakeMethod("WorldActivationProgress", &Game::WorldActivationProgress));
 		t.methods.push_back(MakeMethod("IsEditor", &Game::IsEditor));
 		t.methods.push_back(MakeMethod("IsPlaying", &Game::IsPlaying));
 		t.methods.push_back(MakeMethod("IsPaused", &Game::IsPaused));

@@ -371,11 +371,14 @@ void World::Update()
 		std::string path;
 		path.swap(app->pendingSaveLoad);
 		std::cout << "[World]\t\t\t" << "Game.LoadGame -> '" << path << "'" << std::endl;
+		app->FlushWorldActivation();   // a still-growing world completes before the save replaces it
 		LoadFromFile(path);
 	}
 	// Async-loaded world activation (Game.ActivateLoadedWorld): the staged, pre-parsed
 	// document swaps in HERE — traversal done, lock held, same safety as the loads above.
 	app->ApplyAsyncWorldLoad();
+	// Incremental activation (budgeted): instantiate this frame's slice of a GROWING world.
+	app->ContinueWorldActivation();
 }
 
 // --- fixed-step physics driver (service/iPhysics.h; no-op without a provider) ---------
@@ -2788,6 +2791,15 @@ void World::LoadFromString(const std::string& data)
 
 void World::LoadFromJson(const json& j)
 {
+	LoadHeaderFromJson(j);
+	if (j.contains("atoms"))
+		for (const json& gj : j["atoms"])
+			Add(LoadAtom(gj));
+	FinalizeIncrementalLoad();
+}
+
+void World::LoadHeaderFromJson(const json& j)
+{
 	// The authored world name. Empty when the file carries none (older worlds / never named) —
 	// AppInstance::OpenWorld then fills it from the file stem so Game.GetWorld().Name is useful.
 	name = j.value("name", std::string());
@@ -2849,9 +2861,19 @@ void World::LoadFromJson(const json& j)
 		else { Atom* a = *it; it = hierarchy->erase(it); hardDestroy(a); }
 	}
 	destroyQueue.clear();   // pending deferred destroys referenced the just-freed atoms
-	if (j.contains("atoms"))
-		for (const json& gj : j["atoms"])
-			Add(LoadAtom(gj));
+}
+
+Atom* World::AddAtomFromJson(const json& atomJ)
+{
+	boost::recursive_mutex::scoped_lock fixedGuard(gameLock);   // atoms may pop in over frames
+	Atom* a = LoadAtom(atomJ);
+	if (a) Add(a);
+	return a;
+}
+
+void World::FinalizeIncrementalLoad()
+{
+	boost::recursive_mutex::scoped_lock fixedGuard(gameLock);
 	std::set<unsigned long> seen;
 	FixDuplicateIds(*hierarchy, seen);   // heal any colliding ids from old saves / duplicates
 	Reflect_ResolveAtomRefs();           // AtomRef props: ids -> live atoms, now that everything exists

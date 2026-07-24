@@ -144,6 +144,33 @@ public:
 	bool   ActivateLoadedWorld();    // queue the swap at the frame boundary; false if not ready
 	void   CancelWorldLoadAsync();   // drop the loading/staged world
 	void   ApplyAsyncWorldLoad();    // frame boundary (World::Update): perform the queued swap
+
+	// --- INCREMENTAL (budgeted) activation: the async-loaded world GROWS over frames instead
+	// of appearing in one hitch — optionally outward from an origin point (the player spawn),
+	// the "world assembles around the character" pattern. With a budget set, activation swaps
+	// to the world HEADER immediately and then instantiates root atoms within the per-frame
+	// ms budget; already-created atoms live normally (scripts run, physics bodies appear).
+	// The engine emits events for the GAME to drive spawn effects (wireframe fade, particles,
+	// goo — effects are game-side, never engine-side):
+	//   "world.atomActivated"       {"id":<atomId>,"name":"<name>"}   per root atom (subtree)
+	//   "world.activationComplete"  {"path":"<world path>"}
+	// (ABI: appended at the END of the class.)
+	float activationBudgetMs  = 0.f;    // per-frame instantiation budget; 0 = whole world in one frame
+	bool  activationOriginSet = false;  // sort root atoms by distance from activationOrigin
+	float activationOrigin[3] = { 0.f, 0.f, 0.f };
+	bool  activationActive = false;     // an incremental activation is in progress (game thread only)
+	int   activationTotal = 0, activationDone = 0;
+	std::shared_ptr<nlohmann::json> activationDoc;       // keeps the atom array alive while growing
+	std::vector<const nlohmann::json*> activationQueue;  // sorted roots; next = activationQueue[activationDone]
+	std::string activationPath;                          // world path (the completion event payload)
+
+	void   SetWorldActivationBudget(double ms);
+	double GetWorldActivationBudget();
+	void   SetWorldActivationOrigin(float x, float y, float z);
+	void   ClearWorldActivationOrigin();
+	double WorldActivationProgress();                       // -1 idle, else 0..1 roots instantiated
+	void   ContinueWorldActivation(bool ignoreBudget = false); // frame boundary: next budget slice
+	void   FlushWorldActivation();                          // finish instantly (a new load needs a whole world)
 };
 
 }  // namespace nuke
