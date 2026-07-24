@@ -5,6 +5,8 @@
 #include "API/Model/World.h"
 #include "API/Model/Time.h"      // fixed-thread cadence scales with Game.SetTimeScale
 #include "API/Model/Package.h"   // packed-content resolve (3.2)
+#include "API/Model/Jobs.h"      // async world load runs on the engine pool
+#include <nlohmann/json.hpp>     // background parse of the staged world document
 #include <map>                   // mod-name -> layer index (world-merge baselines)
 #include <boost/chrono.hpp>
 #include <boost/filesystem.hpp>
@@ -56,6 +58,76 @@ bool AppInstance::ReadContent(const std::string& relPath, std::string& out) cons
 	return false;
 }
 
+// A world's FINAL data string, resolved through every source: the raw content file from
+// disk, or the mounted pak layers MERGED (base game + mods + overlay). THREAD-SAFE —
+// filesystem reads + mutex-guarded Package reads, no engine-object mutation — so both the
+// synchronous OpenWorld and the async loader's background job run through here.
+bool AppInstance::ComposeWorldData(const std::string& relPath, std::string& out)
+{
+	boost::system::error_code ec;
+	std::string full = WorldFullPath(relPath);
+	if (!boost::filesystem::exists(boost::filesystem::path(full), ec))
+		full = ResolveContent(relPath);   // legacy fallback (e.g. a world next to the exe)
+	if (boost::filesystem::exists(boost::filesystem::path(full), ec))
+	{
+		boost::filesystem::ifstream f(boost::filesystem::path(full), std::ios::binary);
+		if (!f) return false;
+		out.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
+		return true;
+	}
+	// Packed runtime (3.2): the world lives in a mounted pak — load it from bytes.
+	// SEVERAL layers may carry this world (base game + mods editing it): they MERGE
+	// semantically (World::MergeWorldLayers) instead of the top file winning outright.
+	// Each layer diffs against ITS OWN baseline: an ordinary mod against the base game,
+	// a patch-mod against base + the mods it requires (mod.json), the modder's raw
+	// overlay against everything mounted below it (the session it was authored in).
+	std::vector<std::pair<std::string, std::string>> hits;   // (data, source pak; "" = raw)
+	if (Package::MountedCount() > 0 && Package::ReadAllInfo("content/" + relPath, hits) > 0)
+	{
+		std::vector<std::string> layers;
+		std::vector<std::vector<int>> deps(hits.size());
+		std::vector<std::string> basis(hits.size());   // per-layer recorded baseline ("" = none)
+		std::vector<std::string> names(hits.size());   // provenance: the mod each layer is
+		// Which layer index a mod NAME resolves to (only mods carrying THIS world count).
+		std::map<std::string, int> nameToLayer;
+		auto lower = [](std::string s) { for (char& c : s) c = (char)tolower((unsigned char)c); return s; };
+		for (size_t i = 0; i < hits.size(); ++i)
+		{
+			layers.push_back(hits[i].first);
+			if (hits[i].second.empty())
+			{
+				// The raw overlay: authored on top of the FULL mounted stack.
+				for (size_t j = 1; j < i; ++j) deps[i].push_back((int)j);
+				continue;
+			}
+			// The layer's own recorded BASELINE (Package Mod stores the world exactly as
+			// the mod's author saw it under "basis/<rel>"): the diff applies the author's
+			// ACTUAL point changes — a stale mod can't wipe what the base gained since.
+			if (i > 0)
+			{
+				Package::File pf;
+				std::string b;
+				if (pf.Open(hits[i].second) && pf.Read("basis/content/" + relPath, b)) basis[i] = b;
+			}
+			for (const Package::ModInfo& mi : Package::Mods())
+				if (mi.pakPath == hits[i].second)
+				{
+					names[i] = mi.name;
+					nameToLayer[lower(mi.name)] = (int)i;
+					for (const std::string& r : mi.requires_)
+					{
+						auto it = nameToLayer.find(lower(r));   // deps mount below -> already seen
+						if (it != nameToLayer.end()) deps[i].push_back(it->second);
+					}
+					break;
+				}
+		}
+		out = layers.size() > 1 ? World::MergeWorldLayers(layers, deps, basis, names) : layers[0];
+		return true;
+	}
+	return false;
+}
+
 bool AppInstance::OpenWorld(const std::string& relPath)
 {
 	if (relPath.empty() || !currentWorld) return false;
@@ -67,73 +139,117 @@ bool AppInstance::OpenWorld(const std::string& relPath)
 		pendingWorldLoad = relPath;
 		return true;
 	}
-	boost::system::error_code ec;
-	std::string full = WorldFullPath(relPath);
-	if (!boost::filesystem::exists(boost::filesystem::path(full), ec))
-		full = ResolveContent(relPath);   // legacy fallback (e.g. a world next to the exe)
-	if (!boost::filesystem::exists(boost::filesystem::path(full), ec))
-	{
-		// Packed runtime (3.2): the world lives in a mounted pak — load it from bytes.
-		// SEVERAL layers may carry this world (base game + mods editing it): they MERGE
-		// semantically (World::MergeWorldLayers) instead of the top file winning outright.
-		// Each layer diffs against ITS OWN baseline: an ordinary mod against the base game,
-		// a patch-mod against base + the mods it requires (mod.json), the modder's raw
-		// overlay against everything mounted below it (the session it was authored in).
-		std::vector<std::pair<std::string, std::string>> hits;   // (data, source pak; "" = raw)
-		if (Package::MountedCount() > 0 && Package::ReadAllInfo("content/" + relPath, hits) > 0)
-		{
-			std::vector<std::string> layers;
-			std::vector<std::vector<int>> deps(hits.size());
-			std::vector<std::string> basis(hits.size());   // per-layer recorded baseline ("" = none)
-			std::vector<std::string> names(hits.size());   // provenance: the mod each layer is
-			// Which layer index a mod NAME resolves to (only mods carrying THIS world count).
-			std::map<std::string, int> nameToLayer;
-			auto lower = [](std::string s) { for (char& c : s) c = (char)tolower((unsigned char)c); return s; };
-			for (size_t i = 0; i < hits.size(); ++i)
-			{
-				layers.push_back(hits[i].first);
-				if (hits[i].second.empty())
-				{
-					// The raw overlay: authored on top of the FULL mounted stack.
-					for (size_t j = 1; j < i; ++j) deps[i].push_back((int)j);
-					continue;
-				}
-				// The layer's own recorded BASELINE (Package Mod stores the world exactly as
-				// the mod's author saw it under "basis/<rel>"): the diff applies the author's
-				// ACTUAL point changes — a stale mod can't wipe what the base gained since.
-				if (i > 0)
-				{
-					Package::File pf;
-					std::string b;
-					if (pf.Open(hits[i].second) && pf.Read("basis/content/" + relPath, b)) basis[i] = b;
-				}
-				for (const Package::ModInfo& mi : Package::Mods())
-					if (mi.pakPath == hits[i].second)
-					{
-						names[i] = mi.name;
-						nameToLayer[lower(mi.name)] = (int)i;
-						for (const std::string& r : mi.requires_)
-						{
-							auto it = nameToLayer.find(lower(r));   // deps mount below -> already seen
-							if (it != nameToLayer.end()) deps[i].push_back(it->second);
-						}
-						break;
-					}
-			}
-			selectedInHieararchy = nullptr;
-			currentWorld->LoadFromString(layers.size() > 1 ? World::MergeWorldLayers(layers, deps, basis, names)
-			                                               : layers[0]);
-			currentWorldPath = relPath;
-			NameWorldFromPath(relPath);
-			return true;
-		}
-		return false;
-	}
+	std::string data;
+	if (!ComposeWorldData(relPath, data)) return false;
 	selectedInHieararchy = nullptr;
-	currentWorld->LoadFromFile(full);
+	currentWorld->LoadFromString(data);
 	currentWorldPath = relPath;
 	NameWorldFromPath(relPath);
+	std::cout << "[World]\t\t\t" << "Loaded " << relPath << std::endl;
 	return true;
+}
+
+// --- async world load (Game.LoadWorldAsync; task #147) --------------------------------
+// The background job reads + merges + PARSES (the heavy part for big worlds). The staged
+// document then waits for the script's ActivateLoadedWorld — applied by World::Update at
+// the frame boundary via ApplyAsyncWorldLoad. A new Start supersedes a pending one (the
+// generation counter makes the stale job drop its result silently).
+
+bool AppInstance::StartWorldLoadAsync(const std::string& relPath)
+{
+	if (relPath.empty() || !currentWorld) return false;
+	const unsigned my = ++asyncLoadGen;
+	{
+		boost::mutex::scoped_lock l(asyncLoadLock);
+		asyncLoadPath = relPath;
+		asyncLoadDoc.reset();
+	}
+	asyncLoadActivate = false;
+	asyncLoadState = 1;
+	asyncLoadProgress = 0.05f;
+	std::cout << "[World]\t\t\t" << "async load started: '" << relPath << "'" << std::endl;
+	Jobs::Schedule([this, relPath, my]()
+	{
+		std::string data;
+		const bool ok = ComposeWorldData(relPath, data);
+		if (asyncLoadGen != my) return;   // superseded/cancelled — drop silently
+		if (!ok)
+		{
+			asyncLoadState = 3;
+			std::cout << "[World]\t\t\t" << "async load: world '" << relPath << "' not found" << std::endl;
+			return;
+		}
+		asyncLoadProgress = 0.35f;
+		auto doc = std::make_shared<nlohmann::json>(nlohmann::json::parse(data, nullptr, false));
+		if (asyncLoadGen != my) return;
+		if (doc->is_discarded())
+		{
+			asyncLoadState = 3;
+			std::cout << "[World]\t\t\t" << "async load: '" << relPath << "' is not valid JSON" << std::endl;
+			return;
+		}
+		asyncLoadProgress = 0.95f;
+		{
+			boost::mutex::scoped_lock l(asyncLoadLock);
+			if (asyncLoadGen != my) return;
+			asyncLoadDoc = doc;
+		}
+		asyncLoadState = 2;
+		asyncLoadProgress = 1.0f;
+		std::cout << "[World]\t\t\t" << "async load staged: '" << relPath << "' (ActivateLoadedWorld to switch)" << std::endl;
+	});
+	return true;
+}
+
+double AppInstance::WorldLoadProgress()
+{
+	const int s = asyncLoadState;
+	if (s == 0 || s == 3) return -1.0;
+	return (double)asyncLoadProgress.load();
+}
+
+bool AppInstance::WorldLoadReady() { return asyncLoadState == 2; }
+
+bool AppInstance::ActivateLoadedWorld()
+{
+	if (asyncLoadState != 2) return false;
+	asyncLoadActivate = true;   // World::Update performs the swap at the frame boundary
+	return true;
+}
+
+void AppInstance::CancelWorldLoadAsync()
+{
+	++asyncLoadGen;   // any in-flight job drops its result
+	{
+		boost::mutex::scoped_lock l(asyncLoadLock);
+		asyncLoadDoc.reset();
+		asyncLoadPath.clear();
+	}
+	asyncLoadActivate = false;
+	asyncLoadState = 0;
+	asyncLoadProgress = 0.f;
+}
+
+void AppInstance::ApplyAsyncWorldLoad()
+{
+	if (!asyncLoadActivate || asyncLoadState != 2 || !currentWorld) return;
+	std::shared_ptr<nlohmann::json> doc;
+	std::string path;
+	{
+		boost::mutex::scoped_lock l(asyncLoadLock);
+		doc.swap(asyncLoadDoc);
+		path.swap(asyncLoadPath);
+	}
+	asyncLoadActivate = false;
+	asyncLoadState = 0;
+	asyncLoadProgress = 0.f;
+	++asyncLoadGen;
+	if (!doc) return;
+	selectedInHieararchy = nullptr;
+	currentWorld->LoadFromJson(*doc);   // pre-parsed: the game thread only instantiates
+	currentWorldPath = path;
+	NameWorldFromPath(path);
+	std::cout << "[World]\t\t\t" << "async world activated: '" << path << "'" << std::endl;
 }
 
 // A world with no authored name (older files / never named) reads its name from the file

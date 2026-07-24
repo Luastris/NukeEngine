@@ -34,6 +34,21 @@ public:
 	// "Worlds/level2.nuworld"). Same path the Player uses at boot (AppInstance::OpenWorld).
 	[[nuke::func]] static bool LoadWorld(const std::string& contentRelPath);
 
+	// --- ASYNC world loading: hide the wait behind a transition level -----------------------
+	// LoadWorldAsync starts a BACKGROUND load (content read + mod-layer merge + JSON parse —
+	// the heavy part) on the engine job pool; the current world (your transition level with a
+	// loading screen) keeps running. Poll LoadWorldProgress/LoadWorldReady, then call
+	// ActivateLoadedWorld — the pre-parsed world swaps in at the frame boundary, so the
+	// switch itself is short. A second LoadWorldAsync supersedes the first; CancelLoadWorld
+	// drops the loading/staged world. Typical flow (transition-level script):
+	//   start:  Game.LoadWorldAsync("Worlds/big.nuworld")
+	//   update: draw Game.LoadWorldProgress(); if Game.LoadWorldReady() then Game.ActivateLoadedWorld()
+	[[nuke::func]] static bool   LoadWorldAsync(const std::string& contentRelPath);
+	[[nuke::func]] static double LoadWorldProgress();    // -1 = none/failed, else 0..1 (1 = staged)
+	[[nuke::func]] static bool   LoadWorldReady();       // staged world awaits activation
+	[[nuke::func]] static bool   ActivateLoadedWorld();  // swap at the frame boundary; false if not ready
+	[[nuke::func]] static void   CancelLoadWorld();      // drop the loading/staged world
+
 	[[nuke::func]] static bool IsEditor();     // running inside the editor host (plugins/game may branch)
 	[[nuke::func]] static bool IsPlaying();    // play mode active (PIE playing / Player)
 	[[nuke::func]] static bool IsPaused();     // play mode paused (PIE pause)

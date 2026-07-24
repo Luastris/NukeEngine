@@ -3,6 +3,9 @@
 #define NUKEE_APPINSTANCE_H
 #include "NukeAPI.h"
 #include <cstdint>
+#include <atomic>                    // async world-load state flags
+#include <memory>                    // staged world document handoff
+#include <nlohmann/json_fwd.hpp>     // parsed world document (full include only in .cpp)
 #include <boost/thread.hpp>
 #include <boost/container/list.hpp>
 #include <boost/container/map.hpp>
@@ -117,6 +120,30 @@ public:
 	// the frame is fully drawn there; capturing from a script (mid-Update, pre-render) would
 	// read a stale/undefined rotated backbuffer. (ABI: appended at the END of the class.)
 	std::string pendingScreenshot;
+
+	// --- ASYNC world load (Game.LoadWorldAsync): hide the wait behind a transition level.
+	// A background job (nuke::Jobs) does the HEAVY part — content read, pak-layer merge,
+	// JSON parse; the game thread only instantiates atoms, at the FRAME BOUNDARY, and only
+	// when the script activates the staged world (World::Update -> ApplyAsyncWorldLoad).
+	// The transition level keeps running the whole time. (ABI: appended at the END.)
+	std::atomic<int>      asyncLoadState{ 0 };       // 0 idle / 1 loading / 2 ready / 3 failed
+	std::atomic<float>    asyncLoadProgress{ 0.f };  // coarse 0..1 while loading (1 = staged)
+	std::atomic<unsigned> asyncLoadGen{ 0 };         // supersede/cancel: a stale job drops its result
+	bool                  asyncLoadActivate = false; // script requested the swap (game thread only)
+	std::string           asyncLoadPath;             // staged world's content path  (asyncLoadLock)
+	std::shared_ptr<nlohmann::json> asyncLoadDoc;    // parsed (+merged) document    (asyncLoadLock)
+	boost::mutex          asyncLoadLock;             // job -> game thread handoff guard
+
+	// Compose a world's FINAL data string: the raw content file, or the mounted pak layers
+	// merged (base + mods + overlay, per-layer baselines). Thread-safe (filesystem + locked
+	// Package reads) — shared by the synchronous OpenWorld and the async loader's job.
+	bool   ComposeWorldData(const std::string& relPath, std::string& out);
+	bool   StartWorldLoadAsync(const std::string& relPath); // begin/replace a background load
+	double WorldLoadProgress();      // -1 idle/failed, else 0..1 (1 = staged, ready to activate)
+	bool   WorldLoadReady();         // a staged world awaits ActivateLoadedWorld
+	bool   ActivateLoadedWorld();    // queue the swap at the frame boundary; false if not ready
+	void   CancelWorldLoadAsync();   // drop the loading/staged world
+	void   ApplyAsyncWorldLoad();    // frame boundary (World::Update): perform the queued swap
 };
 
 }  // namespace nuke

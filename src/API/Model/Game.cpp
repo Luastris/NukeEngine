@@ -23,6 +23,13 @@ bool Game::LoadWorld(const std::string& contentRelPath)
 	return AppInstance::GetSingleton()->OpenWorld(contentRelPath);
 }
 
+// Async world loading (task #147) — thin facade over AppInstance's staged loader.
+bool   Game::LoadWorldAsync(const std::string& contentRelPath) { return AppInstance::GetSingleton()->StartWorldLoadAsync(contentRelPath); }
+double Game::LoadWorldProgress()   { return AppInstance::GetSingleton()->WorldLoadProgress(); }
+bool   Game::LoadWorldReady()      { return AppInstance::GetSingleton()->WorldLoadReady(); }
+bool   Game::ActivateLoadedWorld() { return AppInstance::GetSingleton()->ActivateLoadedWorld(); }
+void   Game::CancelLoadWorld()     { AppInstance::GetSingleton()->CancelWorldLoadAsync(); }
+
 bool Game::IsEditor()  { return AppInstance::GetSingleton()->isEditor(); }
 bool Game::IsPlaying() { return AppInstance::GetSingleton()->playState == 1; }
 bool Game::IsPaused()  { return AppInstance::GetSingleton()->playState == 2; }

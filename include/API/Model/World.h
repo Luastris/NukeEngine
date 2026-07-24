@@ -7,6 +7,7 @@
 #include <boost/thread/recursive_mutex.hpp>
 #include <memory>
 #include <vector>
+#include <nlohmann/json_fwd.hpp>   // LoadFromJson (async load hands over a pre-parsed document)
 
 namespace nuke {
 
@@ -101,6 +102,10 @@ public:
 	// excluded from save and preserved across load (it is editor infrastructure).
 	[[nuke::func]] std::string SaveToString();   // serialize to JSON text (also used for PIE snapshots)
 	[[nuke::func]] void        LoadFromString(const std::string& data);
+	// Load from an ALREADY-PARSED document (C++ only, not reflected). The async world loader
+	// parses (+merges) on a background job and hands the document over — the game thread then
+	// skips the parse (the heavy part) and only instantiates atoms.
+	void LoadFromJson(const nlohmann::json& j);
 	// Merge every mounted layer's copy of ONE world (Package::ReadAll order: base first,
 	// mods above). Each layer is diffed against the BASE (atoms by id, components by cid)
 	// and the diffs apply bottom-up — two mods editing the same world MERGE instead of the

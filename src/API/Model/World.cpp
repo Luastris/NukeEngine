@@ -373,6 +373,9 @@ void World::Update()
 		std::cout << "[World]\t\t\t" << "Game.LoadGame -> '" << path << "'" << std::endl;
 		LoadFromFile(path);
 	}
+	// Async-loaded world activation (Game.ActivateLoadedWorld): the staged, pre-parsed
+	// document swaps in HERE — traversal done, lock held, same safety as the loads above.
+	app->ApplyAsyncWorldLoad();
 }
 
 // --- fixed-step physics driver (service/iPhysics.h; no-op without a provider) ---------
@@ -2780,6 +2783,11 @@ void World::LoadFromString(const std::string& data)
 {
 	json j = json::parse(data, nullptr, false);
 	if (j.is_discarded()) { std::cout << "[World]\t\t\t" << "LoadFromString: bad JSON" << std::endl; return; }
+	LoadFromJson(j);
+}
+
+void World::LoadFromJson(const json& j)
+{
 	// The authored world name. Empty when the file carries none (older worlds / never named) —
 	// AppInstance::OpenWorld then fills it from the file stem so Game.GetWorld().Name is useful.
 	name = j.value("name", std::string());
