@@ -153,7 +153,25 @@ Vector3 Wind::Sample(const Vector3& worldPos)
 			float len = glm::length(out);
 			zdir = len > 1e-5f ? out / len : glm::vec3(0, 1, 0);
 		}
-		v += zdir * (zn->strength * w);
+		// Per-zone gusts: swell this zone's strength on the wind clock (Perlin, so it
+		// breathes instead of ticking) — same idea as the global gusts, local rate/amount.
+		float zs = zn->strength;
+		if (zn->gustAmount > 0.f)
+		{
+			const double g01 = Noise::Perlin3(7.0 + (double)(size_t)zn * 1e-7, t * (double)zn->gustFrequency, 0.13, 0.71) * 0.5 + 0.5;
+			zs *= 1.0f - zn->gustAmount + zn->gustAmount * (float)g01;
+		}
+		v += zdir * (zs * w);
+		// Per-zone turbulence: spatial direction noise inside the volume, m/s at full weight.
+		if (zn->turbulence > 0.f)
+		{
+			const double s = 1.0 / std::max(0.1f, zn->turbulenceScale);
+			const double x = worldPos.x * s, y = worldPos.y * s, z = worldPos.z * s, dr = t * 0.31;
+			glm::vec3 tn((float)Noise::Perlin3(13.0, x + dr, y, z),
+			             (float)Noise::Perlin3(29.0, x, y + dr, z),
+			             (float)Noise::Perlin3(41.0, x, y, z + dr));
+			v += tn * (zn->turbulence * w);
+		}
 	}
 	return Vector3(v.x, v.y, v.z);
 }

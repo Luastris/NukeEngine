@@ -21,18 +21,17 @@ class NUKEENGINE_API InstancedMesh : public Component
 {
 	NUKE_CLASS(InstancedMesh, Component)
 public:
-	Mesh*     mesh = nullptr;   // resolved from meshGuid (runtime)
+	Mesh*     mesh = nullptr;   // resolved from meshGuid (runtime; re-resolves when the prop changes)
 	Material* mat  = nullptr;   // OWNED instance (clone of the matGuid asset), like MeshRenderer
+	std::string meshGuidRes, matGuidRes;   // guid each cache was resolved from (hot-apply, no latch)
+	float cellSizeRes = -1.f;              // cell size the chunks were built with (live re-chunk)
 
 	[[nuke::prop(asset="mesh", label="Mesh")]]         std::string meshGuid;
 	[[nuke::prop(asset="material", label="Material")]] std::string matGuid;
 	[[nuke::prop(label="Cast Shadows")]]               bool  castShadows = true;
-	[[nuke::prop(label="In Reflections", tip="Add instances to the RT reflection scene (up to RT Max Instances).")]]
-	bool inReflections = false;
-	[[nuke::prop(label="RT Max Instances", min=0, tip="RT reflections take instances individually - cap the count.")]]
-	int rtMaxInstances = 256;
-	[[nuke::prop(label="Cell Size", min=1, tip="Spatial chunk size (world units) for frustum culling.")]]
-	float cellSize = 16.0f;
+	[[nuke::prop(label="In Reflections", tip="Add instances to the RT reflection scene (up to RT Max Instances).")]] bool inReflections = false;
+	[[nuke::prop(label="RT Max Instances", min=0, tip="RT reflections take instances individually - cap the count.")]] int rtMaxInstances = 256;
+	[[nuke::prop(label="Cell Size", min=1, tip="Spatial chunk size (world units) for frustum culling.")]] float cellSize = 16.0f;
 	[[nuke::prop(hidden)]] std::string data;   // packed instances (base64 of floats) — the serialized store
 
 	// ---- reflected instance API (scripts author scatters through these) --------------------

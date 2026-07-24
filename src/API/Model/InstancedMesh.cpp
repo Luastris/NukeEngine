@@ -162,13 +162,26 @@ int InstancedMesh::InstanceCount() { EnsureDecoded(); return (int)instances.size
 bool InstancedMesh::EnsureRenderReady(iRender* r)
 {
 	if (!r) return false;
-	if (!mesh && !meshGuid.empty()) mesh = ResDB::getSingleton()->GetMesh(meshGuid);   // late asset (pak load order)
-	if (!mat && !matGuid.empty())
+	// HOT-APPLY asset resolution: re-resolve on any prop change (assign/replace/reset) —
+	// a latched first state must never survive an inspector edit. The material is an OWNED
+	// clone, so a swap tears the old instance down properly.
+	if (meshGuid != meshGuidRes)
 	{
-		Material* asset = ResDB::getSingleton()->GetMaterial(matGuid);
-		if (asset) mat = asset->Clone();
+		mesh = meshGuid.empty() ? nullptr : ResDB::getSingleton()->GetMesh(meshGuid);
+		if (meshGuid.empty() || mesh) { meshGuidRes = meshGuid; dirty = true; }
+	}
+	if (matGuid != matGuidRes)
+	{
+		Material* asset = matGuid.empty() ? nullptr : ResDB::getSingleton()->GetMaterial(matGuid);
+		if (matGuid.empty() || asset)
+		{
+			if (mat) { Reflect_DropObject(mat); delete mat; mat = nullptr; }
+			if (asset) mat = asset->Clone();
+			matGuidRes = matGuid;
+		}
 	}
 	EnsureDecoded();
+	if (cellSize != cellSizeRes) { cellSizeRes = cellSize; dirty = true; }   // live re-chunk on edit
 	if (!mesh || instances.empty()) return false;
 
 	// Atom world matrix (glm column-major; v' = M*v). Compare against the snapshot — an atom

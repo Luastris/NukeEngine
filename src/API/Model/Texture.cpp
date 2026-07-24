@@ -109,8 +109,22 @@ int encodeBC(std::vector<uint8_t>& bytes, std::vector<uint8_t> cur, int w, int h
 			for (int x = 0; x < nw; ++x)
 			{
 				int x0 = x * 2, y0 = y * 2, x1 = (x * 2 + 1 < w) ? x * 2 + 1 : x0, y1 = (y * 2 + 1 < h) ? y * 2 + 1 : y0;
-				for (int c = 0; c < 4; ++c)
-					nx[((size_t)y * nw + x) * 4 + c] = (uint8_t)((cur[((size_t)y0 * w + x0) * 4 + c] + cur[((size_t)y0 * w + x1) * 4 + c] + cur[((size_t)y1 * w + x0) * 4 + c] + cur[((size_t)y1 * w + x1) * 4 + c]) / 4);
+				const uint8_t* s0 = &cur[((size_t)y0 * w + x0) * 4]; const uint8_t* s1 = &cur[((size_t)y0 * w + x1) * 4];
+				const uint8_t* s2 = &cur[((size_t)y1 * w + x0) * 4]; const uint8_t* s3 = &cur[((size_t)y1 * w + x1) * 4];
+				uint8_t* d = &nx[((size_t)y * nw + x) * 4];
+				if (bc3)
+				{
+					// ALPHA-WEIGHTED rgb: a plain average pulls the (black) rgb of transparent
+					// texels into every mip — dark fringes / squarish halos around cutout
+					// sprites as soon as they sample below mip0 (small particles).
+					const int aS = s0[3] + s1[3] + s2[3] + s3[3];
+					for (int c = 0; c < 3; ++c)
+						d[c] = aS ? (uint8_t)((s0[c] * s0[3] + s1[c] * s1[3] + s2[c] * s2[3] + s3[c] * s3[3]) / aS)
+						          : (uint8_t)((s0[c] + s1[c] + s2[c] + s3[c]) / 4);
+					d[3] = (uint8_t)(aS / 4);
+				}
+				else
+					for (int c = 0; c < 4; ++c) d[c] = (uint8_t)((s0[c] + s1[c] + s2[c] + s3[c]) / 4);
 			}
 		cur.swap(nx); w = nw; h = nh;
 	}
@@ -256,7 +270,7 @@ int Texture::GuessUsage(const std::string& filename)
 
 namespace {
 	const char kMagic[8] = { 'N','U','T','E','X','\0','\0','\0' };
-	const uint32_t kVersion = 10;   // v2..v7 as before; v8: symmetric margin/spacing+9-slice; v9: per-side margins; v10: nineSlice flag
+	const uint32_t kVersion = 11;   // v2..v7 as before; v8: symmetric margin/spacing+9-slice; v9: per-side margins; v10: nineSlice flag; v11: alpha-weighted mips (BC3 assets from older files heal on load)
 }
 
 bool Texture::SaveToFile(const std::string& path) const
@@ -332,6 +346,20 @@ Texture* Texture::LoadFromStream(std::istream& i)
 	uint32_t bytes = 0; i.read((char*)&bytes, 4);
 	if (bytes) { t->pixels.resize(bytes); i.read((char*)t->pixels.data(), bytes); }
 	if (!i && !i.eof()) { delete t; return nullptr; }
+	// v11 HEAL: older BC3 assets carry mips box-filtered WITHOUT alpha weighting — the black
+	// rgb of transparent texels bled in, giving cutout sprites dark fringes below mip0.
+	// Rebuild the chain from mip0 with the fixed filter (in memory; an editor save writes v11).
+	if (version < 11 && t->format == FMT_BC3 && t->mipCount > 1 && !t->renderTexture
+	    && t->frameCount == 1 && t->width > 0 && t->height > 0)
+	{
+		std::vector<uint8_t> rgba = decodeMip0(t);
+		if (!rgba.empty())
+		{
+			std::vector<uint8_t> enc;
+			t->mipCount = encodeBC(enc, std::move(rgba), t->width, t->height, FMT_BC3);
+			t->pixels.swap(enc);
+		}
+	}
 	return t;
 }
 }  // namespace nuke

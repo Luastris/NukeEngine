@@ -171,12 +171,21 @@ static void CompressToBC(Texture* tex, const std::vector<unsigned char>& rgba0, 
 			for (int x = 0; x < nw; ++x)
 			{
 				int x0 = x * 2, y0 = y * 2, x1 = (x * 2 + 1 < w) ? x * 2 + 1 : x0, y1 = (y * 2 + 1 < h) ? y * 2 + 1 : y0;
-				for (int c = 0; c < 4; ++c)
+				const unsigned char* s0 = &cur[((size_t)y0 * w + x0) * 4]; const unsigned char* s1 = &cur[((size_t)y0 * w + x1) * 4];
+				const unsigned char* s2 = &cur[((size_t)y1 * w + x0) * 4]; const unsigned char* s3 = &cur[((size_t)y1 * w + x1) * 4];
+				unsigned char* d = &nx[((size_t)y * nw + x) * 4];
+				if (alpha)
 				{
-					int a = cur[((size_t)y0 * w + x0) * 4 + c], b = cur[((size_t)y0 * w + x1) * 4 + c];
-					int e = cur[((size_t)y1 * w + x0) * 4 + c], f = cur[((size_t)y1 * w + x1) * 4 + c];
-					nx[((size_t)y * nw + x) * 4 + c] = (unsigned char)((a + b + e + f) / 4);
+					// ALPHA-WEIGHTED rgb (see Texture.cpp encodeBC): plain averaging bleeds the
+					// black rgb of transparent texels into the mips — dark fringes on cutouts.
+					const int aS = s0[3] + s1[3] + s2[3] + s3[3];
+					for (int c = 0; c < 3; ++c)
+						d[c] = aS ? (unsigned char)((s0[c] * s0[3] + s1[c] * s1[3] + s2[c] * s2[3] + s3[c] * s3[3]) / aS)
+						          : (unsigned char)((s0[c] + s1[c] + s2[c] + s3[c]) / 4);
+					d[3] = (unsigned char)(aS / 4);
 				}
+				else
+					for (int c = 0; c < 4; ++c) d[c] = (unsigned char)((s0[c] + s1[c] + s2[c] + s3[c]) / 4);
 			}
 		cur.swap(nx); w = nw; h = nh;
 	}

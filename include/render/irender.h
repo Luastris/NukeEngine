@@ -494,6 +494,11 @@ public:
     // it there and apply their own local variation.
     virtual void setWind(const float dirStrength[4], const float params[4]) {}
 
+    // --- Soft particles (7.3): fade distance for SUBSEQUENT sprite runs. The fragment fades
+    // where it nears scene geometry (needs the single-sample depth prepass this frame —
+    // silently off otherwise). Per-run: a change flushes the open batch. 0 = off (default).
+    virtual void setSpriteSoftDepth(float dist) {}
+
     // ABI: new virtuals are appended at the END of the class, NEVER inserted mid-vtable —
     // plugins are separate DLLs built at different times, and an inserted slot shifts every
     // later one (an old NukeGUI.dll calling getScrollDelta through a shifted slot landed in

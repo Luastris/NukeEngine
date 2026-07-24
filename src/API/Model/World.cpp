@@ -1739,6 +1739,34 @@ static void EmitSelectionGizmos(Atom* a)
 		else
 			DebugDraw::WireSphere(pos, 1.0, c);   // infinite probe: a small marker sphere
 	}
+
+	if (WindZone* wz = a->GetComponent<WindZone>())
+	{
+		// wind zones: teal volume bounds + what the zone DOES (direction / radial arrows)
+		const Color c(0.35, 0.9, 0.75, 1.0);
+		if (wz->shape == 0)
+			DebugDraw::WireSphere(pos, wz->radius, c);
+		else
+			DebugDraw::WireBox(pos, wz->halfExtents, rot, c);
+		const double reach = wz->shape == 0 ? wz->radius : std::max({ fabs(wz->halfExtents.x), fabs(wz->halfExtents.y), fabs(wz->halfExtents.z) });
+		if (wz->mode == 0)   // directional: arrow along forward through the volume
+		{
+			Vector3 f = t.direction();
+			DebugDraw::Arrow(Vector3(pos.x - f.x * reach * 0.8, pos.y - f.y * reach * 0.8, pos.z - f.z * reach * 0.8),
+			                 Vector3(pos.x + f.x * reach * 0.8, pos.y + f.y * reach * 0.8, pos.z + f.z * reach * 0.8), c);
+		}
+		else                 // radial: outward arrows on the cardinal axes (suction shows reversed)
+		{
+			const double s = wz->strength >= 0 ? 1.0 : -1.0;
+			const Vector3 axes[6] = { {1,0,0}, {-1,0,0}, {0,1,0}, {0,-1,0}, {0,0,1}, {0,0,-1} };
+			for (const Vector3& ax : axes)
+			{
+				Vector3 inner(pos.x + ax.x * reach * 0.25, pos.y + ax.y * reach * 0.25, pos.z + ax.z * reach * 0.25);
+				Vector3 outer(pos.x + ax.x * reach * 0.85, pos.y + ax.y * reach * 0.85, pos.z + ax.z * reach * 0.85);
+				if (s > 0) DebugDraw::Arrow(inner, outer, c); else DebugDraw::Arrow(outer, inner, c);
+			}
+		}
+	}
 }
 
 void World::Render(iRender* r)

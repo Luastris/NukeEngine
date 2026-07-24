@@ -20,8 +20,13 @@ public:
 	[[nuke::prop(label="Half Extents")]]                    Vector3 halfExtents = Vector3(5, 5, 5);   // box (local)
 	[[nuke::prop(label="Mode", enum="Directional,Radial")]] int   mode = 0;
 	[[nuke::prop(label="Strength")]]                        float strength = 5.0f;     // m/s (negative radial = suction)
-	[[nuke::prop(label="Falloff", min=0, max=1, tip="0 = full strength to the edge, 1 = linear fade to the edge.")]]
-	float falloff = 1.0f;
+	[[nuke::prop(label="Falloff", min=0, max=1, tip="0 = full strength to the edge, 1 = linear fade to the edge.")]] float falloff = 1.0f;
+	// Per-zone animation, layered on top of the global wind's own gusts/turbulence: this
+	// zone's contribution swells (gusts) and its direction jitters spatially (turbulence).
+	[[nuke::prop(label="Turbulence", min=0, tip="m/s of spatial direction noise added inside the zone.")]] float turbulence = 0.0f;
+	[[nuke::prop(label="Turbulence Scale", min=0.1, tip="World units per turbulence feature.")]] float turbulenceScale = 4.0f;
+	[[nuke::prop(label="Gust Amount", min=0, max=1, tip="0 = steady; 1 = strength swells fully on and off.")]] float gustAmount = 0.0f;
+	[[nuke::prop(label="Gust Frequency", min=0.01, tip="Gust cycles per second (approx).")]] float gustFrequency = 0.5f;
 
 	WindZone();
 	void Init(Atom* parent) override;

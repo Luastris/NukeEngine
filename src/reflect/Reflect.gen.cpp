@@ -406,6 +406,12 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("meshGuid", &InstancedMesh::meshGuid, "mesh", "Mesh"));
 		t.fields.push_back(MakeField("matGuid", &InstancedMesh::matGuid, "material", "Material"));
 		t.fields.push_back(MakeField("castShadows", &InstancedMesh::castShadows, "", "Cast Shadows"));
+		t.fields.push_back(MakeField("inReflections", &InstancedMesh::inReflections, "", "In Reflections"));
+		t.fields.back().tip = "Add instances to the RT reflection scene (up to RT Max Instances).";
+		t.fields.push_back(MakeField("rtMaxInstances", &InstancedMesh::rtMaxInstances, "", "RT Max Instances"));
+		t.fields.back().tip = "RT reflections take instances individually - cap the count.";
+		t.fields.push_back(MakeField("cellSize", &InstancedMesh::cellSize, "", "Cell Size"));
+		t.fields.back().tip = "Spatial chunk size (world units) for frustum culling.";
 		t.fields.push_back(MakeField("data", &InstancedMesh::data));
 		t.fields.back().hidden = true;
 		t.methods.push_back(MakeMethod("AddInstance", &InstancedMesh::AddInstance));
@@ -700,6 +706,16 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("halfExtents", &WindZone::halfExtents, "", "Half Extents"));
 		t.fields.push_back(MakeField("mode", &WindZone::mode, "", "Mode", 0.0f, 0.0f, "Directional,Radial"));
 		t.fields.push_back(MakeField("strength", &WindZone::strength, "", "Strength"));
+		t.fields.push_back(MakeField("falloff", &WindZone::falloff, "", "Falloff", 0.0f, 1.0f));
+		t.fields.back().tip = "0 = full strength to the edge, 1 = linear fade to the edge.";
+		t.fields.push_back(MakeField("turbulence", &WindZone::turbulence, "", "Turbulence"));
+		t.fields.back().tip = "m/s of spatial direction noise added inside the zone.";
+		t.fields.push_back(MakeField("turbulenceScale", &WindZone::turbulenceScale, "", "Turbulence Scale"));
+		t.fields.back().tip = "World units per turbulence feature.";
+		t.fields.push_back(MakeField("gustAmount", &WindZone::gustAmount, "", "Gust Amount", 0.0f, 1.0f));
+		t.fields.back().tip = "0 = steady; 1 = strength swells fully on and off.";
+		t.fields.push_back(MakeField("gustFrequency", &WindZone::gustFrequency, "", "Gust Frequency"));
+		t.fields.back().tip = "Gust cycles per second (approx).";
 		t.create = []() -> void* { return new WindZone(); };
 	}
 	{
