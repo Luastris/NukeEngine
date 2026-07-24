@@ -373,6 +373,7 @@ void World::Update()
 		path.swap(app->pendingSaveLoad);
 		std::cout << "[World]\t\t\t" << "Game.LoadGame -> '" << path << "'" << std::endl;
 		app->FlushWorldActivation();   // a still-growing world completes before the save replaces it
+		suppressPersistOnce = true;    // the save IS the full state — carrying persistent atoms would duplicate them
 		LoadFromFile(path);
 	}
 	// Async-loaded world activation (Game.ActivateLoadedWorld): the staged, pre-parsed
@@ -2182,6 +2183,7 @@ static void SaveAtom(Atom* atom, json& j)
 	j["id"]   = atom->id.id;   // stable identity (survives the scene rebuild on PIE stop / reload)
 	if (!atom->prefabGuid.empty()) j["prefab"] = atom->prefabGuid;   // instance link to a .nuprefab
 	if (atom->layer != 0) j["layer"] = atom->layer;                  // render layer index (0 = Default, omitted)
+	if (atom->persistent) j["persistent"] = true;                    // survives game world switches (omitted when off)
 	Transform& t = atom->GetTransform();
 	if (TypeInfo* tti = t.GetType())
 		SaveObject(*tti, &t, j["transform"]);
@@ -2259,6 +2261,7 @@ static Atom* LoadAtom(const json& j)
 	atom->prefabGuid = j.value("prefab", std::string());       // instance link (if any)
 	atom->modOrigin  = j.value("__mod", std::string());        // merge provenance (runtime only)
 	atom->layer      = std::max(0, std::min(31, j.value("layer", 0)));   // render layer index
+	atom->persistent = j.value("persistent", false);                     // survives game world switches
 	if (j.contains("transform"))
 	{
 		Transform& t = atom->GetTransform();
@@ -2965,11 +2968,31 @@ void World::LoadHeaderFromJson(const json& j)
 		a->components.clear();
 		delete a;
 	};
-	for (auto it = hierarchy->begin(); it != hierarchy->end(); )   // keep editor camera, drop the rest
+	// PERSISTENT atoms (DontDestroyOnLoad): during PLAY (player, or PIE playing/paused) a
+	// persistent ROOT atom's subtree survives the switch — live script state and all. Editor
+	// edit-mode loads never carry (world B's file must not absorb world A's atoms); a
+	// SAVEGAME load suppresses carry too (the snapshot already contains the carried atoms —
+	// keeping them would duplicate). Carried physics handles are STALE after the wholesale
+	// reset above — zero them so the fixed-step driver lazily re-creates bodies/characters.
+	AppInstance* app = AppInstance::GetSingleton();
+	const bool persistOk = !suppressPersistOnce && (!app->isEditor() || app->playState != 0);
+	suppressPersistOnce = false;
+	int carried = 0;
+	std::function<void(Atom*)> healPhysics = [&](Atom* a)
 	{
-		if ((*it)->GetName() == "Editor Camera") ++it;
-		else { Atom* a = *it; it = hierarchy->erase(it); hardDestroy(a); }
+		if (!a) return;
+		if (Collider* col = a->GetComponent<Collider>()) col->bodyId = 0;
+		if (CharacterController* cc = a->GetComponent<CharacterController>()) cc->charId = 0;
+		for (Atom* ch : a->children) healPhysics(ch);
+	};
+	for (auto it = hierarchy->begin(); it != hierarchy->end(); )   // keep editor camera + persistent, drop the rest
+	{
+		if ((*it)->GetName() == "Editor Camera") { ++it; continue; }
+		if (persistOk && (*it)->persistent) { healPhysics(*it); ++carried; ++it; continue; }
+		Atom* a = *it; it = hierarchy->erase(it); hardDestroy(a);
 	}
+	if (carried > 0)
+		std::cout << "[World]\t\t\t" << carried << " persistent atom(s) carried across the world switch" << std::endl;
 	destroyQueue.clear();   // pending deferred destroys referenced the just-freed atoms
 }
 

@@ -41,6 +41,14 @@ public:
 	// layerMask has this bit set. 0 = "Default"; 31 is conventionally the editor's own objects.
 	int layer = 0;
 
+	// PERSISTENT atom (the DontDestroyOnLoad pattern): a persistent ROOT atom survives a GAME
+	// world switch (Game.LoadWorld / async activation) — its subtree, components and live
+	// script state carry into the next world instead of being torn down. Only in PLAY (player
+	// or PIE playing): editor edit-mode loads never carry atoms (opening world B must not
+	// leak world A's content into its file), and a SAVEGAME load restores the full snapshot
+	// (the save already contains the carried atoms — persisting would duplicate them).
+	bool persistent = false;
+
     bc::list<Component*> components = bc::list<Component*>();
     bc::list<Atom*> children = bc::list<Atom*>();
 
@@ -55,6 +63,8 @@ public:
 	[[nuke::func]] void SetTag(const std::string& tag);
 	[[nuke::func]] void   SetLayer(double index);   // render layer index 0..31 (clamped; see nuke::Layers)
 	[[nuke::func]] double GetLayer();
+	[[nuke::func]] void SetPersistent(bool on);     // survive game world switches (root atoms; see `persistent`)
+	[[nuke::func]] bool IsPersistent();
 	Transform& GetTransform();
 	
 	template<class T>

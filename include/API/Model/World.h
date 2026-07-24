@@ -113,6 +113,9 @@ public:
 	void  LoadHeaderFromJson(const nlohmann::json& j);    // name/settings/calendar + teardown
 	Atom* AddAtomFromJson(const nlohmann::json& atomJ);   // instantiate ONE root atom (its subtree)
 	void  FinalizeIncrementalLoad();                      // duplicate-id heal + AtomRef resolve
+	// One-shot: the NEXT load must NOT carry persistent atoms (set by the savegame path —
+	// the snapshot already contains them; carrying would duplicate). Consumed by the teardown.
+	bool suppressPersistOnce = false;
 	// Merge every mounted layer's copy of ONE world (Package::ReadAll order: base first,
 	// mods above). Each layer is diffed against the BASE (atoms by id, components by cid)
 	// and the diffs apply bottom-up — two mods editing the same world MERGE instead of the

@@ -52,6 +52,9 @@ double Atom::GetLayer()
 	return (double)layer;
 }
 
+void Atom::SetPersistent(bool on) { persistent = on; }
+bool Atom::IsPersistent()         { return persistent; }
+
 Transform& Atom::GetTransform()
 {
 	return transform;
