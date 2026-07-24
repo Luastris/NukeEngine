@@ -110,6 +110,20 @@ struct WindowDesc
     bool  gpuValidation = false; // Debug: turn on the D3D12 validation layer + DRED (heavy; off by default)
 };
 
+// GPU instancing (7.1): ONE record per instance in an instance buffer. The three rows are
+// HLSL-READY: row_i dotted with (localPos, 1) yields the world-space coordinate — i.e. the
+// COLUMNS of a row-vector-convention world matrix, translation in row_i.w. `color` multiplies
+// the material base color; `custom` is free per-instance data for shaders (a custom material
+// shader opts into instancing by handling the NUKE_INSTANCED define in its vs/ps source).
+struct NukeInstanceData
+{
+    float row0[4];
+    float row1[4];
+    float row2[4];
+    float color[4]  = { 1, 1, 1, 1 };
+    float custom[4] = { 0, 0, 0, 0 };
+};
+
 class iRender
 {
     friend class NukeOGL;
@@ -460,6 +474,19 @@ public:
     // Current cursor mode (setCursorMode lives mid-vtable with the input callbacks — it is an
     // original slot; only this getter is an append).
     virtual int  getCursorMode() { return 0; }
+
+    // --- GPU instancing (7.1): one mesh+material, N instances, ONE draw call. ---------------
+    // Instance buffers are persistent renderer objects: create once, update on change (static
+    // foliage uploads once; dynamic consumers re-upload per frame), destroy when done. Draws
+    // take a RANGE [first, first+count) so the engine can cull CHUNKS of instances and issue
+    // only the visible ranges. The three passes mirror the per-object trio: lit camera pass,
+    // shadow depth pass (inside begin/endShadowPass), G-buffer/velocity prepass.
+    virtual uint64_t createInstanceBuffer() { return 0; }
+    virtual void     updateInstanceBuffer(uint64_t id, const NukeInstanceData* data, int count) {}
+    virtual void     destroyInstanceBuffer(uint64_t id) {}
+    virtual void renderObjectInstanced(Mesh* mesh, Material* mat, uint64_t instBuf, int first, int count) {}
+    virtual void renderShadowInstanced(Mesh* mesh, uint64_t instBuf, int first, int count, Material* mat) {}
+    virtual void renderGBufferInstanced(Mesh* mesh, Material* mat, uint64_t instBuf, int first, int count) {}
 
     // ABI: new virtuals are appended at the END of the class, NEVER inserted mid-vtable —
     // plugins are separate DLLs built at different times, and an inserted slot shifts every

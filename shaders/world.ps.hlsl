@@ -95,7 +95,14 @@ Texture2D    g_Occlusion;    SamplerState g_Occlusion_sampler;   // R = ambient 
 Texture2D    g_Emissive;     SamplerState g_Emissive_sampler;    // emissive color
 Texture2D    g_Spec;         SamplerState g_Spec_sampler;        // specular reflectance (KHR); white = 0.04 F0
 
+// NUKE_INSTANCED (7.1): per-instance tint + custom float4 arrive as extra interpolants
+// (must mirror world.vs's instanced PSIn exactly); the tint multiplies the base color.
+#if NUKE_INSTANCED
+struct PSIn { float4 pos : SV_POSITION; float3 wpos : TEXCOORD0; float3 nrm : TEXCOORD1; float2 uv : TEXCOORD2;
+              float4 icol : TEXCOORD3; float4 icustom : TEXCOORD4; };
+#else
 struct PSIn { float4 pos : SV_POSITION; float3 wpos : TEXCOORD0; float3 nrm : TEXCOORD1; float2 uv : TEXCOORD2; };
+#endif
 
 static const float PI = 3.14159265359;
 
@@ -131,6 +138,9 @@ float3 PerturbNormal(float3 N, float3 n, float3 dp1, float3 dp2, float2 du1, flo
 float4 main(in PSIn i) : SV_Target
 {
     float4 base = g_Color;
+#if NUKE_INSTANCED
+    base *= i.icol;   // per-instance tint
+#endif
     if (g_Params.x > 0.5) base *= g_Tex.Sample(g_Tex_sampler, i.uv);
     float3 albedo = pow(max(base.rgb, 0.0), 2.2);   // sRGB -> linear
 

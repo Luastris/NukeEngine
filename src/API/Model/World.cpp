@@ -26,6 +26,7 @@
 #include "API/Model/Rigidbody.h"  // physics: dynamic/kinematic body settings
 #include "API/Model/CharacterController.h"   // physics: virtual character capsules
 #include "API/Model/DebugDraw.h"   // editor gizmos (selection wire shapes)
+#include "API/Model/InstancedMesh.h" // GPU-instanced scatters (7.1: chunked instanced draws)
 #include "interface/Services.h"   // GetService<iPhysics>()
 #include "service/iPhysics.h"     // the physics service seam (fixed-step driver below)
 #include "service/iAudio.h"       // the audio service seam (per-frame pump in Render)
@@ -1029,6 +1030,82 @@ static void CameraVP(iRender* r, float vp[16])
 		{ float s = 0; for (int k = 0; k < 4; ++k) s += view[i*4+k] * proj[k*4+j]; vp[i*4+j] = s; }
 }
 
+// --- GPU instancing (7.1): InstancedMesh components draw as chunked instanced ranges -------
+
+static void CollectInstancedMeshes(bc::list<Atom*>& gos, std::vector<InstancedMesh*>& out, unsigned int mask = 0xFFFFFFFFu)
+{
+	for (auto atom : gos)
+	{
+		if (!atom) continue;
+		if (LayerVisible(atom, mask))
+			if (auto* im = atom->GetComponent<InstancedMesh>())
+				if (im->enabled) out.push_back(im);
+		if (atom->children.size() > 0)
+			CollectInstancedMeshes(atom->children, out, mask);
+	}
+}
+
+// World-AABB against the current camera frustum — the same 8-corner clip test as FrustumCull,
+// but over a chunk's precomputed world bounds instead of a transformed mesh AABB.
+static bool CullAABB(const float mn[3], const float mx[3], const float vp[16])
+{
+	int oL = 0, oR = 0, oB = 0, oT = 0, oN = 0, oF = 0;
+	for (int c = 0; c < 8; ++c)
+	{
+		float wx = (c & 1) ? mx[0] : mn[0], wy = (c & 2) ? mx[1] : mn[1], wz = (c & 4) ? mx[2] : mn[2];
+		float x  = wx*vp[0] + wy*vp[4] + wz*vp[8]  + vp[12];
+		float y  = wx*vp[1] + wy*vp[5] + wz*vp[9]  + vp[13];
+		float z  = wx*vp[2] + wy*vp[6] + wz*vp[10] + vp[14];
+		float ww = wx*vp[3] + wy*vp[7] + wz*vp[11] + vp[15];
+		if (x < -ww) ++oL; if (x > ww) ++oR;
+		if (y < -ww) ++oB; if (y > ww) ++oT;
+		if (z < 0.0f) ++oN; if (z > ww) ++oF;
+	}
+	return oL == 8 || oR == 8 || oB == 8 || oT == 8 || oN == 8 || oF == 8;
+}
+
+// Camera-pass draw: every visible chunk of every InstancedMesh = ONE instanced draw call.
+static void DrawInstancedMeshes(std::vector<InstancedMesh*>& ims, iRender* r, bool cull)
+{
+	if (ims.empty()) return;
+	float vp[16]; if (cull) CameraVP(r, vp);
+	for (InstancedMesh* im : ims)
+	{
+		if (!im->EnsureRenderReady(r)) continue;
+		for (const InstancedMesh::Chunk& c : im->chunks)
+			if (!(cull && CullAABB(c.mn, c.mx, vp)))
+				r->renderObjectInstanced(im->mesh, im->mat, im->gpuBuf, c.first, c.count);
+	}
+}
+
+// G-buffer/velocity prepass: opaque instanced sets only (same rule as DrawGBuffer).
+static void DrawInstancedGBuffer(std::vector<InstancedMesh*>& ims, iRender* r, bool cull)
+{
+	if (ims.empty()) return;
+	float vp[16]; if (cull) CameraVP(r, vp);
+	for (InstancedMesh* im : ims)
+	{
+		if (im->mat && im->mat->blendMode != 0) continue;
+		if (!im->EnsureRenderReady(r)) continue;
+		for (const InstancedMesh::Chunk& c : im->chunks)
+			if (!(cull && CullAABB(c.mn, c.mx, vp)))
+				r->renderGBufferInstanced(im->mesh, im->mat, im->gpuBuf, c.first, c.count);
+	}
+}
+
+// Shadow depth pass: all chunks (the light frustum is not the camera's — no camera culling).
+static void DrawInstancedShadows(std::vector<InstancedMesh*>& ims, iRender* r)
+{
+	for (InstancedMesh* im : ims)
+	{
+		if (!im->castShadows) continue;
+		if (im->mat && !im->mat->castShadows) continue;
+		if (!im->EnsureRenderReady(r)) continue;
+		for (const InstancedMesh::Chunk& c : im->chunks)
+			r->renderShadowInstanced(im->mesh, im->gpuBuf, c.first, c.count, im->mat);
+	}
+}
+
 // End of frame: snapshot each MeshRenderer's current global transform as its "previous" for next frame's TAA
 // motion vectors. Runs once per frame (transforms are camera-independent), after all cameras have rendered.
 static void UpdatePrevTransforms(bc::list<Atom*>& gos)
@@ -1871,6 +1948,10 @@ void World::Render(iRender* r)
 	// passes, both of which draw with the world PSO and ray-query g_TLAS (RT shadows). Must exist before any draw.
 	// Auxiliary worlds (asset previews) skip it: the TLAS is GLOBAL and the live scene must stay its last
 	// writer (and a preview doesn't need RT reflections).
+	// Instanced sets (7.1) are drawn in every pass below — gather them once per frame.
+	std::vector<InstancedMesh*> instSets;
+	CollectInstancedMeshes(*hierarchy, instSets);
+
 	if (r->rtAvailable() && !auxiliary)
 	{
 		r->beginRTScene();
@@ -1880,6 +1961,27 @@ void World::Render(iRender* r)
 		for (auto& it : rtItems) if (it.blend == 0)
 			r->addRTInstance(it.mesh->rtProxy ? it.mesh->rtProxy : it.mesh,
 			                 it.mat, it.pos, it.quat, it.scale, it.inReflections);
+		// Instanced sets: a TLAS entry per instance is not free — capped per component
+		// (rtMaxInstances) and opt-in (inReflections, default off for big scatters).
+		for (InstancedMesh* im : instSets)
+		{
+			if (!im->inReflections || !im->EnsureRenderReady(r)) continue;
+			if ((int)im->instances.size() > im->rtMaxInstances) continue;
+			Transform& t = im->atom->GetTransform();
+			Vector3 P = t.globalPosition(); Quaternion Q = t.globalRotation(); Vector3 S = t.globalScale();
+			glm::quat aq((float)Q.w, (float)Q.x, (float)Q.y, (float)Q.z);
+			for (const InstancedMesh::Inst& in : im->instances)
+			{
+				glm::quat iq(in.quat[3], in.quat[0], in.quat[1], in.quat[2]);
+				glm::quat wq = aq * iq;
+				glm::vec3 wp = glm::vec3((float)P.x, (float)P.y, (float)P.z)
+				             + aq * (glm::vec3(in.pos[0], in.pos[1], in.pos[2]) * glm::vec3((float)S.x, (float)S.y, (float)S.z));
+				float pos[3]   = { wp.x, wp.y, wp.z };
+				float quat[4]  = { wq.x, wq.y, wq.z, wq.w };
+				float scale[3] = { in.scale[0] * (float)S.x, in.scale[1] * (float)S.y, in.scale[2] * (float)S.z };
+				r->addRTInstance(im->mesh->rtProxy ? im->mesh->rtProxy : im->mesh, im->mat, pos, quat, scale, true);
+			}
+		}
 		r->buildRTScene();
 	}
 
@@ -1889,6 +1991,7 @@ void World::Render(iRender* r)
 	{
 		r->beginShadowPass(sp);
 		RenderShadowMeshes(*hierarchy, r);
+		DrawInstancedShadows(instSets, r);
 		r->endShadowPass();
 	}
 
@@ -1913,6 +2016,7 @@ void World::Render(iRender* r)
 			{
 				r->beginCubeFace(probe->cubeId, f, pos, probe->nearZ, probe->farZ);
 				for (auto& it : items) if (it.blend == 0) r->renderObject(it.mesh, it.mat, it.pos, it.quat, it.scale);
+				DrawInstancedMeshes(instSets, r, false);   // instanced sets appear in reflections too (no cull for capture)
 				r->endCubeFace(probe->cubeId, f);
 			}
 			if (!probe->realtime)
@@ -2020,11 +2124,16 @@ void World::Render(iRender* r)
 		// Decals reconstruct surfaces from the depth prepass, so their presence also forces it.
 		std::vector<Decal*> decals; CollectDecals(*hierarchy, decals, camMask);
 		// SSR / RT reflections / TAA / decals need scene depth (+ normals for SSR) — a single-sample prepass before colour.
+		// Instanced sets for THIS camera (its layer mask filters them like everything else).
+		std::vector<InstancedMesh*> camInstSets;
+		CollectInstancedMeshes(*hierarchy, camInstSets, camMask);
+
 		if (hasSSR || hasTAA || !decals.empty())
 		{
 			r->beginGBufferPass(d);
 			std::vector<DrawItem> gitems; CollectMeshes(*hierarchy, gitems, camMask);
 			DrawGBuffer(gitems, r, settings.frustumCull);
+			DrawInstancedGBuffer(camInstSets, r, settings.frustumCull);
 			r->endGBufferPass();
 		}
 
@@ -2033,6 +2142,7 @@ void World::Render(iRender* r)
 			std::vector<DrawItem> items;
 			CollectMeshes(*hierarchy, items, camMask);
 			DrawCollected(items, cp, r, settings.frustumCull);
+			DrawInstancedMeshes(camInstSets, r, settings.frustumCull);   // chunk-culled instanced sets
 			DrawComponentHooks(*hierarchy, r, RenderPhase::Opaque, camMask);        // module components: opaque draws
 			DrawDecals(decals, r);               // screen-space decals: composite onto the scene from the depth prepass
 			DrawSprites(*hierarchy, d, cp, r, cam, camMask);   // 2D sprites: after opaque, back-to-front, depth-tested

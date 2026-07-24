@@ -17,6 +17,7 @@
 #include "API/Model/Environment.h"
 #include "API/Model/Events.h"
 #include "API/Model/Game.h"
+#include "API/Model/InstancedMesh.h"
 #include "API/Model/Layers.h"
 #include "API/Model/Light.h"
 #include "API/Model/Log.h"
@@ -395,6 +396,23 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("Opacity", &Game::Opacity));
 		t.methods.push_back(MakeMethod("IsVSync", &Game::IsVSync));
 		t.methods.push_back(MakeMethod("Screenshot", &Game::Screenshot));
+	}
+	{
+		TypeInfo& t = TypeOf<InstancedMesh>();
+		t.base = "Component";
+		t.fields.push_back(MakeField("meshGuid", &InstancedMesh::meshGuid, "mesh", "Mesh"));
+		t.fields.push_back(MakeField("matGuid", &InstancedMesh::matGuid, "material", "Material"));
+		t.fields.push_back(MakeField("castShadows", &InstancedMesh::castShadows, "", "Cast Shadows"));
+		t.fields.push_back(MakeField("data", &InstancedMesh::data));
+		t.fields.back().hidden = true;
+		t.methods.push_back(MakeMethod("AddInstance", &InstancedMesh::AddInstance));
+		t.methods.push_back(MakeMethod("SetInstancePos", &InstancedMesh::SetInstancePos));
+		t.methods.push_back(MakeMethod("SetInstanceTint", &InstancedMesh::SetInstanceTint));
+		t.methods.push_back(MakeMethod("SetInstanceCustom", &InstancedMesh::SetInstanceCustom));
+		t.methods.push_back(MakeMethod("RemoveInstance", &InstancedMesh::RemoveInstance));
+		t.methods.push_back(MakeMethod("ClearInstances", &InstancedMesh::ClearInstances));
+		t.methods.push_back(MakeMethod("InstanceCount", &InstancedMesh::InstanceCount));
+		t.create = []() -> void* { return new InstancedMesh(); };
 	}
 	{
 		TypeInfo& t = TypeOf<Layers>();
