@@ -27,6 +27,7 @@
 #include "API/Model/CharacterController.h"   // physics: virtual character capsules
 #include "API/Model/DebugDraw.h"   // editor gizmos (selection wire shapes)
 #include "API/Model/InstancedMesh.h" // GPU-instanced scatters (7.1: chunked instanced draws)
+#include "API/Model/Wind.h"          // global wind field (7.2: world state + renderer push)
 #include "interface/Services.h"   // GetService<iPhysics>()
 #include "service/iPhysics.h"     // the physics service seam (fixed-step driver below)
 #include "service/iAudio.h"       // the audio service seam (per-frame pump in Render)
@@ -323,6 +324,7 @@ void World::Update()
 	// emits the time.* events. Then pump the event bus (6.3): due scheduled entries + queued
 	// emits are delivered to native subscribers and every enabled component's OnEvent hook.
 	Time::getSingleton()->Advance(Time::getSingleton()->gameDelta);
+	Wind::Advance(Time::getSingleton()->gameDelta);   // wind's smooth clock (gusts/turbulence drift; freezes with the world)
 	Events::Pump([this](const std::string& n, const std::string& p)
 	{
 		std::function<void(bc::list<Atom*>&)> deliver = [&](bc::list<Atom*>& gos)
@@ -1945,6 +1947,14 @@ void World::Render(iRender* r)
 		r->setSky(sky);
 	}
 
+	// Wind (7.2): push the CURRENT animated global to the renderer (FrameCB g_Wind/g_Wind2)
+	// for vertex-bend consumers. Zones/turbulence stay per-point on the CPU (Wind.Sample).
+	{
+		float wd[4], wp[4];
+		Wind::ShaderParams(wd, wp);
+		r->setWind(wd, wp);
+	}
+
 	// Ray tracing (D3D12): build the scene TLAS from opaque meshes FIRST — before the probe capture and camera
 	// passes, both of which draw with the world PSO and ray-query g_TLAS (RT shadows). Must exist before any draw.
 	// Auxiliary worlds (asset previews) skip it: the TLAS is GLOBAL and the live scene must stay its last
@@ -2559,6 +2569,7 @@ std::string World::SaveToString()
 		                  {"hour", t->hour}, {"minute", t->minute}, {"sec", t->sec},
 		                  {"totalgt", t->totalgt}, {"totalgd", t->totalgd} };
 		j["events"] = Events::SaveJson();
+		Wind::SaveJson(j);   // 7.2: global wind is world state ("wind" block; omitted when windless)
 	}
 	j["atoms"] = json::array();
 	for (Atom* atom : *hierarchy)
@@ -2949,6 +2960,7 @@ void World::LoadHeaderFromJson(const json& j)
 			Events::LoadJson(j["events"].get<std::string>());
 		else
 			Events::ResetSchedule();
+		Wind::LoadJson(j);   // 7.2: "wind" block, or defaults (windless) when absent
 	}
 	// The old atoms get a FULL teardown (Component::Destroy + delete): a leaked component
 	// keeps its module-owned resources alive — a game module's native Events subscriptions

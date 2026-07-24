@@ -488,6 +488,12 @@ public:
     virtual void renderShadowInstanced(Mesh* mesh, uint64_t instBuf, int first, int count, Material* mat) {}
     virtual void renderGBufferInstanced(Mesh* mesh, Material* mat, uint64_t instBuf, int first, int count) {}
 
+    // --- Wind (7.2): the CURRENT animated global wind, pushed once per frame by World::Render.
+    // Lands in the world FrameCB as g_Wind (dir.xyz, gusted strength) + g_Wind2 (turbAmount,
+    // 1/turbScale, time, gustFreq) — vertex-bend consumers (foliage/VFX/custom shaders) read
+    // it there and apply their own local variation.
+    virtual void setWind(const float dirStrength[4], const float params[4]) {}
+
     // ABI: new virtuals are appended at the END of the class, NEVER inserted mid-vtable —
     // plugins are separate DLLs built at different times, and an inserted slot shifts every
     // later one (an old NukeGUI.dll calling getScrollDelta through a shifted slot landed in

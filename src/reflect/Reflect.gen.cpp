@@ -40,6 +40,7 @@
 #include "API/Model/Texture.h"
 #include "API/Model/Time.h"
 #include "API/Model/Transform.h"
+#include "API/Model/Wind.h"
 #include "API/Model/World.h"
 #include "input/Input.h"
 #include "interface/iGUI.h"
@@ -690,6 +691,31 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("EulerDeg", &Transform::EulerDeg));
 		t.methods.push_back(MakeMethod("setEuler", &Transform::setEuler));
 		t.methods.push_back(MakeMethod("euler", &Transform::euler));
+	}
+	{
+		TypeInfo& t = TypeOf<WindZone>();
+		t.base = "Component";
+		t.fields.push_back(MakeField("shape", &WindZone::shape, "", "Shape", 0.0f, 0.0f, "Sphere,Box"));
+		t.fields.push_back(MakeField("radius", &WindZone::radius, "", "Radius"));
+		t.fields.push_back(MakeField("halfExtents", &WindZone::halfExtents, "", "Half Extents"));
+		t.fields.push_back(MakeField("mode", &WindZone::mode, "", "Mode", 0.0f, 0.0f, "Directional,Radial"));
+		t.fields.push_back(MakeField("strength", &WindZone::strength, "", "Strength"));
+		t.create = []() -> void* { return new WindZone(); };
+	}
+	{
+		TypeInfo& t = TypeOf<Wind>();
+		t.base = "Object";
+		t.methods.push_back(MakeMethod("SetDirection", &Wind::SetDirection));
+		t.methods.push_back(MakeMethod("Direction", &Wind::Direction));
+		t.methods.push_back(MakeMethod("SetStrength", &Wind::SetStrength));
+		t.methods.push_back(MakeMethod("Strength", &Wind::Strength));
+		t.methods.push_back(MakeMethod("SetGusts", &Wind::SetGusts));
+		t.methods.push_back(MakeMethod("GustAmount", &Wind::GustAmount));
+		t.methods.push_back(MakeMethod("GustFrequency", &Wind::GustFrequency));
+		t.methods.push_back(MakeMethod("SetTurbulence", &Wind::SetTurbulence));
+		t.methods.push_back(MakeMethod("TurbulenceAmount", &Wind::TurbulenceAmount));
+		t.methods.push_back(MakeMethod("TurbulenceScale", &Wind::TurbulenceScale));
+		t.methods.push_back(MakeMethod("Sample", &Wind::Sample));
 	}
 	{
 		TypeInfo& t = TypeOf<World>();

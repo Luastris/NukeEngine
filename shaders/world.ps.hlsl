@@ -22,6 +22,10 @@ cbuffer FrameCB
     // Reflection probe: g_ProbePos = (pos.xyz, active); g_ProbeParams = (intensity, maxMip, _, _);
     // g_ProbeBox = (boxHalf.xyz, parallaxValid) — parallax-correct the cubemap to a box centred on g_ProbePos.
     float4 g_ProbePos; float4 g_ProbeParams; float4 g_ProbeBox;
+    // Wind (7.2): g_Wind = (dir.xyz, gusted strength m/s); g_Wind2 = (turbulence amount,
+    // 1/turbulence scale, time, gust frequency). Consumed by vertex-bend shaders (foliage/
+    // VFX/custom NUKE_INSTANCED materials); the base world shader leaves it untouched.
+    float4 g_Wind; float4 g_Wind2;
 };
 TextureCube  g_Probe;          // scene-captured reflection cubemap (when g_ProbePos.w > 0.5)
 SamplerState g_Probe_sampler;
