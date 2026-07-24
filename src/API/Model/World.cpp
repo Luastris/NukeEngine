@@ -24,6 +24,7 @@
 #include "API/Model/Collider.h"   // physics: shape components -> iPhysics bodies
 #include "API/Model/Jobs.h"       // PumpMain each game-thread frame (2.4)
 #include "API/Model/Rigidbody.h"  // physics: dynamic/kinematic body settings
+#include "API/Model/CharacterController.h"   // physics: virtual character capsules
 #include "API/Model/DebugDraw.h"   // editor gizmos (selection wire shapes)
 #include "interface/Services.h"   // GetService<iPhysics>()
 #include "service/iPhysics.h"     // the physics service seam (fixed-step driver below)
@@ -386,6 +387,26 @@ static void SyncBodies(bc::list<Atom*>& gos, iPhysics* p, std::map<uint64_t, Col
 		if (!atom) continue;
 		if (Collider* col = atom->GetComponent<Collider>())
 		{
+			// A CharacterController OWNS its atom's collision (virtual capsule + inner
+			// body). A Collider body here would FIGHT the character: the static body gets
+			// pose-synced onto the moving character every step and the capsule depenetrates
+			// out of it — permanent jitter. Skip it (and kill a stale body if the
+			// controller was added mid-play).
+			// Disabled collider: the body must GO — `enabled` unticked mid-play previously
+			// left the body alive forever (create was gated, destroy never happened).
+			if (atom->GetComponent<CharacterController>() || !col->enabled)
+			{
+				if (col->bodyId)
+				{
+					p->destroyBody(col->bodyId);
+					col->bodyId = 0;
+					col->hasSync = false;
+				}
+				if (!atom->children.empty())
+					SyncBodies(atom->children, p, bodyMap, dt);
+				continue;
+			}
+
 			Rigidbody* rb = atom->GetComponent<Rigidbody>();
 			Transform& t = atom->GetTransform();
 
@@ -581,6 +602,156 @@ static void SyncBodies(bc::list<Atom*>& gos, iPhysics* p, std::map<uint64_t, Col
 	}
 }
 
+// --- character controllers (virtual capsules; see CharacterController.h) --------------
+
+// The capsule FEET position relative to the atom's position (scaled local units):
+// Pivot Feet = the atom stands at its position; Pivot Center = the capsule is centered
+// on the atom (centered-pivot meshes); capsuleOffset fine-tunes either.
+static Vector3 CharFeetLocal(CharacterController* cc, const Vector3& scl)
+{
+	Vector3 f(cc->capsuleOffset.x * scl.x, cc->capsuleOffset.y * scl.y, cc->capsuleOffset.z * scl.z);
+	if (cc->pivot == CharacterController::P_Center)
+		f.y -= std::max(0.2, cc->height * fabs(scl.y)) * 0.5;   // same height clamp everywhere
+	return f;
+}
+
+// Lazily create backend characters, compose each one's desired velocity for this step
+// (gravity/jump/platform under autoGravity; the raw velocity verbatim otherwise) and
+// push it to the seam. Runs under the game lock, BEFORE step().
+static void SyncCharacters(bc::list<Atom*>& gos, iPhysics* p, const float gravity[3], float dt)
+{
+	for (Atom* atom : gos)
+	{
+		if (!atom) continue;
+		if (CharacterController* cc = atom->GetComponent<CharacterController>())
+		{
+			Transform& t = atom->GetTransform();
+			// Disabled: the backend character must GO (mirrors the Collider rule — a
+			// stale character would keep steering the transform).
+			if (!cc->enabled)
+			{
+				if (cc->charId) { p->destroyCharacter(cc->charId); cc->charId = 0; }
+				if (!atom->children.empty()) SyncCharacters(atom->children, p, gravity, dt);
+				continue;
+			}
+			// Bake the world scale into the capsule (like Collider); a live size/scale
+			// change recreates the character in place (position is preserved).
+			const Vector3 scl = t.globalScale();
+			const float rScale = (float)std::max(fabs(scl.x), fabs(scl.z));
+			const float r  = std::max(0.05f, cc->radius * rScale);
+			const float H  = std::max(0.2f, (float)(cc->height * fabs(scl.y)));   // same clamp as the gizmo
+			const float hh = std::max(0.01f, H * 0.5f - r);
+			if (cc->charId && (fabs(cc->bakedRadius - r) > 1e-5f || fabs(cc->bakedHalf - hh) > 1e-5f))
+			{
+				p->destroyCharacter(cc->charId);
+				cc->charId = 0;
+			}
+			if (!cc->charId)
+			{
+				const Vector3 pos = t.globalPosition();
+				const Vector3 fl = CharFeetLocal(cc, scl);
+				NukeCharacterDesc d;
+				d.radius = r; d.halfHeight = hh;
+				d.maxSlopeDeg  = cc->maxSlope;
+				d.stepHeight   = cc->stepHeight;
+				d.stickDistance = cc->stickDistance;
+				d.mass         = cc->pushMass;
+				d.maxStrength  = cc->maxPushForce;
+				d.pos[0] = (float)(pos.x + fl.x); d.pos[1] = (float)(pos.y + fl.y); d.pos[2] = (float)(pos.z + fl.z);
+				cc->charId = p->createCharacter(d);
+				cc->bakedRadius = r; cc->bakedHalf = hh;
+				cc->liveSlope = cc->maxSlope; cc->liveStep = cc->stepHeight; cc->liveStick = cc->stickDistance;
+			}
+			if (!cc->charId) continue;
+			// Live walk-parameter edits (inspector mid-play) — no recreate needed.
+			if (cc->liveSlope != cc->maxSlope || cc->liveStep != cc->stepHeight || cc->liveStick != cc->stickDistance)
+			{
+				p->setCharacterParams(cc->charId, cc->maxSlope, cc->stepHeight, cc->stickDistance);
+				cc->liveSlope = cc->maxSlope; cc->liveStep = cc->stepHeight; cc->liveStick = cc->stickDistance;
+			}
+			if (cc->pendingTeleport)
+			{
+				// Teleport takes an ATOM position — convert to the capsule's feet.
+				const Vector3 fl = CharFeetLocal(cc, scl);
+				float tp[3] = { (float)(cc->teleportPos.x + fl.x),
+				                (float)(cc->teleportPos.y + fl.y),
+				                (float)(cc->teleportPos.z + fl.z) };
+				p->setCharacterPosition(cc->charId, tp);
+				cc->pendingTeleport = false;
+				cc->verticalVel = 0;
+			}
+
+			Vector3 v;
+			if (!cc->autoGravity && cc->rawSet)
+			{
+				// Raw mode: the caller's velocity verbatim — their movement code owns
+				// gravity, jumps, dashes; we only resolve collisions.
+				v = cc->rawVelocity;
+			}
+			else
+			{
+				// Managed mode: horizontal from SetMove; vertical integrated here.
+				const bool grounded = cc->groundState == NUKE_GROUND_ON;
+				if (grounded && cc->verticalVel <= 0)
+					cc->verticalVel = 0;                     // landed — stop falling
+				if (grounded && cc->pendingJump > 0)
+				{
+					cc->verticalVel = cc->pendingJump;       // lift off
+					cc->pendingJump = 0;
+				}
+				if (!grounded || cc->verticalVel > 0)
+					cc->verticalVel += gravity[1] * cc->gravityScale * dt;   // in the air: fall
+				cc->pendingJump = 0;                         // a jump not consumed while grounded expires
+				v = Vector3(cc->moveInput.x, cc->verticalVel, cc->moveInput.z);
+				// Moving ground carries the character (elevators, platforms).
+				if (grounded && cc->inheritPlatform)
+					v += cc->groundVel;
+			}
+			float fv[3] = { (float)v.x, (float)v.y, (float)v.z };
+			p->setCharacterVelocity(cc->charId, fv);
+		}
+		if (!atom->children.empty())
+			SyncCharacters(atom->children, p, gravity, dt);
+	}
+}
+
+// Write stepped character positions back into the Transforms and snapshot the ground
+// state for the query API. Runs under the game lock, AFTER step().
+static void PullCharacters(bc::list<Atom*>& gos, iPhysics* p, const std::map<uint64_t, Collider*>& bodyMap)
+{
+	for (Atom* atom : gos)
+	{
+		if (!atom) continue;
+		CharacterController* cc = atom->GetComponent<CharacterController>();
+		if (cc && cc->charId)
+		{
+			float pos[3], n[3], gv[3];
+			int state; uint64_t gb;
+			if (p->getCharacterState(cc->charId, pos, state, n, gv, gb))
+			{
+				Transform& t = atom->GetTransform();
+				// The character owns POSITION only — rotation stays gameplay's (a capsule
+				// has no meaningful physical orientation; scripts yaw the transform).
+				// The backend reports the capsule's FEET — map back through the pivot.
+				const Vector3 fl = CharFeetLocal(cc, t.globalScale());
+				t.SetGlobal(Vector3(pos[0] - fl.x, pos[1] - fl.y, pos[2] - fl.z),
+				            t.globalRotation(), t.globalScale());
+				cc->groundState  = state;
+				cc->groundNormal = Vector3(n[0], n[1], n[2]);
+				cc->groundVel    = Vector3(gv[0], gv[1], gv[2]);
+				cc->groundBody   = gb;
+				auto it = gb ? bodyMap.find(gb) : bodyMap.end();
+				cc->groundAtomId = (it != bodyMap.end() && it->second->atom) ? (long long)it->second->atom->id.id : 0;
+				float av[3];
+				p->getCharacterVelocity(cc->charId, av);
+				cc->actualVel = Vector3(av[0], av[1], av[2]);
+			}
+		}
+		if (!atom->children.empty())
+			PullCharacters(atom->children, p, bodyMap);
+	}
+}
+
 // Route drained contact transitions to BOTH atoms' components: trigger pairs (either
 // collider is a trigger) -> OnTriggerEnter/Exit, the rest -> OnCollisionEnter/Exit.
 static void DispatchContacts(iPhysics* p, const std::map<uint64_t, Collider*>& bodyMap)
@@ -667,6 +838,7 @@ void World::FixedUpdate()
 		p->init();   // idempotent
 		p->setGravity(settings.gravity);
 		SyncBodies(*hierarchy, p, bodyMap, dt);
+		SyncCharacters(*hierarchy, p, settings.gravity, dt);   // desired velocities for this step
 	}
 
 	if (p)
@@ -679,6 +851,7 @@ void World::FixedUpdate()
 		if (p)
 		{
 			PullDynamicPoses(*hierarchy, p);
+			PullCharacters(*hierarchy, p, bodyMap);   // positions + ground snapshots
 			DispatchContacts(p, bodyMap);    // OnCollision/OnTrigger hooks — DIRECT, incl. scripts
 		}
 		for (Atom* atom : *hierarchy)          // the EXISTING fixed chain: Atom -> components
@@ -1416,6 +1589,24 @@ static void EmitSelectionGizmos(Atom* a)
 				                                col->halfExtents.z * fabs(scl.z)), rot, c);
 				break;
 		}
+	}
+
+	if (CharacterController* cc = a->GetComponent<CharacterController>())
+	{
+		// characters: orange capsule, placed exactly like the driver places the shape
+		// (pivot Feet/Center + capsuleOffset)
+		const Color c(1.0, 0.6, 0.15, 1.0);
+		// Same clamps the driver applies — the gizmo must show the capsule that will
+		// actually simulate, even if the inspector holds out-of-range numbers.
+		const double rScale = std::max(fabs(scl.x), fabs(scl.z));
+		const double r = std::max(0.05, (double)cc->radius * rScale);
+		const double H = std::max(0.2, (double)cc->height * fabs(scl.y));
+		const double half = std::max(0.01, H * 0.5 - r);   // cylinder half
+		Vector3 center(pos.x + cc->capsuleOffset.x * scl.x,
+		               pos.y + cc->capsuleOffset.y * scl.y,
+		               pos.z + cc->capsuleOffset.z * scl.z);
+		if (cc->pivot == CharacterController::P_Feet) center.y += H * 0.5;
+		DebugDraw::WireCapsule(center, r, half, Quaternion::Identity(), c);
 	}
 
 	if (Camera* cam = a->GetComponent<Camera>())

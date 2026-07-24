@@ -23,12 +23,17 @@ enum class RenderPhase { Opaque = 0, Transparent = 1, Overlay = 2 };
 
 // A dynamic, per-instance property value (e.g. a script's exported var). Pure data — no
 // UI, no engine logic; the editor draws these, the runtime just carries them.
+// AtomRef = a REFERENCE to a live atom by STABLE id (never a name/string): scripts see a
+// live atom object, the inspector draws the picker, serialization travels by id and
+// resolves stale-safe after load. Lua declares one with `nuke.AtomRef()`; C# with a
+// member of type `Atom`.
 struct NukeVar
 {
-	enum class Kind { None, Number, Bool, String } kind = Kind::None;
+	enum class Kind { None, Number, Bool, String, AtomRef } kind = Kind::None;
 	double      num = 0.0;
 	bool        b   = false;
 	std::string str;
+	long long   refId = 0;   // AtomRef: the stable atom id (0 = none)
 };
 
 struct DynProp

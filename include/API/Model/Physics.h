@@ -35,6 +35,15 @@ public:
 	// Nearest hit along the ray (dir need not be normalized). True = hit; read it via
 	// HitAtom/HitPoint/HitNormal/HitDistance (valid until the next cast on this thread).
 	[[nuke::func]] static bool    Raycast(const Vector3& from, const Vector3& dir, double maxDist);
+	// Raycast that IGNORES one atom's physics body (its CharacterController capsule or its
+	// Collider) — camera booms / aim rays from inside the followed character need this: a
+	// plain ray starting inside the capsule reports an inside-hit at distance 0.
+	[[nuke::func]] static bool    RaycastIgnore(const Vector3& from, const Vector3& dir,
+	                                            double maxDist, Atom* ignore);
+	// Sphere sweep with the same one-atom exclusion — camera booms probe with a VOLUME so
+	// they don't flicker on edges a thin ray alternately hits and misses (UE spring arm).
+	[[nuke::func]] static bool    SphereCastIgnore(const Vector3& from, double radius,
+	                                               const Vector3& dir, double maxDist, Atom* ignore);
 
 	// SHAPE casts — sweep a volume instead of an infinitely thin ray (catches what a ray
 	// slips past). Same last-hit contract as Raycast. `rot` orients the box/capsule.

@@ -9,6 +9,7 @@
 #include "API/Model/AudioSource.h"
 #include "API/Model/Camera.h"
 #include "API/Model/Canvas.h"
+#include "API/Model/CharacterController.h"
 #include "API/Model/Clock.h"
 #include "API/Model/Collider.h"
 #include "API/Model/DebugDraw.h"
@@ -241,6 +242,43 @@ bool NukeReflectInit() {
 		t.create = []() -> void* { return new Canvas(); };
 	}
 	{
+		TypeInfo& t = TypeOf<CharacterController>();
+		t.base = "Component";
+		t.fields.push_back(MakeField("radius", &CharacterController::radius, "", "Radius"));
+		t.fields.push_back(MakeField("height", &CharacterController::height, "", "Height"));
+		t.fields.back().tip = "Total capsule height, feet to head.";
+		t.fields.push_back(MakeField("pivot", &CharacterController::pivot, "", "Pivot", 0.0f, 0.0f, "Feet,Center"));
+		t.fields.push_back(MakeField("capsuleOffset", &CharacterController::capsuleOffset, "", "Capsule Offset"));
+		t.fields.back().tip = "Extra offset of the capsule relative to the pivot (local units).";
+		t.fields.push_back(MakeField("maxSlope", &CharacterController::maxSlope, "", "Max Slope", 0.0f, 89.0f));
+		t.fields.back().tip = "Steeper ground is not walkable - the character slides off.";
+		t.fields.push_back(MakeField("stepHeight", &CharacterController::stepHeight, "", "Step Height"));
+		t.fields.back().tip = "Highest ledge the character walks straight up (stairs). 0 disables.";
+		t.fields.push_back(MakeField("stickDistance", &CharacterController::stickDistance, "", "Stick Distance"));
+		t.fields.back().tip = "How far the character is glued down when walking down slopes/stairs. 0 disables.";
+		t.fields.push_back(MakeField("pushMass", &CharacterController::pushMass, "", "Push Mass"));
+		t.fields.back().tip = "How hard the character pushes dynamic bodies.";
+		t.fields.push_back(MakeField("maxPushForce", &CharacterController::maxPushForce, "", "Max Push Force"));
+		t.fields.push_back(MakeField("autoGravity", &CharacterController::autoGravity, "", "Auto Gravity"));
+		t.fields.back().tip = "On: SetMove + Jump, gravity is integrated for you.\\nOff: SetVelocity is applied verbatim - your own movement code owns gravity/jumps.";
+		t.fields.push_back(MakeField("gravityScale", &CharacterController::gravityScale, "", "Gravity Scale"));
+		t.fields.back().tip = "Multiplier over the world gravity (Auto Gravity only).";
+		t.fields.push_back(MakeField("inheritPlatform", &CharacterController::inheritPlatform, "", "Inherit Platform"));
+		t.fields.back().tip = "Carried by moving ground (elevators, platforms). Auto Gravity only.";
+		t.methods.push_back(MakeMethod("SetMove", &CharacterController::SetMove));
+		t.methods.push_back(MakeMethod("SetVelocity", &CharacterController::SetVelocity));
+		t.methods.push_back(MakeMethod("Velocity", &CharacterController::Velocity));
+		t.methods.push_back(MakeMethod("Jump", &CharacterController::Jump));
+		t.methods.push_back(MakeMethod("IsGrounded", &CharacterController::IsGrounded));
+		t.methods.push_back(MakeMethod("GroundState", &CharacterController::GroundState));
+		t.methods.push_back(MakeMethod("GroundNormal", &CharacterController::GroundNormal));
+		t.methods.push_back(MakeMethod("GroundVelocity", &CharacterController::GroundVelocity));
+		t.methods.push_back(MakeMethod("GroundAtom", &CharacterController::GroundAtom));
+		t.methods.push_back(MakeMethod("Teleport", &CharacterController::Teleport));
+		t.methods.push_back(MakeMethod("FitToMesh", &CharacterController::FitToMesh));
+		t.create = []() -> void* { return new CharacterController(); };
+	}
+	{
 		TypeInfo& t = TypeOf<Clock>();
 		t.base = "Object";
 		t.methods.push_back(MakeMethod("Restart", &Clock::Restart));
@@ -424,6 +462,8 @@ bool NukeReflectInit() {
 		t.base = "Object";
 		t.methods.push_back(MakeMethod("Available", &Physics::Available));
 		t.methods.push_back(MakeMethod("Raycast", &Physics::Raycast));
+		t.methods.push_back(MakeMethod("RaycastIgnore", &Physics::RaycastIgnore));
+		t.methods.push_back(MakeMethod("SphereCastIgnore", &Physics::SphereCastIgnore));
 		t.methods.push_back(MakeMethod("SphereCast", &Physics::SphereCast));
 		t.methods.push_back(MakeMethod("BoxCast", &Physics::BoxCast));
 		t.methods.push_back(MakeMethod("CapsuleCast", &Physics::CapsuleCast));
@@ -659,6 +699,8 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("Control", &Input::Control));
 		t.methods.push_back(MakeMethod("MouseX", &Input::MouseX));
 		t.methods.push_back(MakeMethod("MouseY", &Input::MouseY));
+		t.methods.push_back(MakeMethod("SetCursorMode", &Input::SetCursorMode));
+		t.methods.push_back(MakeMethod("CursorMode", &Input::CursorMode));
 		t.methods.push_back(MakeMethod("MapJson", &Input::MapJson));
 		t.methods.push_back(MakeMethod("ControlsJson", &Input::ControlsJson));
 		t.methods.push_back(MakeMethod("RebindJson", &Input::RebindJson));

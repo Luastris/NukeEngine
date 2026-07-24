@@ -1,5 +1,6 @@
 #include "API/Model/Physics.h"
 #include "API/Model/Atom.h"
+#include "API/Model/CharacterController.h"   // RaycastIgnore: the atom's capsule body
 #include "API/Model/Collider.h"
 #include "API/Model/World.h"
 #include "interface/AppInstance.h"
@@ -42,6 +43,66 @@ bool Physics::Raycast(const Vector3& from, const Vector3& dir, double maxDist)
 	uint64_t body = 0;
 	float point[3], normal[3];
 	if (!p->raycast(f, d, (float)maxDist, body, point, normal)) return false;
+
+	Collider* col = FindColliderByBody(w->GetHierarchy(), body);
+	tl_lastHit.atom   = col ? col->atom : nullptr;
+	tl_lastHit.point  = Vector3(point[0], point[1], point[2]);
+	tl_lastHit.normal = Vector3(normal[0], normal[1], normal[2]);
+	Vector3 delta(tl_lastHit.point.x - from.x, tl_lastHit.point.y - from.y, tl_lastHit.point.z - from.z);
+	tl_lastHit.distance = sqrt(delta.x * delta.x + delta.y * delta.y + delta.z * delta.z);
+	return true;
+}
+
+// The atom's physics body for exclusion casts: its character's inner capsule, else its collider.
+static uint64_t BodyOfAtom(iPhysics* p, Atom* a)
+{
+	if (!a) return 0;
+	if (CharacterController* cc = a->GetComponent<CharacterController>())
+		if (cc->charId)
+			if (uint64_t b = p->characterBodyId(cc->charId)) return b;
+	if (Collider* col = a->GetComponent<Collider>()) return col->bodyId;
+	return 0;
+}
+
+bool Physics::RaycastIgnore(const Vector3& from, const Vector3& dir, double maxDist, Atom* ignore)
+{
+	tl_lastHit = RayHit{};
+	iPhysics* p = GetService<iPhysics>();
+	World* w = AppInstance::GetSingleton()->currentWorld;
+	if (!p || !w) return false;
+
+	const uint64_t ignoreBody = BodyOfAtom(p, ignore);
+	float f[3] = { (float)from.x, (float)from.y, (float)from.z };
+	float d[3] = { (float)dir.x,  (float)dir.y,  (float)dir.z };
+	uint64_t body = 0;
+	float point[3], normal[3];
+	if (!p->raycastIgnore(f, d, (float)maxDist, ignoreBody, body, point, normal)) return false;
+
+	Collider* col = FindColliderByBody(w->GetHierarchy(), body);
+	tl_lastHit.atom   = col ? col->atom : nullptr;
+	tl_lastHit.point  = Vector3(point[0], point[1], point[2]);
+	tl_lastHit.normal = Vector3(normal[0], normal[1], normal[2]);
+	Vector3 delta(tl_lastHit.point.x - from.x, tl_lastHit.point.y - from.y, tl_lastHit.point.z - from.z);
+	tl_lastHit.distance = sqrt(delta.x * delta.x + delta.y * delta.y + delta.z * delta.z);
+	return true;
+}
+
+bool Physics::SphereCastIgnore(const Vector3& from, double radius, const Vector3& dir,
+                               double maxDist, Atom* ignore)
+{
+	tl_lastHit = RayHit{};
+	iPhysics* p = GetService<iPhysics>();
+	World* w = AppInstance::GetSingleton()->currentWorld;
+	if (!p || !w) return false;
+
+	NukeShapeDesc s; s.shape = 1; s.radius = (float)radius;
+	float f[3] = { (float)from.x, (float)from.y, (float)from.z };
+	float q[4] = { 0, 0, 0, 1 };
+	float d[3] = { (float)dir.x, (float)dir.y, (float)dir.z };
+	uint64_t body = 0;
+	float point[3], normal[3];
+	if (!p->shapeCastIgnore(s, f, q, d, (float)maxDist, BodyOfAtom(p, ignore), body, point, normal))
+		return false;
 
 	Collider* col = FindColliderByBody(w->GetHierarchy(), body);
 	tl_lastHit.atom   = col ? col->atom : nullptr;

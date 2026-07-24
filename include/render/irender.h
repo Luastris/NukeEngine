@@ -189,6 +189,10 @@ public:
     virtual void keyboard(int key, int scancode, int action, int mods) = 0;
     virtual void mouseMove(double xpos, double ypos) = 0;
     virtual void mouseClick(int button, int action, int mods) = 0;
+    // Cursor mode (gameplay: FPS/orbit cameras, menus) — an original slot, so it keeps its
+    // mid-vtable position: 0 Normal (visible, free), 1 Hidden (invisible, free), 2 Locked
+    // (invisible + pinned to the window center, raw deltas keep flowing — the FPS/third-person
+    // camera mode), 3 Confined (visible, clamped to the window bounds).
     virtual void setCursorMode(int mode) = 0;
     virtual void rawMouse(double xpos, double ypos) = 0;
     virtual void mouseEnterLeave(int entered) = 0;
@@ -452,6 +456,10 @@ public:
     // Backends without a lit sprite pipeline fall back to the unlit run.
     virtual void drawSpriteRunLit(Texture* tex, Texture* normal, const float* verts, int vertCount,
                                   bool normalFlipY) { drawSpriteRun(tex, verts, vertCount); }
+
+    // Current cursor mode (setCursorMode lives mid-vtable with the input callbacks — it is an
+    // original slot; only this getter is an append).
+    virtual int  getCursorMode() { return 0; }
 
     // ABI: new virtuals are appended at the END of the class, NEVER inserted mid-vtable —
     // plugins are separate DLLs built at different times, and an inserted slot shifts every

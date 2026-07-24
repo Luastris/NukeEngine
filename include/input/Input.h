@@ -48,6 +48,13 @@ public:
 	[[nuke::func]] static double MouseX();
 	[[nuke::func]] static double MouseY();
 
+	// Cursor mode: 0 Normal (visible, free), 1 Hidden (invisible, free), 2 Locked
+	// (invisible + pinned to the window center, raw deltas — the FPS/orbit camera mode),
+	// 3 Confined (visible, clamped to the window). Editor PIE note: lock engages over
+	// the game viewport; stopping play restores Normal.
+	[[nuke::func]] static void SetCursorMode(int mode);
+	[[nuke::func]] static int  CursorMode();
+
 	// ---- reflected USER REMAPS (an in-game rebind screen, written in scripts) -------------------------
 	// Reflection can't marshal InputBinding/vectors, so the model crosses as JSON strings (same schema
 	// as .nuinput). MapJson = the LIVE model (actions/contexts/bindings incl. applied user overrides) to

@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <algorithm>
+#include <cmath>
 
 // Runtime + serialization of the gameplay input system (model in input/InputTypes.h, public surface in
 // input/Input.h). Single-threaded: fed on the game thread, evaluated once per frame in Update().
@@ -84,6 +85,17 @@ double Input::MouseY()
 	app->render->getCursorPos(x, y);
 	return y - app->uiY;
 }
+void Input::SetCursorMode(int mode)
+{
+	AppInstance* app = AppInstance::GetSingleton();
+	if (app->render) app->render->setCursorMode(mode);
+}
+int Input::CursorMode()
+{
+	AppInstance* app = AppInstance::GetSingleton();
+	return app->render ? app->render->getCursorMode() : 0;
+}
+
 void Input::RegisterProvider(const std::string& name, std::function<void()> poll)
 {
 	for (auto& p : g_providers) if (p.first == name) { p.second = poll; return; }
@@ -131,7 +143,10 @@ float Input::Value(const std::string& a)        { auto it = g_state.find(a); ret
 Vector2 Input::Axis2(const std::string& a)      { auto it = g_state.find(a); return it == g_state.end() ? Vector2(0, 0) : Vector2(it->second.x, it->second.y); }
 
 // ---- evaluation --------------------------------------------------------------------------------------
-static bool ctrlDown(const std::string& id) { auto it = g_controls.find(id); return it != g_controls.end() && it->second.value >= 0.5f; }
+// "Down" by MAGNITUDE: axis controls swing negative (mouse-left delta, stick down) and
+// must actuate exactly like the positive direction — `value >= 0.5` silently killed one
+// direction of every axis (the "camera only turns left/down" bug).
+static bool ctrlDown(const std::string& id) { auto it = g_controls.find(id); return it != g_controls.end() && fabsf(it->second.value) >= 0.5f; }
 
 // A chord's analog magnitude (single control passes its analog value; multi-control chord is 0/1).
 static float bindingAnalog(const InputBinding& b)
@@ -153,11 +168,11 @@ void Input::Update(double dt)
 	// 1) providers feed raw controls
 	for (auto& p : g_providers) if (p.second) p.second();
 
-	// 2) control edges + timing
+	// 2) control edges + timing (magnitude-based: a negative axis swing is "down" too)
 	for (auto& kv : g_controls)
 	{
 		ControlState& s = kv.second;
-		bool down = s.value >= 0.5f, wasDown = s.prev >= 0.5f;
+		bool down = fabsf(s.value) >= 0.5f, wasDown = fabsf(s.prev) >= 0.5f;
 		s.downEdge = down && !wasDown;
 		s.upEdge   = !down && wasDown;
 		if (s.downEdge) { s.prevDownTime = s.downTime; s.downTime = g_now; }
@@ -210,9 +225,20 @@ void Input::Update(double dt)
 				continue;
 			}
 
-			// PARALLEL chord (or single control): complete = all controls down + mods held
+			// PARALLEL chord (or single control): complete = all controls actuated + mods held.
+			// A single-control ANALOG binding honors its own deadzone as the threshold (a
+			// stick at 0.3 with deadzone 0.2 must drive the action; the 0.5 button gate
+			// would drop it) — magnitude-based, so both directions of an axis work.
 			bool complete = modsHeld(b);
-			for (const std::string& ctl : b.controls) complete = complete && ctrlDown(ctl);
+			if (b.controls.size() == 1)
+			{
+				auto it = g_controls.find(b.controls[0]);
+				const float cv  = (it == g_controls.end()) ? 0.0f : it->second.value;
+				const float thr = b.deadzone > 0.0f ? b.deadzone : 0.5f;
+				complete = complete && fabsf(cv) >= thr;
+			}
+			else
+				for (const std::string& ctl : b.controls) complete = complete && ctrlDown(ctl);
 
 			bool justComplete   = complete && !rt.wasComplete;
 			bool justUncomplete = !complete && rt.wasComplete;
