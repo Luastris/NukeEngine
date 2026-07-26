@@ -6,8 +6,10 @@
 
 cbuffer BendCSParams
 {
-    uint   g_VertCount;
+    // std140 (Vulkan): float3 must sit at a 16-byte boundary — it leads, the uint packs
+    // into the tail slot. Mirrors the MapHelper write in NukeDiligent_RT.cpp BendRTMeshes.
     float3 g_AtomOffset;   // chunk verts are ATOM-LOCAL; waves key on world position
+    uint   g_VertCount;
 };
 StructuredBuffer<float>    g_SrcPos;    // static baked positions, 3 floats per vertex
 StructuredBuffer<float4>   g_BendData;  // (source-mesh local Y, custom.z, custom.w, 0)
