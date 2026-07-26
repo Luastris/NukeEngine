@@ -44,6 +44,13 @@ NUKEENGINE_API bool Reflect_Invoke(void* obj, const Method& m,
 NUKEENGINE_API ReflectValue Reflect_GetField(void* obj, const Field& f);
 NUKEENGINE_API bool         Reflect_SetField(void* obj, const Field& f, const ReflectValue& v);
 
+// LIST props (std::vector<T>: IntList/FloatList/DoubleList/StringList) cannot ride in a
+// ReflectValue — they cross the script bridge as a JSON ARRAY string, the same encoding the
+// serializer already trusts (SaveField/LoadField). Get returns "[...]"; Set parses and
+// replaces the whole list (returns false on malformed json / a non-list field).
+NUKEENGINE_API std::string Reflect_GetFieldJson(void* obj, const Field& f);
+NUKEENGINE_API bool        Reflect_SetFieldJson(void* obj, const Field& f, const std::string& jsonText);
+
 // Names of every reflected type that can be created as a component (has a factory and
 // derives from Component) — the script-side "what can I add" list.
 NUKEENGINE_API std::vector<std::string> Reflect_ComponentTypes();

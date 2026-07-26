@@ -1,4 +1,5 @@
 #include "reflect/ReflectBind.h"
+#include "reflect/ReflectJson.h"   // SaveField/LoadField: list props cross the bridge as JSON
 #include "API/Model/Atom.h"
 #include "API/Model/Component.h"
 #include "API/Model/World.h"
@@ -89,6 +90,28 @@ bool Reflect_SetField(void* obj, const Field& f, const ReflectValue& v)
 		case FT::Color: { Color& c = *(Color*)p; c.r = v.v[0]; c.g = v.v[1]; c.b = v.v[2]; c.a = v.v[3]; return true; }
 		default: return false;
 	}
+}
+
+// LIST props cross the script bridge as JSON arrays (ReflectValue cannot hold a vector) —
+// encoded/decoded by the SAME SaveField/LoadField the world serializer uses, so scripts,
+// inspector and worlds agree byte-for-byte on the list format.
+std::string Reflect_GetFieldJson(void* obj, const Field& f)
+{
+	void* p = f.addr ? f.addr(obj) : nullptr;
+	if (!p) return "null";
+	json j;
+	SaveField(f.type, p, j);
+	return j.dump();
+}
+
+bool Reflect_SetFieldJson(void* obj, const Field& f, const std::string& jsonText)
+{
+	void* p = f.addr ? f.addr(obj) : nullptr;
+	if (!p) return false;
+	json j = json::parse(jsonText, nullptr, false);
+	if (j.is_discarded()) return false;
+	LoadField(f.type, p, j);
+	return true;
 }
 
 std::vector<std::string> Reflect_ComponentTypes()
