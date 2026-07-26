@@ -8,7 +8,7 @@ namespace nuke {
 
 class NUKEENGINE_API MeshRenderer : public Component
 {
-	NUKE_CLASS(MeshRenderer, Component)
+	NUKE_CLASS(MeshRenderer, Component, "Rendering")
 public:
     Mesh        *mesh;                       // resolved at load from meshGuid (runtime, not serialized)
     Material    *mat;                        // OWNED material INSTANCE (clone of the matGuid asset);

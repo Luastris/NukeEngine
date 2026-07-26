@@ -13,7 +13,7 @@ namespace nuke {
 // world's fixed-step driver writes the simulated pose back into the Transform.
 class NUKEENGINE_API Rigidbody : public Component
 {
-	NUKE_CLASS(Rigidbody, Component)
+	NUKE_CLASS(Rigidbody, Component, "Physics")
 public:
 	[[nuke::prop(label="Mass")]]        float mass = 1.0f;
 	[[nuke::prop(label="Use Gravity")]] bool  useGravity = true;

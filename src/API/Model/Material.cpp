@@ -53,7 +53,8 @@ Material* Material::Clone() const
 	m->specular    = specular;
 	m->emissive = emissive;
 	m->emissiveIntensity = emissiveIntensity;
-	m->castShadows = castShadows;
+	m->castShadows    = castShadows;
+	m->receiveShadows = receiveShadows;
 	m->blendMode   = blendMode;
 	m->shaderGuid  = shaderGuid;
 	m->props       = props;
@@ -102,6 +103,7 @@ bool Material::SaveToFile(const std::string& path) const
 	j["emissive"]   = { emissive.r, emissive.g, emissive.b };
 	j["emissiveIntensity"] = emissiveIntensity;
 	j["castShadows"] = castShadows;
+	j["receiveShadows"] = receiveShadows;
 	j["blendMode"]   = blendMode;
 	boost::filesystem::path p(path);
 	boost::filesystem::ofstream f(p);
@@ -138,6 +140,7 @@ Material* Material::LoadFromString(const std::string& text)
 	m->specular     = j.value("specularFactor", 1.0f);
 	m->emissiveIntensity = j.value("emissiveIntensity", 0.0f);
 	m->castShadows = j.value("castShadows", true);
+	m->receiveShadows = j.value("receiveShadows", true);
 	m->blendMode   = (Material::Blend)j.value("blendMode", 0);
 	if (j.contains("color") && j["color"].is_array() && j["color"].size() == 4)
 	{

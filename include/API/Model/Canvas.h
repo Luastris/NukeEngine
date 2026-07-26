@@ -51,7 +51,7 @@ template<> struct NukeEnumInfo<CanvasScale>
 //   ScreenSpaceCamera   — like Overlay but drawn over a specific camera's output.
 class NUKEENGINE_API Canvas : public Component
 {
-	NUKE_CLASS(Canvas, Component)
+	NUKE_CLASS(Canvas, Component, "UI & 2D")
 public:
 	[[nuke::prop(label="Mode", enum="WorldSpace,ScreenSpaceOverlay,ScreenSpaceCamera")]] CanvasMode mode = CanvasMode::WorldSpace;
 	// Render queue for SCREEN-space canvases: WithWorld = drawn with the scene BEFORE post effects

@@ -28,7 +28,7 @@ template<> struct NukeEnumInfo<DecalMode>
 // Sibling of a Transform. Like Unreal decal actors / Unity HDRP-URP decal projectors.
 class NUKEENGINE_API Decal : public Component
 {
-	NUKE_CLASS(Decal, Component)
+	NUKE_CLASS(Decal, Component, "Rendering")
 public:
 	[[nuke::prop(asset="texture", label="Texture")]] std::string textureGuid;
 	[[nuke::prop(label="Mode", enum="Albedo,Light Projector")]] DecalMode mode = DecalMode::Albedo;

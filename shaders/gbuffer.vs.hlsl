@@ -6,6 +6,10 @@
 // not stored; static instances get exact velocity, moving ones fall back to camera reprojection).
 cbuffer CB { float4x4 g_WVP; float4x4 g_World; float4x4 g_PrevWVP; };
 #if NUKE_INSTANCED
+// Foliage bend (7.4) — KEEP IN SYNC with world.vs.hlsl (same code, same CB): the depth and
+// velocity the TAA/SSR consume must match the bent lit surface. Sway itself is excluded
+// from velocity (prevClip uses the SAME bent position) — small smear beats false motion.
+#include "nukebend.hlsl"
 struct VSIn { float3 pos : ATTRIB0; float3 nrm : ATTRIB1; float2 uv : ATTRIB2;
               float4 iRow0 : ATTRIB3; float4 iRow1 : ATTRIB4; float4 iRow2 : ATTRIB5;
               float4 iColor : ATTRIB6; float4 iCustom : ATTRIB7; };
@@ -16,6 +20,7 @@ void main(in VSIn i, out PSIn o)
 {
     float4 p4 = float4(i.pos, 1.0);
     o.wpos     = float3(dot(i.iRow0, p4), dot(i.iRow1, p4), dot(i.iRow2, p4));
+    o.wpos     = NukeBend(o.wpos, i.pos, i.iCustom, float3(i.iRow0.w, i.iRow1.w, i.iRow2.w));
     o.pos      = mul(g_WVP, float4(o.wpos, 1.0));
     o.nrm      = float3(dot(i.iRow0.xyz, i.nrm), dot(i.iRow1.xyz, i.nrm), dot(i.iRow2.xyz, i.nrm));
     o.uv       = i.uv;

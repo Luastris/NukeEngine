@@ -250,12 +250,21 @@ struct TypeInfo {
     std::vector<Field> fields;
     std::vector<Method> methods;          // [[nuke::func]]-tagged methods
     std::function<void*()> create;   // factory (set by NUKE_REGISTER) — create-by-name on load
+    // Editor grouping (Add Component menu): NUKE_CLASS(Class, Base, "Category"). "" = Other.
+    std::string category;
+    // Base-inheritance merge state (7.4): when `base` names ANOTHER reflected type, its
+    // fields/methods fold into this TypeInfo lazily (Registry_Find/Registry_All). Fine for
+    // single non-virtual inheritance (base subobject at offset 0 — addr functors stay valid).
+    bool baseMerged = false;
 };
 
 // Registry (defined in Reflect.cpp).
 NUKEENGINE_API TypeInfo& Registry_GetOrCreate(const std::string& name);
 NUKEENGINE_API TypeInfo* Registry_Find(const std::string& name);
 NUKEENGINE_API std::vector<TypeInfo*> Registry_All();   // every registered type (for "Add Component")
+// True when the type IS a component through the whole reflected base chain (a derived
+// component like Foliage : InstancedMesh has base "InstancedMesh", not "Component").
+NUKEENGINE_API bool Registry_IsComponentType(const TypeInfo* ti);
 
 // Defined in the generated Reflect.gen.cpp — registers every reflected type's schema +
 // factory. Call once (from World's ctor) so the generated .obj is linked and runs.
@@ -387,20 +396,22 @@ Method MakeMethod(const char* name, R (*fn)(A...)) {
 // Put NUKE_TYPE once at the top of the class, NUKE_PROP per serialized field,
 // and NUKE_REGISTER(Type) once at file scope.
 // UE-like reflection markers:
-//   NUKE_CLASS(Camera, Component)        // one line in the class body (like UCLASS)
+//   NUKE_CLASS(Camera, Component, "Rendering")        // one line in the class body (like UCLASS)
 //   [[nuke::prop]] float fov = 90.0f;    // attribute on each field (like UPROPERTY)
 //
 // NUKE_CLASS provides the type name + virtual GetType(). The actual field/factory
 // REGISTRATION is emitted into Reflect.gen.cpp by the codegen tool (tools/nukegen.py),
 // which scans for NUKE_CLASS + [[nuke::prop]]. The compiler ignores [[nuke::prop]];
 // when C++26 reflection lands, the same attribute is read natively and the tool is dropped.
-#define NUKE_CLASS(Class_, Base_)                                                   \
+// Optional 3rd argument = the editor CATEGORY ("Rendering", "Physics", ...) shown in the
+// Add Component menu's grouping; nukegen reads it, the macro itself just swallows it.
+#define NUKE_CLASS(Class_, Base_, ...)                                              \
     public:                                                                        \
         using Self = Class_;                                                       \
         static const char* __NukeTypeName() { return #Class_; }                    \
         virtual ::nuke::TypeInfo* GetType() { return &::nuke::TypeOf<Class_>(); }
 
 // Same, for types that are never created by name (no factory generated, e.g. Transform).
-#define NUKE_CLASS_NOCREATE(Class_, Base_) NUKE_CLASS(Class_, Base_)
+#define NUKE_CLASS_NOCREATE(Class_, Base_, ...) NUKE_CLASS(Class_, Base_)
 
 #endif // NUKEE_REFLECT_H

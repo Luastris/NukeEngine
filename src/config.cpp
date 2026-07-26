@@ -2,6 +2,7 @@
 
 #include <nlohmann/json.hpp>
 #include <boost/filesystem.hpp>
+#include <boost/dll/runtime_symbol_info.hpp>
 #include <boost/filesystem/fstream.hpp>
 #include <iostream>
 #ifdef _WIN32
@@ -109,17 +110,30 @@ Config* Config::getSingleton()
     return &instance;
 }
 
+// config/ lives NEXT TO THE EXECUTABLE, never in the process working directory: a packaged
+// game launched from a shortcut / another folder has an arbitrary CWD, and a CWD-relative
+// path silently loaded NOTHING — every config parameter fell back to defaults (D3D11,
+// decorated window, console on). Falls back to the CWD only if the exe path is unavailable.
+bfs::path Config::baseDir()
+{
+    boost::system::error_code ec;
+    bfs::path exeDir = boost::dll::program_location(ec).parent_path();
+    if (ec || exeDir.empty()) return bfs::path(".");
+    return exeDir;
+}
+
 void Config::reload(Config* instance)
 {
-    bfs::path configDir("config");
-    if (!bfs::exists(configDir))
-        bfs::create_directory(configDir);
+    bfs::path configDir = baseDir() / "config";
+    boost::system::error_code ec;
+    if (!bfs::exists(configDir, ec))
+        bfs::create_directory(configDir, ec);
 
-    bfs::path cfg("./config/main.json");
+    bfs::path cfg = configDir / "main.json";
     bfs::ifstream f(cfg);
     if (!f)
     {
-        cout << PREFIX_CONF << "config/main.json not found — using defaults." << endl;
+        cout << PREFIX_CONF << cfg.string() << " not found — using defaults." << endl;
         return;
     }
 
@@ -143,14 +157,24 @@ void Config::reload(Config* instance)
         win.resizable   = w.value("resizable",   win.resizable);
         win.floating    = w.value("floating",    win.floating);
         win.maximized   = w.value("maximized",   win.maximized);
-        win.fullscreen  = w.value("fullscreen",  win.fullscreen);
-        // `mode` is authoritative; a config predating it derives from the legacy `fullscreen`
-        // bool (true -> exclusive). `fullscreen` is then kept in sync with mode.
-        win.mode        = w.value("mode", win.fullscreen ? 2 : 0);
-        win.fullscreen  = win.mode != 0;
+        // `mode` is the ONLY display-mode key, and it is HUMAN-READABLE: "windowed" /
+        // "borderless" / "exclusive". Legacy configs are still accepted (a 0/1/2 number, or
+        // the ancient `fullscreen` bool -> exclusive); the legacy keys vanish on next save.
+        if (w.contains("mode") && w["mode"].is_string())
+        {
+            const std::string m = w["mode"].get<std::string>();
+            win.mode = (m == "borderless") ? 1 : (m == "exclusive") ? 2 : 0;
+        }
+        else if (w.contains("mode") && w["mode"].is_number())
+            win.mode = w["mode"].get<int>();
+        else
+            win.mode = w.value("fullscreen", false) ? 2 : 0;
+        win.fullscreen  = win.mode != 0;   // internal mirror only — never serialized
         win.transparent = w.value("transparent", win.transparent);
         win.opacity     = w.value("opacity",     win.opacity);
         win.backend     = w.value("backend",     win.backend);
+        win.rayTracing  = w.value("rayTracing",  win.rayTracing);
+        win.showFps     = w.value("showFps",     win.showFps);
         win.vsync       = w.value("vsync",       win.vsync);
         win.showConsole = w.value("showConsole", win.showConsole);
         cout << PREFIX_CONF << "Window size = [" << win.w << "x" << win.h << "]  backend="
@@ -183,11 +207,12 @@ void Config::reload(Config* instance)
     }
 }
 
-void Config::saveWindow() { saveWindowTo("./config/main.json"); }
+void Config::saveWindow() { saveWindowTo((baseDir() / "config" / "main.json").string()); }
 
-// Persist the window block into an arbitrary json file (read-modify-write). The editor routes the
-// GAME's window settings (Game.Set* from scripts) to <project>/window.json through this — they are
-// game data and must never flip the EDITOR's own config/main.json (see Game.cpp).
+// Persist the window block into an arbitrary json file (read-modify-write). saveWindow routes
+// here; the seam stays for any caller that needs the block written elsewhere. In the EDITOR
+// Game.Set* persists NOTHING (the shipped game's config is formed by the Package Project
+// dialog — see Game.cpp SaveGameWindow).
 void Config::saveWindowTo(const std::string& path)
 {
     bfs::path cfg(path);
@@ -207,11 +232,14 @@ void Config::saveWindowTo(const std::string& path)
     w["resizable"]   = window.resizable;
     w["floating"]    = window.floating;
     w["maximized"]   = window.maximized;
-    w["mode"]        = window.mode;
-    w["fullscreen"]  = window.fullscreen;   // legacy mirror (mode != 0)
+    // Display mode is written as the WORD a user can read and edit; the legacy bool is erased.
+    w["mode"]        = window.mode == 1 ? "borderless" : window.mode == 2 ? "exclusive" : "windowed";
+    w.erase("fullscreen");
     w["transparent"] = window.transparent;
     w["opacity"]     = window.opacity;
     w["backend"]     = window.backend;
+    w["rayTracing"]  = window.rayTracing;
+    w["showFps"]     = window.showFps;
     w["vsync"]       = window.vsync;
     w["showConsole"] = window.showConsole;
 

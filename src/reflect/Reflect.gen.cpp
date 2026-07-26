@@ -16,6 +16,7 @@
 #include "API/Model/Decal.h"
 #include "API/Model/Environment.h"
 #include "API/Model/Events.h"
+#include "API/Model/Foliage.h"
 #include "API/Model/Game.h"
 #include "API/Model/InstancedMesh.h"
 #include "API/Model/Layers.h"
@@ -82,6 +83,7 @@ bool NukeReflectInit() {
 	{
 		TypeInfo& t = TypeOf<Animator>();
 		t.base = "Component";
+		t.category = "Animation";
 		t.fields.push_back(MakeField("clipGuid", &Animator::clipGuid, "anim", "Clip"));
 		t.fields.push_back(MakeField("boneMapGuid", &Animator::boneMapGuid, "bonemap", "Bone Map"));
 		t.fields.push_back(MakeField("playOnStart", &Animator::playOnStart, "", "Play On Start"));
@@ -168,11 +170,13 @@ bool NukeReflectInit() {
 	{
 		TypeInfo& t = TypeOf<AudioListener>();
 		t.base = "Component";
+		t.category = "Audio";
 		t.create = []() -> void* { return new AudioListener(); };
 	}
 	{
 		TypeInfo& t = TypeOf<AudioSource>();
 		t.base = "Component";
+		t.category = "Audio";
 		t.fields.push_back(MakeField("clip", &AudioSource::clip, "audio", "Clip"));
 		t.fields.push_back(MakeField("bus", &AudioSource::bus, "", "Bus", 0.0f, 0.0f, "Music,SFX"));
 		t.fields.push_back(MakeField("volume", &AudioSource::volume, "", "Volume", 0.0f, 2.0f));
@@ -192,6 +196,7 @@ bool NukeReflectInit() {
 	{
 		TypeInfo& t = TypeOf<Camera>();
 		t.base = "Component";
+		t.category = "Rendering";
 		t.fields.push_back(MakeField("invertMouse", &Camera::invertMouse, "", "Invert Mouse"));
 		t.fields.back().tip = "Invert mouse Y in free-fly mode";
 		t.fields.push_back(MakeField("r_width", &Camera::r_width));
@@ -235,6 +240,7 @@ bool NukeReflectInit() {
 	{
 		TypeInfo& t = TypeOf<Canvas>();
 		t.base = "Component";
+		t.category = "UI & 2D";
 		t.fields.push_back(MakeField("mode", &Canvas::mode, "", "Mode", 0.0f, 0.0f, "WorldSpace,ScreenSpaceOverlay,ScreenSpaceCamera"));
 		t.fields.push_back(MakeField("renderQueue", &Canvas::renderQueue, "", "Render Queue", 0.0f, 0.0f, "WithWorld,AfterPost"));
 		t.fields.push_back(MakeField("width", &Canvas::width, "", "Width"));
@@ -248,6 +254,7 @@ bool NukeReflectInit() {
 	{
 		TypeInfo& t = TypeOf<CharacterController>();
 		t.base = "Component";
+		t.category = "Physics";
 		t.fields.push_back(MakeField("radius", &CharacterController::radius, "", "Radius"));
 		t.fields.push_back(MakeField("height", &CharacterController::height, "", "Height"));
 		t.fields.back().tip = "Total capsule height, feet to head.";
@@ -296,6 +303,7 @@ bool NukeReflectInit() {
 	{
 		TypeInfo& t = TypeOf<Collider>();
 		t.base = "Component";
+		t.category = "Physics";
 		t.fields.push_back(MakeField("shape", &Collider::shape, "", "Shape", 0.0f, 0.0f, "Box,Sphere,Capsule,Mesh"));
 		t.fields.push_back(MakeField("halfExtents", &Collider::halfExtents, "", "Half Extents"));
 		t.fields.push_back(MakeField("radius", &Collider::radius, "", "Radius"));
@@ -320,6 +328,7 @@ bool NukeReflectInit() {
 	{
 		TypeInfo& t = TypeOf<Decal>();
 		t.base = "Component";
+		t.category = "Rendering";
 		t.fields.push_back(MakeField("textureGuid", &Decal::textureGuid, "texture", "Texture"));
 		t.fields.push_back(MakeField("mode", &Decal::mode, "", "Mode", 0.0f, 0.0f, "Albedo,Light Projector"));
 		t.fields.push_back(MakeField("tint", &Decal::tint, "", "Tint"));
@@ -330,6 +339,7 @@ bool NukeReflectInit() {
 	{
 		TypeInfo& t = TypeOf<Environment>();
 		t.base = "Component";
+		t.category = "World";
 		t.fields.push_back(MakeField("mode", &Environment::mode, "", "Mode", 0.0f, 0.0f, "None,Procedural"));
 		t.fields.push_back(MakeField("skyTop", &Environment::skyTop, "", "Sky Top"));
 		t.fields.push_back(MakeField("skyHorizon", &Environment::skyHorizon, "", "Sky Horizon"));
@@ -359,6 +369,42 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("Every", &Events::Every));
 		t.methods.push_back(MakeMethod("Cancel", &Events::Cancel));
 		t.methods.push_back(MakeMethod("PendingCount", &Events::PendingCount));
+	}
+	{
+		TypeInfo& t = TypeOf<Foliage>();
+		t.base = "InstancedMesh";
+		t.category = "World";
+		t.fields.push_back(MakeField("surface", &Foliage::surface, "", "Surface"));
+		t.fields.back().tip = "Atom (with its children) whose meshes to scatter over. Empty = this atom's own meshes.";
+		t.fields.push_back(MakeField("density", &Foliage::density, "", "Density"));
+		t.fields.back().tip = "Instances per square meter of surface area.";
+		t.fields.push_back(MakeField("seed", &Foliage::seed, "", "Seed"));
+		t.fields.back().tip = "Same seed + same rules = the same scatter.";
+		t.fields.push_back(MakeField("scaleMin", &Foliage::scaleMin, "", "Scale Min"));
+		t.fields.push_back(MakeField("scaleMax", &Foliage::scaleMax, "", "Scale Max"));
+		t.fields.push_back(MakeField("randomYaw", &Foliage::randomYaw, "", "Random Yaw"));
+		t.fields.back().tip = "Random rotation around the growth axis.";
+		t.fields.push_back(MakeField("alignToNormal", &Foliage::alignToNormal, "", "Align To Normal", 0.0f, 1.0f));
+		t.fields.back().tip = "0 = grows straight up, 1 = follows the surface normal.";
+		t.fields.push_back(MakeField("surfaceOffset", &Foliage::surfaceOffset, "", "Surface Offset"));
+		t.fields.back().tip = "Lift (positive) or sink along the surface normal, world units.";
+		t.fields.push_back(MakeField("maxSlope", &Foliage::maxSlope, "", "Max Slope", 0.0f, 90.0f));
+		t.fields.back().tip = "Degrees from horizontal; steeper spots grow nothing.";
+		t.fields.push_back(MakeField("heightMin", &Foliage::heightMin, "", "Height Min"));
+		t.fields.back().tip = "World-Y band; spots outside are masked out.";
+		t.fields.push_back(MakeField("heightMax", &Foliage::heightMax, "", "Height Max"));
+		t.fields.push_back(MakeField("noiseScale", &Foliage::noiseScale, "", "Noise Scale"));
+		t.fields.back().tip = "World units per patch-noise feature.";
+		t.fields.push_back(MakeField("noiseCover", &Foliage::noiseCover, "", "Noise Cover", 0.0f, 1.0f));
+		t.fields.back().tip = "1 = everywhere, 0.5 = noisy patches over half the area, 0 = nothing.";
+		t.fields.push_back(MakeField("windBend", &Foliage::windBend, "", "Wind Bend", 0.0f, 2.0f));
+		t.fields.back().tip = "How much the global wind bends this layer (top of the mesh sways, base stays).";
+		t.fields.push_back(MakeField("interactionBend", &Foliage::interactionBend, "", "Interaction Bend", 0.0f, 2.0f));
+		t.fields.back().tip = "How much characters and moving bodies part this layer.";
+		t.methods.push_back(MakeMethod("Rebuild", &Foliage::Rebuild));
+		t.methods.push_back(MakeMethod("PaintAt", &Foliage::PaintAt));
+		t.methods.push_back(MakeMethod("EraseAt", &Foliage::EraseAt));
+		t.create = []() -> void* { return new Foliage(); };
 	}
 	{
 		TypeInfo& t = TypeOf<Game>();
@@ -403,13 +449,16 @@ bool NukeReflectInit() {
 	{
 		TypeInfo& t = TypeOf<InstancedMesh>();
 		t.base = "Component";
+		t.category = "Rendering";
 		t.fields.push_back(MakeField("meshGuid", &InstancedMesh::meshGuid, "mesh", "Mesh"));
 		t.fields.push_back(MakeField("matGuid", &InstancedMesh::matGuid, "material", "Material"));
 		t.fields.push_back(MakeField("castShadows", &InstancedMesh::castShadows, "", "Cast Shadows"));
+		t.fields.push_back(MakeField("receiveShadows", &InstancedMesh::receiveShadows, "", "Receive Shadows"));
+		t.fields.back().tip = "Off: instances ignore all shadowing (self-shadow included) and stay fully lit.";
 		t.fields.push_back(MakeField("inReflections", &InstancedMesh::inReflections, "", "In Reflections"));
-		t.fields.back().tip = "Add instances to the RT reflection scene (up to RT Max Instances).";
+		t.fields.back().tip = "Show instances to RT reflection rays. Cast Shadows alone already puts them in the RT scene as shadow-only casters.";
 		t.fields.push_back(MakeField("rtMaxInstances", &InstancedMesh::rtMaxInstances, "", "RT Max Instances"));
-		t.fields.back().tip = "RT reflections take instances individually - cap the count.";
+		t.fields.back().tip = "0 = exclude the set from the RT scene. Chunks are merged into single BLASes, so no per-instance cap applies.";
 		t.fields.push_back(MakeField("cellSize", &InstancedMesh::cellSize, "", "Cell Size"));
 		t.fields.back().tip = "Spatial chunk size (world units) for frustum culling.";
 		t.fields.push_back(MakeField("data", &InstancedMesh::data));
@@ -434,6 +483,7 @@ bool NukeReflectInit() {
 	{
 		TypeInfo& t = TypeOf<Light>();
 		t.base = "Component";
+		t.category = "Rendering";
 		t.fields.push_back(MakeField("type", &Light::type, "", "Type", 0.0f, 0.0f, "Directional,Point,Spot"));
 		t.fields.push_back(MakeField("color", &Light::color, "", "Color"));
 		t.fields.push_back(MakeField("intensity", &Light::intensity, "", "Intensity"));
@@ -466,6 +516,8 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("emissive", &Material::emissive, "", "Emissive"));
 		t.fields.push_back(MakeField("emissiveIntensity", &Material::emissiveIntensity, "", "Emissive Intensity"));
 		t.fields.push_back(MakeField("castShadows", &Material::castShadows, "", "Cast Shadows"));
+		t.fields.push_back(MakeField("receiveShadows", &Material::receiveShadows, "", "Receive Shadows"));
+		t.fields.back().tip = "Off: surfaces with this material ignore all shadowing and stay fully lit.";
 		t.fields.push_back(MakeField("blendMode", &Material::blendMode, "", "Blend", 0.0f, 0.0f, "Opaque,Transparent,Additive"));
 		t.fields.push_back(MakeField("shaderGuid", &Material::shaderGuid, "shader", "Shader"));
 		t.create = []() -> void* { return new Material(); };
@@ -478,6 +530,7 @@ bool NukeReflectInit() {
 	{
 		TypeInfo& t = TypeOf<MeshRenderer>();
 		t.base = "Component";
+		t.category = "Rendering";
 		t.fields.push_back(MakeField("meshGuid", &MeshRenderer::meshGuid, "mesh", "Mesh"));
 		t.fields.push_back(MakeField("matGuid", &MeshRenderer::matGuid, "material", "Material"));
 		t.fields.push_back(MakeField("inReflections", &MeshRenderer::inReflections, "", "In Reflections"));
@@ -516,6 +569,7 @@ bool NukeReflectInit() {
 	{
 		TypeInfo& t = TypeOf<PostProcess>();
 		t.base = "Component";
+		t.category = "Rendering";
 		t.fields.push_back(MakeField("effectsData", &PostProcess::effectsData));
 		t.fields.back().hidden = true;
 		t.create = []() -> void* { return new PostProcess(); };
@@ -546,6 +600,7 @@ bool NukeReflectInit() {
 	{
 		TypeInfo& t = TypeOf<RectAnchor>();
 		t.base = "Component";
+		t.category = "UI & 2D";
 		t.fields.push_back(MakeField("left", &RectAnchor::left, "", "Left"));
 		t.fields.push_back(MakeField("right", &RectAnchor::right, "", "Right"));
 		t.fields.push_back(MakeField("top", &RectAnchor::top, "", "Top"));
@@ -559,12 +614,15 @@ bool NukeReflectInit() {
 	{
 		TypeInfo& t = TypeOf<ReflectionProbe>();
 		t.base = "Component";
+		t.category = "Rendering";
 		t.fields.push_back(MakeField("resolution", &ReflectionProbe::resolution, "", "Resolution", 0.0f, 0.0f, "64,128,256,512"));
 		t.fields.push_back(MakeField("nearZ", &ReflectionProbe::nearZ, "", "Near", 0.01f, 10.0f));
 		t.fields.push_back(MakeField("farZ", &ReflectionProbe::farZ, "", "Far", 1.0f, 2000.0f));
 		t.fields.push_back(MakeField("intensity", &ReflectionProbe::intensity, "", "Intensity", 0.0f, 4.0f));
 		t.fields.push_back(MakeField("realtime", &ReflectionProbe::realtime, "", "Realtime"));
 		t.fields.push_back(MakeField("bake", &ReflectionProbe::bake, "", "Bake"));
+		t.fields.push_back(MakeField("sliceFaces", &ReflectionProbe::sliceFaces, "", "Faces Per Frame", 0.0f, 6.0f));
+		t.fields.back().tip = "0 or 6 = capture all faces every frame. 1-5 = time-slice the capture over frames: cheaper, but reflections of fast motion update in steps.";
 		t.fields.push_back(MakeField("boxProjection", &ReflectionProbe::boxProjection, "", "Box Projection"));
 		t.fields.push_back(MakeField("boxSize", &ReflectionProbe::boxSize, "", "Box Size", 0.0f, 500.0f));
 		t.create = []() -> void* { return new ReflectionProbe(); };
@@ -572,6 +630,7 @@ bool NukeReflectInit() {
 	{
 		TypeInfo& t = TypeOf<Rigidbody>();
 		t.base = "Component";
+		t.category = "Physics";
 		t.fields.push_back(MakeField("mass", &Rigidbody::mass, "", "Mass"));
 		t.fields.push_back(MakeField("useGravity", &Rigidbody::useGravity, "", "Use Gravity"));
 		t.fields.push_back(MakeField("isKinematic", &Rigidbody::isKinematic, "", "Kinematic"));
@@ -602,6 +661,7 @@ bool NukeReflectInit() {
 	{
 		TypeInfo& t = TypeOf<Sprite>();
 		t.base = "Component";
+		t.category = "UI & 2D";
 		t.fields.push_back(MakeField("textureGuid", &Sprite::textureGuid, "texture", "Texture"));
 		t.fields.push_back(MakeField("tint", &Sprite::tint, "", "Tint"));
 		t.fields.push_back(MakeField("width", &Sprite::width, "", "Width"));
@@ -620,6 +680,7 @@ bool NukeReflectInit() {
 	{
 		TypeInfo& t = TypeOf<SpriteAnimator>();
 		t.base = "Component";
+		t.category = "UI & 2D";
 		t.fields.push_back(MakeField("firstFrame", &SpriteAnimator::firstFrame, "", "First Frame"));
 		t.fields.push_back(MakeField("frameCount", &SpriteAnimator::frameCount, "", "Frame Count"));
 		t.fields.push_back(MakeField("fps", &SpriteAnimator::fps, "", "FPS", 0.0f, 120.0f));
@@ -701,6 +762,7 @@ bool NukeReflectInit() {
 	{
 		TypeInfo& t = TypeOf<WindZone>();
 		t.base = "Component";
+		t.category = "World";
 		t.fields.push_back(MakeField("shape", &WindZone::shape, "", "Shape", 0.0f, 0.0f, "Sphere,Box"));
 		t.fields.push_back(MakeField("radius", &WindZone::radius, "", "Radius"));
 		t.fields.push_back(MakeField("halfExtents", &WindZone::halfExtents, "", "Half Extents"));
@@ -773,6 +835,7 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("MouseY", &Input::MouseY));
 		t.methods.push_back(MakeMethod("SetCursorMode", &Input::SetCursorMode));
 		t.methods.push_back(MakeMethod("CursorMode", &Input::CursorMode));
+		t.methods.push_back(MakeMethod("CursorVisible", &Input::CursorVisible));
 		t.methods.push_back(MakeMethod("MapJson", &Input::MapJson));
 		t.methods.push_back(MakeMethod("ControlsJson", &Input::ControlsJson));
 		t.methods.push_back(MakeMethod("RebindJson", &Input::RebindJson));

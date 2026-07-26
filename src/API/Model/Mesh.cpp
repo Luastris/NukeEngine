@@ -478,4 +478,148 @@ Mesh* Mesh::LoadFromStream(std::istream& i)
 	if (!i && !i.eof()) { delete m; return nullptr; }
 	return m;
 }
+
+// ---- built-in foliage placeholders (7.4) --------------------------------------------------
+// Small triangle-list builder shared by the foliage meshes (unindexed, like every builtin).
+namespace {
+struct TriBuilder
+{
+	std::vector<float> v, n, uv;
+	void Tri(const float a[3], const float b[3], const float c[3],
+	         const float na[3], const float nb[3], const float nc[3],
+	         const float ta[2], const float tb[2], const float tc[2])
+	{
+		const float* P[3] = { a, b, c }; const float* N[3] = { na, nb, nc }; const float* T[3] = { ta, tb, tc };
+		for (int i = 0; i < 3; ++i)
+		{
+			v.insert(v.end(), { P[i][0], P[i][1], P[i][2] });
+			n.insert(n.end(), { N[i][0], N[i][1], N[i][2] });
+			uv.insert(uv.end(), { T[i][0], T[i][1] });
+		}
+	}
+	Mesh* Bake(const char* nm)
+	{
+		Mesh* m = new Mesh();
+		m->numVerts = (int)(v.size() / 3);
+		m->vertexArray = new float[v.size()];  memcpy(m->vertexArray, v.data(), v.size() * sizeof(float));
+		m->normalArray = new float[n.size()];  memcpy(m->normalArray, n.data(), n.size() * sizeof(float));
+		m->uvArray     = new float[uv.size()]; memcpy(m->uvArray, uv.data(), uv.size() * sizeof(float));
+		strcpy(m->name, nm);
+		return m;
+	}
+};
+inline float FolHash(int i, int k) { float s = sinf((float)(i * 127 + k * 311) * 12.9898f) * 43758.5453f; return s - floorf(s); }
+}  // namespace
+
+// A clump of tapered grass blades. All normals point UP — the classic grass-lighting trick
+// (blades shade like the ground under them instead of flickering per-face). Double-sided
+// by mirrored winding, so it renders with the default backface-culled world pipeline.
+Mesh* Mesh::CreateGrassClump()
+{
+	TriBuilder tb;
+	const float up[3] = { 0, 1, 0 };
+	const int kBlades = 7;
+	for (int i = 0; i < kBlades; ++i)
+	{
+		const float ang  = (float)i / kBlades * 6.2831853f + FolHash(i, 0) * 0.8f;
+		const float dist = 0.02f + FolHash(i, 1) * 0.10f;                 // clump radius
+		const float h    = 0.28f + FolHash(i, 2) * 0.18f;                 // blade height
+		const float lean = 0.04f + FolHash(i, 3) * 0.10f;                 // top lean (world units)
+		const float w0   = 0.020f + FolHash(i, 4) * 0.012f;              // base half-width
+		const float bx = cosf(ang) * dist, bz = sinf(ang) * dist;
+		const float lx = cosf(ang + 1.3f) * lean, lz = sinf(ang + 1.3f) * lean;
+		// width axis perpendicular to the lean direction
+		const float wx = -sinf(ang + 1.3f), wz = cosf(ang + 1.3f);
+		// three levels: base(w0) -> mid(0.55*w0, half lean) -> tip(point, full lean)
+		const float L0[2][3] = { { bx - wx * w0, 0, bz - wz * w0 }, { bx + wx * w0, 0, bz + wz * w0 } };
+		const float w1 = w0 * 0.55f;
+		const float L1[2][3] = { { bx + lx * 0.4f - wx * w1, h * 0.55f, bz + lz * 0.4f - wz * w1 },
+		                         { bx + lx * 0.4f + wx * w1, h * 0.55f, bz + lz * 0.4f + wz * w1 } };
+		const float TIP[3] = { bx + lx, h, bz + lz };
+		const float uvA[2] = { 0, 1 }, uvB[2] = { 1, 1 }, uvC[2] = { 0, 0.45f }, uvD[2] = { 1, 0.45f }, uvT[2] = { 0.5f, 0 };
+		// front
+		tb.Tri(L0[0], L0[1], L1[1], up, up, up, uvA, uvB, uvD);
+		tb.Tri(L0[0], L1[1], L1[0], up, up, up, uvA, uvD, uvC);
+		tb.Tri(L1[0], L1[1], TIP,   up, up, up, uvC, uvD, uvT);
+		// back (mirrored winding = double-sided under backface culling)
+		tb.Tri(L0[1], L0[0], L1[0], up, up, up, uvB, uvA, uvC);
+		tb.Tri(L0[1], L1[0], L1[1], up, up, up, uvB, uvC, uvD);
+		tb.Tri(L1[1], L1[0], TIP,   up, up, up, uvD, uvC, uvT);
+	}
+	return tb.Bake("GrassClump");
+}
+
+// A lumpy hemisphere-ish blob: lat-long sphere with hashed radius, flattened base.
+Mesh* Mesh::CreateBush()
+{
+	TriBuilder tb;
+	const int SEG = 8, RING = 5;
+	const float R = 0.45f;
+	auto pt = [&](int s, int r, float* out, float* nrm)
+	{
+		const float phi = (float)r / RING * 3.14159265f;          // 0 = top, pi = bottom
+		const float th  = (float)(s % SEG) / SEG * 6.2831853f;
+		const float rad = R * (0.82f + FolHash(s % SEG, r) * 0.30f);
+		float x = sinf(phi) * cosf(th), y = cosf(phi), z = sinf(phi) * sinf(th);
+		out[0] = x * rad; out[1] = y * rad * 0.75f + R * 0.72f; out[2] = z * rad;
+		if (out[1] < 0.02f) out[1] = 0.02f;                       // flattened base
+		nrm[0] = x; nrm[1] = y; nrm[2] = z;
+	};
+	for (int r = 0; r < RING; ++r)
+		for (int s = 0; s < SEG; ++s)
+		{
+			float a[3], b[3], c[3], d[3], na[3], nb[3], nc[3], nd[3];
+			pt(s, r, a, na); pt(s + 1, r, b, nb); pt(s + 1, r + 1, c, nc); pt(s, r + 1, d, nd);
+			const float u0 = (float)s / SEG, u1 = (float)(s + 1) / SEG;
+			const float v0 = (float)r / RING, v1 = (float)(r + 1) / RING;
+			const float ta[2] = { u0, v0 }, tbv[2] = { u1, v0 }, tc[2] = { u1, v1 }, td[2] = { u0, v1 };
+			tb.Tri(a, c, b, na, nc, nb, ta, tc, tbv);
+			tb.Tri(a, d, c, na, nd, nc, ta, td, tc);
+		}
+	return tb.Bake("Bush");
+}
+
+// Trunk cylinder + a lumpy canopy blob. One material (a builtin placeholder, not an oak).
+Mesh* Mesh::CreateTree()
+{
+	TriBuilder tb;
+	const int SEG = 6;
+	const float TR = 0.09f, TH = 1.1f;
+	for (int s = 0; s < SEG; ++s)   // trunk
+	{
+		const float t0 = (float)s / SEG * 6.2831853f, t1 = (float)(s + 1) / SEG * 6.2831853f;
+		const float x0 = cosf(t0) * TR, z0 = sinf(t0) * TR, x1 = cosf(t1) * TR, z1 = sinf(t1) * TR;
+		const float a[3] = { x0, 0, z0 }, b[3] = { x1, 0, z1 }, c[3] = { x1 * 0.8f, TH, z1 * 0.8f }, d[3] = { x0 * 0.8f, TH, z0 * 0.8f };
+		const float na[3] = { cosf(t0), 0, sinf(t0) }, nb[3] = { cosf(t1), 0, sinf(t1) };
+		const float ta[2] = { (float)s / SEG, 1 }, tbv[2] = { (float)(s + 1) / SEG, 1 };
+		const float tc[2] = { (float)(s + 1) / SEG, 0.45f }, td[2] = { (float)s / SEG, 0.45f };
+		tb.Tri(a, b, c, na, nb, nb, ta, tbv, tc);
+		tb.Tri(a, c, d, na, nb, na, ta, tc, td);
+	}
+	{	// canopy: lumpy sphere centered above the trunk
+		const int CS = 8, CR = 5;
+		const float CRAD = 0.55f, CY = TH + 0.35f;
+		auto pt = [&](int s, int r, float* out, float* nrm)
+		{
+			const float phi = (float)r / CR * 3.14159265f;
+			const float th  = (float)(s % CS) / CS * 6.2831853f;
+			const float rad = CRAD * (0.8f + FolHash(s % CS + 17, r) * 0.35f);
+			float x = sinf(phi) * cosf(th), y = cosf(phi), z = sinf(phi) * sinf(th);
+			out[0] = x * rad; out[1] = CY + y * rad * 0.85f; out[2] = z * rad;
+			nrm[0] = x; nrm[1] = y; nrm[2] = z;
+		};
+		for (int r = 0; r < CR; ++r)
+			for (int s = 0; s < CS; ++s)
+			{
+				float a[3], b[3], c[3], d[3], na[3], nb[3], nc[3], nd[3];
+				pt(s, r, a, na); pt(s + 1, r, b, nb); pt(s + 1, r + 1, c, nc); pt(s, r + 1, d, nd);
+				const float u0 = (float)s / CS, u1 = (float)(s + 1) / CS;
+				const float v0 = (float)r / CR * 0.45f, v1 = (float)(r + 1) / CR * 0.45f;
+				const float ta[2] = { u0, v0 }, tbv[2] = { u1, v0 }, tc[2] = { u1, v1 }, td[2] = { u0, v1 };
+				tb.Tri(a, c, b, na, nc, nb, ta, tc, tbv);
+				tb.Tri(a, d, c, na, nd, nc, ta, td, tc);
+			}
+	}
+	return tb.Bake("Tree");
+}
 }  // namespace nuke

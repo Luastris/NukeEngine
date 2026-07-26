@@ -21,7 +21,7 @@ namespace nuke {
 // surface (its Z never drifts). Without a canvas above it the component does nothing.
 class NUKEENGINE_API RectAnchor : public Component
 {
-	NUKE_CLASS(RectAnchor, Component)
+	NUKE_CLASS(RectAnchor, Component, "UI & 2D")
 public:
 	[[nuke::prop(label="Left")]]   bool left   = false;
 	[[nuke::prop(label="Right")]]  bool right  = false;

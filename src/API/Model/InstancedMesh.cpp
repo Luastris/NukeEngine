@@ -1,6 +1,7 @@
 #include "API/Model/InstancedMesh.h"
 #include "API/Model/resdb.h"
 #include "reflect/ReflectBind.h"   // Reflect_DropObject (owned material instance)
+#include "interface/AppInstance.h" // renderer access: invalidateMesh on RT chunk release
 #include <render/irender.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -61,6 +62,26 @@ void InstancedMesh::Destroy()
 {
 	if (mat) { Reflect_DropObject(mat); delete mat; mat = nullptr; }
 	if (gpuBuf && gpuOwner) { gpuOwner->destroyInstanceBuffer(gpuBuf); gpuBuf = 0; gpuOwner = nullptr; }
+	ReleaseRTChunks();
+}
+
+void InstancedMesh::ReleaseRTChunks()
+{
+	if (rtChunkMeshes.empty()) return;
+	// The renderer caches GPU buffers + BLASes keyed by Mesh* — drop those entries BEFORE
+	// deleting, or a later allocation at the same address would be served stale GPU data.
+	iRender* r = AppInstance::GetSingleton() ? AppInstance::GetSingleton()->render : nullptr;
+	for (Mesh* m : rtChunkMeshes)
+	{
+		if (!m) continue;
+		if (r) r->invalidateMesh(m);
+		delete[] m->vertexArray; delete[] m->normalArray; delete[] m->uvArray;
+		delete[] m->rtBendArray; delete[] m->rtPivotArray;
+		m->vertexArray = m->normalArray = m->uvArray = nullptr;
+		m->rtBendArray = m->rtPivotArray = nullptr;
+		delete m;
+	}
+	rtChunkMeshes.clear();
 }
 
 void InstancedMesh::Update() {}
@@ -181,6 +202,7 @@ bool InstancedMesh::EnsureRenderReady(iRender* r)
 		}
 	}
 	EnsureDecoded();
+	if (mat) mat->receiveShadows = receiveShadows;   // component checkbox drives its OWNED clone
 	if (cellSize != cellSizeRes) { cellSizeRes = cellSize; dirty = true; }   // live re-chunk on edit
 	if (!mesh || instances.empty()) return false;
 
@@ -188,6 +210,7 @@ bool InstancedMesh::EnsureRenderReady(iRender* r)
 	// that moved (platform carrying its scatter) re-uploads with the new composition.
 	Transform& t = atom->GetTransform();
 	Vector3 P = t.globalPosition(); Quaternion Q = t.globalRotation(); Vector3 S = t.globalScale();
+	if (!ScaleWithAtom()) S = Vector3(1, 1, 1);   // scatter layers ignore the atom's scale (7.4)
 	glm::mat4 aw = glm::translate(glm::mat4(1.0f), glm::vec3((float)P.x, (float)P.y, (float)P.z))
 	             * glm::mat4_cast(glm::quat((float)Q.w, (float)Q.x, (float)Q.y, (float)Q.z))
 	             * glm::scale(glm::mat4(1.0f), glm::vec3((float)S.x, (float)S.y, (float)S.z));
@@ -221,12 +244,72 @@ bool InstancedMesh::EnsureRenderReady(iRender* r)
 		cells[{ (int)floorf(wp.x / cs), (int)floorf(wp.y / cs), (int)floorf(wp.z / cs) }].push_back(i);
 	}
 
+	// RT merged chunks (see header): bake each cell's instances into ONE Mesh in ATOM-LOCAL
+	// space — a single TLAS entry per chunk. Built alongside the raster chunks so the two
+	// can never drift; pooled Mesh objects are refilled in place (version bump re-uploads
+	// GPU buffers and the BLAS lazily). Skipped entirely when RT is off for this set.
+	// Merged chunks serve RT shadows AND reflections; the renderer bends them with the
+	// NukeBend compute + BLAS refit every frame, so the rays hit SWAYING blades.
+	const bool rtWanted = r->rtAvailable() && (castShadows || inReflections) && rtMaxInstances > 0 &&
+	                      mesh->vertexArray && mesh->normalArray && mesh->uvArray;
+	if (rtWanted)
+		while (rtChunkMeshes.size() < cells.size())
+		{
+			Mesh* m = new Mesh();
+			snprintf(m->name, sizeof(m->name), "rtchunk"); m->numVerts = 0;
+			m->vertexArray = m->normalArray = m->uvArray = nullptr;
+			rtChunkMeshes.push_back(m);
+		}
+	size_t rtCi = 0;
+
 	// Pack records cell by cell; each instance's rows = HLSL rows of (atomWorld * local).
 	std::vector<NukeInstanceData> packed;
 	packed.reserve(instances.size());
 	chunks.clear();
 	for (auto& kv : cells)
 	{
+		if (rtWanted)
+		{
+			Mesh* rm = rtChunkMeshes[rtCi++];
+			const int mv = mesh->numVerts, nv = (int)kv.second.size() * mv;
+			if (rm->numVerts != nv)
+			{
+				delete[] rm->vertexArray; delete[] rm->normalArray; delete[] rm->uvArray;
+				delete[] rm->rtBendArray; delete[] rm->rtPivotArray;
+				rm->vertexArray  = new float[(size_t)nv * 3];
+				rm->normalArray  = new float[(size_t)nv * 3];
+				rm->uvArray      = new float[(size_t)nv * 2];
+				rm->rtBendArray  = new float[(size_t)nv * 4];
+				rm->rtPivotArray = new float[(size_t)nv * 4];
+				rm->numVerts     = nv;
+			}
+			float* vp = rm->vertexArray; float* np = rm->normalArray; float* up = rm->uvArray;
+			float* bp = rm->rtBendArray; float* pv2 = rm->rtPivotArray;
+			for (int i : kv.second)
+			{
+				const Inst& in = instances[i];
+				glm::quat q(in.quat[3], in.quat[0], in.quat[1], in.quat[2]);
+				glm::vec3 tr(in.pos[0], in.pos[1], in.pos[2]), sc(in.scale[0], in.scale[1], in.scale[2]);
+				for (int v = 0; v < mv; ++v)
+				{
+					glm::vec3 p(mesh->vertexArray[v * 3], mesh->vertexArray[v * 3 + 1], mesh->vertexArray[v * 3 + 2]);
+					const float localY = p.y;   // blade-local height BEFORE the transform (bend gate)
+					p = tr + q * (p * sc);
+					*vp++ = p.x; *vp++ = p.y; *vp++ = p.z;
+					glm::vec3 n(mesh->normalArray[v * 3], mesh->normalArray[v * 3 + 1], mesh->normalArray[v * 3 + 2]);
+					n = q * n;   // rotation only (scale skew ignored — foliage scales ~uniformly)
+					*np++ = n.x; *np++ = n.y; *np++ = n.z;
+					*up++ = mesh->uvArray[v * 2]; *up++ = mesh->uvArray[v * 2 + 1];
+					// Bend streams for the RT compute (bend.cs): gates from the instance custom
+					// (z/w), pivot = the instance origin — the same phase hash the raster VS uses.
+					*bp++ = localY; *bp++ = in.custom[2]; *bp++ = in.custom[3]; *bp++ = 0.0f;
+					*pv2++ = tr.x; *pv2++ = tr.y; *pv2++ = tr.z; *pv2++ = 0.0f;
+				}
+			}
+			rm->boundsValid = false;
+			++rm->version;   // renderer re-uploads the buffers + rebuilds the BLAS on mismatch
+		}
+
 		Chunk c; c.first = (int)packed.size(); c.count = (int)kv.second.size();
 		c.mn[0] = c.mn[1] = c.mn[2] = 1e30f; c.mx[0] = c.mx[1] = c.mx[2] = -1e30f;
 		for (int i : kv.second)
@@ -254,6 +337,11 @@ bool InstancedMesh::EnsureRenderReady(iRender* r)
 		}
 		chunks.push_back(c);
 	}
+
+	// Pool meshes beyond the live chunk count: zero them out and drop their renderer caches so
+	// the RT gather skips them (kept allocated for reuse; freed for real in ReleaseRTChunks).
+	for (size_t k = rtCi; k < rtChunkMeshes.size(); ++k)
+		if (rtChunkMeshes[k] && rtChunkMeshes[k]->numVerts) { rtChunkMeshes[k]->numVerts = 0; r->invalidateMesh(rtChunkMeshes[k]); }
 
 	if (!gpuBuf) { gpuBuf = r->createInstanceBuffer(); gpuOwner = r; }
 	if (!gpuBuf) return false;

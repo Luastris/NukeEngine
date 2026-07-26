@@ -7,6 +7,9 @@
 #include <iterator>
 #include <map>
 #include <set>
+#ifdef _WIN32
+#include <windows.h>   // SetDllDirectoryW: module deps resolve from the exe dir, not the CWD
+#endif
 
 namespace nuke {
 
@@ -115,13 +118,28 @@ void InitModules(AppInstance* instance)
 {
 	g_instance = instance;
 
-	if (!bfs::exists(bfs::path(bfs::current_path().concat("/modules"))))
+	// modules/ sits NEXT TO THE EXECUTABLE (editor and dist layouts alike) — resolve against
+	// the exe dir, never the CWD: a shortcut-launched packaged game (arbitrary working dir)
+	// otherwise scans a random folder and finds no modules at all.
+	boost::system::error_code ec;
+	bfs::path exeDir = boost::dll::program_location(ec).parent_path();
+	if (ec || exeDir.empty()) exeDir = bfs::current_path();
+#ifdef _WIN32
+	// Module DLLs load with LOAD_WITH_ALTERED_SEARCH_PATH, which REPLACES the application
+	// directory with the module's own dir in the dependency search — their runtime deps
+	// (glfw3, boost, ...) live in the EXE dir and were only ever found via the CWD slot.
+	// Pin the exe dir into the standard search order so a launch from any working
+	// directory (shortcut, terminal elsewhere) resolves them.
+	SetDllDirectoryW(exeDir.wstring().c_str());
+#endif
+	const bfs::path modulesDir = exeDir / "modules";
+	if (!bfs::exists(modulesDir, ec))
 	{
-		bfs::create_directory(bfs::current_path().concat("/modules"));
+		bfs::create_directory(modulesDir, ec);
 		cout << "directory created!" << endl;
 	}
 
-	DiscoverModulesIn(bfs::path(bfs::current_path().concat("/modules")).string());
+	DiscoverModulesIn(modulesDir.string());
 }
 
 // Phase 6.0: unload a module's DLL so a rebuild can overwrite the file. The pool's

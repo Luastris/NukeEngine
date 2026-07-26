@@ -11,7 +11,7 @@ Texture2D    g_Normal;  SamplerState g_Normal_sampler;
 // imported atlases), <0 = DirectX (no flip). Matches the world PS's per-material rule.
 cbuffer SpriteLitCB { float4 g_T; float4 g_B; float4 g_N; };
 
-#define MAX_LIGHTS 16
+#define MAX_LIGHTS 256   // per-particle light sources (VFX) need a real budget; unattenuated lights early-out
 struct Light { float4 posType; float4 dirRange; float4 colorIntensity; float4 spot; };
 cbuffer FrameCB { float4 g_CamPos; float4 g_Ambient; float4 g_LightCount; Light g_Lights[MAX_LIGHTS]; };
 

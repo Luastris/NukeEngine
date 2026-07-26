@@ -25,7 +25,7 @@ template<> struct NukeEnumInfo<SpriteMode>
 // and alpha-blended after the opaque geometry (transparent, depth-tested). Sibling of a Transform.
 class NUKEENGINE_API Sprite : public Component
 {
-	NUKE_CLASS(Sprite, Component)
+	NUKE_CLASS(Sprite, Component, "UI & 2D")
 public:
 	[[nuke::prop(asset="texture", label="Texture")]] std::string textureGuid;
 	[[nuke::prop(label="Tint")]]   Color tint = Color(1.0f, 1.0f, 1.0f, 1.0f);

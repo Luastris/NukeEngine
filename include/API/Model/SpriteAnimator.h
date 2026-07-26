@@ -13,7 +13,7 @@ namespace nuke {
 // so it needs no renderer support. Sibling of a Sprite on the same atom.
 class NUKEENGINE_API SpriteAnimator : public Component
 {
-	NUKE_CLASS(SpriteAnimator, Component)
+	NUKE_CLASS(SpriteAnimator, Component, "UI & 2D")
 public:
 	// The atlas grid (columns×rows) lives on the sprite's TEXTURE (Usage=Sprite), not here — configure it
 	// once on the texture and every animator using it inherits the slicing.

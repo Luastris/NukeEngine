@@ -13,7 +13,7 @@ namespace nuke {
 // (an explosion, a downdraft with negative strength). Additive with every other zone.
 class NUKEENGINE_API WindZone : public Component
 {
-	NUKE_CLASS(WindZone, Component)
+	NUKE_CLASS(WindZone, Component, "World")
 public:
 	[[nuke::prop(label="Shape", enum="Sphere,Box")]]        int   shape = 0;
 	[[nuke::prop(label="Radius", min=0)]]                   float radius = 10.0f;      // sphere
@@ -70,6 +70,10 @@ public:
 	// delta (freezes with the world). The calendar's totalgt ticks in whole game seconds —
 	// integer lattice coordinates where gradient Perlin is exactly 0, killing the gust swell.
 	static void Advance(double dt);
+	// Every enabled WindZone as a shader BendVolume (7.4 foliage): sphere zones exact; box
+	// zones approximated by their bounding sphere (the vertex shader keeps volumes analytic).
+	// Per-zone gusts are baked into the strength here (same clock as Sample).
+	static void CollectZones(std::vector<struct BendVolume>& out);
 	static void Register(WindZone* z);     // WindZone lifecycle (Init/Destroy)
 	static void Unregister(WindZone* z);
 	static void SaveJson(nlohmann::json& j);         // world "wind" block

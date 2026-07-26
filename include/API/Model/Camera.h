@@ -22,7 +22,7 @@ template<> struct NukeEnumInfo<Projection>
 
 class NUKEENGINE_API Camera : public Component
 {
-	NUKE_CLASS(Camera, Component)
+	NUKE_CLASS(Camera, Component, "Rendering")
 private:
 	boost::thread* renderThread;
 

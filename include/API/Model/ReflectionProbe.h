@@ -12,7 +12,7 @@ namespace nuke {
 // (sibling of a Transform on its atom). World::Render finds the first one, captures it, and binds it.
 class NUKEENGINE_API ReflectionProbe : public Component
 {
-	NUKE_CLASS(ReflectionProbe, Component)
+	NUKE_CLASS(ReflectionProbe, Component, "Rendering")
 public:
 	[[nuke::prop(label="Resolution", enum="64,128,256,512")]] int resolution = 2;   // index -> 64/128/256/512
 	[[nuke::prop(label="Near", min=0.01, max=10)]]   float nearZ     = 0.1f;
@@ -20,6 +20,11 @@ public:
 	[[nuke::prop(label="Intensity", min=0, max=4)]]   float intensity = 1.0f;
 	[[nuke::prop(label="Realtime")]]                  bool  realtime  = false;   // re-capture every frame (dynamic)
 	[[nuke::prop(label="Bake")]]                      bool  bake      = false;   // tick to force a one-off re-capture
+	// Realtime capture budget. 0/6 = all six faces every frame (fully live reflections, the
+	// default); 1-5 = that many faces per frame round-robin — up to 6x cheaper, but fast
+	// motion in the mirror updates in steps. Opt-in, NOT the default (a sliced mirror turns
+	// particles into a slideshow).
+	[[nuke::prop(label="Faces Per Frame", min=0, max=6, tip="0 or 6 = capture all faces every frame. 1-5 = time-slice the capture over frames: cheaper, but reflections of fast motion update in steps.")]] int sliceFaces = 0;
 	// Parallax correction: anchor the cubemap to a box volume centred on the probe (instead of "reflection at
 	// infinity"), so reflections line up with the actual geometry and agree with SSR. Size it to the room.
 	[[nuke::prop(label="Box Projection")]]            bool    boxProjection = true;
@@ -28,6 +33,7 @@ public:
 	// Runtime state (not serialized): the renderer cube handle + whether it has been captured.
 	uint64_t cubeId   = 0;
 	bool     captured = false;
+	int      sliceFace = 0;   // round-robin cursor when sliceFaces time-slicing is active
 	int      builtRes = 0;
 
 	ReflectionProbe();

@@ -33,7 +33,7 @@ class MeshRenderer;
 // cross-fade); Play/CrossFade work directly with clip guids or names as well.
 class NUKEENGINE_API Animator : public Component
 {
-	NUKE_CLASS(Animator, Component)
+	NUKE_CLASS(Animator, Component, "Animation")
 public:
 	[[nuke::prop(asset="anim", label="Clip")]]        std::string clipGuid;      // initial clip (entry state wins if set)
 	[[nuke::prop(asset="bonemap", label="Bone Map")]] std::string boneMapGuid;   // retarget asset (.nubonemap)

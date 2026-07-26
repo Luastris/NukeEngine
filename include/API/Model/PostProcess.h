@@ -25,7 +25,7 @@ struct PostEffect
 // effect list is stored on disk in the hidden `effectsData` JSON field; `effects` is the runtime form.
 class NUKEENGINE_API PostProcess : public Component
 {
-	NUKE_CLASS(PostProcess, Component)
+	NUKE_CLASS(PostProcess, Component, "Rendering")
 public:
 	[[nuke::prop(hidden)]] std::string effectsData;   // serialized chain (JSON); edited via the custom inspector
 

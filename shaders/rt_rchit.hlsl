@@ -23,7 +23,11 @@ void main(inout RTPayload p, in BuiltInTriangleIntersectionAttributes attr)
     SampleMR(inst, uv, metal, rough);                            // metal-rough map overrides factors
     float  ao     = SampleAO(inst, uv);
     float3 spec   = SampleSpec(inst, uv);
-    float3 emiss  = inst.emissiveRough.rgb * SampleEmissiveMap(inst, uv);
+    // Per-particle gradient/fade (identity for ordinary meshes): tints the sprite in the
+    // reflection exactly like the direct view; the fade also dims it out.
+    float4 dc     = FetchDynColor(inst, prim, bc);
+    albedo       *= dc.rgb;
+    float3 emiss  = inst.emissiveRough.rgb * SampleEmissiveMap(inst, uv) * dc.rgb * dc.a;
 
     float3 col = ShadeSurface(hitPos, hitN, V, albedo, metal, rough, emiss, ao, spec);   // honest PBR diffuse
 

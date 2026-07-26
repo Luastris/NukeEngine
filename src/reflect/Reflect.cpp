@@ -24,18 +24,73 @@ TypeInfo& Registry_GetOrCreate(const std::string& name)
     return *ti;
 }
 
+// --- base-class field/method inheritance (7.4) ---------------------------------------------
+// A reflected type whose base is ANOTHER reflected type (e.g. Foliage : InstancedMesh)
+// inherits the base's fields and methods: they are merged into the derived TypeInfo the
+// first time both sides exist. Field addr functors bind the BASE class — valid on a derived
+// instance because single non-virtual inheritance keeps the base subobject at offset 0.
+// Lazy + idempotent: registration order (engine vs module load) doesn't matter.
+static void MergeBaseInto(TypeInfo* ti, int depth = 0)
+{
+    if (ti->baseMerged || depth > 8) return;
+    if (ti->base.empty() || ti->base == "Component" || ti->base == "Object") { ti->baseMerged = true; return; }
+    auto& r = registry();
+    auto bit = r.find(ti->base);
+    if (bit == r.end()) return;             // base not registered yet — retry on next access
+    TypeInfo* b = bit->second;
+    MergeBaseInto(b, depth + 1);            // chains: grandparent fields land in the parent first
+    // Prepend base fields (base props first in the inspector); skip names the derived redefines.
+    std::vector<Field> merged;
+    merged.reserve(b->fields.size() + ti->fields.size());
+    for (const Field& bf : b->fields)
+    {
+        bool shadowed = false;
+        for (const Field& df : ti->fields) if (df.name == bf.name) { shadowed = true; break; }
+        if (!shadowed) merged.push_back(bf);
+    }
+    merged.insert(merged.end(), ti->fields.begin(), ti->fields.end());
+    ti->fields.swap(merged);
+    for (const Method& bm : b->methods)
+    {
+        bool shadowed = false;
+        for (const Method& dm : ti->methods) if (dm.name == bm.name) { shadowed = true; break; }
+        if (!shadowed) ti->methods.push_back(bm);
+    }
+    ti->baseMerged = true;
+}
+
+// Walk the base chain: is this type a Component (directly or through reflected bases)?
+// The Add Component menus must accept Foliage (base InstancedMesh), not just base=="Component".
+bool Registry_IsComponentType(const TypeInfo* ti)
+{
+    auto& r = registry();
+    for (int guard = 0; ti && guard < 8; ++guard)
+    {
+        if (ti->base == "Component") return true;
+        if (ti->base.empty() || ti->base == "Object") return false;
+        auto it = r.find(ti->base);
+        ti = (it != r.end()) ? it->second : nullptr;
+    }
+    return false;
+}
+
 TypeInfo* Registry_Find(const std::string& name)
 {
     auto& r = registry();
     auto it = r.find(name);
-    return (it != r.end()) ? it->second : nullptr;
+    if (it == r.end()) return nullptr;
+    MergeBaseInto(it->second);
+    return it->second;
 }
 
 std::vector<TypeInfo*> Registry_All()
 {
     std::vector<TypeInfo*> out;
     for (auto& kv : registry())
+    {
+        MergeBaseInto(kv.second);
         out.push_back(kv.second);
+    }
     return out;
 }
 

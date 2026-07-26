@@ -95,6 +95,12 @@ int Input::CursorMode()
 	AppInstance* app = AppInstance::GetSingleton();
 	return app->render ? app->render->getCursorMode() : 0;
 }
+bool Input::CursorVisible()
+{
+	AppInstance* app = AppInstance::GetSingleton();
+	const int m = app->render ? app->render->getCursorMode() : 0;
+	return m == 0 || m == 3;   // Normal / Confined show the cursor; Hidden / Locked do not
+}
 
 void Input::RegisterProvider(const std::string& name, std::function<void()> poll)
 {

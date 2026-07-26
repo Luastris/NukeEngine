@@ -16,7 +16,7 @@ namespace nuke {
 // through the Preview bus instead (browser / asset editor).
 class NUKEENGINE_API AudioSource : public Component
 {
-	NUKE_CLASS(AudioSource, Component)
+	NUKE_CLASS(AudioSource, Component, "Audio")
 public:
 	[[nuke::prop(asset="audio", label="Clip")]]        std::string clip;        // content-relative path
 	enum Bus : int { Music = 0, SFX = 1 };

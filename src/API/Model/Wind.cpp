@@ -1,6 +1,7 @@
 #include "API/Model/Wind.h"
 #include "API/Model/Noise.h"
 #include "API/Model/Atom.h"
+#include "API/Model/BendVolumes.h"   // zones export as shader bend volumes (7.4)
 #include <nlohmann/json.hpp>
 #include <boost/thread/mutex.hpp>
 #include <glm/glm.hpp>
@@ -174,6 +175,52 @@ Vector3 Wind::Sample(const Vector3& worldPos)
 		}
 	}
 	return Vector3(v.x, v.y, v.z);
+}
+
+// Every enabled zone as an analytic shader volume (7.4 foliage bend). Direction/strength
+// mirror Sample()'s zone term, including the per-zone gust swell on the same wind clock.
+void Wind::CollectZones(std::vector<BendVolume>& out)
+{
+	boost::mutex::scoped_lock l(gZoneLock);
+	const double t = gTime;
+	for (WindZone* zn : gZones)
+	{
+		if (!zn || !zn->enabled || !zn->transform) continue;
+		Transform& tr = *zn->transform;
+		Vector3 c = tr.globalPosition();
+		BendVolume v;
+		v.pos[0] = (float)c.x; v.pos[1] = (float)c.y; v.pos[2] = (float)c.z;
+		if (zn->shape == 0) v.radius = zn->radius > 0.01f ? zn->radius : 0.01f;
+		else
+		{
+			const float hx = (float)fabs(zn->halfExtents.x), hy = (float)fabs(zn->halfExtents.y), hz = (float)fabs(zn->halfExtents.z);
+			v.radius = std::max(0.01f, sqrtf(hx * hx + hy * hy + hz * hz));   // bounding sphere
+		}
+		float zs = zn->strength;
+		if (zn->gustAmount > 0.f)
+		{
+			const double g01 = Noise::Perlin3(7.0 + (double)(size_t)zn * 1e-7, t * (double)zn->gustFrequency, 0.13, 0.71) * 0.5 + 0.5;
+			zs *= 1.0f - zn->gustAmount + zn->gustAmount * (float)g01;
+		}
+		v.strength = zs;
+		v.falloff = zn->falloff;
+		if (zn->mode == 0)   // directional: along the atom's forward
+		{
+			Vector3 f = tr.direction();
+			v.dir[0] = (float)f.x; v.dir[1] = (float)f.y; v.dir[2] = (float)f.z;
+			v.mode = 0;
+		}
+		else v.mode = 1;     // radial (outward; negative strength = suction)
+		out.push_back(v);
+		// Per-zone turbulence rides along as a SECOND, animated volume in the same spot.
+		if (zn->turbulence > 0.f)
+		{
+			BendVolume tv = v;
+			tv.mode = 3;
+			tv.strength = zn->turbulence;
+			out.push_back(tv);
+		}
+	}
 }
 
 // ---- serialization + renderer push --------------------------------------------------------

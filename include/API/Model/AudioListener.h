@@ -13,7 +13,7 @@ namespace nuke {
 // only when the ears must differ from the eyes, e.g. a third-person character).
 class NUKEENGINE_API AudioListener : public Component
 {
-	NUKE_CLASS(AudioListener, Component)
+	NUKE_CLASS(AudioListener, Component, "Audio")
 public:
 	AudioListener();
 	void Init(Atom* parent) override;

@@ -20,12 +20,23 @@ ResDB::ResDB()
 	Mesh* sphere= Mesh::CreateSphere(); sphere->guid= "builtin:sphere"; RegisterMesh(sphere);
 	Mesh* cyl   = Mesh::CreateCylinder(); cyl->guid  = "builtin:cylinder"; RegisterMesh(cyl);
 	Mesh* caps  = Mesh::CreateCapsule();  caps->guid = "builtin:capsule";  RegisterMesh(caps);
+	// Built-in foliage placeholders (7.4): the scatter works with zero imported assets.
+	Mesh* grass = Mesh::CreateGrassClump(); grass->guid = "builtin:grassclump"; RegisterMesh(grass);
+	Mesh* bush  = Mesh::CreateBush();       bush->guid  = "builtin:bush";       RegisterMesh(bush);
+	Mesh* tree  = Mesh::CreateTree();       tree->guid  = "builtin:tree";       RegisterMesh(tree);
 
 	// Default material (white) so a MeshRenderer always has something to point at.
 	Material* def = new Material();
 	def->guid = "builtin:default";
 	def->matName = "Default";
 	RegisterMaterial(def);
+	// Green foliage default: the builtin grass/bush/tree meshes carry no texture — the
+	// material color is the look. Users swap in their own material per layer.
+	Material* grn = new Material();
+	grn->guid = "builtin:grass";
+	grn->matName = "Grass";
+	grn->color = Color(0.24, 0.52, 0.16, 1.0);
+	RegisterMaterial(grn);
 }
 
 ResDB* ResDB::getSingleton()

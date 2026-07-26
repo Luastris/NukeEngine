@@ -108,6 +108,7 @@ struct WindowDesc
     float opacity     = 1.0f;   // whole-window opacity 0..1 (cheap, always works — live-settable)
     int   backend     = 0;      // 0 = D3D11, 1 = D3D12 (chosen at launch; D3D12 enables ray tracing)
     bool  gpuValidation = false; // Debug: turn on the D3D12 validation layer + DRED (heavy; off by default)
+    bool  rayTracing  = true;   // false = force the raster path (shadow maps/SSR) even on RT-capable GPUs
 };
 
 // GPU instancing (7.1): ONE record per instance in an instance buffer. The three rows are
@@ -338,7 +339,9 @@ public:
     // world shader ray-queries (RT shadows, later RT reflections). No-op / false on D3D11 or unsupported GPUs.
     virtual bool rtAvailable() { return false; }
     virtual void beginRTScene() {}
-    virtual void addRTInstance(Mesh* mesh, Material* mat, const float pos[3], const float quat[4], const float scale[3], bool inReflections = true) {}
+    // inReflections = visible to reflection rays (TLAS mask bit 0x01); castShadows = blocks shadow
+    // rays (bit 0x02) — a caster can be shadow-only (in shadows but absent from mirror images).
+    virtual void addRTInstance(Mesh* mesh, Material* mat, const float pos[3], const float quat[4], const float scale[3], bool inReflections = true, bool castShadows = true) {}
     virtual void buildRTScene() {}
 
     // TAA: called per camera BEFORE beginGBufferPass/beginCamera. When enabled the renderer jitters the colour
@@ -498,6 +501,18 @@ public:
     // where it nears scene geometry (needs the single-sample depth prepass this frame —
     // silently off otherwise). Per-run: a change flushes the open batch. 0 = off (default).
     virtual void setSpriteSoftDepth(float dist) {}
+
+    // --- Foliage interaction (7.4): world positions of things that PART the blades this
+    // frame — characters and moving bodies. Each pusher is float4 (x, y, z, radius); up to 8
+    // are consumed by the instanced vertex shaders (bend gated by instance custom.w). Pushed
+    // once per frame by World::Render BEFORE the passes; count 0 clears.
+    virtual void setBendPushers(const float* xyzr, int count) {}
+
+    // --- Foliage bend VOLUMES (7.4): analytic local volumes that bend the blades — wind
+    // zones, VFX force fields, weather. 12 floats per volume: (pos.xyz, radius),
+    // (dir.xyz, strength), (mode, falloff, seed, 0); mode 0=directional 1=radial 2=vortex
+    // 3=turbulence. Up to 16, pushed once per frame by World::Render; count 0 clears.
+    virtual void setBendVolumes(const float* vols, int count) {}
 
     // ABI: new virtuals are appended at the END of the class, NEVER inserted mid-vtable —
     // plugins are separate DLLs built at different times, and an inserted slot shifts every

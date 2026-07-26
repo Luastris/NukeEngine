@@ -1,5 +1,6 @@
 #ifndef CONFIG_H
 #define CONFIG_H
+#include <boost/filesystem/path.hpp>
 #include "NukeAPI.h"
 #include <string>
 
@@ -28,9 +29,11 @@ struct NukeWindow{
     bool  resizable   = true;
     bool  floating    = false;   // always-on-top
     bool  maximized   = false;
-    // Display mode (authoritative; `fullscreen` mirrors mode != 0): 0 = windowed,
-    // 1 = borderless fullscreen (desktop-res, no mode switch), 2 = exclusive fullscreen.
+    // Display mode: 0 = windowed, 1 = borderless fullscreen (desktop-res, no mode switch),
+    // 2 = exclusive fullscreen. Serialized as the READABLE word — main.json "mode" is
+    // "windowed" / "borderless" / "exclusive" (legacy number/bool configs still load).
     int   mode        = 0;
+    // INTERNAL mirror of mode != 0 (kept for cross-DLL layout + old callers) — never serialized.
     bool  fullscreen  = false;
     bool  transparent = false;   // per-pixel alpha (creation-time; applied on next launch)
     float opacity     = 1.0f;    // whole-window opacity 0..1
@@ -48,6 +51,10 @@ struct NukeWindow{
             about = true,
             inspector = true,
             render = true;
+    // --- APPENDED at the END (cross-DLL struct: inserting mid-struct shifts every later
+    // field for any binary built against the old layout — config silently "stops working").
+    bool  rayTracing  = true;    // false = force the raster path (shadow maps/SSR) even on RT-capable GPUs. "rayTracing" in main.json.
+    bool  showFps     = true;    // Player: append "N FPS (x.x ms)" to the window title (dev readout). "showFps" in main.json.
 };
 
 // Global ray-tracing (RTX) reflection settings — engine-wide quality knobs, edited in Project Settings,
@@ -166,9 +173,12 @@ public:
 	// every other section (theme, raytracing, jobs, physicsCore) exactly as on disk. Used by
 	// the runtime window API (Game.Set*) so a game's chosen video settings survive relaunch.
 	void saveWindow();
-	// Same, into an arbitrary json file — the editor routes GAME window settings (PIE scripts) to
-	// <project>/window.json so they never touch the EDITOR's own config/main.json.
+	// Same, into an arbitrary json file. (In the editor Game.Set* persists nothing — the
+	// shipped game's config is formed by the Package Project dialog; see Game.cpp.)
 	void saveWindowTo(const std::string& path);
+	// The directory config/ resolves against — NEXT TO THE EXECUTABLE, never the CWD
+	// (a shortcut-launched packaged game has an arbitrary working directory).
+	static boost::filesystem::path baseDir();
 	static Config* getSingleton();
 };
 }  // namespace nuke

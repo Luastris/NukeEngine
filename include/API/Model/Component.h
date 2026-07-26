@@ -19,7 +19,10 @@ struct TypeInfo;   // reflection
 // iRender seams using its own transform — the camera's view/proj is already bound. This is how MODULE
 // components (particles, custom draws) get into the render without World::Render hardcoding them; the
 // core Sprite/Decal keep their own batched path.
-enum class RenderPhase { Opaque = 0, Transparent = 1, Overlay = 2 };
+// RTScene fires between beginRTScene/buildRTScene (only when RT is available): module
+// components add their own TLAS entries there (NukeVFX particle quads). APPEND-ONLY enum
+// (cross-DLL: modules compiled against the old set must keep their values).
+enum class RenderPhase { Opaque = 0, Transparent = 1, Overlay = 2, RTScene = 3 };
 
 // A dynamic, per-instance property value (e.g. a script's exported var). Pure data — no
 // UI, no engine logic; the editor draws these, the runtime just carries them.

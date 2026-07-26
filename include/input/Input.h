@@ -54,6 +54,10 @@ public:
 	// the game viewport; stopping play restores Normal.
 	[[nuke::func]] static void SetCursorMode(int mode);
 	[[nuke::func]] static int  CursorMode();
+	// True while the OS cursor is on screen (Normal/Confined). Gate camera look and gameplay
+	// aim on this — a visible (menu) cursor should not also spin the camera:
+	//   if not nuke.Input.CursorVisible() then yaw = yaw + nuke.Input.Value("Look.X") end
+	[[nuke::func]] static bool CursorVisible();
 
 	// ---- reflected USER REMAPS (an in-game rebind screen, written in scripts) -------------------------
 	// Reflection can't marshal InputBinding/vectors, so the model crosses as JSON strings (same schema

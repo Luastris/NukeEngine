@@ -7,7 +7,7 @@
 //         g_Emissive2 = (emissive rgb, emissive intensity)  (texture g_Emissive is separate)
 cbuffer MatCB { float4 g_Color; float4 g_Params; float4 g_Params2; float4 g_Emissive2; };
 
-#define MAX_LIGHTS 16
+#define MAX_LIGHTS 256   // per-particle light sources (VFX) need a real budget; unattenuated lights early-out
 struct Light { float4 posType; float4 dirRange; float4 colorIntensity; float4 spot; };
 #define MAX_SHADOWS 4
 // FrameCB: per-camera lighting. g_CamPos.xyz; g_Ambient = (rgb, intensity); g_LightCount.x = count.
@@ -30,15 +30,53 @@ cbuffer FrameCB
 TextureCube  g_Probe;          // scene-captured reflection cubemap (when g_ProbePos.w > 0.5)
 SamplerState g_Probe_sampler;
 
+// Per-draw flags, written by the renderer before every object draw. x = receiveShadows:
+// 0 -> this surface ignores ALL shadowing (RT and shadow-map alike), stays fully lit.
+cbuffer DrawFlagsCB { float4 g_DrawFlags; };
+
 #ifdef RT_ENABLED   // D3D12 + DXR: inline ray-traced shadows (RayQuery, SM6.5) — replaces the shadow maps
 RaytracingAccelerationStructure g_TLAS;
+// BYTE-MIRROR of the renderer's RTInstanceData (96 bytes; only shadowShape/shadowAlpha read
+// here -- the other rows are typed loosely to keep the stride right). Change together with
+// NukeDiligentImpl.h + rt_common.hlsl.
+struct RTInstInfo
+{
+    uint4  offs;          // nrmOffset, uvOffset, posOffset, matByteOffset
+    uint4  texA;          // texIndex, nrmTexIndex, mrTexIndex, aoTexIndex
+    uint4  texB;          // emTexIndex, specTexIndex, specularFactor(asfloat), nrmFlipG
+    float4 albedoMetal;
+    float4 emissiveRough;
+    uint   colOffset; uint shadowShape; float shadowAlpha; uint pad0;
+};
+StructuredBuffer<RTInstInfo> g_RTInst;
 // 1 = lit, 0 = occluded. Traces from the (biased) surface point toward the light; first opaque hit = shadowed.
 float RTShadow(float3 origin, float3 L, float maxDist)
 {
     RayDesc ray; ray.Origin = origin; ray.Direction = L; ray.TMin = 0.02; ray.TMax = maxDist;
-    RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_CULL_NON_OPAQUE | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> q;
-    q.TraceRayInline(g_TLAS, RAY_FLAG_NONE, 0xFF, ray);
-    q.Proceed();
+    RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> q;
+    // Mask 0x02 = the shadow-caster bit of the TLAS instance mask: objects with Cast Shadows
+    // off are transparent to direct shadow rays (they may still appear in reflections, 0x01).
+    q.TraceRayInline(g_TLAS, RAY_FLAG_NONE, 0x02, ray);
+    // Opaque geometry commits through the fast path. NON-OPAQUE candidates are PARTICLE
+    // QUADS (canonical vertex order, two triangles per quad): each instance declares its
+    // shadow FOOTPRINT — full quad (stretched sprites), disc (round billboards) or a strip
+    // across u (trail ribbons) — plus an alpha gate. Analytic UV from the primitive parity
+    // + barycentrics; no texture fetch here (the bindless maps live only in the RT pipeline).
+    while (q.Proceed())
+        if (q.CandidateType() == CANDIDATE_NON_OPAQUE_TRIANGLE)
+        {
+            RTInstInfo inst = g_RTInst[q.CandidateInstanceID()];
+            float2 bc = q.CandidateTriangleBarycentrics();
+            float  w0 = 1.0 - bc.x - bc.y;
+            // even tri = (0,1)(1,1)(1,0), odd tri = (0,1)(1,0)(0,0) — the quad builder's UVs
+            float2 uv = (q.CandidatePrimitiveIndex() & 1)
+                      ? float2(0.0, 1.0) * w0 + float2(1.0, 0.0) * bc.x
+                      : float2(0.0, 1.0) * w0 + float2(1.0, 1.0) * bc.x + float2(1.0, 0.0) * bc.y;
+            bool inside = (inst.shadowShape == 1u) ? (length(uv - 0.5) < 0.45)
+                        : (inst.shadowShape == 2u) ? (abs(uv.x - 0.5) < 0.45)
+                        : true;
+            if (inside && inst.shadowAlpha >= 0.35) q.CommitNonOpaqueTriangleHit();
+        }
     return (q.CommittedStatus() == COMMITTED_TRIANGLE_HIT) ? 0.0 : 1.0;
 }
 #endif
@@ -55,14 +93,16 @@ Texture2DArray          g_Shadow;
 SamplerComparisonState  g_Shadow_sampler;
 
 // Shadow factor (1 = lit, 0 = fully shadowed) for a light's shadow-map slot, with 3x3 PCF.
-float SampleShadow(float3 wpos, int slot)
+// ndl = saturate(N.L) of the receiver: grazing surfaces (thin grass blades edge-on to the
+// sun) get a SLOPE-SCALED depth bias — a flat bias either acnes there or peter-pans everywhere.
+float SampleShadow(float3 wpos, int slot, float ndl)
 {
     if (slot < 0) return 1.0;
     float4 lp = mul(g_ShadowVP[slot], float4(wpos, 1.0));
     lp.xyz /= lp.w;
     float2 uv = lp.xy * float2(0.5, -0.5) + 0.5;   // NDC -> UV (Diligent: flip Y)
     if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || lp.z > 1.0) return 1.0;
-    float depth = lp.z - g_ShadowParams.w;          // depth bias to kill acne
+    float depth = lp.z - g_ShadowParams.w * (1.0 + 1.5 * (1.0 - saturate(ndl)));
     float t = g_ShadowParams.z, s = 0.0;
     [unroll] for (int y = -1; y <= 1; ++y)
     [unroll] for (int x = -1; x <= 1; ++x)
@@ -200,21 +240,25 @@ float4 main(in PSIn i) : SV_Target
             }
         }
         float ndl = max(dot(N, L), 0.0);
-        if (ndl <= 0.0) continue;
+        if (ndl <= 0.0 || atten <= 1e-6) continue;   // out of range / facing away: free skip (256-light budget)
         float3 H = normalize(V + L);
         float3 radiance = lt.colorIntensity.rgb * lt.colorIntensity.w * atten;
-#ifdef RT_ENABLED
-        // RT shadows: ray-query toward the light (only for lights that cast — same gate as the shadow-map slot).
-        bool casts = (type > 0.5 && type < 1.5) ? ((int)lt.spot.w >= 0) : ((int)lt.spot.z >= 0);
-        if (casts)
+        if (g_DrawFlags.x > 0.5)   // receiveShadows: off -> the surface stays fully lit
         {
-            float maxD = (type < 0.5) ? 1e4 : length(lt.posType.xyz - i.wpos);
-            radiance *= RTShadow(swpos, L, maxD);
-        }
+#ifdef RT_ENABLED
+            // RT shadows: ray-query toward the light. Vegetation sways here too — the renderer
+            // bends the foliage BLAS with the NukeBend compute (bend.cs) and refits it per frame.
+            bool casts = (type > 0.5 && type < 1.5) ? ((int)lt.spot.w >= 0) : ((int)lt.spot.z >= 0);
+            if (casts)
+            {
+                float maxD = (type < 0.5) ? 1e4 : length(lt.posType.xyz - i.wpos);
+                radiance *= RTShadow(swpos, L, maxD);
+            }
 #else
-        if (type > 0.5 && type < 1.5) radiance *= SamplePointShadow(swpos, lt.posType.xyz, (int)lt.spot.w, lt.dirRange.w);
-        else                          radiance *= SampleShadow(swpos, (int)lt.spot.z);   // dir/spot 2D slot
+            if (type > 0.5 && type < 1.5) radiance *= SamplePointShadow(swpos, lt.posType.xyz, (int)lt.spot.w, lt.dirRange.w);
+            else                          radiance *= SampleShadow(swpos, (int)lt.spot.z, ndl);   // dir/spot 2D slot
 #endif
+        }
 
         float  D = DistributionGGX(N, H, rough);
         float  G = GeometrySmith(N, V, L, rough);

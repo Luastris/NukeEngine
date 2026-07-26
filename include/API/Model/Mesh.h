@@ -67,6 +67,29 @@ public:
 	// instance points at its bind-pose source — per-frame BLAS rebuilds are a non-goal).
 	Mesh* rtProxy = nullptr;
 
+	// RT WIND BEND (7.4, merged foliage chunks only): when present, the renderer runs the
+	// NukeBend compute over this mesh every frame and REFITS its BLAS — ray-traced shadows
+	// and reflections of the vegetation sway exactly like the raster blades.
+	// rtBendArray  = 4 floats/vert: (source-mesh local Y, custom.z windGate, custom.w interactGate, 0)
+	// rtPivotArray = 4 floats/vert: (instance origin in atom space, 0) — the bend phase hash.
+	float* rtBendArray  = nullptr;
+	float* rtPivotArray = nullptr;
+	// RT DYNAMIC mesh (particle quads): the vertex data is rewritten EVERY frame (version
+	// bump -> in-place buffer update) and the renderer REBUILDS the cached BLAS over it each
+	// frame (scratch kept, capacity constant — dead space collapses to degenerate triangles).
+	bool rtDynamic = false;
+	// Non-opaque RT geometry: rays run the ALPHA-TEST any-hit (albedo-map alpha) instead of
+	// committing on the whole surface — cutout sprites in reflections; shadow rays treat each
+	// quad by its rtShadowShape footprint (world.ps candidate loop).
+	bool rtAlphaTested = false;
+	// PER-VERTEX RGBA (4 floats/vert) for RT shading of dynamic sprite meshes: particle
+	// gradient/fade colors. Re-read EVERY FRAME into the renderer's dynamic color pool
+	// (rtDynamic meshes only) — reflections tint and fade exactly like the direct view.
+	float* rtColorArray = nullptr;
+	// Shadow-ray footprint of NON-OPAQUE quads (world.ps candidate loop, no textures there):
+	// 0 = full quad, 1 = disc (round sprites), 2 = strip across u (trail ribbons).
+	int rtShadowShape = 0;
+
 	// Local-space bounds (for frustum culling). Lazily computed from vertexArray on first use.
 	float aabbMin[3] = { 0, 0, 0 };
 	float aabbMax[3] = { 0, 0, 0 };
@@ -87,6 +110,12 @@ public:
 	static Mesh* CreateSphere();
 	static Mesh* CreateCylinder();
 	static Mesh* CreateCapsule();
+	// Built-in foliage placeholders (7.4): honest geometry, no textures needed — the scatter
+	// works out of the box; swap in imported meshes for beauty. Registered as
+	// builtin:grassclump / builtin:bush / builtin:tree in ResDB.
+	static Mesh* CreateGrassClump();
+	static Mesh* CreateBush();
+	static Mesh* CreateTree();
 
 	// Native asset format (.numesh): binary header + interleaved-free vertex/normal/uv arrays.
 	// Import converts external files (OBJ/FBX/...) into these so nothing references the source

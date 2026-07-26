@@ -7,7 +7,7 @@
 #include <boost/filesystem/fstream.hpp>
 #include "config.h"
 #include "render/irender.h"
-#include <boost/filesystem.hpp>   // project dir for the game's window.json (editor)
+#include <boost/filesystem.hpp>   // SaveDir (savegame slots)
 #include <algorithm>
 #include <iostream>
 #include <mutex>                  // screenshot request handoff (update thread -> render)
@@ -135,23 +135,18 @@ void Game::Quit()
 
 // --- window control ------------------------------------------------------------------------
 namespace {
-// The game's window settings are GAME DATA. In the editor they go to <project>/window.json
-// (Package Project merges it into the shipped config) — NEVER into the editor's own
-// config/main.json: a PIE script calling e.g. Game.SetTransparent(true) must not flip the
-// EDITOR's window on its next launch (this exact hijack kept re-enabling transparency).
+// The game's window settings are GAME DATA. The packaged game persists them into its own
+// config/main.json (next to its exe). In the EDITOR they are NOT persisted anywhere: the
+// editor's own config must never be flipped by a PIE script (that hijack kept re-enabling
+// transparency), and the shipped game's config is FORMED at packaging — the Game Build
+// dialog (File -> Package Project) is where the game's boot settings are set.
 void SaveGameWindow()
 {
 	Config* c = Config::getSingleton();
 	AppInstance* app = AppInstance::GetSingleton();
 	if (!app->isEditor()) { c->saveWindow(); return; }   // the game owns its own config/main.json
-	if (app->contentRoot.empty())
-	{
-		std::cout << "[Game]\t\twindow settings NOT saved (no project loaded)" << std::endl;
-		return;
-	}
-	boost::filesystem::path proj = boost::filesystem::path(app->contentRoot).parent_path();
-	c->saveWindowTo((proj / "window.json").string());
-	std::cout << "[Game]\t\twindow settings saved to the project (editor config untouched)" << std::endl;
+	std::cout << "[Game]\t\twindow settings applied for this session only (the shipped game's "
+	             "config is set in the Package Project dialog)" << std::endl;
 }
 
 // Persist the window config + apply it to the live window. Live-apply is skipped in the
@@ -173,6 +168,7 @@ void ApplyAndSaveWindow()
 	d.mode = win.mode; d.fullscreen = win.fullscreen;
 	d.transparent = win.transparent; d.opacity = win.opacity;
 	d.backend = win.backend;
+	d.rayTracing = win.rayTracing;   // creation-time only (PSOs); carried for consistency
 	app->render->applyWindow(d);
 }
 }  // namespace

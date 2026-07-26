@@ -30,9 +30,13 @@ struct RTInstanceData
     uint  emTexIndex, specTexIndex; float specularFactor; uint nrmFlipG;   // nrmFlipG: 1 = flip green (OpenGL)
     float4 albedoMetal;     // rgb albedo factor, a = metallic factor
     float4 emissiveRough;   // rgb emissive (pre-multiplied), a = roughness factor
+    // Dynamic sprite meshes (particles): byte offset into g_DynCol (0xFFFFFFFF = none),
+    // shadow-ray footprint (0 quad / 1 disc / 2 strip) + instance shadow alpha.
+    uint  colOffset; uint shadowShape; float shadowAlpha; uint pad0;
 };
 StructuredBuffer<RTInstanceData> g_Instances;
 ByteAddressBuffer g_MatBytes;   // per-instance MatCB block (same packing as the raster MatCB); auto-gen chits load from here
+ByteAddressBuffer g_DynCol;     // PER-FRAME particle colors (float4/vertex): gradients + fade, rebuilt every frame
 
 // Surface contract — a shader's Surface(IN, O) fills O; the generated closest-hit lights/recurses it (or, if
 // O.unlit, outputs O.emissive). The raster path uses the same Surface() through its own harness.
@@ -41,7 +45,7 @@ struct SurfaceOut { float3 albedo; float metallic; float roughness; float3 emiss
 
 cbuffer RTRefCB { float4x4 g_InvProj; float4x4 g_InvView; float4 g_RTCam; float4 g_RTParams; };  // camPos.xyz; (intensity, maxDist, maxDepth, _)
 
-#define MAX_LIGHTS 16
+#define MAX_LIGHTS 256   // per-particle light sources (VFX) need a real budget; unattenuated lights early-out
 #define MAX_SHADOWS 4
 struct Light { float4 posType; float4 dirRange; float4 colorIntensity; float4 spot; };
 cbuffer FrameCB   // identical layout to world.ps / worldFrameCB
@@ -85,6 +89,13 @@ float2 FetchUV(uint uvOffset, uint prim, float2 bc)
 {
     float w0 = 1.0 - bc.x - bc.y; uint ub = uvOffset + prim * 24u;    // 3 verts * 8 bytes (float2)
     return asfloat(g_AllUV.Load2(ub)) * w0 + asfloat(g_AllUV.Load2(ub + 8u)) * bc.x + asfloat(g_AllUV.Load2(ub + 16u)) * bc.y;
+}
+// Per-vertex particle color (dynamic sprite meshes; identity for everything else).
+float4 FetchDynColor(RTInstanceData inst, uint prim, float2 bc)
+{
+    if (inst.colOffset == 0xFFFFFFFFu) return float4(1.0, 1.0, 1.0, 1.0);
+    float w0 = 1.0 - bc.x - bc.y; uint cb = inst.colOffset + prim * 48u;   // 3 verts * 16 bytes (float4)
+    return asfloat(g_DynCol.Load4(cb)) * w0 + asfloat(g_DynCol.Load4(cb + 16u)) * bc.x + asfloat(g_DynCol.Load4(cb + 32u)) * bc.y;
 }
 float3 SampleAlbedo(RTInstanceData inst, float2 uv)
 {
@@ -137,11 +148,25 @@ float3 ApplyNormalMap(RTInstanceData inst, uint prim, float2 uv, float3 geomN, f
 float RTShadow(float3 origin, float3 L, float maxD)
 {
     RayDesc r; r.Origin = origin; r.Direction = L; r.TMin = 0.02; r.TMax = maxD;
-    RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_CULL_NON_OPAQUE | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> q;
+    RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> q;
     // Shadow rays DURING REFLECTION shading use the reflect mask too: an object excluded from reflections must not
-    // cast a shadow visible in the reflection either. Direct-view shadows (world.ps RTShadow) still use 0xFF.
+    // cast a shadow visible in the reflection either. Direct-view shadows (world.ps RTShadow) use the shadow-caster
+    // bit 0x02 instead (mask bits are OR-tested, so "reflect-visible AND casts" is not expressible here).
     q.TraceRayInline(g_TLAS, RAY_FLAG_NONE, RT_REFLECT_MASK, r);
-    q.Proceed();
+    // Opaque hits commit through the fast path; NON-OPAQUE candidates (particle quads) get
+    // an honest albedo-alpha test — transparent texels don't shadow the reflection.
+    while (q.Proceed())
+        if (q.CandidateType() == CANDIDATE_NON_OPAQUE_TRIANGLE)
+        {
+            RTInstanceData inst = g_Instances[q.CandidateInstanceID()];
+            uint   prim = q.CandidatePrimitiveIndex();
+            float2 bc   = q.CandidateTriangleBarycentrics();
+            float  a    = FetchDynColor(inst, prim, bc).a;   // per-particle fade shadows honestly
+            if (inst.texIndex != 0xFFFFFFFFu)
+                a *= g_MatTex[NonUniformResourceIndex(inst.texIndex)].SampleLevel(g_MatTex_sampler,
+                         FetchUV(inst.uvOffset, prim, bc), 0).a;
+            if (a >= 0.35) q.CommitNonOpaqueTriangleHit();
+        }
     return (q.CommittedStatus() == COMMITTED_TRIANGLE_HIT) ? 0.0 : 1.0;
 }
 
@@ -178,7 +203,12 @@ float3 ShadeSurface(float3 pos, float3 N, float3 V, float3 albedo, float metal, 
         float ndl = max(dot(N, L), 0.0);
         if (ndl <= 0.0 || atten <= 0.0) continue;
         float3 H = normalize(V + L);
-        float3 radiance = lt.colorIntensity.rgb * lt.colorIntensity.w * (atten * RTShadow(pos + L * 0.05 + N * 0.02, L, lmax));
+        // Shadow rays only for lights that CAST (slot >= 0) — per-particle VFX lights are
+        // shadowless by design (UE-style), so hundreds of them add zero rays here.
+        float sh = 1.0;
+        bool casts = (type > 0.5 && type < 1.5) ? ((int)lt.spot.w >= 0) : ((int)lt.spot.z >= 0);
+        if (casts) sh = RTShadow(pos + L * 0.05 + N * 0.02, L, lmax);
+        float3 radiance = lt.colorIntensity.rgb * lt.colorIntensity.w * (atten * sh);
         float  D = RT_GGX(N, H, rough); float G = RT_GSm(N, V, L, rough); float3 F = RT_Fresnel(max(dot(H, V), 0.0), F0);
         float3 spec = (D * G) * F / max(4.0 * max(dot(N, V), 0.0) * ndl, 1e-4);
         float3 kd = (1.0 - F) * (1.0 - metal);

@@ -17,7 +17,7 @@ namespace nuke {
 // body takes a recreate (stop/start play). Mesh shape arrives later in the track.
 class NUKEENGINE_API Collider : public Component
 {
-	NUKE_CLASS(Collider, Component)
+	NUKE_CLASS(Collider, Component, "Physics")
 public:
 	enum Shape : int { S_Box = 0, S_Sphere = 1, S_Capsule = 2, S_Mesh = 3 };
 

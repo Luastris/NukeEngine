@@ -28,6 +28,7 @@
 #include "API/Model/DebugDraw.h"   // editor gizmos (selection wire shapes)
 #include "API/Model/InstancedMesh.h" // GPU-instanced scatters (7.1: chunked instanced draws)
 #include "API/Model/Wind.h"          // global wind field (7.2: world state + renderer push)
+#include "API/Model/BendVolumes.h"   // foliage bend volumes: zones + module submissions (7.4)
 #include "interface/Services.h"   // GetService<iPhysics>()
 #include "service/iPhysics.h"     // the physics service seam (fixed-step driver below)
 #include "service/iAudio.h"       // the audio service seam (per-frame pump in Render)
@@ -1909,6 +1910,13 @@ void World::Render(iRender* r)
 		n.spotOuter = std::cos(outer); n.spotInner = std::cos(inner);
 		gpuLights.push_back(n);
 	}
+	// Module-submitted DYNAMIC lights (glowing particles, muzzle flashes): one-frame
+	// submissions appended after the scene's Light components, cleared once consumed.
+	{
+		std::vector<NukeLight>& fl = FrameLights::Frame();
+		for (const NukeLight& n : fl) gpuLights.push_back(n);
+		fl.clear();
+	}
 	// Global shadow settings BEFORE setLights (the directional ortho extent uses shadowDistance).
 	r->setShadowSettings(settings.shadowRes, settings.shadowDistance, settings.shadowDepthBias,
 	                     settings.shadowNormalBias, settings.shadowSoftness);
@@ -1975,9 +1983,110 @@ void World::Render(iRender* r)
 		r->setSky(sky);
 	}
 
+	// Scene view position — shared by the pusher cap below and the RT nearest-instance pick.
+	Vector3 sceneCamP(0, 0, 0);
+
 	// Wind (7.2): push the CURRENT animated global to the renderer (FrameCB g_Wind/g_Wind2)
 	// for vertex-bend consumers. Zones/turbulence stay per-point on the CPU (Wind.Sample).
 	{
+		// Foliage interaction (7.4): characters + awake dynamic bodies become "pushers" the
+		// instanced vertex shaders bend blades away from. Collected BEFORE setWind — the
+		// renderer writes both into the per-frame BendCB there. Cap 8 (nearest to the main
+		// camera when over).
+		struct Push { float x, y, z, r; };
+		std::vector<Push> pushers;
+		Vector3 camP(0, 0, 0); bool camMain = false, camAny = false;
+		std::function<void(bc::list<Atom*>&)> collect = [&](bc::list<Atom*>& gos)
+		{
+			for (Atom* a : gos)
+			{
+				if (!a) continue;
+				if (Camera* cam = a->GetComponent<Camera>())
+				{
+					if ((!camAny || (cam->mainCamera && !camMain)) && a->GetName() != "Editor Camera")
+					{ camP = a->GetTransform().globalPosition(); camAny = true; camMain = cam->mainCamera; }
+				}
+				if (CharacterController* cc = a->GetComponent<CharacterController>())
+				{
+					Vector3 p = a->GetTransform().globalPosition();
+					pushers.push_back({ (float)p.x, (float)p.y, (float)p.z, std::max(0.8f, (float)cc->radius * 3.0f) });
+				}
+				else if (Rigidbody* rb = a->GetComponent<Rigidbody>())
+				{
+					if (rb->enabled && !rb->isKinematic)
+					{
+						Vector3 p = a->GetTransform().globalPosition();
+						float rad = 1.0f;
+						if (Collider* col = a->GetComponent<Collider>())
+							rad = std::max(0.6f, (float)std::max({ fabs(col->halfExtents.x), fabs(col->halfExtents.y), fabs(col->halfExtents.z), (double)col->radius }) * 2.0f);
+						pushers.push_back({ (float)p.x, (float)p.y, (float)p.z, rad });
+					}
+				}
+				if (!a->children.empty()) collect(a->children);
+			}
+		};
+		collect(*hierarchy);
+		// EDIT mode renders through the Editor Camera while game cameras sit parked wherever
+		// the world left them — anchor the camera-relative caps (pushers, RT nearest-pick) to
+		// the view actually on screen, or "nearest" quietly drifts to a parked game camera.
+		{
+			AppInstance* app = AppInstance::GetSingleton();
+			if (app && app->isEditor() && app->playState == 0)
+				for (Atom* a : *hierarchy)
+					if (a && a->GetName() == "Editor Camera") { camP = a->GetTransform().globalPosition(); break; }
+		}
+		sceneCamP = camP;
+		if (pushers.size() > 8)
+		{
+			std::sort(pushers.begin(), pushers.end(), [&](const Push& a, const Push& b)
+			{
+				float ax = a.x - (float)camP.x, ay = a.y - (float)camP.y, az = a.z - (float)camP.z;
+				float bx = b.x - (float)camP.x, by = b.y - (float)camP.y, bz = b.z - (float)camP.z;
+				return ax * ax + ay * ay + az * az < bx * bx + by * by + bz * bz;
+			});
+			pushers.resize(8);
+		}
+		static std::vector<float> flat; flat.clear();
+		for (const Push& p : pushers) flat.insert(flat.end(), { p.x, p.y, p.z, p.r });
+		r->setBendPushers(flat.empty() ? nullptr : flat.data(), (int)pushers.size());
+
+		// Bend VOLUMES (7.4): wind zones (collected live, exact this frame) + whatever the
+		// modules submitted since the last frame (VFX force fields etc., 1-frame latency).
+		// Capped at 16 nearest the camera — same policy as the pushers.
+		{
+			std::vector<BendVolume> vols;
+			Wind::CollectZones(vols);
+			for (const BendVolume& v : BendVolumes::Consume()) vols.push_back(v);
+			if (vols.size() > 16)
+			{
+				std::sort(vols.begin(), vols.end(), [&](const BendVolume& a, const BendVolume& b)
+				{
+					float ax = a.pos[0] - (float)camP.x, ay = a.pos[1] - (float)camP.y, az = a.pos[2] - (float)camP.z;
+					float bx = b.pos[0] - (float)camP.x, by = b.pos[1] - (float)camP.y, bz = b.pos[2] - (float)camP.z;
+					return ax * ax + ay * ay + az * az < bx * bx + by * by + bz * bz;
+				});
+				vols.resize(16);
+			}
+			static std::vector<float> vflat; vflat.clear();
+			for (size_t i = 0; i < vols.size(); ++i)
+			{
+				const BendVolume& v = vols[i];
+				const float seed = (float)((i * 37) % 13) * 0.7f;
+				vflat.insert(vflat.end(), { v.pos[0], v.pos[1], v.pos[2], v.radius,
+				                            v.dir[0], v.dir[1], v.dir[2], v.strength,
+				                            (float)v.mode, v.falloff, seed, 0.0f });
+			}
+			r->setBendVolumes(vflat.empty() ? nullptr : vflat.data(), (int)vols.size());
+		}
+
+		// EDIT-mode preview: the wind clock normally advances with World::Update (play only).
+		// Tick it here off the REAL frame delta so foliage/VFX sway is ALIVE in the edit
+		// viewport — a frozen clock made wind-bent grass look like it ignores the wind.
+		{
+			AppInstance* app = AppInstance::GetSingleton();
+			if (app->isEditor() && app->playState == 0)
+				Wind::Advance(Time::getSingleton()->delta);
+		}
 		float wd[4], wp[4];
 		Wind::ShaderParams(wd, wp);
 		r->setWind(wd, wp);
@@ -1998,41 +2107,57 @@ void World::Render(iRender* r)
 		// Dynamic meshes (skinned instances) provide a static stand-in for BLAS/TLAS —
 		// per-frame BLAS rebuilds are a non-goal (rtProxy = the bind-pose source).
 		for (auto& it : rtItems) if (it.blend == 0)
+		{
+			const bool cs = !it.mat || it.mat->castShadows;   // same gate as the raster shadow pass
+			if (!it.inReflections && !cs) continue;           // invisible to every ray kind -> skip
 			r->addRTInstance(it.mesh->rtProxy ? it.mesh->rtProxy : it.mesh,
-			                 it.mat, it.pos, it.quat, it.scale, it.inReflections);
-		// Instanced sets: a TLAS entry per instance is not free — capped per component
-		// (rtMaxInstances) and opt-in (inReflections, default off for big scatters).
+			                 it.mat, it.pos, it.quat, it.scale, it.inReflections, cs);
+		}
+		// Instanced sets, MERGED (7.4): each spatial chunk is baked into ONE Mesh (built beside
+		// the raster chunks in EnsureRenderReady) and enters the TLAS as a single entry — no
+		// per-instance caps, no distance picks, a TLAS of dozens of entries. The renderer runs
+		// the NukeBend compute over these meshes and REFITS their BLAS every frame, so RT
+		// shadows AND reflections of the vegetation sway exactly like the raster blades.
+		// Visibility follows the mask bits (0x01 reflections, 0x02 shadow rays).
 		for (InstancedMesh* im : instSets)
 		{
-			if (!im->inReflections || !im->EnsureRenderReady(r)) continue;
-			if ((int)im->instances.size() > im->rtMaxInstances) continue;
+			const bool csI = im->castShadows && (!im->mat || im->mat->castShadows);
+			if ((!im->inReflections && !csI) || im->rtMaxInstances <= 0 || !im->EnsureRenderReady(r)) continue;
+			if (im->rtChunkMeshes.empty()) continue;
 			Transform& t = im->atom->GetTransform();
-			Vector3 P = t.globalPosition(); Quaternion Q = t.globalRotation(); Vector3 S = t.globalScale();
-			glm::quat aq((float)Q.w, (float)Q.x, (float)Q.y, (float)Q.z);
-			for (const InstancedMesh::Inst& in : im->instances)
-			{
-				glm::quat iq(in.quat[3], in.quat[0], in.quat[1], in.quat[2]);
-				glm::quat wq = aq * iq;
-				glm::vec3 wp = glm::vec3((float)P.x, (float)P.y, (float)P.z)
-				             + aq * (glm::vec3(in.pos[0], in.pos[1], in.pos[2]) * glm::vec3((float)S.x, (float)S.y, (float)S.z));
-				float pos[3]   = { wp.x, wp.y, wp.z };
-				float quat[4]  = { wq.x, wq.y, wq.z, wq.w };
-				float scale[3] = { in.scale[0] * (float)S.x, in.scale[1] * (float)S.y, in.scale[2] * (float)S.z };
-				r->addRTInstance(im->mesh->rtProxy ? im->mesh->rtProxy : im->mesh, im->mat, pos, quat, scale, true);
-			}
+			Vector3 P = t.globalPosition(); Quaternion Q = t.globalRotation();
+			Vector3 S = im->ScaleWithAtom() ? t.globalScale() : Vector3(1, 1, 1);   // Foliage: layer frame is T*R only
+			float pos[3]   = { (float)P.x, (float)P.y, (float)P.z };
+			float quat[4]  = { (float)Q.x, (float)Q.y, (float)Q.z, (float)Q.w };
+			float scale[3] = { (float)S.x, (float)S.y, (float)S.z };
+			for (Mesh* rm : im->rtChunkMeshes)
+				if (rm && rm->numVerts > 0)
+					r->addRTInstance(rm, im->mat, pos, quat, scale, im->inReflections, csI);
 		}
+		// Module components contribute their OWN TLAS entries here (NukeVFX particles: a
+		// per-frame quad mesh so reflections and shadow rays see the sprites) — the gather
+		// is open only between beginRTScene and buildRTScene.
+		DrawComponentHooks(*hierarchy, r, RenderPhase::RTScene);
 		r->buildRTScene();
 	}
 
 	// Shadow depth passes (one per shadow-casting dir/spot light) before any camera pass — the renderer
 	// samples them during the world pass. Only shadow-casting surfaces (Material::castShadows) contribute.
-	for (int sp = 0, spc = r->shadowPassCount(); sp < spc; ++sp)
-	{
-		r->beginShadowPass(sp);
-		RenderShadowMeshes(*hierarchy, r);
-		DrawInstancedShadows(instSets, r);
-		r->endShadowPass();
-	}
+	// HYBRID under ray tracing: solids shadow via TLAS rays, but VEGETATION'S rays would FREEZE
+	// (the RT BLAS is a static bake — the raster shadow VS is what carries the wind bend). So with
+	// RT active the maps still render, holding ONLY the instanced sets, and the lit shader
+	// multiplies both terms: rays for solids, bent (SWAYING) raster shadows for foliage.
+	// SKIPPED when ray tracing is active: everything (foliage included) shadows via TLAS rays —
+	// the renderer bends the foliage BLAS with the NukeBend compute every frame, so the rays
+	// hit SWAYING blades and the maps would be pure waste (nothing samples them under RT).
+	if (!r->rtAvailable())
+		for (int sp = 0, spc = r->shadowPassCount(); sp < spc; ++sp)
+		{
+			r->beginShadowPass(sp);
+			RenderShadowMeshes(*hierarchy, r);
+			DrawInstancedShadows(instSets, r);
+			r->endShadowPass();
+		}
 
 	// Reflection probe: capture the scene into its cubemap (after shadows so reflections are lit/shadowed),
 	// then bind it for the camera passes. Static probes capture once; realtime / Bake re-capture.
@@ -2051,13 +2176,21 @@ void World::Render(iRender* r)
 			if (!probe->realtime)
 				cout << "[World]\t\t\tprobe capture begin (res " << probe->Res() << ")" << endl;
 			std::vector<DrawItem> items; CollectMeshes(*hierarchy, items);   // no cull for capture
-			for (int f = 0; f < 6; ++f)
+			// Realtime capture budget (Faces Per Frame): the default renders ALL six faces every
+			// frame — fully live reflections. 1-5 = OPT-IN time-slicing round-robin (cheaper; fast
+			// motion in the mirror then updates in steps). First capture/Bake is always full.
+			const bool slice  = probe->realtime && probe->captured && !probe->bake &&
+			                    probe->sliceFaces > 0 && probe->sliceFaces < 6;
+			const int  budget = slice ? probe->sliceFaces : 6;
+			for (int k = 0; k < budget; ++k)
 			{
+				const int f = slice ? (probe->sliceFace + k) % 6 : k;
 				r->beginCubeFace(probe->cubeId, f, pos, probe->nearZ, probe->farZ);
 				for (auto& it : items) if (it.blend == 0) r->renderObject(it.mesh, it.mat, it.pos, it.quat, it.scale);
 				DrawInstancedMeshes(instSets, r, false);   // instanced sets appear in reflections too (no cull for capture)
 				r->endCubeFace(probe->cubeId, f);
 			}
+			if (slice) probe->sliceFace = (probe->sliceFace + budget) % 6;
 			if (!probe->realtime)
 				cout << "[World]\t\t\tprobe capture done" << endl;
 			probe->captured = true; probe->bake = false;
@@ -2267,6 +2400,7 @@ static void SaveAtom(Atom* atom, json& j)
 				jm["emissive"]   = { mr->mat->emissive.r, mr->mat->emissive.g, mr->mat->emissive.b };
 				jm["emissiveIntensity"] = mr->mat->emissiveIntensity;
 				jm["castShadows"] = mr->mat->castShadows;
+				jm["receiveShadows"] = mr->mat->receiveShadows;
 				jm["blendMode"]   = mr->mat->blendMode;
 				if (!mr->mat->props.empty())
 				{
@@ -2344,6 +2478,7 @@ static Atom* LoadAtom(const json& j)
 						if (jm.contains("specularFactor")) mr->mat->specular    = jm.value("specularFactor", 1.0f);
 						if (jm.contains("emissiveIntensity")) mr->mat->emissiveIntensity = jm.value("emissiveIntensity", 0.0f);
 						if (jm.contains("castShadows"))    mr->mat->castShadows    = jm.value("castShadows", true);
+						if (jm.contains("receiveShadows")) mr->mat->receiveShadows = jm.value("receiveShadows", true);
 						if (jm.contains("blendMode"))      mr->mat->blendMode      = (Material::Blend)jm.value("blendMode", 0);
 						if (jm.contains("emissive") && jm["emissive"].is_array() && jm["emissive"].size() == 3)
 						{

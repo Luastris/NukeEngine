@@ -27,7 +27,7 @@ class Atom;
 //    is fully yours, the collision resolution is not your problem.
 class NUKEENGINE_API CharacterController : public Component
 {
-	NUKE_CLASS(CharacterController, Component)
+	NUKE_CLASS(CharacterController, Component, "Physics")
 public:
 	// Capsule (scale-baked at creation like Collider; live edits recreate the character).
 	[[nuke::prop(label="Radius",      min=0.05)]] float radius = 0.35f;

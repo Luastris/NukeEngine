@@ -221,6 +221,8 @@
     <ClInclude Include="include\interface\AtomCreators.h" />
     <ClInclude Include="include\interface\ComponentIcons.h" />
     <ClInclude Include="include\API\Model\InstancedMesh.h" />
+    <ClInclude Include="include\API\Model\Foliage.h" />
+    <ClInclude Include="include\API\Model\BendVolumes.h" />
     <ClInclude Include="include\API\Model\ray.h" />
     <ClInclude Include="include\API\Model\resdb.h" />
     <ClInclude Include="include\API\Model\UnknownComponent.h" />
@@ -316,6 +318,8 @@
     <ClCompile Include="src\interface\AtomCreators.cpp" />
     <ClCompile Include="src\interface\ComponentIcons.cpp" />
     <ClCompile Include="src\API\Model\InstancedMesh.cpp" />
+    <ClCompile Include="src\API\Model\Foliage.cpp" />
+    <ClCompile Include="src\API\Model\BendVolumes.cpp" />
     <ClCompile Include="src\API\Model\ray.cpp" />
     <ClCompile Include="src\API\Model\resdb.cpp" />
     <ClCompile Include="src\API\Model\UnknownComponent.cpp" />

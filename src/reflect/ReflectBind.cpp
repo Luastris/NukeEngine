@@ -95,7 +95,7 @@ std::vector<std::string> Reflect_ComponentTypes()
 {
 	std::vector<std::string> out;
 	for (TypeInfo* t : Registry_All())
-		if (t && t->create && t->base == "Component") out.push_back(t->name);
+		if (t && t->create && Registry_IsComponentType(t)) out.push_back(t->name);   // whole base chain (7.4)
 	return out;
 }
 

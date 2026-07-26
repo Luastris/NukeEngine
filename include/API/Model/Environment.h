@@ -11,7 +11,7 @@ namespace nuke {
 // World::Render uses the first Environment found. No Environment => just the camera clear color.
 class NUKEENGINE_API Environment : public Component
 {
-	NUKE_CLASS(Environment, Component)
+	NUKE_CLASS(Environment, Component, "World")
 public:
 	enum Mode : int { None = 0, Procedural = 1 };   // None = clear color only
 	[[nuke::prop(label="Mode", enum="None,Procedural")]] Mode mode = Procedural;
