@@ -55,6 +55,12 @@ double Atom::GetLayer()
 void Atom::SetPersistent(bool on) { persistent = on; }
 bool Atom::IsPersistent()         { return persistent; }
 
+// Plain flag write: every consumer (update/render collectors, event walk, physics sync) gates
+// on it per frame, so toggling needs no eager side effects — bodies die/respawn on the next
+// physics sync, renderables just stop being collected.
+void Atom::SetEnabled(bool on) { enabled = on; }
+bool Atom::IsEnabled()         { return enabled; }
+
 Transform& Atom::GetTransform()
 {
 	return transform;
@@ -72,6 +78,7 @@ void Atom::Init(Atom* parent)
 // then this atom's enabled components.
 void Atom::FixedUpdate()
 {
+	if (!enabled) return;   // whole subtree off (children are only reachable through their parent)
 	for (auto child : children)
 	{
 		if (child)
@@ -85,6 +92,7 @@ void Atom::FixedUpdate()
 }
 void Atom::Update()
 {
+	if (!enabled) return;   // whole subtree off
 	for (auto child : children)
 	{
 		if (child)

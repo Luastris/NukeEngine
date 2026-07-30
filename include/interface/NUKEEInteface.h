@@ -23,6 +23,18 @@
 #define NUKE_MODULE_ABI 2
 extern "C" { __declspec(dllexport) __declspec(selectany) int nuke_module_abi = NUKE_MODULE_ABI; }
 
+// ---- Engine BINARY-COMPATIBILITY generation -------------------------------------------------
+// nuke_module_abi (above) tracks ONLY the NUKEModule vtable tail. THIS stamp tracks the whole
+// engine ABI a module was compiled against: exported class layouts (Atom, NukeWindow, ...),
+// signatures — anything that makes an old DLL jump into garbage against a new engine. Bump it
+// on ANY such break; the loader REFUSES a module whose stamp differs (clear log at discovery,
+// the host keeps running, rebuild the module) instead of crashing inside its OnLoad. A DLL
+// without the export (built before the stamp) reports 1.
+//   1 — pre-stamp builds
+//   2 — 2026-07-30: Atom gained `enabled` (tail field); NukeWindow.vsync moved to the tail
+#define NUKE_ENGINE_ABI 2
+extern "C" { __declspec(dllexport) __declspec(selectany) int nuke_engine_abi = NUKE_ENGINE_ABI; }
+
 namespace nuke {
 
 // When a plugin must be brought up. PHASE_BOOT providers (e.g. the renderer) are enabled

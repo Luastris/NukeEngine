@@ -52,6 +52,11 @@ public:
     bc::list<Component*> components = bc::list<Component*>();
     bc::list<Atom*> children = bc::list<Atom*>();
 
+	// Whole-atom switch (the SetActive pattern): a disabled atom — and its entire subtree —
+	// neither updates, renders, receives events, nor keeps physics bodies alive. Distinct from
+	// per-component `enabled`. APPENDED at the END of the data members (cross-DLL layout).
+	bool enabled = true;
+
 	Atom();
 	Atom(const char* name);
 	~Atom();
@@ -65,6 +70,8 @@ public:
 	[[nuke::func]] double GetLayer();
 	[[nuke::func]] void SetPersistent(bool on);     // survive game world switches (root atoms; see `persistent`)
 	[[nuke::func]] bool IsPersistent();
+	[[nuke::func]] void SetEnabled(bool on);        // whole-atom switch incl. subtree (see `enabled`)
+	[[nuke::func]] bool IsEnabled();                // this atom's own flag (parents may still disable it)
 	Transform& GetTransform();
 	
 	template<class T>

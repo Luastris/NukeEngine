@@ -75,6 +75,9 @@ public:
     // Build a renderer pipeline for each loaded shader (sets Shader::rendererHandle). Call once
     // after render init. HotReloadShaders re-reads changed shader files + rebuilds their pipeline.
     void     BuildShaderPipelines(iRender* r);
+    // Incremental variant: build up to `maxCount` missing pipelines and return how many still
+    // lack one (0 = done). The editor boot compiles a couple per frame so the UI keeps breathing.
+    int      BuildShaderPipelinesStep(iRender* r, int maxCount);
     void     HotReloadShaders(iRender* r);
     // Create an iRender render target for every loaded RenderTexture (sets Texture::rtId). After init.
     void     CreateRenderTextures(iRender* r);

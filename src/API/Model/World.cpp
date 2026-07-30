@@ -111,6 +111,7 @@ static void PickRec(bc::list<Atom*>& gos, const glm::vec3& ro, const glm::vec3& 
 {
 	for (auto atom : gos)
 	{
+		if (!atom || !atom->enabled) continue;   // disabled = not rendered, so clicks pass through
 		// A canvas re-parents the coordinate space for its subtree (same rule as rendering).
 		Canvas* here = atom->GetComponent<Canvas>();
 		Canvas* cur  = here ? here : ctx;
@@ -333,7 +334,7 @@ void World::Update()
 		{
 			for (Atom* atom : gos)
 			{
-				if (!atom) continue;
+				if (!atom || !atom->enabled) continue;   // disabled atom = whole subtree off
 				for (Component* c : atom->components)
 					if (c && c->enabled) c->OnEvent(n, p);
 				deliver(atom->children);
@@ -392,11 +393,15 @@ void World::Update()
 // Lazily create the physics body for an atom's Collider, and drive KINEMATIC bodies from
 // the Transform (gameplay moves them; the simulation follows and pushes dynamics away).
 // Fills `bodyMap` (bodyId -> Collider) for contact-event dispatch after the step.
-static void SyncBodies(bc::list<Atom*>& gos, iPhysics* p, std::map<uint64_t, Collider*>& bodyMap, float dt)
+static void SyncBodies(bc::list<Atom*>& gos, iPhysics* p, std::map<uint64_t, Collider*>& bodyMap, float dt,
+                       bool off = false)
 {
 	for (Atom* atom : gos)
 	{
 		if (!atom) continue;
+		// Whole-atom switch acts down the subtree: a disabled atom's bodies (and its children's)
+		// must GO, same as a disabled collider — so keep recursing with `kill` instead of skipping.
+		const bool kill = off || !atom->enabled;
 		if (Collider* col = atom->GetComponent<Collider>())
 		{
 			// A CharacterController OWNS its atom's collision (virtual capsule + inner
@@ -406,7 +411,7 @@ static void SyncBodies(bc::list<Atom*>& gos, iPhysics* p, std::map<uint64_t, Col
 			// controller was added mid-play).
 			// Disabled collider: the body must GO — `enabled` unticked mid-play previously
 			// left the body alive forever (create was gated, destroy never happened).
-			if (atom->GetComponent<CharacterController>() || !col->enabled)
+			if (atom->GetComponent<CharacterController>() || !col->enabled || kill)
 			{
 				if (col->bodyId)
 				{
@@ -415,7 +420,7 @@ static void SyncBodies(bc::list<Atom*>& gos, iPhysics* p, std::map<uint64_t, Col
 					col->hasSync = false;
 				}
 				if (!atom->children.empty())
-					SyncBodies(atom->children, p, bodyMap, dt);
+					SyncBodies(atom->children, p, bodyMap, dt, kill);
 				continue;
 			}
 
@@ -609,8 +614,15 @@ static void SyncBodies(bc::list<Atom*>& gos, iPhysics* p, std::map<uint64_t, Col
 			if (col->bodyId)
 				bodyMap[col->bodyId] = col;
 		}
+		else if (kill)
+		{
+			// No collider here, but the subtree is switched off — keep walking to kill nested bodies.
+			if (!atom->children.empty())
+				SyncBodies(atom->children, p, bodyMap, dt, true);
+			continue;
+		}
 		if (!atom->children.empty())
-			SyncBodies(atom->children, p, bodyMap, dt);
+			SyncBodies(atom->children, p, bodyMap, dt, kill);
 	}
 }
 
@@ -630,20 +642,22 @@ static Vector3 CharFeetLocal(CharacterController* cc, const Vector3& scl)
 // Lazily create backend characters, compose each one's desired velocity for this step
 // (gravity/jump/platform under autoGravity; the raw velocity verbatim otherwise) and
 // push it to the seam. Runs under the game lock, BEFORE step().
-static void SyncCharacters(bc::list<Atom*>& gos, iPhysics* p, const float gravity[3], float dt)
+static void SyncCharacters(bc::list<Atom*>& gos, iPhysics* p, const float gravity[3], float dt,
+                           bool off = false)
 {
 	for (Atom* atom : gos)
 	{
 		if (!atom) continue;
+		const bool kill = off || !atom->enabled;   // whole-atom switch acts down the subtree
 		if (CharacterController* cc = atom->GetComponent<CharacterController>())
 		{
 			Transform& t = atom->GetTransform();
-			// Disabled: the backend character must GO (mirrors the Collider rule — a
-			// stale character would keep steering the transform).
-			if (!cc->enabled)
+			// Disabled (component or whole atom): the backend character must GO (mirrors the
+			// Collider rule — a stale character would keep steering the transform).
+			if (!cc->enabled || kill)
 			{
 				if (cc->charId) { p->destroyCharacter(cc->charId); cc->charId = 0; }
-				if (!atom->children.empty()) SyncCharacters(atom->children, p, gravity, dt);
+				if (!atom->children.empty()) SyncCharacters(atom->children, p, gravity, dt, kill);
 				continue;
 			}
 			// Bake the world scale into the capsule (like Collider); a live size/scale
@@ -723,7 +737,7 @@ static void SyncCharacters(bc::list<Atom*>& gos, iPhysics* p, const float gravit
 			p->setCharacterVelocity(cc->charId, fv);
 		}
 		if (!atom->children.empty())
-			SyncCharacters(atom->children, p, gravity, dt);
+			SyncCharacters(atom->children, p, gravity, dt, kill);
 	}
 }
 
@@ -878,6 +892,7 @@ static void CollectCameras(bc::list<Atom*>& gos, std::vector<Camera*>& out)
 {
 	for (auto atom : gos)
 	{
+		if (!atom || !atom->enabled) continue;   // disabled atom = whole subtree off (all collectors)
 		if (auto* c = atom->GetComponent<Camera>())
 			if (c->enabled) out.push_back(c);   // a disabled camera renders nothing
 		if (atom->children.size() > 0)
@@ -907,6 +922,7 @@ static void CollectLights(bc::list<Atom*>& gos, std::vector<Light*>& out)
 {
 	for (auto atom : gos)
 	{
+		if (!atom || !atom->enabled) continue;
 		if (auto* l = atom->GetComponent<Light>())
 			if (l->enabled) out.push_back(l);
 		if (atom->children.size() > 0)
@@ -920,6 +936,7 @@ static Transform* FindAudioListener(bc::list<Atom*>& gos)
 {
 	for (auto atom : gos)
 	{
+		if (!atom || !atom->enabled) continue;
 		if (auto* l = atom->GetComponent<AudioListener>())
 			if (l->enabled && l->transform) return l->transform;
 		if (!atom->children.empty())
@@ -933,6 +950,7 @@ static void CollectPostProcess(bc::list<Atom*>& gos, std::vector<PostProcess*>& 
 {
 	for (auto atom : gos)
 	{
+		if (!atom || !atom->enabled) continue;
 		if (auto* p = atom->GetComponent<PostProcess>())
 			if (p->enabled) out.push_back(p);
 		if (atom->children.size() > 0)
@@ -944,6 +962,7 @@ static ReflectionProbe* FindReflectionProbe(bc::list<Atom*>& gos)
 {
 	for (auto atom : gos)
 	{
+		if (!atom || !atom->enabled) continue;
 		if (auto* p = atom->GetComponent<ReflectionProbe>()) if (p->enabled) return p;
 		if (atom->children.size() > 0) if (ReflectionProbe* p = FindReflectionProbe(atom->children)) return p;
 	}
@@ -954,6 +973,7 @@ static Environment* FindEnvironment(bc::list<Atom*>& gos)
 {
 	for (auto atom : gos)
 	{
+		if (!atom || !atom->enabled) continue;
 		if (auto* e = atom->GetComponent<Environment>()) if (e->enabled) return e;
 		if (atom->children.size() > 0) if (Environment* e = FindEnvironment(atom->children)) return e;
 	}
@@ -972,6 +992,7 @@ static void CollectMeshes(bc::list<Atom*>& gos, std::vector<DrawItem>& out, unsi
 {
 	for (auto atom : gos)
 	{
+		if (!atom || !atom->enabled) continue;
 		if (LayerVisible(atom, mask))
 		if (auto* mr = atom->GetComponent<MeshRenderer>())
 			if (mr->enabled && mr->mesh)
@@ -1041,7 +1062,7 @@ static void CollectInstancedMeshes(bc::list<Atom*>& gos, std::vector<InstancedMe
 {
 	for (auto atom : gos)
 	{
-		if (!atom) continue;
+		if (!atom || !atom->enabled) continue;
 		if (LayerVisible(atom, mask))
 			if (auto* im = atom->GetComponent<InstancedMesh>())
 				if (im->enabled) out.push_back(im);
@@ -1273,7 +1294,7 @@ static void GatherSprites(bc::list<Atom*>& gos, Canvas* ctx, std::vector<ScreenS
 {
 	for (Atom* atom : gos)
 	{
-		if (!atom) continue;
+		if (!atom || !atom->enabled) continue;
 		Canvas* here = atom->GetComponent<Canvas>();
 		Canvas* cur  = here ? here : ctx;   // a canvas re-parents the coordinate space for its subtree
 		if (LayerVisible(atom, mask))
@@ -1413,7 +1434,7 @@ static void ApplyCanvasLayouts(bc::list<Atom*>& gos, Canvas* ctx)
 {
 	for (Atom* atom : gos)
 	{
-		if (!atom) continue;
+		if (!atom || !atom->enabled) continue;
 		Canvas* here = atom->GetComponent<Canvas>();
 		Canvas* cur  = here ? here : ctx;
 		if (cur && cur != here && cur->transform)
@@ -1522,7 +1543,7 @@ static void CollectDecals(bc::list<Atom*>& gos, std::vector<Decal*>& out, unsign
 {
 	for (Atom* atom : gos)
 	{
-		if (!atom) continue;
+		if (!atom || !atom->enabled) continue;
 		if (LayerVisible(atom, mask))
 		if (Decal* d = atom->GetComponent<Decal>()) if (d->enabled) out.push_back(d);
 		CollectDecals(atom->children, out, mask);
@@ -1588,7 +1609,7 @@ static void DrawComponentHooks(bc::list<Atom*>& gos, iRender* r, RenderPhase pha
 {
 	for (auto atom : gos)
 	{
-		if (!atom) continue;
+		if (!atom || !atom->enabled) continue;
 		if (LayerVisible(atom, mask))
 			for (Component* c : atom->components)
 				if (c && c->enabled) c->OnRender(r, phase);
@@ -1602,6 +1623,7 @@ static void RenderShadowMeshes(bc::list<Atom*>& gos, iRender* r)
 {
 	for (auto atom : gos)
 	{
+		if (!atom || !atom->enabled) continue;
 		if (auto* mr = atom->GetComponent<MeshRenderer>())
 		{
 			if (mr->enabled && mr->mesh && (!mr->mat || mr->mat->castShadows))
@@ -2376,6 +2398,7 @@ static void SaveAtom(Atom* atom, json& j)
 	if (!atom->prefabGuid.empty()) j["prefab"] = atom->prefabGuid;   // instance link to a .nuprefab
 	if (atom->layer != 0) j["layer"] = atom->layer;                  // render layer index (0 = Default, omitted)
 	if (atom->persistent) j["persistent"] = true;                    // survives game world switches (omitted when off)
+	if (!atom->enabled) j["enabled"] = false;                        // whole-atom switch (omitted when on = default)
 	Transform& t = atom->GetTransform();
 	if (TypeInfo* tti = t.GetType())
 		SaveObject(*tti, &t, j["transform"]);
@@ -2455,6 +2478,7 @@ static Atom* LoadAtom(const json& j)
 	atom->modOrigin  = j.value("__mod", std::string());        // merge provenance (runtime only)
 	atom->layer      = std::max(0, std::min(31, j.value("layer", 0)));   // render layer index
 	atom->persistent = j.value("persistent", false);                     // survives game world switches
+	atom->enabled    = j.value("enabled", true);                         // whole-atom switch
 	if (j.contains("transform"))
 	{
 		Transform& t = atom->GetTransform();

@@ -1,6 +1,7 @@
 #include "API/Model/resdb.h"
 #include <cstring>
 #include "API/Model/Package.h"   // packed-content scan (3.2)
+#include "API/Model/Jobs.h"      // Stopping(): boot-time scans bail out so process exit isn't blocked
 #include "API/Model/Prefab.h"   // PrefabGuid (register prefab guid<->path)
 #include "render/irender.h"
 #include "interface/AppInstance.h"   // GuidForContentPath: content root + ResolveContent
@@ -143,6 +144,25 @@ void ResDB::BuildShaderPipelines(iRender* r)
 		}
 }
 
+int ResDB::BuildShaderPipelinesStep(iRender* r, int maxCount)
+{
+	if (!r) return 0;
+	int built = 0, left = 0;
+	for (Shader* s : shaders)
+	{
+		if (!s || s->rendererHandle != 0) continue;
+		if (built >= maxCount) { ++left; continue; }
+		s->rendererHandle = s->isPost ? r->createPostPipeline(s->name.c_str(), s->psSource.c_str())
+		                              : r->createShaderPipeline(s->name.c_str(), s->vsSource.c_str(), s->psSource.c_str());
+		std::cout << "[ResDB]\t" << (s->isPost ? "post" : "shader") << " pipeline '" << s->name
+		          << "' -> handle " << s->rendererHandle << std::endl;
+		// A failed build keeps handle 0 — count it as done for THIS pass so the boot pump
+		// can't spin on it forever; the full BuildShaderPipelines/hot-reload can retry later.
+		++built;
+	}
+	return left;
+}
+
 void ResDB::HotReloadShaders(iRender* r)
 {
 	if (!r) return;
@@ -196,6 +216,7 @@ void ResDB::LoadShadersDir(const std::string& dir)
 	for (bfs::recursive_directory_iterator it(dir, ec), end; it != end; it.increment(ec))
 	{
 		if (ec) break;
+		if (Jobs::Stopping()) return;   // boot-time worker job — bail so Shutdown's join returns
 		if (bfs::is_directory(it->path())) continue;
 		std::string fn = it->path().filename().string();
 		// Post-process effect shader: a single "<name>.post.hlsl" (fullscreen PS; paired with the built-in
@@ -385,6 +406,7 @@ void ResDB::LoadContentDir(const std::string& dir)
 	for (bfs::recursive_directory_iterator it(dir, ec), end; it != end; it.increment(ec))
 	{
 		if (ec) break;
+		if (Jobs::Stopping()) return;   // runs on a worker at boot — must not block process exit
 		if (bfs::is_directory(it->path())) continue;
 		LoadContentFile(it->path().string());
 	}
@@ -397,6 +419,7 @@ void ResDB::LoadContentPackaged()
 {
 	for (const std::string& rel : Package::List("content/"))
 	{
+		if (Jobs::Stopping()) return;   // boot-time worker job — must not block process exit
 		std::string disk = Package::ResolveRead(rel);   // raw overlay only
 		if (!disk.empty()) { LoadContentFile(disk); continue; }
 		std::string bytes;

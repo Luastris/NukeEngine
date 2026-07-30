@@ -134,6 +134,8 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("GetLayer", &Atom::GetLayer));
 		t.methods.push_back(MakeMethod("SetPersistent", &Atom::SetPersistent));
 		t.methods.push_back(MakeMethod("IsPersistent", &Atom::IsPersistent));
+		t.methods.push_back(MakeMethod("SetEnabled", &Atom::SetEnabled));
+		t.methods.push_back(MakeMethod("IsEnabled", &Atom::IsEnabled));
 		t.methods.push_back(MakeMethod("SetParent", &Atom::SetParent));
 		t.methods.push_back(MakeMethod("GetParent", &Atom::GetParent));
 		t.methods.push_back(MakeMethod("AddChild", &Atom::AddChild));

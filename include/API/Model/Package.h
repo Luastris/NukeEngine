@@ -72,16 +72,48 @@ public:
 	static int  MountedCount();
 	static std::vector<std::string> MountedPaks();   // pak paths, priority order (top first)
 
+	// ---- pak manifest (base game / DLC identity + platform tags) --------------------------
+	// Every .nupak may carry a reserved "pak.json" entry:
+	//   {"kind": "base"|"dlc", "name": "...", "base": "<base pak name>", "platforms": ["win64"]}
+	// The base game pak is written with kind "base". A DLC is the SAME container, but it
+	// DEPENDS on its base (mounted only when the base pak's name matches its "base"), carries
+	// only new/changed entries (built as a crc diff against the base), and is never editable
+	// as a project — a developer-only artifact rebuilt from the raw project. A pak without
+	// pak.json is a legacy base. Empty "platforms" = runs anywhere.
+	struct PakInfo
+	{
+		std::string kind;                     // "" (legacy base) / "base" / "dlc"
+		std::string name;                     // display name (the game's or the DLC's)
+		std::string base;                     // DLC: the base pak name it extends
+		std::vector<std::string> platforms;   // empty = any platform
+	};
+	static bool ReadPakInfo(const std::string& pakPath, PakInfo& out);   // false = no/bad pak.json
+	// The platform tag this binary was built for ("win64" today) — matched against pak.json
+	// "platforms" and mod.json "platform" ("any" or missing = cross-platform).
+	static const char* CurrentPlatform();
+	// Mount every DLC pak in <gameRoot>/content/dlc (filename order, priority 1..K — above the
+	// base at 0, below the mods at 1000+). Skips with a log: no dlc manifest, base-name
+	// mismatch vs `baseName`, platform excluded. Returns how many mounted.
+	static int MountDlcs(const std::string& gameRoot, const std::string& baseName);
+
 	// ---- mods with dependencies (mods-on-mods) -------------------------------------------
-	// Every .numod may carry a "mod.json" manifest: {"name": "...", "requires": ["OtherMod"]}.
+	// Every .numod may carry a "mod.json" manifest:
+	//   {"name": "...", "requires": ["OtherMod"], "platform": "any"|"win64",
+	//    "parts": ["X.textures.numod", ...]}           (the split parts of THIS mod)
+	// or, for a split PART pak: {"name": "...", "part_of": "<main mod name>"} — parts are
+	// mounted by their main mod (same priority) and never listed/mounted as mods themselves.
 	// `requires` = the mods that were MOUNTED in the authoring session (a compatibility
 	// patch depends on the mods it patches; a mod reusing another mod's system depends on
-	// it) — they must load BELOW the dependent mod.
+	// it) — they must load BELOW the dependent mod. `platform` beyond "any" marks a mod
+	// carrying native code (platform-bound); content-only mods stay cross-platform.
 	struct ModInfo
 	{
 		std::string pakPath;                 // mounted file
 		std::string name;                    // manifest name, else the file stem
 		std::vector<std::string> requires_;  // dependency names (load below this mod)
+		std::string platform;                // "" / "any" = cross-platform, else a platform tag
+		std::vector<std::string> parts;      // split-part pak filenames (mounted with this mod)
+		std::string partOf;                  // non-empty = this pak IS a part (skip as a mod)
 	};
 	// Mount every mod enabled in <gameRoot>/config/mods.json above the base pak: tolerant
 	// path resolution (as written -> mods/<entry> -> mods/<filename>), dependency-aware

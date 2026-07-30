@@ -42,7 +42,7 @@ struct Pool
 	std::deque<std::pair<std::shared_ptr<JobState>, boost::function<void()>>> queue;
 	boost::mutex              qm;
 	boost::condition_variable qcv;
-	bool  stop = false;
+	boost::atomic<bool> stop{ false };   // atomic: Jobs::Stopping() polls it lock-free from jobs
 	bool  inited = false;
 	boost::atomic<int> busy{ 0 };   // jobs executing right now (status-bar jobs list)
 
@@ -129,6 +129,8 @@ void Jobs::Init(int workers, bool pinCores)
 	}
 	std::cout << " (physics core " << physCore << " reserved)" << std::endl;
 }
+
+bool Jobs::Stopping() { return g_pool.stop; }
 
 void Jobs::Shutdown()
 {

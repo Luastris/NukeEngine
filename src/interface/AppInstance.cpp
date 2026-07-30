@@ -176,7 +176,7 @@ bool AppInstance::StartWorldLoadAsync(const std::string& relPath)
 	{
 		std::string data;
 		const bool ok = ComposeWorldData(relPath, data);
-		if (asyncLoadGen != my) return;   // superseded/cancelled — drop silently
+		if (asyncLoadGen != my || Jobs::Stopping()) return;   // superseded/cancelled/exiting — drop silently
 		if (!ok)
 		{
 			asyncLoadState = 3;

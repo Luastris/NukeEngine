@@ -36,6 +36,10 @@ public:
 	// later calls are ignored. Schedule() lazily Inits with config defaults if needed.
 	static void Init(int workers = -1, bool pinCores = true);
 	static void Shutdown();
+	// True once Shutdown() started: long-running jobs (content scans, world parses) MUST poll
+	// this and bail out early — Shutdown JOINS the workers, so an oblivious job blocks process
+	// exit for its whole runtime ("the editor won't close" while a background load runs).
+	static bool Stopping();
 	static int  WorkerCount();
 	static int  Pending();   // jobs queued, not yet picked up (status-bar jobs list)
 	static int  Busy();      // jobs executing right now

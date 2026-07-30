@@ -313,7 +313,7 @@ bool Package::Read(const std::string& rel, std::string& out)
 					{
 						static std::set<std::string> warned;
 						if (warned.insert(k).second)
-							cout << "[Package]\t'" << rel << "' OVERRIDDEN by mod: "
+							cout << "[Package]\t'" << rel << "' OVERRIDDEN by: "   // a mod OR a DLC layer
 							     << bfs::path(m.pakPath).stem().string() << endl;
 						break;
 					}
@@ -347,6 +347,84 @@ bool Package::Unmount(const std::string& pakPath)
 			return true;
 		}
 	return false;
+}
+
+const char* Package::CurrentPlatform()
+{
+#if defined(_WIN64)
+	return "win64";
+#elif defined(_WIN32)
+	return "win32";
+#elif defined(__APPLE__)
+	return "mac64";
+#else
+	return "linux64";
+#endif
+}
+
+// Empty list = runs anywhere; otherwise the current platform tag must be listed.
+static bool PlatformListOk(const std::vector<std::string>& platforms)
+{
+	if (platforms.empty()) return true;
+	for (const std::string& p : platforms)
+		if (p == "any" || p == Package::CurrentPlatform()) return true;
+	return false;
+}
+
+bool Package::ReadPakInfo(const std::string& pakPath, PakInfo& out)
+{
+	out = PakInfo();
+	Package::File pf;
+	std::string man;
+	if (!pf.Open(pakPath) || !pf.Read("pak.json", man)) return false;
+	nlohmann::json j = nlohmann::json::parse(man, nullptr, false);
+	if (j.is_discarded() || !j.is_object()) return false;
+	out.kind = j.value("kind", std::string());
+	out.name = j.value("name", std::string());
+	out.base = j.value("base", std::string());
+	if (j.contains("platforms") && j["platforms"].is_array())
+		for (auto& p : j["platforms"])
+			if (p.is_string()) out.platforms.push_back(p.get<std::string>());
+	return true;
+}
+
+int Package::MountDlcs(const std::string& gameRoot, const std::string& baseName)
+{
+	bfs::path dir = bfs::path(gameRoot) / "content" / "dlc";
+	boost::system::error_code ec;
+	if (!bfs::exists(dir, ec) || !bfs::is_directory(dir, ec)) return 0;
+	std::vector<std::string> paks;
+	for (bfs::directory_iterator it(dir, ec), end; it != end && !ec; it.increment(ec))
+		if (it->path().extension() == ".nupak") paks.push_back(it->path().string());
+	std::sort(paks.begin(), paks.end());   // deterministic load order: filename
+	auto lower = [](std::string s) { for (char& c : s) c = (char)tolower((unsigned char)c); return s; };
+	int prio = 1, mounted = 0;   // above the base (0), below the mods (1000+)
+	for (const std::string& p : paks)
+	{
+		const std::string fn = bfs::path(p).filename().string();
+		PakInfo pi;
+		if (!ReadPakInfo(p, pi) || pi.kind != "dlc")
+		{
+			cout << "[Package]\tdlc skipped (no dlc manifest): " << fn << endl;
+			continue;
+		}
+		// A DLC belongs to ONE game: its recorded base must match the mounted base pak's name.
+		// Legacy bases have no name — then the folder placement is the only binding we have.
+		if (!pi.base.empty() && !baseName.empty() && lower(pi.base) != lower(baseName))
+		{
+			cout << "[Package]\tdlc '" << pi.name << "' is for '" << pi.base
+			     << "', not '" << baseName << "' — skipped" << endl;
+			continue;
+		}
+		if (!PlatformListOk(pi.platforms))
+		{
+			cout << "[Package]\tdlc '" << pi.name << "' excludes platform "
+			     << CurrentPlatform() << " — skipped" << endl;
+			continue;
+		}
+		if (Package::Mount(p, prio)) { ++prio; ++mounted; }
+	}
+	return mounted;
 }
 
 int Package::MountMods(const std::string& gameRoot)
@@ -395,11 +473,32 @@ int Package::MountModList(const std::string& gameRoot, const std::vector<std::st
 			nlohmann::json j = nlohmann::json::parse(man, nullptr, false);
 			if (!j.is_discarded() && j.is_object())
 			{
-				mi.name = j.value("name", mi.name);
+				mi.name     = j.value("name", mi.name);
+				mi.platform = j.value("platform", std::string());
+				mi.partOf   = j.value("part_of", std::string());
 				if (j.contains("requires") && j["requires"].is_array())
 					for (auto& r : j["requires"])
 						if (r.is_string()) mi.requires_.push_back(r.get<std::string>());
+				if (j.contains("parts") && j["parts"].is_array())
+					for (auto& r : j["parts"])
+						if (r.is_string()) mi.parts.push_back(r.get<std::string>());
 			}
+		}
+		// A split PART pak is mounted by its main mod — never as a mod of its own (a stray
+		// part in the config would double-mount its entries).
+		if (!mi.partOf.empty())
+		{
+			cout << "[Package]\t'" << bfs::path(resolved).filename().string()
+			     << "' is a part of mod '" << mi.partOf << "' — mounted with it, not listed" << endl;
+			continue;
+		}
+		// Platform gate: content-only mods are cross-platform ("any"/missing); a mod carrying
+		// native code was tagged with its platform at packaging time.
+		if (!mi.platform.empty() && mi.platform != "any" && mi.platform != CurrentPlatform())
+		{
+			cout << "[Package]\tmod '" << mi.name << "' is " << mi.platform << "-only (this is "
+			     << CurrentPlatform() << ") — skipped" << endl;
+			continue;
 		}
 		mods.push_back(std::move(mi));
 	}
@@ -436,11 +535,25 @@ int Package::MountModList(const std::string& gameRoot, const std::vector<std::st
 			     << "] which is not enabled — skipped" << endl;
 		}
 
-	// 3) Mount in that order above the base pak (priority 1..N).
-	int prio = 1, mounted = 0;
+	// 3) Mount in that order above the base pak AND above the DLC layer: DLCs sit at 1..K,
+	// mods start at 1000 so mods always override DLC content the way they override the base.
+	int prio = 1000, mounted = 0;
 	for (ModInfo& mi : order)
 	{
 		if (!Package::Mount(mi.pakPath, prio)) { cout << "[Package]\tmod skipped (bad pak): " << mi.pakPath << endl; continue; }
+		// Split parts ride at the SAME priority, mounted after the main pak (stable sort keeps
+		// the main above its parts; a split never duplicates a path, so order inside is moot).
+		for (const std::string& part : mi.parts)
+		{
+			boost::system::error_code pec;
+			bfs::path pcand[] = { bfs::path(part), root / part, root / "mods" / part,
+			                      root / "mods" / bfs::path(part).filename(),
+			                      bfs::path(mi.pakPath).parent_path() / bfs::path(part).filename() };
+			std::string presolved;
+			for (bfs::path& c : pcand) if (bfs::exists(c, pec) && !bfs::is_directory(c, pec)) { presolved = c.string(); break; }
+			if (presolved.empty() || !Package::Mount(presolved, prio))
+				cout << "[Package]\tmod '" << mi.name << "': part '" << part << "' missing/bad — SKIPPED (content of that part won't load)" << endl;
+		}
 		if (!mi.requires_.empty())
 		{
 			std::string deps;

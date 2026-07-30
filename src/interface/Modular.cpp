@@ -55,9 +55,127 @@ bool IsTypeActive(const std::string& type)
 	return IsPluginLoaded(it->second);
 }
 
+#ifdef _WIN32
+// Read two exports from a DLL's PE export table by parsing the FILE — no LoadLibrary of any
+// kind (see the gate below for why). Sets `hasPlugin` when an exported "plugin" symbol exists
+// and `engineAbi` from the exported `nuke_engine_abi` int (1 = pre-stamp build). Returns false
+// when the file isn't a parseable x64 PE — callers then fall back to the post-load gate.
+static bool PreflightPeExports(const std::string& path, bool& hasPlugin, int& engineAbi)
+{
+	hasPlugin = false; engineAbi = 1;
+	bfs::ifstream f(bfs::path(path), std::ios::binary);
+	if (!f) return false;
+	auto rd = [&](long long off, void* dst, size_t n) -> bool
+	{
+		f.clear(); f.seekg((std::streamoff)off);
+		f.read((char*)dst, (std::streamsize)n);
+		return (bool)f;
+	};
+	IMAGE_DOS_HEADER dos;
+	if (!rd(0, &dos, sizeof(dos)) || dos.e_magic != IMAGE_DOS_SIGNATURE) return false;
+	DWORD sig = 0; IMAGE_FILE_HEADER fh;
+	if (!rd(dos.e_lfanew, &sig, 4) || sig != IMAGE_NT_SIGNATURE) return false;
+	if (!rd(dos.e_lfanew + 4, &fh, sizeof(fh))) return false;
+	if (fh.SizeOfOptionalHeader < sizeof(IMAGE_OPTIONAL_HEADER64)) return false;   // not PE32+
+	IMAGE_OPTIONAL_HEADER64 oh;
+	if (!rd(dos.e_lfanew + 4 + sizeof(fh), &oh, sizeof(oh)) || oh.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC) return false;
+	const IMAGE_DATA_DIRECTORY& expDir = oh.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
+	if (!expDir.VirtualAddress) return true;   // parsed fine — just exports nothing
+	std::vector<IMAGE_SECTION_HEADER> secs(fh.NumberOfSections);
+	if (secs.empty() || !rd(dos.e_lfanew + 4 + sizeof(fh) + fh.SizeOfOptionalHeader,
+	                        secs.data(), secs.size() * sizeof(IMAGE_SECTION_HEADER))) return false;
+	auto off = [&](DWORD rva) -> long long
+	{
+		for (const IMAGE_SECTION_HEADER& s : secs)
+		{
+			const DWORD size = s.Misc.VirtualSize > s.SizeOfRawData ? s.Misc.VirtualSize : s.SizeOfRawData;
+			if (rva >= s.VirtualAddress && rva < s.VirtualAddress + size)
+				return (long long)rva - s.VirtualAddress + s.PointerToRawData;
+		}
+		return -1;
+	};
+	IMAGE_EXPORT_DIRECTORY ed;
+	const long long edOff = off(expDir.VirtualAddress);
+	if (edOff < 0 || !rd(edOff, &ed, sizeof(ed))) return false;
+	if (!ed.NumberOfNames || !ed.NumberOfFunctions) return true;
+	std::vector<DWORD> nameRvas(ed.NumberOfNames);
+	std::vector<WORD>  ordinals(ed.NumberOfNames);
+	std::vector<DWORD> funcRvas(ed.NumberOfFunctions);
+	const long long na = off(ed.AddressOfNames), no = off(ed.AddressOfNameOrdinals), fa = off(ed.AddressOfFunctions);
+	if (na < 0 || no < 0 || fa < 0) return false;
+	if (!rd(na, nameRvas.data(), nameRvas.size() * sizeof(DWORD))) return false;
+	if (!rd(no, ordinals.data(), ordinals.size() * sizeof(WORD))) return false;
+	if (!rd(fa, funcRvas.data(), funcRvas.size() * sizeof(DWORD))) return false;
+	for (DWORD i = 0; i < ed.NumberOfNames; ++i)
+	{
+		const long long so = off(nameRvas[i]);
+		if (so < 0) continue;
+		char nm[64] = {};
+		f.clear(); f.seekg((std::streamoff)so);
+		f.read(nm, sizeof(nm) - 1);              // partial read at EOF is fine — gcount bytes
+		nm[f.gcount() > 0 ? f.gcount() : 0] = 0;
+		if (strcmp(nm, "plugin") == 0) hasPlugin = true;
+		else if (strcmp(nm, "nuke_engine_abi") == 0 && ordinals[i] < ed.NumberOfFunctions)
+		{
+			const long long vo = off(funcRvas[ordinals[i]]);
+			int v = 0;
+			if (vo >= 0 && rd(vo, &v, sizeof(v))) engineAbi = v;
+		}
+	}
+	return true;
+}
+#endif
+
+// ---- SEH shields around FOREIGN module code -------------------------------------------------
+// The loader's contract: NO broken, stale or config-mismatched DLL may ever take the host
+// down. Stamps (above) catch the KNOWN mismatches cheaply; these shields catch everything
+// else — an access violation (or any exception) inside module code refuses that module and
+// the host keeps running. MSVC C++ exceptions ride on SEH too, so both kinds are caught.
+// C++ unwinding can't cross __try, hence the tiny raw wrapper functions (no C++ locals).
+static NUKEModule* DiscoverModuleFileBody(const std::string& absPath);
+NUKEModule* DiscoverModuleFile(const std::string& absPath)
+{
+	__try { return DiscoverModuleFileBody(absPath); }
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		cout << "[Modular]\tREFUSED (crashed during discovery): " << absPath
+		     << " — broken or stale binary; rebuild or remove it" << endl;
+		return nullptr;
+	}
+}
+
+static bool SehOnLoad(NUKEModule* m)
+{
+	__try { m->OnLoad(); return true; }
+	__except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+
+static void* SehQueryService(NUKEModule* m)
+{
+	__try { return m->queryService(); }
+	__except (EXCEPTION_EXECUTE_HANDLER) { return nullptr; }
+}
+
+static bool SehShutdown(NUKEModule* m)
+{
+	__try { m->Shutdown(); return true; }
+	__except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+
+// The plugin's Run() executes on its own background thread — an unshielded crash there kills
+// the process no matter how careful the loader was. Same rule: log, stop, host lives.
+static void SehRunGuard(NUKEModule* m, AppInstance* inst)
+{
+	__try { m->Run(inst); }
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		cout << "[Modular]\tplugin Run() crashed (module survives disabled): " << m->moduleFile << endl;
+	}
+}
+
 // Import ONE plugin DLL into the pool. Skips non-plugins (no "plugin" export) and file
 // names already discovered (the host's own modules/ wins over a same-named project module).
-NUKEModule* DiscoverModuleFile(const std::string& absPath)
+static NUKEModule* DiscoverModuleFileBody(const std::string& absPath)
 {
 	bfs::path p(absPath);
 	auto ext = p.extension().string();
@@ -67,6 +185,32 @@ NUKEModule* DiscoverModuleFile(const std::string& absPath)
 		if (m && m->moduleFile == file) return nullptr;   // already in the pool
 	try
 	{
+#ifdef _WIN32
+		// Engine BINARY-compat gate WITHOUT running the DLL's code, and WITHOUT the OS loader:
+		// LoadLibraryEx(DONT_RESOLVE_DLL_REFERENCES) is a trap — it plants an uninitialized
+		// image in the loader's cache, and the later REAL LoadLibrary can be handed that same
+		// image (imports unresolved, statics never run; seen live: NukeCSharp discovered as ''
+		// with a garbage moduleFile, then a null service provider crash). So the stamps are
+		// read by parsing the PE export table straight from the FILE BYTES (PreflightPeExports
+		// below) — zero loader-state side effects, statics of a stale module never execute.
+		{
+			bool hasPlugin = false; int engineAbi = 1;
+			if (PreflightPeExports(p.string(), hasPlugin, engineAbi))
+			{
+				if (!hasPlugin)
+					return nullptr;   // not a NUKE module — skip without ever loading it
+				if (engineAbi != NUKE_ENGINE_ABI)
+				{
+					cout << "[Modular]\t" << file << " REFUSED: built against engine ABI " << engineAbi
+					     << ", this engine is " << NUKE_ENGINE_ABI
+					     << " — rebuild the module (game modules: File -> Build & Reload Game Modules)" << endl;
+					return nullptr;
+				}
+			}
+			// Unparseable/foreign binary: fall through — the post-load gate below still refuses
+			// a stale ABI (worst case its statics ran, same as before the pre-flight existed).
+		}
+#endif
 		// Extension plugins export an unmangled "plugin" symbol — skip any other DLL.
 		// ALTERED SEARCH PATH: a module's DLL dependencies resolve from the MODULE'S OWN
 		// directory first (a game module linking NukeTilemap.dll finds it beside itself in
@@ -74,6 +218,19 @@ NUKEModule* DiscoverModuleFile(const std::string& absPath)
 		boost::dll::shared_library lib(p.string(), boost::dll::load_mode::load_with_altered_search_path);
 		if (!lib.has("plugin"))
 			return nullptr;
+
+		// Second line of the ABI gate (non-Windows path: no pre-flight probe above).
+		{
+			int engineAbi = 1;
+			if (lib.has("nuke_engine_abi")) engineAbi = lib.get<const int>("nuke_engine_abi");
+			if (engineAbi != NUKE_ENGINE_ABI)
+			{
+				cout << "[Modular]\t" << file << " REFUSED: built against engine ABI " << engineAbi
+				     << ", this engine is " << NUKE_ENGINE_ABI
+				     << " — rebuild the module (game modules: File -> Build & Reload Game Modules)" << endl;
+				return nullptr;
+			}
+		}
 
 		auto plugin = boost::dll::import_symbol<NUKEModule>(p.string(), "plugin",
 			boost::dll::load_mode::load_with_altered_search_path);
@@ -223,7 +380,18 @@ void EnablePlugin(NUKEModule* m)
 	// Diff the registry around OnLoad() to learn which component types this plugin provides.
 	std::set<std::string> before;
 	for (TypeInfo* t : Registry_All()) before.insert(t->name);
-	m->OnLoad();   // synchronous: registers the plugin's component types
+	// SEH-shielded: OnLoad runs FOREIGN code. A crash refuses the plugin instead of killing
+	// the host (classic victim: a project Game.dll built against another engine build or the
+	// other Debug/Release configuration — the ABI stamp can't see a config mismatch).
+	if (!SehOnLoad(m))
+	{
+		cout << "[Modular]\t" << m->moduleFile << " REFUSED: crashed in OnLoad — stale or built "
+		     << "for another engine build/configuration; rebuild it "
+		     << "(game modules: File -> Build & Reload Game Modules)" << endl;
+		m->loaded = false;
+		m->stopped = true;
+		return;
+	}
 	for (TypeInfo* t : Registry_All())
 		if (!before.count(t->name)) g_typePlugin[t->name] = m->moduleFile;
 
@@ -236,11 +404,11 @@ void EnablePlugin(NUKEModule* m)
 	// bound (not done by the plugin itself) so provide/revoke can never get out of sync
 	// with the plugin lifecycle.
 	if (!service.empty())
-		if (void* iface = m->queryService())
+		if (void* iface = SehQueryService(m))
 			Services_Provide(service.c_str(), iface);
 
 	cout << "[Modular]\tenabled '" << m->title << "'" << endl;
-	boost::thread(boost::bind(&NUKEModule::Run, m, g_instance));
+	boost::thread(boost::bind(&SehRunGuard, m, g_instance));   // shielded: a crashing Run() must not kill the host
 }
 
 void DisablePlugin(NUKEModule* m)
@@ -250,14 +418,15 @@ void DisablePlugin(NUKEModule* m)
 	// Revoke THIS module's interface FIRST so no consumer can grab it while it's dying —
 	// by instance, not by name: a shared service's other providers must stay registered.
 	if (*m->provides())
-		Services_RevokeIface(m->provides(), m->queryService());
+		Services_RevokeIface(m->provides(), SehQueryService(m));
 
 	// Live downgrade FIRST (while the type's reflection + vtable are still valid): convert this
 	// plugin's live components into inert placeholders so nothing dangles after it goes away.
 	if (g_instance && g_instance->currentWorld)
 		g_instance->currentWorld->ConvertPluginToUnknown(m->moduleFile);
 
-	m->Shutdown();   // tears down windows/menus etc.; sets stopped = true
+	if (!SehShutdown(m))   // shielded like OnLoad — teardown of a broken module must not kill the host
+		cout << "[Modular]\t" << m->moduleFile << ": Shutdown crashed (module dropped anyway)" << endl;
 	m->loaded = false;
 	cout << "[Modular]\tdisabled '" << m->title << "'" << endl;
 }
@@ -270,13 +439,18 @@ void UnloadModules()
 	// run so module-owned components DIE (and e.g. unsubscribe their Events lambdas) before
 	// g_modules.clear() frees the DLLs — else engine statics hold std::functions whose code
 	// is gone and the CRT teardown segfaults (hit by NukeNativeRim's RimGame subscriptions).
+	// Teardown breadcrumbs go to STDERR raw: cout is tee'd into the log ring, and at this
+	// point a wedged stream/thread can hang or assert inside the tee — stderr can't.
 	for (int phase : { PHASE_RUNTIME, PHASE_BOOT })
 		for (auto i : g_modules)
 		{
 			if (!i || !i->loaded || i->phase() != phase) continue;
+			fprintf(stderr, "[Unload]\tdisabling %s\n", i->moduleFile.c_str()); fflush(stderr);
 			DisablePlugin(i.get());
 		}
+	fprintf(stderr, "[Unload]\tfreeing module DLLs\n"); fflush(stderr);
 	g_modules.clear();
+	fprintf(stderr, "[Unload]\tdone\n"); fflush(stderr);
 }
 
 void LoadBuiltinShaders(iRender* render, const std::string& dir)
