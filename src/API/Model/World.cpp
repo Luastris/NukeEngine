@@ -28,6 +28,7 @@
 #include "API/Model/DebugDraw.h"   // editor gizmos (selection wire shapes)
 #include "API/Model/InstancedMesh.h" // GPU-instanced scatters (7.1: chunked instanced draws)
 #include "API/Model/Wind.h"          // global wind field (7.2: world state + renderer push)
+#include "interface/WorldHooks.h"    // module loop hooks (water params/captures/prepass, weather, ...)
 #include "API/Model/BendVolumes.h"   // foliage bend volumes: zones + module submissions (7.4)
 #include "interface/Services.h"   // GetService<iPhysics>()
 #include "service/iPhysics.h"     // the physics service seam (fixed-step driver below)
@@ -2092,6 +2093,7 @@ void World::Render(iRender* r)
 		r->setWind(wd, wp);
 	}
 
+
 	// Ray tracing (D3D12): build the scene TLAS from opaque meshes FIRST — before the probe capture and camera
 	// passes, both of which draw with the world PSO and ray-query g_TLAS (RT shadows). Must exist before any draw.
 	// Auxiliary worlds (asset previews) skip it: the TLAS is GLOBAL and the live scene must stay its last
@@ -2150,6 +2152,20 @@ void World::Render(iRender* r)
 	// SKIPPED when ray tracing is active: everything (foliage included) shadows via TLAS rays —
 	// the renderer bends the foliage BLAS with the NukeBend compute every frame, so the rays
 	// hit SWAYING blades and the maps would be pure waste (nothing samples them under RT).
+	// Module loop hooks (interface/WorldHooks.h): loop-level module systems run before the
+	// shadow/probe/camera passes — NukeWater pushes its wave state and renders its GPU
+	// bottom-depth captures here. The submitter draws every opaque mesh with the shadow path
+	// into whatever depth target the hook has bound. The engine stays module-blind.
+	if (!auxiliary)
+		for (WorldRenderHook* hk : WorldRenderHooks())
+			hk->preRender(r, [&]()
+			{
+				std::vector<DrawItem> bitems; CollectMeshes(*hierarchy, bitems);
+				for (DrawItem& di : bitems)
+					if (di.blend == 0)   // opaque only: glass/particles are not a ground
+						r->renderShadowObject(di.mesh, di.pos, di.quat, di.scale, di.mat);
+			});
+
 	if (!r->rtAvailable())
 		for (int sp = 0, spc = r->shadowPassCount(); sp < spc; ++sp)
 		{
@@ -2231,6 +2247,7 @@ void World::Render(iRender* r)
 		d.fov   = (float)cam->fov * 0.01745329252f; // degrees -> radians
 		d.nearZ = cam->_near;
 		d.farZ  = cam->_far;
+		d.editorCamera = cam->editorCamera ? 1 : 0;
 		// Projection: ease the runtime blend toward the target (Perspective 0 / Orthographic 1)
 		// so SetProjection / the editor toggle animate smoothly; hand the blend + size to the renderer.
 		{
@@ -2300,7 +2317,11 @@ void World::Render(iRender* r)
 		std::vector<InstancedMesh*> camInstSets;
 		CollectInstancedMeshes(*hierarchy, camInstSets, camMask);
 
-		if (hasSSR || hasTAA || !decals.empty())
+		// Module hooks may demand scene depth too (water: shore foam/absorption/underwater fog).
+		bool hookPrepass = false;
+		for (WorldRenderHook* hk : WorldRenderHooks())
+			if (hk->wantsScenePrepass()) { hookPrepass = true; break; }
+		if (hasSSR || hasTAA || !decals.empty() || hookPrepass)
 		{
 			r->beginGBufferPass(d);
 			std::vector<DrawItem> gitems; CollectMeshes(*hierarchy, gitems, camMask);
@@ -2579,12 +2600,16 @@ bool SavePrefab(Atom* root, const std::string& path)
 	return (bool)f;
 }
 
-static void RegenIds(Atom* a)
+// Fresh unique ids for a whole subtree, recording old->new so queued AtomRef fixups that
+// pointed INSIDE the subtree can follow their clones (external refs keep their ids).
+static void RegenIds(Atom* a, std::map<unsigned long, unsigned long>& oldToNew)
 {
 	if (!a) return;
+	const unsigned long old = (unsigned long)a->id.id;
 	a->id.generate();                    // each instantiated atom gets a fresh unique id
+	oldToNew[old] = (unsigned long)a->id.id;
 	for (Component* c : a->components) c->id.generate();   // and its components
-	for (Atom* c : a->children) RegenIds(c);
+	for (Atom* c : a->children) RegenIds(c, oldToNew);
 }
 
 Atom* LoadPrefab(const std::string& path)
@@ -2601,8 +2626,10 @@ Atom* LoadPrefabFromString(const std::string& text)
 	json j = json::parse(text, nullptr, false);
 	if (j.is_discarded()) return nullptr;
 	Atom* a = LoadAtom(j);
-	RegenIds(a);                         // instances are unique — don't share the prefab's saved ids
-	Reflect_ResolveAtomRefs();           // AtomRef props inside the subtree (world-external ids -> null)
+	std::map<unsigned long, unsigned long> ids;
+	RegenIds(a, ids);                    // instances are unique — don't share the prefab's saved ids
+	Reflect_RemapPendingAtomRefs(ids);   // refs INSIDE the subtree follow their clones
+	Reflect_ResolveAtomRefs();           // remaining (world-external) ids -> null
 	return a;
 }
 
@@ -2662,6 +2689,24 @@ Atom* LoadAtomFromString(const std::string& data)
 	if (j.is_discarded()) return nullptr;
 	Atom* a = LoadAtom(j);
 	Reflect_ResolveAtomRefs();   // AtomRef props in the restored subtree (undo/merge paths)
+	return a;
+}
+
+// CLONE variant (editor copy/paste/duplicate): same reconstruction, but the subtree gets FRESH
+// ids — the original stays in the world, and two atoms must never share a stable id. AtomRef
+// props that pointed inside the copied subtree follow their clones; refs to outside atoms
+// (a scene camera, a shared target) keep pointing at the originals.
+Atom* CloneAtomFromString(const std::string& data)
+{
+	if (data.empty()) return nullptr;
+	json j = json::parse(data, nullptr, false);
+	if (j.is_discarded()) return nullptr;
+	Atom* a = LoadAtom(j);
+	if (!a) return nullptr;
+	std::map<unsigned long, unsigned long> ids;
+	RegenIds(a, ids);
+	Reflect_RemapPendingAtomRefs(ids);
+	Reflect_ResolveAtomRefs();
 	return a;
 }
 

@@ -43,5 +43,11 @@ void main(inout RTPayload p, in BuiltInTriangleIntersectionAttributes attr)
         traced = p2.color;
     }
     col += SpecFr(hitN, V, rough, albedo, metal, spec) * lerp(traced, env, rough);   // sharp(traced) -> blurred(env) by roughness
-    p.color = col;
+    // WATER on the way back: this radiance travels the segment the ray just came along — if
+    // that segment crossed the surface (a mirror above water reflecting something below, or
+    // the reverse), the water swallows it with depth and the SURFACE ITSELF takes over (it
+    // is not in the TLAS — attenuating alone left a black hole where the sea belongs).
+    // Each recursion level handles its own segment.
+    float3 wT = RTWaterTrans3(WorldRayOrigin(), hitPos);
+    p.color = col * wT + RTWaterLook(wdir) * (1.0 - dot(wT, float3(0.299, 0.587, 0.114)));
 }

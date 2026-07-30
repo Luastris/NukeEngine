@@ -55,10 +55,12 @@ void Time::NewFrame()
 	last = now;
 	have = true;
 	++frame;   // tick-interval stagger (6.8)
-	// Game clock: scaled while PLAYING; equal to real time in edit mode so editor previews
-	// (animators in asset editors, etc.) never freeze on the game-speed setting.
-	const bool playing = AppInstance::GetSingleton()->playState == 1;
-	gameDelta = playing ? delta * scale : delta;
+	// Game clock: scaled while PLAYING, FROZEN while PIE is PAUSED (pause means the game
+	// world stands still — water, animators, everything on game time), and equal to real
+	// time in edit mode so editor previews (animators in asset editors, etc.) never freeze
+	// on the game-speed setting.
+	const int ps = AppInstance::GetSingleton()->playState;   // 0 edit, 1 playing, 2 paused
+	gameDelta = (ps == 1) ? delta * scale : (ps == 2 ? 0.0 : delta);
 }
 
 Time::Time() {}

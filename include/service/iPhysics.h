@@ -190,6 +190,12 @@ public:
 	virtual bool shapeCastIgnore(const NukeShapeDesc& shape, const float from[3], const float quat[4],
 	                             const float dir[3], float maxDist, uint64_t ignoreBody,
 	                             uint64_t& hitBody, float hitPoint[3], float hitNormal[3]) = 0;
+
+	// --- water/buoyancy (7.5). Appended at the END (ABI: never insert mid-vtable). ---
+	// Force applied at a world POINT (generates torque about the COM) — per-probe buoyancy.
+	virtual void addForceAtPoint(uint64_t body, const float force[3], const float point[3]) = 0;
+	// The body's velocity AT a world point (linear + omega x r) — per-probe water drag.
+	virtual void getPointVelocity(uint64_t body, const float point[3], float outVel[3]) = 0;
 };
 
 }  // namespace nuke

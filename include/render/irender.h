@@ -84,6 +84,10 @@ struct NukeCameraDesc
     // engine animates it for a smooth perspective<->ortho transition.
     float    ortho     = 0.0f;
     float    orthoSize = 5.0f;
+    // 1 = the EDITOR viewport camera (scene navigation), 0 = a game/world camera. Appended at
+    // the END (ABI). Camera-anchored effects (the water ripple window) prefer GAME cameras:
+    // in PIE the player watches the game view, not the editor viewport.
+    int      editorCamera = 0;
 };
 
 // Backend-neutral window description, filled by the app from its config and passed
@@ -513,6 +517,155 @@ public:
     // (dir.xyz, strength), (mode, falloff, seed, 0); mode 0=directional 1=radial 2=vortex
     // 3=turbulence. Up to 16, pushed once per frame by World::Render; count 0 clears.
     virtual void setBendVolumes(const float* vols, int count) {}
+
+    // --- Water (7.5) --------------------------------------------------------------------
+    // Global wave state, pushed once per frame by the World (WaterBody + nuke::Wind). The
+    // renderer runs the Tessendorf FFT over it (ocean surfaces) and shares the SAME Gerstner
+    // wave set the engine samples on the CPU for buoyancy (waves are GENERATED CPU-side and
+    // uploaded — no drift between physics and pixels).
+    struct NukeWaterParams
+    {
+        float windDir[2]   = { 1, 0 };    // normalized XZ
+        float windSpeed    = 6.0f;        // m/s (drives the spectrum energy)
+        float choppiness   = 1.0f;        // horizontal displacement scale
+        float patchSize    = 120.0f;      // FFT patch world size (m)
+        float amplitude    = 1.0f;        // spectrum energy multiplier
+        float foamJacobian = 0.85f;       // crest foam threshold (lower = more foam)
+        float time         = 0.0f;        // seconds (unscaled game clock)
+        int   seed         = 1337;        // spectrum seed (matches the CPU sampler)
+        // The shared analytic wave set (CPU-generated): float4 pairs per wave —
+        // (dirX, dirZ, k, amplitude), (phase, speed, 0, 0). Used by lake surfaces and by
+        // the physics sampler; ocean FFT uses the full spectrum built from the same seed.
+        const float* waves = nullptr;     // 8 floats per wave
+        int          waveCount = 0;
+        // Scripted SOLITON crests (Water.MakeWave — tsunami fronts / surfable swells), part of
+        // the SAME shared field physics samples. 8 floats each: (originX, originZ, dirX, dirZ,
+        // amplitude, 1/halfWidth, horizontal push m/s, 0); the origin RIDES the crest (the
+        // engine advances it), so consumers evaluate amp * sech^2(dot(p - o, d) * invW).
+        const float* solitons = nullptr;
+        int          solitonCount = 0;
+        // Short-wave energy on top of the swell: 1 = full physical tail (Phillips detail +
+        // micro wavelets), 0 = clean glassy swell. Appended at the struct END (ABI).
+        float detail = 1.0f;
+        // 1 while the game is PLAYING (PIE/runtime): the ripple window anchors to the GAME
+        // camera then — the player watches the game view, not the editor viewport.
+        int playing = 0;
+        // Stage 7 (ABI append): water-carving volumes, 3 float4 each (max 8): (center.xyz,
+        // mode 1 cut / 2 compartment), (halfExtents.xyz, interior fill level Y), (quat xyzw).
+        const float* cutVolumes = nullptr;
+        int cutCount = 0;
+        // Stage 10 (ABI append): active SURF TUBES, 12 floats each — (ox, oz, dx, dz),
+        // (H, L, Rworld, peelP), (secLen, peelSign, collapse, restY). The shaders carve the
+        // barrel CAVITY out of the underwater pass with these; the tube meshes themselves
+        // arrive as type-5 surfaces. Max 4.
+        const float* tubes = nullptr;
+        int tubeCount = 0;
+        // Stage 11 (ABI append): scene-wide feature toggles from the driver body. 1 = on.
+        int ripplesOn = 1;      // local ripple sim (rings/wakes/imprints/splashes)
+        int wakeFoamOn = 1;     // wake-foam trail
+        int tessOn = 1;         // tessellated near-camera grid
+        int underwaterOn = 1;   // submerged-camera treatment (split/fog/wetness)
+    };
+    struct NukeWaterSurface
+    {
+        int    type = 0;                    // 0 ocean (FFT), 1 lake (Gerstner), 2 river, 3 waterfall sheet, 4 spread (SWE sheet), 5 surf tube (barrel)
+        float  pos[3]  = { 0, 0, 0 };       // origin; water level = pos.y (sheet: top-center)
+        float  quat[4] = { 0, 0, 0, 1 };    // orientation (sheets tilt; ocean/lake use yaw only)
+        float  size[2] = { 100, 100 };      // XZ extent (sheet: width x drop height)
+        float  absorb[3]  = { 0.45f, 0.09f, 0.06f };   // per-channel absorption (deep water color)
+        float  scatter[3] = { 0.02f, 0.10f, 0.09f };   // in-scatter tint
+        float  foamShoreDepth = 0.6f;       // shore foam within this depth difference (m)
+        float  opacityDepth   = 4.0f;       // view depth where refraction fully absorbs (m)
+        float  waveScale      = 1.0f;       // per-surface wave height multiplier
+        // River: resampled spline (float4 per sample: x,y,z,halfWidth); flow runs along it.
+        const float* spline = nullptr;
+        int          splineCount = 0;
+        float        flowSpeed = 1.5f;      // m/s along the spline / down the sheet
+        // Bottom depth grid (bodies): bottomN x bottomN floats over the rect (row-major,
+        // -half..+half), meters below the rest level — the engine fills it with PHYSICS
+        // RAYCASTS (any collidable bottom works: terrain, voxels, meshes). Drives shore
+        // shoaling + breakers. `bottomStamp` bumps per refresh sweep (renderer re-upload key).
+        const float* bottomDepth = nullptr;
+        int          bottomN = 0;
+        int          bottomStamp = 0;
+        // Foam tint (crest/shore/swash/sheet foam is this color x lighting).
+        float foamColor[3] = { 1, 1, 1 };
+        // Ocean only: the surface follows the camera to the horizon (camera-anchored window,
+        // no rect edges); the rect still bounds the bottom-depth capture. Appended (ABI).
+        int infinite = 0;
+        // Stage-5 shore tuning block, 12 x float4 for the shader's g_ShoreP — packed by
+        // WaterBody::OnRender in a FIXED order (see the pack there), consumed verbatim by
+        // FillWaterCB. Appended (ABI). Zeroed amp (slot 0) = surf off.
+        float shoreP[48] = {};
+        // Stage-6 knobs (ABI append): [0] caustic strength, [1] caustic sharpness,
+        // [2] god-ray strength, [3] droplet amount, [4] droplet duration (s), rest spare.
+        float fx[8] = { 1.0f, 1.6f, 1.0f, 1.0f, 3.0f, 0, 0, 0 };
+        // Stage 7 (ABI append): this surface is EXEMPT from the carving volumes — the
+        // compartment's own interior water must not be cut by its own box.
+        int cutExempt = 0;
+    };
+    virtual void setWaterParams(const NukeWaterParams& p) {}
+    virtual void drawWaterSurface(const NukeWaterSurface& s) {}   // camera pass, after opaques
+    // Local ripple impulse (steps, splashes, boats) into the GPU heightfield sim.
+    virtual void addWaterRipple(const float pos[3], float radius, float strength) {}
+    // --- Water bottom capture: an ORTHO top-down DEPTH RENDER over a body's rect — the
+    // depth-below-rest-level map that shapes shore waves. Works for ANY visible geometry, no
+    // colliders required: the World submits opaque meshes with renderShadowObject between
+    // begin/end; fetchWaterBottom polls the ASYNC readback (a few frames later) and fills
+    // out[n*n] (row-major over the rect, -half..+half, meters below pos.y; misses = deep).
+    // One capture in flight at a time; fetch returns true exactly once per capture.
+    virtual void beginWaterBottomPass(const float pos[3], const float quat[4], float sizeX, float sizeZ) {}
+    virtual void endWaterBottomPass() {}
+    virtual bool fetchWaterBottom(float* out, int n) { return false; }
+    // --- Water imprints (stage 3): per-frame CONTACT-CONTOUR wave sources — the waterline
+    // cells of bodies crossing the surface, 4 floats each: (x, z, radius m, strength = water
+    // column rate m/s, signed: down-moving hull pushes water UP around it). CONTINUOUS
+    // sources for the ripple sim, unlike addWaterRipple's one-shot impulses: rings hug the
+    // hull outline, a moving bow pushes a wave, the stern trails a trough. Pushed once per
+    // frame by the water module; count 0 clears. Appended at the vtable END (ABI).
+    virtual void setWaterImprints(const float* xzrs, int count) {}
+    // --- Stage 8, shallow-water spreading. EVERY spread region runs its own sim; a spill
+    // splats water into whichever region contains it (one-shot volume in m^3 over a radius).
+    // fetchWaterSpread copies THAT region's depth field DOWNSAMPLED to out[n*n] (row-major
+    // over the region rect, meters of water) — an ASYNC snapshot a few frames stale, polled
+    // by the water module for physics. `key` identifies the region: its bottomDepth grid
+    // pointer (stable per component). Appended at the vtable END (ABI).
+    virtual void addWaterSpill(const float pos[3], float radius, float volume) {}
+    virtual bool fetchWaterSpread(const void* key, float* out, int n) { return false; }
+
+    // --- Stage 9, bounded FLIP volumes: REAL 3D water in a box (splashes, waterfall plunge
+    // pools, tilted compartments). The water module submits one of these per enabled volume
+    // per frame (camera pass); the renderer owns the GPU sim (particles + MAC grid) and the
+    // screen-space-fluid draw. Solids/emitters arrive in the VOLUME's LOCAL frame.
+    struct NukeWaterFlip
+    {
+        const void* key = nullptr;          // stable region identity (component address)
+        float pos[3]  = { 0, 0, 0 };        // box center (world)
+        float quat[4] = { 0, 0, 0, 1 };     // box orientation (tilt = slanted local gravity)
+        float halfExtents[3] = { 2, 1, 2 };
+        int   resolution = 48;              // grid cells along the LONGEST axis (16..96)
+        int   budget = 65536;               // particle capacity (4096..262144)
+        float fill = 0.0f;                  // seeded fill fraction of the box height
+        int   reseedStamp = 0;              // bump -> re-seed the fill (Fill prop edited)
+        float flipness = 0.95f;             // FLIP/PIC blend (1 = lively, 0 = syrup)
+        float damping = 0.02f;              // extra velocity decay (1/s)
+        float evaporation = 0.0f;           // particle kill rate (fraction/s)
+        float particleR = 0.10f;            // render radius (m)
+        float absorb[3]  = { 0.45f, 0.09f, 0.06f };
+        float scatter[3] = { 0.04f, 0.10f, 0.09f };
+        // Solid colliders overlapping the box, LOCAL frame, 16 floats each:
+        // type (0 box / 1 sphere / 2 capsule), lpos.xyz, lquat.xyzw, size.xyz
+        // (he / r,-,- / r,halfH,-), lvel.xyz, spare. Moving solids push water.
+        const float* solids = nullptr;
+        int solidCount = 0;
+        // Emitters, LOCAL frame, 8 floats each: lpos.xyz, radius, lvel.xyz, rate (m^3/s).
+        const float* emitters = nullptr;
+        int emitterCount = 0;
+    };
+    virtual void drawWaterFlip(const NukeWaterFlip& v) {}
+    // Async CPU mirror for physics/queries: out = 16x16x16 float4 (fluid fraction 0..1,
+    // local velocity xyz) over the box, x-major rows, y slices outermost. n must be 16.
+    virtual bool fetchWaterFlip(const void* key, float* out, int n) { return false; }
 
     // ABI: new virtuals are appended at the END of the class, NEVER inserted mid-vtable —
     // plugins are separate DLLs built at different times, and an inserted slot shifts every

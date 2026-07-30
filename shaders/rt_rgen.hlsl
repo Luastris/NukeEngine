@@ -55,5 +55,10 @@ void main()
     TraceRay(g_TLAS, RAY_FLAG_NONE, RT_REFLECT_MASK, 0, 1, 0, ray, p);   // only reflection-visible instances
 
     float k = saturate(refl * intensity);
+    // Water occlusion: the G-buffer holds no water, so a mirror under the surface used to get
+    // its reflection pasted OVER the drawn water ("видно сквозь воду будто её и нет"). The
+    // camera->reflector segment loses whatever water it crossed (same absorption scale as the
+    // body's Opacity Depth), so grazing views through a lot of water hide the mirror entirely.
+    k *= RTWaterTrans(g_RTCam.xyz, wpos);
     g_Output[px] = float4(lerp(base, p.color, k), 1.0);
 }

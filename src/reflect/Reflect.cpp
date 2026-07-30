@@ -138,6 +138,14 @@ void Reflect_ResolveAtomRefs()
         *p.first = Reflect_AtomById(p.second);
     pendingAtomRefs().clear();
 }
+void Reflect_RemapPendingAtomRefs(const std::map<unsigned long, unsigned long>& oldToNew)
+{
+    for (auto& p : pendingAtomRefs())
+    {
+        auto it = oldToNew.find(p.second);
+        if (it != oldToNew.end()) p.second = it->second;   // internal ref follows its clone
+    }
+}
 
 // --- single value <-> json by tag ---
 void SaveField(FT t, const void* a, json& j)

@@ -185,7 +185,7 @@ static bool RendererInternalShader(const std::string& name)
 {
 	return name == "ui" || name == "shadow" || name == "sky" || name == "post" || name == "debug"
 	    || name == "sprite" || name == "sprite_lit" || name == "decal"
-	    || name.rfind("outline", 0) == 0;
+	    || name.rfind("outline", 0) == 0 || name.rfind("water", 0) == 0;   // water* = 7.5 surface/sim/FFT passes
 }
 
 void ResDB::LoadShadersDir(const std::string& dir)

@@ -15,6 +15,7 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
+#include <map>
 #include <functional>
 #include "API/Model/Vector.h"
 #include "API/Model/Color.h"
@@ -43,6 +44,10 @@ NUKEENGINE_API unsigned long Reflect_AtomId(Atom* a);
 // resolves once the whole hierarchy exists (World::Load* / prefab instantiation call Resolve).
 NUKEENGINE_API void Reflect_QueueAtomRefFixup(Atom** slot, unsigned long id);
 NUKEENGINE_API void Reflect_ResolveAtomRefs();
+// Clone support (prefab instantiate, editor copy/paste): the freshly loaded subtree got NEW atom
+// ids, so queued fixup ids that pointed INSIDE it must follow the old->new map BEFORE Resolve —
+// a duplicated rig must reference its own copies. Ids not in the map (external refs) stay put.
+NUKEENGINE_API void Reflect_RemapPendingAtomRefs(const std::map<unsigned long, unsigned long>& oldToNew);
 
 // ObjectRef <-> live reflected instance (defined in ReflectBind.cpp — the object-handle
 // table). Reflect_ObjectPtr is IS-A checked: the handle's type must be `typeName` or

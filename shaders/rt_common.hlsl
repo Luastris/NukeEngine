@@ -43,7 +43,7 @@ ByteAddressBuffer g_DynCol;     // PER-FRAME particle colors (float4/vertex): gr
 struct SurfaceIn  { float3 worldPos; float3 worldNormal; float2 uv; float3 viewDir; };
 struct SurfaceOut { float3 albedo; float metallic; float roughness; float3 emissive; float alpha; bool unlit; };
 
-cbuffer RTRefCB { float4x4 g_InvProj; float4x4 g_InvView; float4 g_RTCam; float4 g_RTParams; };  // camPos.xyz; (intensity, maxDist, maxDepth, _)
+cbuffer RTRefCB { float4x4 g_InvProj; float4x4 g_InvView; float4 g_RTCam; float4 g_RTParams; float4 g_RTWater; float4 g_RTWaterCol; float4 g_RTWaterAbs; };  // camPos.xyz; (intensity, maxDist, maxDepth, roughCut); water (level, on, fade, _); scatter.rgb; absorb.rgb + 1/opacityDepth
 
 #define MAX_LIGHTS 256   // per-particle light sources (VFX) need a real budget; unattenuated lights early-out
 #define MAX_SHADOWS 4
@@ -71,11 +71,79 @@ float3 SkyColor(float3 d)
                            : lerp(g_SkyHorizon.rgb, g_SkyGround.rgb, saturate(-up));
     return c * g_SkyParams.x;
 }
+// --- WATER along a ray (the TLAS/G-buffer carry no water surface) -----------------------------
+// Radiance travelling a segment loses whatever water it crossed. g_RTWater = (level, on, fade).
+// Everything is a flat-level approximation: the rest plane, not the displaced wave — enough to
+// stop mirrors/metal from punching through the drawn surface, and stable under recursion
+// (every bounce attenuates its OWN segment).
+// Submerged length of the segment [a -> b].
+float RTWaterUnder(float3 a, float3 b)
+{
+    if (g_RTWater.y < 0.5) return 0.0;
+    float da = g_RTWater.x - a.y, db = g_RTWater.x - b.y;   // > 0 = below the surface
+    float len = length(b - a);
+    if (da > 0.0 && db > 0.0)      return len;                                   // fully submerged
+    if (da > 0.0 || db > 0.0)      return len * max(da, db) / (abs(da) + abs(db) + 1e-6);
+    return 0.0;
+}
+// Scalar transmittance (the reflection WEIGHT in ray-gen, where the base pixel already holds
+// the drawn water).
+float RTWaterTrans(float3 a, float3 b)
+{
+    float under = RTWaterUnder(a, b);
+    return (under <= 0.0) ? 1.0 : exp(-g_RTWater.z * under);
+}
+// Per-channel transmittance for radiance CARRIED along a ray — the same Beer-Lambert the
+// raster surface uses, so a reflection of something submerged goes blue-green with depth
+// instead of neutral grey.
+float3 RTWaterTrans3(float3 a, float3 b)
+{
+    float under = RTWaterUnder(a, b);
+    if (under <= 0.0) return float3(1.0, 1.0, 1.0);
+    return exp(-g_RTWaterAbs.rgb * (under * 6.0 * g_RTWaterAbs.w));
+}
+// Same, for a ray that never hits anything (miss): the submerged run before it exits upward,
+// or the whole span when it heads away from the surface.
+float3 RTWaterTransRay(float3 o, float3 d, float tMax)
+{
+    if (g_RTWater.y < 0.5) return float3(1.0, 1.0, 1.0);
+    float below = g_RTWater.x - o.y;
+    if (below <= 0.0) return float3(1.0, 1.0, 1.0);  // starts above: an escaping ray stays above
+    float t = (d.y > 1e-4) ? min((g_RTWater.x - o.y) / d.y, tMax) : tMax;
+    return exp(-g_RTWaterAbs.rgb * (max(t, 0.0) * 6.0 * g_RTWaterAbs.w));
+}
+
 float3 EnvSample(float3 dir, float rough)   // probe (parallax-free, infinite), analytic sky, or flat (sky off)
 {
     if (g_ProbePos.w > 0.5) return g_Probe.SampleLevel(g_Probe_sampler, dir, saturate(rough) * g_ProbeParams.y).rgb * g_ProbeParams.x;
     if (g_SkyParams.y > 0.5) return SkyColor(dir);   // procedural sky ON
     return g_Ambient.rgb;                             // sky OFF -> flat environment (no gradient; matches the direct ambient)
+}
+
+// What a ray SEES of the water surface it crossed. Attenuating alone is not enough: the water
+// is not in the TLAS, so swallowing the bottom left a BLACK HOLE where a mirror over the sea
+// should show the sea. Flat-surface approximation: sky mirrored about the horizontal plane,
+// Fresnel-mixed with the body's own scatter colour under the ambient.
+float3 RTWaterLook(float3 d)
+{
+    float3 sky = EnvSample(float3(d.x, -d.y, d.z), 0.15);
+    float  f   = 0.02 + 0.98 * pow(1.0 - saturate(abs(d.y)), 5.0);   // grazing = mirror, steep = body colour
+    float3 amb = (g_SkyParams.y > 0.5)
+               ? (g_SkyTop.rgb + 2.0 * g_SkyHorizon.rgb + g_SkyGround.rgb) * 0.25 * g_SkyParams.x * g_Ambient.w
+               : g_Ambient.rgb * g_Ambient.w;
+    // In-scatter lit like the raster surface does it (water.ps): ambient AND the sun, else a
+    // sunlit sea reflected in a mirror came back nearly black.
+    float3 sunC = float3(0.0, 0.0, 0.0);
+    float best = -1.0;
+    [loop] for (int li = 0; li < (int)g_LightCount.x; ++li)
+        if (g_Lights[li].posType.w < 0.5)
+        {
+            float3 c = g_Lights[li].colorIntensity.rgb * g_Lights[li].colorIntensity.w;
+            float lum = dot(c, float3(0.299, 0.587, 0.114));
+            if (lum > best) { best = lum; sunC = c; }
+        }
+    float3 volLight = min(amb * 0.8 + sunC * 0.35, 1.8);
+    return lerp(g_RTWaterCol.rgb * volLight * 0.8, sky, f);
 }
 
 // --- Bindless geometry/material fetch at a triangle hit (instance + primitive + barycentrics) ----------------
