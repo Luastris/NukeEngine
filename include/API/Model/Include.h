@@ -41,6 +41,4 @@
 
 namespace nuke {
 
-// --------------Already defined troouble-----------------
-
 }  // namespace nuke

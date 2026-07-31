@@ -6,10 +6,8 @@
 
 namespace nuke {
 
-// Window display mode — the typed API surface (Game.SetWindowMode / NukeWindow::mode). A
-// reflected enum: the C# bindings expose it as `enum WindowMode`, Lua as `nuke.WindowMode`
-// (see the NukeEnumInfo<WindowMode> specialization in Game.h). Stored as int on the POD
-// config / WindowDesc so it crosses the render seam and JSON as a plain number.
+// Window display mode (Game.SetWindowMode / NukeWindow::mode). Reflected; stored as int on the
+// POD config / WindowDesc so it crosses the render seam and JSON as a plain number.
 enum class WindowMode : int
 {
     Windowed             = 0,   // regular window (decoration per `decorated`)
@@ -20,28 +18,20 @@ enum class WindowMode : int
 struct NukeWindow{
     int w = 1280, h = 720;
     std::string mainFont;
-    // OS window properties (applied by the renderer at window creation). Mostly for
-    // the game window; the editor leaves them at defaults (normal decorated window).
-    // NOTE: no `title` here — the window TITLE is not config: the editor is always
-    // "NukeEngine Editor" and the game window carries the PROJECT's name (game.nuproj
-    // "name", bound at packaging), see the hosts' main.cpp.
+    // OS window properties, applied by the renderer at window creation. No `title` here — the
+    // window title is not config (the game window carries the project name, bound at packaging).
     bool  decorated   = true;    // false => borderless
     bool  resizable   = true;
     bool  floating    = false;   // always-on-top
     bool  maximized   = false;
-    // Display mode: 0 = windowed, 1 = borderless fullscreen (desktop-res, no mode switch),
-    // 2 = exclusive fullscreen. Serialized as the READABLE word — main.json "mode" is
-    // "windowed" / "borderless" / "exclusive" (legacy number/bool configs still load).
+    // 0 = windowed, 1 = borderless fullscreen, 2 = exclusive fullscreen. main.json "mode" is
+    // serialized as the readable word "windowed"/"borderless"/"exclusive" (legacy forms still load).
     int   mode        = 0;
-    // INTERNAL mirror of mode != 0 (kept for cross-DLL layout + old callers) — never serialized.
-    bool  fullscreen  = false;
+    bool  fullscreen  = false;   // internal mirror of mode != 0 (cross-DLL layout); never serialized
     bool  transparent = false;   // per-pixel alpha (creation-time; applied on next launch)
     float opacity     = 1.0f;    // whole-window opacity 0..1
-    int   backend     = 0;       // render backend: 0 = D3D11, 1 = D3D12 (ray tracing), 2 = Vulkan (editor default; restart to apply)
-    // Show the process's own OS console window (the black log window). false hides it at
-    // startup — for a shipped game. Distinct from the `console` panel flag below (that's the
-    // editor's in-app Console). A console shared with a launching terminal is never hidden.
-    bool  showConsole = true;
+    int   backend     = 0;       // 0 = D3D11, 1 = D3D12 (ray tracing), 2 = Vulkan (restart to apply)
+    bool  showConsole = true;    // show the process's own OS console window; a console shared with a launching terminal is never hidden
     bool hierarchy = true,
             console = true,
             browser = true,
@@ -49,20 +39,13 @@ struct NukeWindow{
             about = true,
             inspector = true,
             render = true;
-    // --- APPENDED at the END (cross-DLL struct: inserting mid-struct shifts every later
-    // field for any binary built against the old layout — config silently "stops working").
-    bool  rayTracing  = true;    // false = force the raster path (shadow maps/SSR) even on RT-capable GPUs. "rayTracing" in main.json.
-    bool  showFps     = true;    // Player: append "N FPS (x.x ms)" to the window title (dev readout). "showFps" in main.json.
-    // vsync USED to sit mid-struct (above showConsole) in violation of the append-only rule: a
-    // player exe newer/older than its NukeEngine.dll read the neighbouring showConsole byte
-    // (default true) instead — "vsync off in the config is forced on in the player".
-    bool  vsync       = true;    // vertical sync on the main present: true = cap to display refresh (no tearing),
-                                 // false = uncapped FPS. Live-toggleable (Game.SetVSync). config/main.json "vsync".
+    // ABI: cross-DLL struct — new fields are APPENDED at the END, never inserted mid-struct.
+    bool  rayTracing  = true;    // false = force the raster path even on RT-capable GPUs ("rayTracing")
+    bool  showFps     = true;    // Player: append "N FPS (x.x ms)" to the window title ("showFps")
+    bool  vsync       = true;    // cap the main present to the display refresh ("vsync"); live-toggleable
 };
 
-// Global ray-tracing (RTX) reflection settings — engine-wide quality knobs, edited in Project Settings,
-// persisted to config/main.json ["raytracing"]. The per-camera PostProcess "rtreflect" effect is just the
-// on/off switch (which camera traces); these control HOW it traces.
+// Engine-wide ray-tracing reflection quality, persisted to config/main.json ["raytracing"].
 struct NukeRT{
     float intensity   = 1.0f;     // reflection strength
     float maxDist     = 100.0f;   // max ray distance (world units)
@@ -149,38 +132,27 @@ public:
     NukeWindow window {};
     NukeTheme theme{};
     NukeRT    rt{};
-    // CPU core the fixed-update (physics) thread is pinned to. -1 = auto (the LAST core,
-    // away from core 0 where the OS/main thread lives); -2 = no pinning. config/main.json
-    // "physicsCore".
+    // Core the fixed-update (physics) thread is pinned to. -1 = auto (last core), -2 = no pinning.
     int physicsCore = -1;
-    // Job system (roadmap 2.4): worker count (-1 = auto: one per core, minus core 0 and
-    // the physics core) and per-core pinning. config/main.json "jobs": {"workers","pinCores"}.
+    // Job workers (-1 = auto: one per core, minus core 0 and the physics core) + per-core pinning.
     int  jobWorkers  = -1;
     bool jobPinCores = true;
-    // Echo logs to the OS console (conhost). Writing to the Windows console is SLOW (per-line
-    // cross-process I/O) and can cost real frame time under heavy logging. false stops the OS
-    // echo — in the editor the in-app Console panel still shows everything (cout is tee'd into
-    // the log ring); in the Player it discards the output entirely. config/main.json "logToConsole".
+    // Echo logs to the OS console. Windows console writes are slow enough to cost frame time under
+    // heavy logging; false stops the echo (the editor's in-app Console panel is unaffected).
     bool logToConsole = true;
-    // Enable the D3D12 GPU validation layer + DRED breadcrumbs (Debug builds only; a heavy per-command
-    // cost — can more than halve FPS). Off by default; turn it on ONLY to diagnose a renderer crash /
-    // device-removed. config/main.json "gpuValidation" (works for double-click launches, unlike the
-    // NUKE_GPU_VALIDATION env var which needs a terminal). Either the config flag OR the env var enables it.
+    // D3D12 GPU validation layer + DRED breadcrumbs (Debug builds only; heavy per-command cost).
+    // Enabled by either this flag or the NUKE_GPU_VALIDATION env var.
     bool gpuValidation = false;
 	void reload(Config* instance);
-	// Show/hide the process's OWN OS console window (driven by window.showConsole). NO-OP if
-	// the console is SHARED with a launching terminal (>1 attached process) so it never hides
-	// the user's shell; no-op off Windows. Called once by each host after config load.
+	// Show/hide the process's OWN OS console window. No-op if the console is SHARED with a
+	// launching terminal (>1 attached process), and no-op off Windows.
 	static void SetConsoleWindowVisible(bool visible);
-	// Persist config/main.json, updating ONLY the "window" object from `window` and leaving
-	// every other section (theme, raytracing, jobs, physicsCore) exactly as on disk. Used by
-	// the runtime window API (Game.Set*) so a game's chosen video settings survive relaunch.
+	// Persist config/main.json, updating ONLY the "window" object and leaving every other
+	// section exactly as on disk.
 	void saveWindow();
-	// Same, into an arbitrary json file. (In the editor Game.Set* persists nothing — the
-	// shipped game's config is formed by the Package Project dialog; see Game.cpp.)
+	// Same, into an arbitrary json file.
 	void saveWindowTo(const std::string& path);
-	// The directory config/ resolves against — NEXT TO THE EXECUTABLE, never the CWD
-	// (a shortcut-launched packaged game has an arbitrary working directory).
+	// The directory config/ resolves against — NEXT TO THE EXECUTABLE, never the CWD.
 	static boost::filesystem::path baseDir();
 	static Config* getSingleton();
 };

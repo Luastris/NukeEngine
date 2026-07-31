@@ -9,17 +9,9 @@
 
 namespace nuke {
 
-// Game-side facade over the audio service (Unity AudioSource/Listener have their own
-// components; this is the STATIC API) — null-safe: no-ops / zeros when no provider is
-// enabled. The API is [[nuke::func]]-reflected, so every scripting backend binds it
-// AUTOMATICALLY (Lua: nuke.Audio.Play(...) etc.).
-//
-// Voices are addressed by the double id Play() returns (0 = failed). Paths are
-// content-relative ("Audio/track.ogg") — resolved against the project content root.
-//
-// The music-analysis getters read the frame's cached NukeAudioAnalysis snapshot
-// (Refresh() pulls it once per frame from World::Render) — they are the script-side
-// twin of the g_Nuke* system post-params the renderer effects consume.
+// Static game-side facade over the audio service; null-safe (no-ops / zeros with no provider).
+// Voices are addressed by the double id Play() returns (0 = failed); clip paths are
+// content-relative. The music-analysis getters read this frame's cached snapshot.
 class NUKEENGINE_API Audio
 {
 	NUKE_CLASS_NOCREATE(Audio, Object)
@@ -30,10 +22,8 @@ public:
 	[[nuke::func]] static double Play(const std::string& clip, double volume, bool loop, double bus);
 	[[nuke::func]] static double PlayAt(const std::string& clip, const Vector3& pos,
 	                                    double volume, double minDist, double maxDist, double bus);
-	// Script-provided SOUND CONTENT: play encoded audio (ogg/wav/mp3/flac) from a memory
-	// buffer — bytes a script composed or read via Packages. NOT [[nuke::func]] (blobs
-	// don't fit the reflected value channel); every language binds it by hand, like
-	// Texture's setPixels. The backend copies the bytes for the voice's lifetime.
+	// Play encoded audio (ogg/wav/mp3/flac) from memory; the backend copies the bytes.
+	// Not [[nuke::func]] — blobs don't fit the reflected value channel; bound per language.
 	static double PlayData(const void* bytes, uint64_t size, double volume, bool loop, double bus);
 	[[nuke::func]] static void   Stop(double voice);
 	[[nuke::func]] static void   StopAll();
@@ -61,7 +51,7 @@ public:
 	[[nuke::func]] static double GetNoteStrength();
 	[[nuke::func]] static double GetBeatPhase();     // 0..1 between beats
 
-	// --- engine internals (not reflected) ---------------------------------------------
+	// --- engine internals (not reflected) ---
 	static const NukeAudioAnalysis& Analysis();      // this frame's cached snapshot
 	static void Refresh();                           // pull the snapshot (World::Render, once per frame)
 	// Fill a system post-param (g_NukeAudio / g_NukeNote / g_NukeChromaA..C) from the

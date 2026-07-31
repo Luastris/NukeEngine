@@ -1,7 +1,5 @@
-// Selection outline — fullscreen edge-detect. Reads the selection mask (alpha = selected). A pixel
-// that is NOT selected but has a selected neighbour within `thickness` pixels is a border pixel ->
-// outline colour. Constant pixel thickness => independent of distance / object size, works for any
-// geometry (incl. flat planes).
+// Selection outline, fullscreen edge-detect over the selection mask (alpha = selected): an unselected
+// pixel with a selected neighbour within `thickness` pixels is a border pixel.
 Texture2D    g_Mask;
 SamplerState g_Mask_sampler;
 cbuffer EdgeCB { float4 g_Texel; };   // xy = 1/width, 1/height ; z = thickness in pixels

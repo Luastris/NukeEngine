@@ -7,11 +7,8 @@
 
 namespace nuke {
 
-// A registered VIEWPORT ICON for a component type (the editor's clickable entity-icon
-// overlay for atoms with no visible mesh). DATA ONLY — the registrant (an engine system or
-// a MODULE) names its component TYPE; the editor matches by name at draw time, so module
-// components get icons with NO editor linkage and NO editor hardcode. Mirrors
-// AtomCreators/AssetCreators (0.6).
+// A registered viewport icon for a component type (the editor's overlay for atoms with no
+// visible mesh). DATA ONLY — the editor matches by type name at draw time, so no linkage is needed.
 struct ComponentIcon
 {
 	std::string component;            // reflected component TYPE NAME, e.g. "ParticleEmitter"

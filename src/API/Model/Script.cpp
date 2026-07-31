@@ -22,8 +22,7 @@ std::vector<std::string> Script::Languages()
 
 bool Script::Run(const std::string& code, const std::string& chunkName, const std::string& language)
 {
-	// "" = the first provider (legacy single-backend callers); otherwise route the snippet
-	// to the backend whose Language() matches — Lua source must never land in the C# VM.
+	// "" = the first provider; otherwise route to the backend whose Language() matches.
 	if (language.empty())
 	{
 		iScript* s = GetService<iScript>();

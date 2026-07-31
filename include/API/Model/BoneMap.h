@@ -7,10 +7,9 @@
 
 namespace nuke {
 
-// Retargeting asset (.nubonemap, roadmap 3.1): renames a clip's channel bone names onto
-// a skeleton's bone names (e.g. "mixamorig:Hips" -> "Hips"). PLAIN JSON — text-editable
-// in the editor's file editor; the Animator references it by guid (asset picker) and
-// applies it when binding clip channels. Runtime MapBone() entries override it.
+// Retargeting asset (.nubonemap, plain JSON): renames a clip's channel bone names onto a
+// skeleton's (e.g. "mixamorig:Hips" -> "Hips"). The Animator applies it when binding clip
+// channels; runtime MapBone() entries override it.
 class NUKEENGINE_API BoneMap
 {
 public:

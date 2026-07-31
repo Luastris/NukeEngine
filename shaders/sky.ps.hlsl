@@ -1,4 +1,4 @@
-// Procedural sky — gradient by view-ray elevation (top/horizon/ground) + optional sun disk.
+// Procedural sky: gradient by view-ray elevation (top/horizon/ground), plus optional stars, moon and sun disk.
 cbuffer SkyCB
 {
     float4x4 g_InvVP;   // inverse(view*proj): clip -> world
@@ -62,25 +62,24 @@ float4 main(in PSIn i) : SV_Target
             float2 uv = saturate(d2 * 0.5 + 0.5); uv.y = 1.0 - uv.y;
             float4 m  = g_MoonTex.Sample(g_MoonTex_sampler, uv);
             float  edge = smoothstep(cr, lerp(cr, 1.0, 0.03), md);  // soft rim
-            // phase: treat the disk as a sphere, light it from a phase-derived direction (terminator).
+            // Phase: treat the disk as a sphere lit from a phase-derived direction.
             float3 ln  = float3(d2, sqrt(saturate(1.0 - dot(d2, d2))));   // sphere normal, +Z toward viewer
             float  pa  = g_MoonParams.z * 6.2831853;                      // 0 = new, PI (.5) = full
             float  lit = saturate(dot(ln, float3(sin(pa), 0.0, -cos(pa))));
-            float3 moonCol = m.rgb * (lit + 0.03);                        // faint earthshine on the dark limb
+            float3 moonCol = m.rgb * (lit + 0.03);                        // earthshine on the dark limb
             sky = lerp(sky, moonCol, m.a * g_MoonParams.x * edge);
         }
     }
 
-    if (g_Params.y > 0.0)   // sun: crisp bright disk + glow halo (look toward the source = -travel dir)
+    if (g_Params.y > 0.0)   // sun disk + glow halo
     {
-        float sd   = dot(dir, normalize(-g_SunDir.xyz));   // 1 = looking straight at the sun
-        float disk = smoothstep(0.9991, 0.9997, sd);       // sharp solar disk
-        float halo = pow(saturate(sd), 350.0) * 0.35       // tight glow around it
-                   + pow(saturate(sd), 18.0)  * 0.025;      // faint wide brightening of the sky near the sun
+        float sd   = dot(dir, normalize(-g_SunDir.xyz));   // g_SunDir is the travel direction, so negate it
+        float disk = smoothstep(0.9991, 0.9997, sd);
+        float halo = pow(saturate(sd), 350.0) * 0.35
+                   + pow(saturate(sd), 18.0)  * 0.025;
         sky += g_SunCol.rgb * g_Params.y * (disk * 2.5 + halo);
     }
 
-    // The sky is authored in display space — output it RAW (no tonemap/gamma), exactly as before. In HDR-off
-    // mode the RGBA8 buffer stores it directly; in HDR mode the post pass will tonemap it along with the scene.
+    // Authored in display space: emitted raw, with no tonemap or gamma applied here.
     return float4(sky, 1.0);
 }

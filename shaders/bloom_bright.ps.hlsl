@@ -1,5 +1,4 @@
-// Bloom bright-pass: keep only the part of each pixel above the threshold (soft knee). Internal — paired
-// with post.vs by the renderer.
+// Bloom bright-pass: keep only the part of each pixel above the threshold. Paired with post.vs.
 Texture2D    g_Source;
 SamplerState g_Source_sampler;
 cbuffer BloomCB { float4 g_BloomParams; float4 g_BloomDir; };   // x=threshold, y=intensity

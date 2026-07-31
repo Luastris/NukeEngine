@@ -1,5 +1,5 @@
-// Shadow depth pass — pixel shader. Depth-only; for transparent casters it alpha-dithers (stochastic)
-// so semi-transparent surfaces cast proportionally lighter shadows ("multiply by alpha").
+// Shadow depth pass pixel shader: depth-only, with stochastic alpha dithering so semi-transparent
+// casters produce proportionally lighter shadows.
 cbuffer ShadowPSCB { float4 g_Alpha; };   // g_Alpha.x = material alpha, y = hasBaseTex
 Texture2D    g_Tex;
 SamplerState g_Tex_sampler;

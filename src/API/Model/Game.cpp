@@ -1,7 +1,7 @@
 #include "API/Model/Game.h"
 #include "API/Model/World.h"
 #include "API/Model/Time.h"
-#include "API/Model/Package.h"       // packed vs raw decides the save dir (6.6)
+#include "API/Model/Package.h"       // packed vs raw decides the save dir
 #include "interface/AppInstance.h"
 #include <boost/dll.hpp>             // program_location (the dist exe carries the game name)
 #include <boost/filesystem/fstream.hpp>
@@ -23,14 +23,14 @@ bool Game::LoadWorld(const std::string& contentRelPath)
 	return AppInstance::GetSingleton()->OpenWorld(contentRelPath);
 }
 
-// Async world loading (task #147) — thin facade over AppInstance's staged loader.
+// Async world loading: a thin facade over AppInstance's staged loader.
 bool   Game::LoadWorldAsync(const std::string& contentRelPath) { return AppInstance::GetSingleton()->StartWorldLoadAsync(contentRelPath); }
 double Game::LoadWorldProgress()   { return AppInstance::GetSingleton()->WorldLoadProgress(); }
 bool   Game::LoadWorldReady()      { return AppInstance::GetSingleton()->WorldLoadReady(); }
 bool   Game::ActivateLoadedWorld() { return AppInstance::GetSingleton()->ActivateLoadedWorld(); }
 void   Game::CancelLoadWorld()     { AppInstance::GetSingleton()->CancelWorldLoadAsync(); }
 
-// Incremental activation (task #148): budgeted growth, optionally outward from a point.
+// Incremental activation: budgeted growth, optionally outward from a point.
 void   Game::SetWorldActivationBudget(double msPerFrame) { AppInstance::GetSingleton()->SetWorldActivationBudget(msPerFrame); }
 double Game::GetWorldActivationBudget()                  { return AppInstance::GetSingleton()->GetWorldActivationBudget(); }
 void   Game::SetWorldActivationOrigin(const Vector3& worldPos) { AppInstance::GetSingleton()->SetWorldActivationOrigin((float)worldPos.x, (float)worldPos.y, (float)worldPos.z); }
@@ -48,9 +48,8 @@ void Game::SetPaused(bool paused)
 	app->playState = paused ? 2 : 1;
 }
 
-// The game's save directory (6.6). Editor + raw dev player: `<project>/saves` (beside the
-// content — versionable, easy to wipe). Packaged player: `%APPDATA%/<exe stem>/saves` (the
-// dist exe carries the game's name), never inside Program Files.
+// The game's save directory: `<project>/saves` for the editor and raw dev player,
+// `%APPDATA%/<exe stem>/saves` for a packaged player (never inside Program Files).
 static boost::filesystem::path SaveDir()
 {
 	AppInstance* app = AppInstance::GetSingleton();
@@ -90,8 +89,7 @@ bool Game::LoadGame(const std::string& slot)
 	boost::system::error_code ec;
 	bfs::path file = SaveDir() / (slot + ".nusave");
 	if (!bfs::exists(file, ec)) { std::cout << "[Game]\t\tLoadGame: no such save '" << slot << "'" << std::endl; return false; }
-	// Queue to the frame boundary — a script calls this MID-TICK over the very hierarchy
-	// the load replaces (same rule as Game.LoadWorld).
+	// Queued to the frame boundary: a script calls this mid-tick over the hierarchy the load replaces.
 	AppInstance::GetSingleton()->pendingSaveLoad = bfs::absolute(file).string();
 	return true;
 }
@@ -135,11 +133,8 @@ void Game::Quit()
 
 // --- window control ------------------------------------------------------------------------
 namespace {
-// The game's window settings are GAME DATA. The packaged game persists them into its own
-// config/main.json (next to its exe). In the EDITOR they are NOT persisted anywhere: the
-// editor's own config must never be flipped by a PIE script (that hijack kept re-enabling
-// transparency), and the shipped game's config is FORMED at packaging — the Game Build
-// dialog (File -> Package Project) is where the game's boot settings are set.
+// Window settings are game data: a packaged game persists them into its own config/main.json.
+// In the editor they are never persisted — the shipped config is formed at packaging time.
 void SaveGameWindow()
 {
 	Config* c = Config::getSingleton();
@@ -149,8 +144,7 @@ void SaveGameWindow()
 	             "config is set in the Package Project dialog)" << std::endl;
 }
 
-// Persist the window config + apply it to the live window. Live-apply is skipped in the
-// editor (the window there is the EDITOR's, not the game's).
+// Persist the window config and apply it live; the live-apply is skipped in the editor.
 void ApplyAndSaveWindow()
 {
 	Config* c = Config::getSingleton();
@@ -207,8 +201,7 @@ void Game::SetVSync(bool on)
 	Config* c = Config::getSingleton();
 	c->window.vsync = on;
 	SaveGameWindow();   // persist for next launch (project-side in the editor)
-	// Unlike the geometry setters, vsync applies LIVE even in the editor — it's only the
-	// present pacing of whatever window the renderer drives, not the game's window layout.
+	// Unlike the geometry setters, vsync applies live even in the editor: it is only present pacing.
 	AppInstance* app = AppInstance::GetSingleton();
 	if (app->render) app->render->setVSync(on);
 }
@@ -221,10 +214,8 @@ bool   Game::IsTransparent() { return Config::getSingleton()->window.transparent
 double Game::Opacity()       { return Config::getSingleton()->window.opacity; }
 bool   Game::IsVSync()       { return Config::getSingleton()->window.vsync; }
 
-// Queue the request: the capture happens at the END of World::Render (FlushScreenshot) —
-// there the frame is fully drawn. Capturing here (mid-Update, before this frame renders)
-// would read a stale/undefined rotated backbuffer. Mutex: the request may be set from a
-// script on the update/fixed thread while the render thread consumes it.
+// The request is queued and consumed at the end of World::Render, where the frame is fully
+// drawn; the mutex covers the update/fixed thread setting it while the render thread reads it.
 static std::mutex gShotMx;
 
 bool Game::Screenshot(const std::string& file)
@@ -236,8 +227,8 @@ bool Game::Screenshot(const std::string& file)
 	return true;
 }
 
-// Called by World::Render after every camera finished (the image is complete). The PIE
-// viewport RT in the editor (AppInstance::uiTarget), the backbuffer in the player.
+// Called by World::Render once every camera finished; captures uiTarget (editor PIE viewport)
+// or the backbuffer (player).
 void Game::FlushScreenshot()
 {
 	AppInstance* app = AppInstance::GetSingleton();

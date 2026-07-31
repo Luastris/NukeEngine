@@ -114,9 +114,7 @@ int encodeBC(std::vector<uint8_t>& bytes, std::vector<uint8_t> cur, int w, int h
 				uint8_t* d = &nx[((size_t)y * nw + x) * 4];
 				if (bc3)
 				{
-					// ALPHA-WEIGHTED rgb: a plain average pulls the (black) rgb of transparent
-					// texels into every mip — dark fringes / squarish halos around cutout
-					// sprites as soon as they sample below mip0 (small particles).
+					// Alpha-weighted rgb: a plain average drags the rgb of transparent texels into the mips.
 					const int aS = s0[3] + s1[3] + s2[3] + s3[3];
 					for (int c = 0; c < 3; ++c)
 						d[c] = aS ? (uint8_t)((s0[c] * s0[3] + s1[c] * s1[3] + s2[c] * s2[3] + s3[c] * s3[3]) / aS)
@@ -132,8 +130,6 @@ int encodeBC(std::vector<uint8_t>& bytes, std::vector<uint8_t> cur, int w, int h
 }
 }  // namespace
 
-// Re-compress this texture to another BC format in place (decode current mip0 -> re-encode). For the inspector's
-// Compression override (e.g. a normal map BC5<->BC1: quality vs half the size). No-op for render textures / GIFs.
 std::vector<unsigned char> Texture::DecodeRGBA() const
 {
 	if (renderTexture || width <= 0 || height <= 0) return {};
@@ -169,8 +165,7 @@ bool Texture::ApplyChromaKey(int kr, int kg, int kb, int tol, bool outsideOnly)
 	}
 	else
 	{
-		// Flood-fill the background inward from every border pixel: only key-coloured pixels REACHABLE
-		// from the edge through other key-coloured pixels are cleared, so enclosed regions survive.
+		// Flood-fill from the border: only key pixels reachable from the edge are cleared.
 		std::vector<uint8_t> vis((size_t)W * H, 0);
 		std::vector<int> stack;
 		auto visit = [&](int x, int y) {
@@ -208,10 +203,8 @@ int Texture::SpriteCount() const
 	return c * r;
 }
 
-// Cell math is intentionally in PIXELS (the natural unit for a sheet with margin/spacing) and rounds the
-// derived cell size down, so a grid whose margins/spacing don't divide the texture exactly still tiles
-// without accumulating drift into the last cell. SpriteAnimator converts the rect to UV (with a half-texel
-// inset); the slicer editor draws it directly.
+// Cell math is in PIXELS and rounds the cell size down, so a grid whose margins/spacing don't
+// divide the texture exactly still tiles without accumulating drift into the last cell.
 bool Texture::SpriteCellRect(int index, int& x0, int& y0, int& cw, int& ch) const
 {
 	int cols = spriteColumns > 0 ? spriteColumns : 1;
@@ -241,8 +234,7 @@ Texture::Texture(char* path) {
 
 Texture::Texture() {}
 
-// Guess a texture's semantic usage from its filename suffix/tokens (bare-image import has no other signal).
-// Tokenizes the stem on _ - . space and matches known role tokens; priority Normal > Emissive > Data > Color.
+// Tokenizes the stem on _ - . space; match priority Normal > Emissive > Data > Color.
 int Texture::GuessUsage(const std::string& filename)
 {
 	// stem: strip directory then extension, lowercase.
@@ -346,9 +338,8 @@ Texture* Texture::LoadFromStream(std::istream& i)
 	uint32_t bytes = 0; i.read((char*)&bytes, 4);
 	if (bytes) { t->pixels.resize(bytes); i.read((char*)t->pixels.data(), bytes); }
 	if (!i && !i.eof()) { delete t; return nullptr; }
-	// v11 HEAL: older BC3 assets carry mips box-filtered WITHOUT alpha weighting — the black
-	// rgb of transparent texels bled in, giving cutout sprites dark fringes below mip0.
-	// Rebuild the chain from mip0 with the fixed filter (in memory; an editor save writes v11).
+	// v11 HEAL: pre-v11 BC3 mips were box-filtered WITHOUT alpha weighting — rebuild the chain
+	// from mip0 in memory (an editor save then writes v11).
 	if (version < 11 && t->format == FMT_BC3 && t->mipCount > 1 && !t->renderTexture
 	    && t->frameCount == 1 && t->width > 0 && t->height > 0)
 	{

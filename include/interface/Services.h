@@ -6,15 +6,10 @@
 
 namespace nuke {
 
-// Engine service registry (unified plugin model). A "service" is a named engine-wide
-// contract ("render", "physics", "audio", "scripting", ...). EXCLUSIVE services (render,
-// physics, audio) have exactly one active provider — the loader (Modular.cpp) displaces
-// the previous one. SHARED services (NUKEModule::sharedService() == true, e.g. scripting)
-// may have SEVERAL live providers at once — a game can run Lua and C# side by side; each
-// provider brings its own component types and file formats. Providers are plugin-supplied
-// interface instances: the loader registers NUKEModule::queryService() under provides()
-// after OnLoad() and revokes THAT instance before Shutdown(), so a pointer is only ever
-// visible while its plugin is live. Consumers must not cache pointers across toggles.
+// Engine service registry. A service is a named engine-wide contract ("render", "physics",
+// "audio", "scripting", ...). Exclusive services have exactly one active provider; shared ones
+// (NUKEModule::sharedService()) may have several. A provider pointer is only visible while its
+// plugin is live — consumers must NOT cache pointers across plugin toggles.
 NUKEENGINE_API void  Services_Provide(const char* service, void* iface);
 NUKEENGINE_API void  Services_Revoke(const char* service);                       // ALL providers
 NUKEENGINE_API void  Services_RevokeIface(const char* service, void* iface);     // one provider

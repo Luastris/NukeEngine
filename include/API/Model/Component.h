@@ -12,24 +12,16 @@ class Transform;
 class Script;
 class Camera;
 class Light;
-class iRender;     // scene-render hook (OnRender) — POD seam, forward-declared to keep this header light
+class iRender;     // scene-render hook (OnRender) — POD seam
 struct TypeInfo;   // reflection
 
-// Phases the scene-render hook fires during a camera pass (see World::Render). A component draws via
-// iRender seams using its own transform — the camera's view/proj is already bound. This is how MODULE
-// components (particles, custom draws) get into the render without World::Render hardcoding them; the
-// core Sprite/Decal keep their own batched path.
-// RTScene fires between beginRTScene/buildRTScene (only when RT is available): module
-// components add their own TLAS entries there (NukeVFX particle quads). APPEND-ONLY enum
-// (cross-DLL: modules compiled against the old set must keep their values).
+// Phases the scene-render hook fires during a camera pass (see World::Render); the camera's
+// view/proj is already bound. RTScene fires between beginRTScene/buildRTScene, when RT is
+// available. APPEND-ONLY enum: modules compiled against the old set must keep their values.
 enum class RenderPhase { Opaque = 0, Transparent = 1, Overlay = 2, RTScene = 3 };
 
-// A dynamic, per-instance property value (e.g. a script's exported var). Pure data — no
-// UI, no engine logic; the editor draws these, the runtime just carries them.
-// AtomRef = a REFERENCE to a live atom by STABLE id (never a name/string): scripts see a
-// live atom object, the inspector draws the picker, serialization travels by id and
-// resolves stale-safe after load. Lua declares one with `nuke.AtomRef()`; C# with a
-// member of type `Atom`.
+// A dynamic, per-instance property value (e.g. a script's exported var). Pure data.
+// AtomRef references a live atom by STABLE id (never a name), so serialization travels by id.
 struct NukeVar
 {
 	enum class Kind { None, Number, Bool, String, AtomRef } kind = Kind::None;
@@ -52,16 +44,11 @@ class NUKEENGINE_API Component
 public:
     ID id;                  // per-component identity (multiple components of one type per atom, e.g. scripts)
     bool enabled = true;
-    // Which MOD added this component (world-merge provenance, RUNTIME only — never
-    // serialized): "" = native. The inspector badges non-native components with it.
-    std::string modOrigin;
+    std::string modOrigin;   // mod that added this component ("" = native); RUNTIME only, never serialized
 	Transform* transform = nullptr;
 	Atom* atom = nullptr;   // owning Atom (back-reference), set by the component's Init
-	// Tick INTERVAL (6.8): Update() runs every Nth frame (1 = every frame, today's default).
-	// Staggered by the component id, so a colony of same-interval components spreads across
-	// frames instead of spiking on the same one. Serialized next to `enabled`; editable in
-	// the inspector; scripts: the component proxy's `tickEvery`. FixedUpdate is NOT affected
-	// (physics cadence is sacred).
+	// Tick interval: Update() runs every Nth frame (1 = every frame), staggered by component
+	// id so same-interval components spread across frames. FixedUpdate is NOT affected.
 	int tickEvery = 1;
     char* name;
     Component(const char* _name = "Component") : name((char*)_name){}
@@ -73,49 +60,41 @@ public:
 	virtual void Reset() = 0;
 	virtual TypeInfo* GetType() { return nullptr; }   // reflection schema (NUKE_TYPE overrides)
 
-	// Per-instance dynamic properties (e.g. a Lua script's exported vars). DATA ONLY —
-	// the editor renders/edits them; the engine and a shipped Player just carry them.
-	// Empty = none. SetDynamicProp writes one back (the editor calls it on edit/reset).
+	// Per-instance dynamic properties (e.g. a Lua script's exported vars); empty = none.
+	// DATA ONLY — the editor renders/edits them, SetDynamicProp writes one back.
 	virtual std::vector<DynProp> DynamicProps() { return {}; }
 	virtual void SetDynamicProp(const std::string& /*name*/, const NukeVar& /*v*/) {}
 
-	// Runtime immediate-mode UI hook. Called each frame by the GUI backend (NukeGUI) while playing;
+	// Runtime immediate-mode UI hook, called each frame by the GUI backend while playing;
 	// draw with nuke::GUI()->... (see interface/iGUI.h).
 	virtual void OnGUI() {}
 
-	// Physics contact hooks, dispatched by World's FIXED-UPDATE THREAD right after
-	// iPhysics::step. `other` = the other atom of the contact pair. Pairs where either
-	// collider is a trigger get the Trigger pair; everything else gets the Collision pair.
-	// THREADING: these run on the fixed thread — a scripting component must QUEUE and
-	// flush into its VM on the game thread (see ScriptComponent), never call in here.
+	// Physics contact hooks; `other` = the other atom of the pair. Trigger colliders get the
+	// Trigger pair, everything else the Collision pair.
+	// THREADING: dispatched on the FIXED-UPDATE thread — a scripting component must queue and
+	// flush into its VM on the game thread, never enter it here.
 	// ABI: new virtuals are appended at the END of the class; keep it that way.
 	virtual void OnCollisionEnter(Atom* other) {}
 	virtual void OnCollisionExit(Atom* other) {}
 	virtual void OnTriggerEnter(Atom* other) {}
 	virtual void OnTriggerExit(Atom* other) {}
 
-	// Animation event (roadmap 3.1): the sibling Animator fires this on every component
-	// of its atom when the playhead crosses a clip event. GAME thread, game lock held —
-	// scripting components may enter their VM directly (same contract as OnGUI).
+	// The sibling Animator fires this on every component of its atom when the playhead
+	// crosses a clip event. GAME thread, game lock held (same contract as OnGUI).
 	virtual void OnAnimEvent(const char* name) {}
 
-	// Scene-render hook: World::Render calls this for every ENABLED component at each RenderPhase during a
-	// camera pass. Default no-op — a component that draws overrides it and issues iRender seam calls
-	// (drawSprite/drawDecal/drawDebugLine/...) using its own transform. Lets module components render
-	// without the engine's render loop knowing them. ABI: new virtuals are appended at the END.
+	// Scene-render hook: called for every ENABLED component at each RenderPhase of a camera
+	// pass; a component that draws issues iRender seam calls using its own transform.
+	// ABI: new virtuals are appended at the END.
 	virtual void OnRender(iRender* /*r*/, RenderPhase /*phase*/) {}
 
-	// Event-bus delivery (nuke::Events, Phase 6.3): every queued event reaches every ENABLED
-	// component once per frame from World::Update. GAME thread, game lock held — scripting
-	// components may enter their VM directly (ScriptComponent → Lua `onEvent(self, name,
-	// payload)`, CSharpScript → C# `OnEvent(string, string)`). Default no-op; filter by name.
+	// Event-bus delivery (nuke::Events): every queued event reaches every ENABLED component
+	// once per frame from World::Update; filter by name. GAME thread, game lock held.
 	// ABI: appended at the END of the vtable.
 	virtual void OnEvent(const std::string& /*name*/, const std::string& /*payload*/) {}
 
-	// Save is about to serialize this component (SaveAtom, right before the reflected props
-	// are read): components whose LIVE state lives outside the props re-encode it here —
-	// the Tilemap packs its cell layers into its hidden data prop, script components (6.6)
-	// pull live script fields back into `props`. Keep it cheap; called on every world save.
+	// Called right before the reflected props are serialized: components whose LIVE state
+	// lives outside the props re-encode it here. Keep it cheap; runs on every world save.
 	// ABI: appended at the END of the vtable.
 	virtual void OnBeforeSave() {}
 };

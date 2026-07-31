@@ -1,7 +1,8 @@
-// NukeBend — the ONE wind/interaction bend implementation shared by every consumer:
-// world.vs / gbuffer.vs / shadow.vs (instanced raster passes) AND bend.cs (the compute
-// that refits the RT foliage BLAS every frame). Edit HERE only.
-cbuffer BendCB { float4 g_WindV; float4 g_WindT; float4 g_WindP; float4 g_Push[8]; float4 g_Vol[48]; };   // windP = (turbAmount, 1/turbScale, -, -)   // + 16 analytic volumes (zones/fields) x 3 float4   // wind dir+strength | time,pusherCount | pushers xyz+radius
+// The single wind/interaction bend implementation, shared by world.vs / gbuffer.vs / shadow.vs
+// and by bend.cs (which refits the RT foliage BLAS each frame). Edit here only.
+// g_WindV = (dir.xyz, strength); g_WindT = (time, pusherCount, volumeCount, _); g_WindP = (turbAmount, 1/turbScale, _, _);
+// g_Push = pusher xyz + radius; g_Vol = 16 analytic volumes x 3 float4 (pos+radius | dir+strength | mode, falloff, seed).
+cbuffer BendCB { float4 g_WindV; float4 g_WindT; float4 g_WindP; float4 g_Push[8]; float4 g_Vol[48]; };
 float3 NukeBend(float3 wpos, float3 localPos, float4 custom, float3 pivot)
 {
     float f = localPos.y * localPos.y;
@@ -12,11 +13,7 @@ float3 NukeBend(float3 wpos, float3 localPos, float4 custom, float3 pivot)
     float3 off = float3(0.0, 0.0, 0.0);
     if (wCoef > 0.0)
     {
-        // GLOBAL WIND — three layers, never a static lean:
-        //  waves:   two traveling waves ALONG the wind direction roll gust bands across
-        //           the whole field (position-dependent, moving with time);
-        //  flutter: per-blade high-frequency jitter (hash phase);
-        //  turb:    spatial direction noise from the world's turbulence settings.
+        // Global wind: traveling gust waves along the wind direction, per-blade flutter, spatial turbulence.
         float2 wdir2 = g_WindV.xz;
         float wl2 = length(wdir2);
         wdir2 = wl2 > 1e-4 ? wdir2 / wl2 : float2(1.0, 0.0);
@@ -33,7 +30,7 @@ float3 NukeBend(float3 wpos, float3 localPos, float4 custom, float3 pivot)
                             sin(wpos.x * ts * 5.1 - g_WindT.x * 1.1)) * g_WindP.x;
         }
         off += wdisp * (g_WindV.w * 0.025 * wave * flutter) * wCoef;
-        // analytic VOLUMES: wind zones / force fields / weather (g_Vol, 3 float4 each)
+        // Analytic volumes: wind zones / force fields.
         int nv = (int)g_WindT.z;
         [loop] for (int vi = 0; vi < nv; ++vi)
         {
@@ -59,9 +56,8 @@ float3 NukeBend(float3 wpos, float3 localPos, float4 custom, float3 pivot)
                                   0.0,
                                   sin(wpos.x * 1.7 + g_WindT.x * 2.6 + v2.z * 1.3)) * v1.w;
             }
-            // Zones live like the global wind — never a static lean:
-            // directional zones get traveling waves along THEIR direction, radial/vortex
-            // get rings rippling out from the center; all share the per-blade flutter.
+            // Zones animate like the global wind: directional gets traveling waves along its own
+            // direction, radial/vortex get rings from the centre; both share the per-blade flutter.
             float env = flutter;
             if (mode == 0)
             {

@@ -1,5 +1,4 @@
-// Audio facade — thin, null-safe pass-through to the "audio" service plus the per-frame
-// analysis snapshot shared by scripts (nuke.Audio.*) and the g_Nuke* system post-params.
+// Audio facade — null-safe pass-through to the "audio" service + the per-frame analysis snapshot.
 #include "API/Model/Audio.h"
 #include "API/Model/Time.h"
 #include "interface/Services.h"
@@ -18,16 +17,12 @@ std::string Audio::ResolveClip(const std::string& clip)
 	return AppInstance::GetSingleton()->ResolveContent(clip);
 }
 
-// Start a voice through the content layers: a real file plays by PATH (the backend
-// streams it from disk); a pak-only clip is read as BYTES and decoded from memory —
-// packed content never touches the disk (3.2).
+// Start a voice: a real file plays by path (streamed); a pak-only clip is decoded from memory.
 uint64_t Audio::PlayDesc(const std::string& clip, const NukeVoiceDesc& d)
 {
 	iAudio* a = GetService<iAudio>();
 	if (!a || clip.empty()) return 0;
-	// Init on demand (idempotent): in the Player the FIRST World::Update (playOnStart
-	// sources) runs before the first World::Render (the per-frame pump that inits the
-	// backend) — without this the very first Play() of the game died silently.
+	// Init on demand (idempotent): the first World::Update runs before the first Render pump.
 	if (!a->init()) return 0;
 	std::string full = ResolveClip(clip);
 	boost::system::error_code ec;
@@ -105,9 +100,8 @@ void Audio::Refresh()
 	else gSnap = NukeAudioAnalysis{};   // provider unloaded mid-session -> calm zeros
 }
 
-// System post-params — the ONE naming convention that makes any post shader
-// audio-reactive: declare these in its PostParams cbuffer (no initializers) and the
-// engine fills them per frame while packing the effect blob (World::Render).
+// System post-params: names a post shader declares in its PostParams cbuffer (no
+// initializers) that the engine fills per frame. Returns false for an unknown name.
 bool Audio::SystemParam(const std::string& name, float out[4])
 {
 	if (name == "g_NukeAudio")

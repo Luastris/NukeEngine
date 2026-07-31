@@ -7,10 +7,8 @@
 
 namespace nuke {
 
-// A registered ATOM TEMPLATE for the editor's create menu (the viewport "+" / hierarchy
-// context). DATA ONLY — the registrant (an engine system or a MODULE) names the components;
-// the editor instantiates them through reflection (Registry_All by type name), so module
-// atom types appear in the menu with NO hard linkage, mirroring AssetCreators (0.6).
+// A registered atom template for the editor's create menu. DATA ONLY — the registrant names the
+// components and the editor instantiates them through reflection, so no hard linkage is needed.
 struct AtomCreator
 {
 	std::string category;                 // menu group, e.g. "Effects" ("" = top level)

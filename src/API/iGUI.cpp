@@ -32,8 +32,7 @@ boost::mutex g_lock;
 std::map<std::string, Node> g_nodes;
 std::vector<std::string>    g_windows;   // declaration order
 
-// Create-or-fetch a node of `type` under `parent` (windows: parent empty). A widget id
-// is appended to its window's child list once, on creation.
+// Create-or-fetch a node of `type` under `parent` (empty for windows).
 Node& Declare(const std::string& id, int type, const std::string& parent)
 {
 	auto it = g_nodes.find(id);
@@ -243,8 +242,7 @@ void Ui::Emit()
 				Node* n = Find(cid);
 				if (!n || !n->visible) continue;
 				if (n->sameLine) g->SameLine();
-				// "label###id": the retained id is the widget identity too — identical
-				// labels in one window can't collide, relabeling keeps widget state.
+				// "label###id": the retained id is the widget identity, so relabeling keeps state.
 				const std::string wl = n->label + "###" + n->id;
 				switch (n->type)
 				{

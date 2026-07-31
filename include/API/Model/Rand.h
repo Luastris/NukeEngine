@@ -7,21 +7,14 @@
 
 namespace nuke {
 
-// Deterministic seeded RNG with NAMED STREAMS (colony-sim base, Phase 6.2).
-//
-// Each stream ("mapgen", "storyteller", "combat", ...) is an independent PCG32 sequence:
-// seed a stream once and its draws replay identically regardless of what the other streams
-// consume — mapgen stays reproducible while the storyteller rolls freely. The unnamed
-// stream ("") is the convenience default. Reflected → nuke.Rand.* / C# Rand.* 1:1; native
-// game modules call the same statics directly.
-//
-// Determinism across save/load: streams expose their raw state (State/SetState) — savegame
-// code stores the streams it cares about (6.6 wires this into the savegame automatically).
+// Deterministic seeded RNG with NAMED STREAMS: each stream ("mapgen", "storyteller", ...) is an
+// independent PCG32 sequence, so its draws replay identically whatever the other streams consume.
+// The unnamed stream ("") is the default. State/SetState carry a stream across save/load.
 class NUKEENGINE_API Rand
 {
 	NUKE_CLASS_NOCREATE(Rand, Object)
 public:
-	// Seed a stream. Same seed = same sequence, forever, on every machine.
+	// Seed a stream. Same seed = same sequence on every machine.
 	[[nuke::func]] static void   Seed(const std::string& stream, double seed);
 	// Uniform double in [0, 1).
 	[[nuke::func]] static double Value(const std::string& stream);
@@ -37,8 +30,8 @@ public:
 	[[nuke::func]] static double State(const std::string& stream);
 	[[nuke::func]] static void   SetState(const std::string& stream, double state);
 
-	// Native fast path (no string lookup per draw): resolve the stream once, then draw.
-	// The returned handle stays valid for the session (streams are never removed).
+	// Native fast path (no string lookup per draw): resolve the stream once, then draw. The
+	// handle stays valid for the session.
 	static void*    StreamHandle(const std::string& stream);
 	static uint32_t Next(void* streamHandle);                    // raw 32 uniform bits
 	static double   ValueH(void* streamHandle);                  // [0,1)

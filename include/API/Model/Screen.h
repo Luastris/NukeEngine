@@ -6,9 +6,8 @@
 
 namespace nuke {
 
-// THE GAME SCREEN — the surface the game's cameras render to, as scripts should see it:
-// the window framebuffer in the Player, the game viewport panel in the editor. Fed by the
-// hosts every frame (Screen::Set); reflected for scripts (nuke.Screen.* / Screen.*).
+// THE GAME SCREEN — the surface the game's cameras render to (window framebuffer in the Player,
+// the game viewport panel in the editor), fed by the hosts every frame via Set().
 // Distinct from Game.WindowWidth/Height (the WINDOW config) — this is the live pixel size.
 class NUKEENGINE_API Screen
 {

@@ -1,6 +1,6 @@
 #include "API/Model/Physics.h"
 #include "API/Model/Atom.h"
-#include "API/Model/CharacterController.h"   // RaycastIgnore: the atom's capsule body
+#include "API/Model/CharacterController.h"
 #include "API/Model/Collider.h"
 #include "API/Model/World.h"
 #include "interface/AppInstance.h"
@@ -11,11 +11,10 @@
 
 namespace nuke {
 
-// Last hit, PER THREAD: the game thread's raycast (Lua update) and the fixed thread's
-// raycast (FixedUpdate logic) must not clobber each other's results.
+// Last hit, PER THREAD: game-thread and fixed-thread casts must not clobber each other.
 static thread_local RayHit tl_lastHit;
 
-// bodyId -> Collider, by walking the live world (queries are occasional; no cache to atom stale).
+// bodyId -> Collider by walking the live world (no cache — it would go stale).
 static Collider* FindColliderByBody(bc::list<Atom*>& gos, uint64_t body)
 {
 	for (Atom* atom : gos)

@@ -7,8 +7,8 @@
 
 namespace nuke {
 
-// World environment: procedural sky + ambient (and later IBL / fog / time-of-day). One per World;
-// World::Render uses the first Environment found. No Environment => just the camera clear color.
+// World environment: procedural sky + ambient. World::Render uses the first Environment found;
+// none => just the camera clear color.
 class NUKEENGINE_API Environment : public Component
 {
 	NUKE_CLASS(Environment, Component, "World")
@@ -24,15 +24,13 @@ public:
 	[[nuke::prop(label="Ambient")]]     Color ambient = Color(0.50, 0.55, 0.60, 1);
 	[[nuke::prop(label="Ambient Intensity", min=0, max=2)]] float ambientIntensity = 0.35f;
 
-	// Tonemap (SDR). Exposure scales the HDR scene; White Point is the linear value mapped to pure white — so a
-	// fully-lit white surface reads as white (plain Reinhard asymptotes below 1.0 and washes everything to grey).
+	// Tonemap (SDR): Exposure scales the HDR scene, White Point is the linear value mapped to pure white.
 	[[nuke::prop(label="Exposure", min=0, max=8)]]      float exposure = 1.0f;
 	[[nuke::prop(label="White Point", min=0.1, max=8)]] float whitePoint = 1.0f;
 
 	[[nuke::prop(label="Sun Disk")]]    bool  sunDisk = true;   // draw a sun in the sky from the first directional light
 
-	// Time of day (optional): drives the FIRST directional light (rotation/color/intensity) + the sky
-	// colours from `hour`. Other lights/suns are untouched. Off => the sky uses the authored colours above.
+	// Time of day: drives the FIRST directional light + sky colours from `hour`; other lights untouched.
 	[[nuke::prop(label="Time of Day")]]      bool  useTimeOfDay = false;
 	[[nuke::prop(label="Hour", min=0, max=24)]]        float hour     = 12.0f;
 	[[nuke::prop(label="Day Speed (h/s)", min=0, max=4)]] float daySpeed = 0.0f;   // auto-advance; 0 = manual

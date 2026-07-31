@@ -29,34 +29,30 @@ public:
 	
 	void Import(const char* path);
 
-	// Full conversion: read an external file (OBJ/FBX/glTF/...) via assimp and write each mesh
-	// as a native .numesh asset into destDir, each with a fresh GUID, registered in ResDB.
-	// Returns the number of meshes converted. Nothing references the source file afterwards.
+	// Read an external model file via assimp and write each mesh as a native .numesh asset into
+	// destDir with a fresh GUID, registered in ResDB. Returns the number of meshes converted.
 	int ImportToContent(const char* srcPath, const char* destDir);
 
-	// Import a standalone image (png/jpg/tga/bmp/...) -> a native .nutex (BC-compressed, mipped),
-	// registered in ResDB. Returns the new texture GUID ("" on failure).
+	// Import a standalone image into a native .nutex (BC-compressed, mipped), registered in ResDB.
+	// Returns the new texture GUID ("" on failure).
 	std::string ImportImage(const char* srcPath, const char* destDir);
 
-	// Import an audio file (ogg/wav/mp3/flac) = collision-safe COPY into content (no custom
-	// format — the audio service decodes the file; components reference it by relative path).
+	// Import an audio file as a collision-safe COPY into content; there is no custom format, so
+	// components reference it by relative path and the audio service decodes it.
 	bool ImportAudio(const char* srcPath, const char* destDir);
 
-	// Dispatch by file extension: image -> ImportImage, audio -> ImportAudio, otherwise ->
-	// ImportToContent. Returns true on any success. Browser Import button + Explorer drag&drop.
+	// Dispatch by file extension: image -> ImportImage, audio -> ImportAudio, else ImportToContent.
+	// True on any success.
 	bool ImportAny(const char* srcPath, const char* destDir);
 
-	// ASYNC import on the core job system (2.4): the heavy work (assimp parsing, BC
-	// compression, file writes) runs on a WORKER; every ResDB mutation the import
-	// produces is deferred and applied on the MAIN thread (ResDB is not thread-safe),
-	// then onDone(ok) fires there too. Imports are serialized among themselves.
+	// Async import on the job system: the heavy work runs on a WORKER, every ResDB mutation is
+	// deferred to the MAIN thread (ResDB is not thread-safe), and onDone(ok) fires there too.
+	// Imports are serialized among themselves.
 	void ImportAnyAsync(const std::string& srcPath, const std::string& destDir,
 	                    boost::function<void(bool)> onDone = boost::function<void(bool)>());
 
-	// INTERNAL: apply a ResDB mutation now (sync import) or queue it for the main
-	// thread (async import worker) — the sink is THREAD-LOCAL, so a synchronous import
-	// on the game thread never crosses wires with a worker import. Used by the free
-	// helper functions in assimporter.cpp too.
+	// Apply a ResDB mutation now (sync import) or queue it for the main thread (async worker).
+	// The sink is THREAD-LOCAL, so a synchronous import never crosses wires with a worker import.
 	static void Reg(const boost::function<void()>& f);
 };
 }  // namespace nuke

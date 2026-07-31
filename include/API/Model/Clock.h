@@ -6,10 +6,8 @@
 
 namespace nuke {
 
-// A user-owned stopwatch for gameplay timing. Complements Time (the per-frame singleton
-// driven by the host loop): a Clock is instantiated freely, runs on the MONOTONIC clock
-// (immune to wall-clock changes), can be paused, and is cheap enough to keep per-object.
-// All values are SECONDS. Reflected: scripts create their own (Clock.Create() / nuke.Clock.Create()).
+// A user-owned, pausable stopwatch for gameplay timing, complementing the per-frame Time
+// singleton. Runs on the MONOTONIC clock (immune to wall-clock changes); all values in SECONDS.
 class NUKEENGINE_API Clock
 {
 	NUKE_CLASS(Clock, Object)
@@ -22,8 +20,7 @@ public:
 	[[nuke::func]] bool   IsPaused() const;
 	[[nuke::func]] double Elapsed() const;   // seconds measured while running (pauses excluded)
 
-	// Monotonic seconds since an arbitrary fixed origin (process start) — the reference
-	// timeline every Clock measures on. For frame time use Time (delta/elapsed).
+	// Monotonic seconds since process start — the timeline every Clock measures on.
 	[[nuke::func]] static double Now();
 
 private:

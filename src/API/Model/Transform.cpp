@@ -63,9 +63,7 @@ void Transform::SetEulerDeg(const Vector3& deg)
 
 Vector3 Transform::EulerDeg()
 {
-	// Show the cached authored euler while it still represents the current rotation
-	// (stable, no quat->euler jitter). If the quaternion was changed by other means,
-	// recompute the euler and refresh the cache.
+	// Prefer the cached authored euler while it still matches the rotation (no quat->euler jitter).
 	glm::quat hintQ = glm::quat(glm::vec3(glm::radians((float)eulerHint.x),
 	                                      glm::radians((float)eulerHint.y),
 	                                      glm::radians((float)eulerHint.z)));
@@ -110,9 +108,7 @@ void Transform::Reset()
 
 
 
-// Standard hierarchical transform: a child's world transform = parent world * local.
-// World position = parentPos + parentRot * (parentScale ⊙ localPos) — so children orbit/scale with the
-// parent (the old version just ADDED positions, ignoring parent rotation/scale).
+// World = parent world * local: parentPos + parentRot * (parentScale ⊙ localPos).
 Vector3 Transform::globalPosition() {
 	Atom* p = this->atom ? this->atom->GetParent() : nullptr;
 	if (!p) return this->position;
@@ -134,8 +130,8 @@ Vector3 Transform::globalScale() {
 	return Vector3((this->atom && this->atom->GetParent()) ? (this->scale * this->atom->GetParent()->GetTransform().globalScale()) : (this->scale));
 }
 
-// Set this transform so its WORLD pose equals (wp, wr, ws), computing the local values relative to the
-// current parent (exact inverse of globalPosition/Rotation/Scale). Used by the gizmo + reparent-keep-world.
+// Set the local values so this transform's world pose equals (wp, wr, ws) —
+// exact inverse of globalPosition/globalRotation/globalScale.
 void Transform::SetGlobal(const Vector3& wp, const Quaternion& wr, const Vector3& ws) {
 	Atom* p = this->atom ? this->atom->GetParent() : nullptr;
 	if (!p) { this->position = wp; this->rotation = wr; this->scale = ws; return; }

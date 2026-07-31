@@ -36,8 +36,8 @@ void Shader::ParseCBProps(const std::string& src, const char* cbName, std::vecto
 	size_t close = (open == std::string::npos) ? std::string::npos : src.find('}', open);
 	if (close == std::string::npos) return;
 	std::string raw = src.substr(open + 1, close - open - 1);
-	// Strip // line comments up front: one can sit between a ';' and the next declaration, so
-	// trimming per-statement would also eat the following field. Comments end at the newline.
+	// Strip // comments first: one sitting between a ';' and the next declaration would
+	// otherwise be swallowed together with that declaration.
 	std::string body; body.reserve(raw.size());
 	for (size_t i = 0; i < raw.size(); )
 	{
@@ -77,16 +77,13 @@ void Shader::ParseCBProps(const std::string& src, const char* cbName, std::vecto
 			float f; int di = 0;
 			while (di < 4 && (ns >> f)) sp.def[di++] = f;
 		}
-		// In MatCB the standard lit fields are renderer-driven (material params), NOT editable custom props —
-		// else the prop loop overwrites them with 0 and kills emissive / metal-rough / AO maps. PostParams has
-		// no such reserved fields (every member is a user param).
+		// MatCB's standard lit fields are renderer-driven, not editable custom props.
 		if (!isMat || (ident != "g_Color" && ident != "g_Params" && ident != "g_Params2" && ident != "g_Emissive2"))
 			out.push_back(sp);
 	}
 
-	// Color annotation: a 3/4-component prop whose declaration line carries `// @color` is shown as an
-	// (HDR-capable) colour picker in the inspector instead of a raw vector. Scanned from the un-stripped
-	// source so the comment is still present.
+	// A 3/4-component prop whose declaration line carries `// @color` gets a colour picker.
+	// Scanned from the un-stripped source, where the comment still exists.
 	for (ShaderProp& sp : out)
 	{
 		if (sp.components < 3) continue;
@@ -131,8 +128,7 @@ Shader* Shader::LoadPostShader(const std::string& name, const std::string& psPat
 	return s;
 }
 
-// Packed content (3.2): build shaders straight from SOURCE TEXT (a pak entry) — no file,
-// no hot-reload (empty paths make HotReloadShaders skip them).
+// Build a shader from source text (packed content); empty paths disable hot-reload.
 Shader* Shader::FromSources(const std::string& name, const std::string& vsSrc, const std::string& psSrc)
 {
 	if (vsSrc.empty() || psSrc.empty()) return nullptr;

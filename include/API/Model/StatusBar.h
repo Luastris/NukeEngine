@@ -7,13 +7,9 @@
 
 namespace nuke {
 
-// Editor status-bar fields (roadmap 2.3). The EDITOR renders the built-in stats
-// (fps / frame time / backend / atoms / draws / memory) and then every field set
-// here, in first-set order. Plugins use this to surface their own live status
-// ("Jolt: 128 bodies", "Net: connected", ...). Thread-safe: any thread may Set.
-//
-// A field with a PROGRESS value is a background JOB: the bar shows it with a
-// progress bar and it appears in the jobs drop-up list (async import etc.).
+// Editor status-bar fields: the editor renders its built-in stats and then every field set
+// here, in first-set order. A field with a PROGRESS value renders as a background JOB (progress
+// bar + jobs drop-up entry). Thread-safe: any thread may Set.
 class NUKEENGINE_API StatusBar
 {
 public:
@@ -27,15 +23,12 @@ public:
 		bool IsJob() const { return progress >= 0.0f || progress == kIndeterminate; }
 	};
 
-	// Create or update a field. The key is the stable identity (and the order slot);
-	// the text is what the bar shows. Empty text keeps the field but shows nothing.
-	// The 2-arg form is a plain text field (progress reset to kNoProgress).
+	// Create or update a field; `key` is the stable identity and the order slot. The 2-arg form
+	// is a plain text field (progress reset to kNoProgress).
 	static void Set(const std::string& key, const std::string& text);
 	static void Set(const std::string& key, const std::string& text, float progress);
-	// Drop a field (job finished / the plugin is shutting down).
-	static void Remove(const std::string& key);
-	// Ordered snapshot for the UI.
-	static std::vector<Entry> All();
+	static void Remove(const std::string& key);   // drop a field
+	static std::vector<Entry> All();              // ordered snapshot for the UI
 };
 
 }  // namespace nuke

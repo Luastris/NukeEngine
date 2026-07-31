@@ -9,8 +9,8 @@
 
 namespace nuke {
 
-// A scene light. World::Render gathers every enabled Light each frame and pushes them to the renderer
-// (iRender::setLights) for the PBR pass. Position = the atom's world position; direction = its forward.
+// A scene light gathered each frame by World::Render for the PBR pass. Position = the atom's world
+// position, direction = its forward.
 class NUKEENGINE_API Light : public Component
 {
 	NUKE_CLASS(Light, Component, "Rendering")
@@ -33,10 +33,8 @@ public:
 	void Reset() override;
 };
 
-// DYNAMIC per-frame lights from modules/effects (glowing particles, muzzle flashes): submit
-// during Update/OnRender; World::Render appends them to the gathered scene lights and CLEARS
-// the list. A submission lives ONE frame — resubmit every frame while the source shines.
-// Game thread only. The renderer's light budget (16) applies to the combined set.
+// Dynamic per-frame lights from modules/effects. A submission lives ONE frame — resubmit every
+// frame while the source shines. Game thread only; the renderer's light budget covers the combined set.
 class NUKEENGINE_API FrameLights
 {
 public:

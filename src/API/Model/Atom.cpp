@@ -1,7 +1,7 @@
 #include "API/Model/Atom.h"
-#include "API/Model/Time.h"          // tick-interval gating reads the global frame counter (6.8)
-#include "interface/AppInstance.h"   // SetParent delegates to the active world's Reparent
-#include "reflect/ReflectBind.h"     // Reflect_DropObject: transform handles die with the atom
+#include "API/Model/Time.h"
+#include "interface/AppInstance.h"
+#include "reflect/ReflectBind.h"
 #include <iostream>
 
 namespace nuke {
@@ -18,7 +18,7 @@ Atom::Atom(const char* name) : name(name), transform(this)
 
 Atom::~Atom()
 {
-	Reflect_DropObject(&transform);   // script handles wrapping this transform atom stale-safe dead
+	Reflect_DropObject(&transform);   // script handles to this transform go stale-safe
 }
 
 std::string Atom::GetName()
@@ -55,9 +55,7 @@ double Atom::GetLayer()
 void Atom::SetPersistent(bool on) { persistent = on; }
 bool Atom::IsPersistent()         { return persistent; }
 
-// Plain flag write: every consumer (update/render collectors, event walk, physics sync) gates
-// on it per frame, so toggling needs no eager side effects — bodies die/respawn on the next
-// physics sync, renderables just stop being collected.
+// No eager side effects: every consumer gates on the flag per frame.
 void Atom::SetEnabled(bool on) { enabled = on; }
 bool Atom::IsEnabled()         { return enabled; }
 
@@ -74,11 +72,10 @@ void Atom::Init(Atom* parent)
 {
 	this->parent = parent;
 }
-// Fixed-step tick (driven by World::FixedUpdate) — same shape as Update: children first,
-// then this atom's enabled components.
+// Fixed-step tick: children first, then this atom's enabled components.
 void Atom::FixedUpdate()
 {
-	if (!enabled) return;   // whole subtree off (children are only reachable through their parent)
+	if (!enabled) return;   // whole subtree off
 	for (auto child : children)
 	{
 		if (child)
@@ -98,8 +95,7 @@ void Atom::Update()
 		if (child)
 			child->Update();
 	}
-	// Tick intervals (6.8): a component with tickEvery N runs every Nth frame, STAGGERED by
-	// its id — 500 pawns at N=5 tick ~100 per frame instead of all spiking on the same one.
+	// tickEvery N = run every Nth frame, staggered by id so they don't all spike on one frame.
 	const unsigned long long frame = Time::getSingleton()->frame;
 	for (auto cmp : components)
 	{
@@ -111,8 +107,7 @@ void Atom::Update()
 }
 
 void Atom::SetParent(Atom* newparent) {
-	// Detach from the old location + attach to the new one (nullptr = scene root), via the active
-	// world's Reparent — which also guards against cycles.
+	// nullptr = world root; Reparent also guards against cycles.
 	AppInstance::GetSingleton()->currentWorld->Reparent(this, newparent);
 }
 
@@ -130,9 +125,7 @@ void Atom::Reset() {}
 void Atom::Pause() {}
 void Atom::Destroy()
 {
-	// DEFERRED, whole-subtree: the world removes + deletes it at the end of Update — never
-	// mid-traversal (the old immediate `free(this)` corrupted the running iteration and
-	// crashed on root atoms). Safe to call from scripts, contacts, even on `self`.
+	// Deferred, whole-subtree: the world deletes it at the end of Update, never mid-traversal.
 	if (World* w = AppInstance::GetSingleton()->currentWorld)
 		w->QueueDestroy((long)id.id);
 }

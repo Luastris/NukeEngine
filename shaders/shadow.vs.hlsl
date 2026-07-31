@@ -1,11 +1,9 @@
-// Shadow depth pass — vertex shader. Transforms by the light's world-view-proj; passes uv for alpha.
-// NUKE_INSTANCED (7.1): per-instance world rows (ATTRIB3..5, HLSL-ready: row·(pos,1) = world);
-// the CB then carries the LIGHT's view*proj only. Tint/custom (ATTRIB6..7) ride along unused —
-// the instance buffer layout is shared with the world pass.
+// Shadow depth pass vertex shader: transforms by the light's world-view-proj and passes uv for alpha test.
+// NUKE_INSTANCED opt-in: per-instance world rows in ATTRIB3..5, so the CB carries the light's view*proj only.
+// ATTRIB6..7 are unused here but the instance buffer layout is shared with the world pass.
 cbuffer ShadowVSCB { float4x4 g_LightWVP; };
 #if NUKE_INSTANCED
-// Foliage bend (7.4) — KEEP IN SYNC with world.vs.hlsl: shadows must bend with the blades
-// or the swaying grass detaches from its own shadow.
+// KEEP IN SYNC with world.vs.hlsl: shadows must bend with the blades.
 #include "nukebend.hlsl"
 struct VSIn { float3 pos : ATTRIB0; float3 nrm : ATTRIB1; float2 uv : ATTRIB2;
               float4 iRow0 : ATTRIB3; float4 iRow1 : ATTRIB4; float4 iRow2 : ATTRIB5;

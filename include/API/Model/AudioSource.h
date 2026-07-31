@@ -9,11 +9,9 @@
 
 namespace nuke {
 
-// Plays an audio file at (optionally) the atom's position. DATA + a thin driver over the
-// audio service (service/iAudio.h): the clip is a PLAIN audio file in the project content
-// (ogg/wav/mp3/flac — no custom asset format), referenced by content-relative path like
-// scripts are. Playback runs in PLAY mode (PIE / Player); the editor previews clips
-// through the Preview bus instead (browser / asset editor).
+// Plays an audio file, optionally at the atom's position. Thin driver over the audio service;
+// the clip is a plain ogg/wav/mp3/flac in project content, by content-relative path.
+// Playback runs in PLAY mode — the editor previews clips through the Preview bus instead.
 class NUKEENGINE_API AudioSource : public Component
 {
 	NUKE_CLASS(AudioSource, Component, "Audio")
@@ -31,14 +29,13 @@ public:
 	enum DecodeMode : int { Auto = 0, Memory = 1, Stream = 2 };
 	[[nuke::prop(label="Decode", enum="Auto,Memory,Stream")]] DecodeMode decode = Auto;
 
-	// Script/game control (auto-bound: source:Play() etc. via component reflection).
+	// Script/game control (auto-bound via component reflection).
 	[[nuke::func]] void Play();
 	[[nuke::func]] void Stop();
 	[[nuke::func]] void SetPaused(bool paused);
 	[[nuke::func]] bool IsPlaying();
 
-	// Live voice handle (0 = none). Runtime only, NOT serialized.
-	uint64_t voice = 0;
+	uint64_t voice = 0;   // live voice handle (0 = none); runtime only, not serialized
 
 	AudioSource();
 	void Init(Atom* parent) override;

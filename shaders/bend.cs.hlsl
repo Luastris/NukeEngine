@@ -1,19 +1,17 @@
-// Foliage RT bend (7.4): bends the MERGED per-chunk RT meshes with the SAME NukeBend the
-// raster passes use (shared include — zero drift), writing into the BLAS vertex buffer.
-// The renderer dispatches this once per bend-mesh per frame and refits the BLAS, so
-// ray-traced shadows/reflections of vegetation SWAY exactly like the visible blades.
+// Bends the merged per-chunk RT foliage meshes into the BLAS vertex buffer using the same
+// NukeBend the raster passes use. Dispatched once per bend-mesh per frame, then the BLAS is refit.
 #include "nukebend.hlsl"
 
 cbuffer BendCSParams
 {
-    // std140 (Vulkan): float3 must sit at a 16-byte boundary — it leads, the uint packs
-    // into the tail slot. Mirrors the MapHelper write in NukeDiligent_RT.cpp BendRTMeshes.
-    float3 g_AtomOffset;   // chunk verts are ATOM-LOCAL; waves key on world position
+    // std140: the float3 must lead so it sits at a 16-byte boundary and the uint packs into the tail.
+    // Mirrors the MapHelper write in NukeDiligent_RT.cpp BendRTMeshes.
+    float3 g_AtomOffset;   // chunk verts are atom-local; wind waves key on world position
     uint   g_VertCount;
 };
 StructuredBuffer<float>    g_SrcPos;    // static baked positions, 3 floats per vertex
 StructuredBuffer<float4>   g_BendData;  // (source-mesh local Y, custom.z, custom.w, 0)
-StructuredBuffer<float4>   g_BendPivot; // (instance origin in atom space, 0) — phase hash
+StructuredBuffer<float4>   g_BendPivot; // (instance origin in atom space, 0), hashed for the sway phase
 RWStructuredBuffer<float>  g_DstPos;
 
 [numthreads(64, 1, 1)]

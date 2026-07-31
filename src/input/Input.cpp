@@ -65,9 +65,8 @@ static const ActionValueType actionType(const std::string& a)
 void Input::SetControl(const std::string& id, float value) { g_controls[id].value = value; }
 float Input::Control(const std::string& id) { auto it = g_controls.find(id); return it == g_controls.end() ? 0.0f : it->second.value; }
 
-// Cursor in GAME-SCREEN pixels (6.7): the renderer's window cursor shifted by the game
-// screen's top-left (the editor viewport panel offset; 0,0 in the player). Same space as
-// Screen.Width/Height — pairs with Camera.ScreenRayOrigin/Dir for click-to-world.
+// Cursor in GAME-SCREEN pixels: the window cursor shifted by the game screen's top-left
+// (the editor viewport offset; 0,0 in the player). Same space as Screen.Width/Height.
 double Input::MouseX()
 {
 	AppInstance* app = AppInstance::GetSingleton();
@@ -149,9 +148,7 @@ float Input::Value(const std::string& a)        { auto it = g_state.find(a); ret
 Vector2 Input::Axis2(const std::string& a)      { auto it = g_state.find(a); return it == g_state.end() ? Vector2(0, 0) : Vector2(it->second.x, it->second.y); }
 
 // ---- evaluation --------------------------------------------------------------------------------------
-// "Down" by MAGNITUDE: axis controls swing negative (mouse-left delta, stick down) and
-// must actuate exactly like the positive direction — `value >= 0.5` silently killed one
-// direction of every axis (the "camera only turns left/down" bug).
+// "Down" by MAGNITUDE: axis controls swing negative and must actuate like the positive direction.
 static bool ctrlDown(const std::string& id) { auto it = g_controls.find(id); return it != g_controls.end() && fabsf(it->second.value) >= 0.5f; }
 
 // A chord's analog magnitude (single control passes its analog value; multi-control chord is 0/1).
@@ -171,10 +168,9 @@ void Input::Update(double dt)
 {
 	g_now += dt;
 
-	// 1) providers feed raw controls
 	for (auto& p : g_providers) if (p.second) p.second();
 
-	// 2) control edges + timing (magnitude-based: a negative axis swing is "down" too)
+	// Edges are magnitude-based: a negative axis swing counts as "down" too.
 	for (auto& kv : g_controls)
 	{
 		ControlState& s = kv.second;
@@ -186,10 +182,9 @@ void Input::Update(double dt)
 		s.prev = s.value;
 	}
 
-	// 3) reset per-frame action states (values recomputed fresh each frame)
 	for (auto& kv : g_state) kv.second = ActionState{};
 
-	// 4) evaluate contexts, highest priority first; a consuming match hides controls from lower contexts
+	// Highest priority first: a consuming match hides its controls from lower contexts.
 	std::vector<EvalContext*> order;
 	for (EvalContext& c : g_ctx) if (c.active) order.push_back(&c);
 	std::sort(order.begin(), order.end(), [](EvalContext* a, EvalContext* b) { return a->priority > b->priority; });
@@ -202,7 +197,6 @@ void Input::Update(double dt)
 			InputBinding& b = eb.b; BindingRT& rt = eb.rt;
 			if (b.controls.empty()) continue;
 
-			// blocked if a higher-priority context consumed any of our controls
 			bool blocked = false;
 			for (const std::string& ctl : b.controls) if (consumed.count(ctl)) { blocked = true; break; }
 			if (blocked) continue;
@@ -232,9 +226,7 @@ void Input::Update(double dt)
 			}
 
 			// PARALLEL chord (or single control): complete = all controls actuated + mods held.
-			// A single-control ANALOG binding honors its own deadzone as the threshold (a
-			// stick at 0.3 with deadzone 0.2 must drive the action; the 0.5 button gate
-			// would drop it) — magnitude-based, so both directions of an axis work.
+			// A single-control ANALOG binding uses its own deadzone, not the 0.5 button gate.
 			bool complete = modsHeld(b);
 			if (b.controls.size() == 1)
 			{
@@ -251,7 +243,6 @@ void Input::Update(double dt)
 			if (justComplete)   { rt.lastCompleteTime = rt.completeTime; rt.completeTime = g_now; rt.longFired = false; }
 			if (justUncomplete) rt.uncompleteTime = g_now;
 
-			// continuous value + held (independent of the edge phase)
 			if (complete)
 			{
 				float v = bindingAnalog(b);
@@ -260,7 +251,6 @@ void Input::Update(double dt)
 				else                              as.value += v;
 			}
 
-			// edge/phase flags
 			switch (b.phase)
 			{
 				case InputPhase::Pressed:  if (justComplete) as.pressed = true; break;
@@ -281,7 +271,6 @@ void Input::Update(double dt)
 		}
 	}
 
-	// 5) fire C++ callbacks for actions that reached a subscribed phase
 	for (const CB& cb : g_cbs)
 	{
 		auto it = g_state.find(cb.action);
@@ -346,7 +335,6 @@ bool Input::LoadAssetFromString(const std::string& text)
 
 void Input::Rebind(const std::string& context, const InputBinding& b)
 {
-	// user override: remove any existing user binding for the same (context, action) then add.
 	ClearUserBindings(context, b.action);
 	g_userBindings.push_back({ context, b });
 	AddBinding(context, b);
@@ -359,9 +347,8 @@ void Input::ClearUserBindings(const std::string& context, const std::string& act
 		c->bindings.erase(std::remove_if(c->bindings.begin(), c->bindings.end(),
 			[&](const EvalBinding& eb) { return eb.b.action == action; }), c->bindings.end());
 }
-// The remap editor edits the WHOLE binding list of a context (WASD = 4 bindings under one "Move"
-// action — a per-action override can't express that), so a full-context override replaces the live
-// context's bindings wholesale and supersedes any per-action user override for the same context.
+// Replace a context's bindings wholesale (WASD = 4 bindings under one action, which a
+// per-action override can't express). Supersedes per-action user overrides for that context.
 void Input::SetUserContext(const std::string& context, const std::vector<InputBinding>& bindings)
 {
 	g_userBindings.erase(std::remove_if(g_userBindings.begin(), g_userBindings.end(),

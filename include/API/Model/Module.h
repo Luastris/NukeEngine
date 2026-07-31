@@ -7,10 +7,8 @@
 
 namespace nuke {
 
-// Read-only public view of the plugin pool: metadata snapshots for game/tool code
-// ("is scripting on?", an about box, diagnostics). Deliberately NOT the loader —
-// enable/disable lives host-side (interface/Modular.h + the editor's plugin window);
-// gameplay must not toggle plugins.
+// Read-only view of the plugin pool: metadata snapshots for game/tool code. NOT the loader —
+// enable/disable lives host-side (interface/Modular.h).
 class NUKEENGINE_API Module
 {
 public:

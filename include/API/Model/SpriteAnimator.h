@@ -7,16 +7,13 @@
 
 namespace nuke {
 
-// Plays a sprite-sheet animation by driving the sibling Sprite's UV frame each update. The sprite's
-// texture is treated as a grid of columns×rows cells; the animation cycles cells
-// [firstFrame .. firstFrame+frameCount) at `fps`. Purely engine-side — it just calls Sprite::SetFrame,
-// so it needs no renderer support. Sibling of a Sprite on the same atom.
+// Plays a sprite-sheet animation by driving the sibling Sprite's UV frame each update: the texture
+// is a columns×rows grid and the animation cycles cells [firstFrame .. firstFrame+frameCount) at `fps`.
 class NUKEENGINE_API SpriteAnimator : public Component
 {
 	NUKE_CLASS(SpriteAnimator, Component, "UI & 2D")
 public:
-	// The atlas grid (columns×rows) lives on the sprite's TEXTURE (Usage=Sprite), not here — configure it
-	// once on the texture and every animator using it inherits the slicing.
+	// The atlas grid (columns×rows) lives on the sprite's TEXTURE (Usage=Sprite), not here.
 	[[nuke::prop(label="First Frame", min=0)]]     int   firstFrame  = 0;   // starting cell (row-major, 0 = top-left)
 	[[nuke::prop(label="Frame Count", min=0)]]     int   frameCount  = 0;   // number of cells to play (0 = to the end)
 	[[nuke::prop(label="FPS", min=0, max=120)]]    float fps         = 12.0f;

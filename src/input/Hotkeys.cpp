@@ -26,7 +26,7 @@ void Hotkeys::Register(const std::string& id, const std::string& name, int defau
 	h->name         = name;
 	h->action       = std::move(action);
 	h->defaultChord = defaultChord;
-	// Only auto-bind if not already bound (don't clobber a user/project rebind on re-registration).
+	// Auto-bind only when unbound, so re-registration can't clobber a user rebind.
 	if (!h->bound)
 	{
 		if (defaultChord != 0 && !ChordTaken(defaultChord, id)) { h->chord = defaultChord; h->bound = true; }

@@ -8,17 +8,8 @@
 namespace nuke {
 
 // PER-SIDE anchors for a CANVAS child: each enabled side pins the element's matching EDGE at a
-// fixed distance (in canvas units: reference px on a screen canvas, world units on a world one)
-// from that canvas side. The distance is captured when the anchor is enabled (the inspector shows
-// the Anchors block in the Transform section for canvas children).
-//
-//   One side enabled (e.g. Left)          — the element keeps its size and its distance to that
-//                                            side whatever the canvas/screen does.
-//   Two OPPOSITE sides (Left+Right)       — both edges pinned: the element STRETCHES with the
-//                                            canvas (its Sprite width/height follow the rect).
-//
-// Applied every frame before rendering (edit mode included), pinning the element to the canvas
-// surface (its Z never drifts). Without a canvas above it the component does nothing.
+// fixed distance (canvas units) from that canvas side. Two OPPOSITE sides make the element
+// stretch. Applied every frame before rendering; does nothing without a canvas above it.
 class NUKEENGINE_API RectAnchor : public Component
 {
 	NUKE_CLASS(RectAnchor, Component, "UI & 2D")
@@ -27,8 +18,7 @@ public:
 	[[nuke::prop(label="Right")]]  bool right  = false;
 	[[nuke::prop(label="Top")]]    bool top    = false;
 	[[nuke::prop(label="Bottom")]] bool bottom = false;
-	// Captured edge-to-side distances (canvas units). The inspector fills them when a side is
-	// toggled on; editing them nudges the element.
+	// Captured edge-to-side distances (canvas units).
 	[[nuke::prop(label="Dist Left")]]   float distLeft   = 0.0f;
 	[[nuke::prop(label="Dist Right")]]  float distRight  = 0.0f;
 	[[nuke::prop(label="Dist Top")]]    float distTop    = 0.0f;

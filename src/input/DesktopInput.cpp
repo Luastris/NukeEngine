@@ -6,8 +6,8 @@
 
 namespace nuke {
 
-// GLFW key code -> control name. Printable ASCII maps to its glyph ("Key.W"); named keys via the table.
-// Unknown codes fall back to "Key.<code>" so nothing is lost. (GLFW numeric constants, no <GLFW/glfw3.h>.)
+// GLFW key code -> control name: ASCII maps to its glyph ("Key.W"), named keys via the table,
+// anything else to "Key.<code>". GLFW constants are inlined — do not include <GLFW/glfw3.h>.
 static std::string KeyName(int key)
 {
 	if (key >= 'A' && key <= 'Z') return std::string("Key.") + (char)key;             // 65..90
@@ -37,7 +37,7 @@ void InstallDesktopInput(iRender* r)
 {
 	if (!r) return;
 
-	// Chain the existing callbacks (the UI may have installed some) — feed Input, then call the previous.
+	// Chain the existing callbacks: feed Input first, then call the previous handler.
 	auto prevKey   = r->_UIkey;
 	auto prevMouse = r->_UImouse;
 	auto prevMove  = r->_UImove;
@@ -46,7 +46,7 @@ void InstallDesktopInput(iRender* r)
 	r->_UIkey = [prevKey](int key, int action, int mods) {
 		float v = (action == 0) ? 0.0f : 1.0f;   // GLFW_RELEASE == 0; press/repeat -> down
 		Input::SetControl(KeyName(key), v);
-		// Metas as generic modifier aliases too (so a binding can require "Key.Ctrl" regardless of side).
+		// Side-agnostic aliases so a binding can just require "Key.Ctrl".
 		if (key == 340 || key == 344) Input::SetControl("Key.Shift", v);
 		if (key == 341 || key == 345) Input::SetControl("Key.Ctrl",  v);
 		if (key == 342 || key == 346) Input::SetControl("Key.Alt",   v);

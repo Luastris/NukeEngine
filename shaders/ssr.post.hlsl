@@ -1,7 +1,5 @@
-// Screen-space reflections — built-in post effect (the renderer special-cases it: isSSR). A single fullscreen
-// pass over the HDR chain colour. The renderer binds the G-buffer (octN.xy, roughness, metalness), the prepass
-// depth, and the camera matrices (SSRCB). Reflections LAYER on top of the specular the world pass already
-// produced — where a ray misses or leaves the screen the underlying reflection-probe / sky term stays.
+// Screen-space reflections: one fullscreen pass over the HDR chain colour, layered on top of the
+// specular the world pass produced (a missed ray leaves the probe/sky term untouched).
 Texture2D    g_Source;     SamplerState g_Source_sampler;   // current HDR chain colour
 Texture2D    g_GBuffer;    SamplerState g_GBuffer_sampler;   // (octN.xy, roughness, metalness)
 Texture2D    g_Depth;      SamplerState g_Depth_sampler;     // prepass device depth (R)
@@ -60,7 +58,6 @@ float4 main(in PSIn i) : SV_Target
     float3 dir  = normalize(vpos);                              // eye(origin) -> pixel
     float NoV   = saturate(dot(Nv, -dir));
 
-    // Selective: Fresnel-Schlick reflectivity, faded out on rough surfaces.
     float  F0   = lerp(0.04, 1.0, metal);
     float  refl = (F0 + (1.0 - F0) * pow(1.0 - NoV, 5.0)) * (1.0 - rough);
     if (refl < 0.01 || g_Intensity <= 0.0) return float4(base, 1.0);
@@ -69,14 +66,13 @@ float4 main(in PSIn i) : SV_Target
 
     int   steps = (int)clamp(g_MaxSteps, 8.0, 128.0);
     float dt    = g_MaxDistance / steps;
-    // Bias the start off the surface (along the view normal) so the march never self-intersects the originating
-    // surface — the prime cause of the grazing-angle "streaks". Per-pixel phase jitter breaks coherent banding.
-    float2 pix      = i.uv * g_SSRRes.xy;   // interleaved gradient noise — cleaner phase dither than a sin-hash
+    // Start biased off the surface along the view normal so the march cannot self-intersect.
+    float2 pix      = i.uv * g_SSRRes.xy;   // interleaved gradient noise phase dither
     float  jit      = frac(52.9829189 * frac(dot(pix, float2(0.06711056, 0.00583715))));
     float3 startPos = vpos + Nv * (0.03 + vpos.z * 0.01);
     float3 p        = startPos + R * dt * jit;
     float3 prevP    = startPos;
-    float  prevDiff = -1.0;          // start: ray is IN FRONT of the scene surface
+    float  prevDiff = -1.0;          // negative = ray starts in front of the scene surface
     bool   hit      = false;
     float2 hitUV    = i.uv;
 
@@ -90,8 +86,7 @@ float4 main(in PSIn i) : SV_Target
         if (sd >= 0.99999) { prevP = p; prevDiff = -1.0; continue; }   // sky -> stays "in front"
         float3 scenePos = ViewPosFromUV(suv, sd);
         float  diff = p.z - scenePos.z;                 // <0: ray in front of surface, >0: behind it
-        // A real hit = the ray CROSSES from in-front to behind a surface, within the thickness tolerance.
-        // Requiring the sign change (not just diff>0) rejects the false self-hits that caused the streaks.
+        // A hit requires the sign to CROSS within the thickness tolerance; diff>0 alone accepts self-hits.
         if (prevDiff < 0.0 && diff >= 0.0 && diff < g_Thickness)
         {
             float3 a = prevP, b = p;
@@ -111,13 +106,13 @@ float4 main(in PSIn i) : SV_Target
 
     if (!hit) return float4(base, 1.0);
 
-    // Fade: vanish toward screen borders (data runs out) AND with ray distance (far hits blend back to the probe).
+    // Fade toward the screen borders and with ray distance.
     float2 e = smoothstep(0.0, 0.12, hitUV) * smoothstep(0.0, 0.12, 1.0 - hitUV);
     float  hd      = g_Depth.Sample(g_Depth_sampler, hitUV).r;
     float  distF   = 1.0 - saturate(length(ViewPosFromUV(hitUV, hd) - vpos) / max(g_MaxDistance, 1e-3));
     float  fade    = e.x * e.y * distF;
 
-    // Glossy: blur the reflection by roughness (cheap disc taps) — softens rough reflections AND hides march noise.
+    // Blur the reflection by roughness with cheap disc taps.
     float3 reflColor = g_Source.SampleLevel(g_Source_sampler, hitUV, 0).rgb;
     float  blur = rough * 6.0;                       // radius in texels
     if (blur > 0.25)
@@ -127,8 +122,7 @@ float4 main(in PSIn i) : SV_Target
         [unroll] for (int t = 0; t < 6; ++t) reflColor += g_Source.SampleLevel(g_Source_sampler, hitUV + off[t] * tx, 0).rgb;
         reflColor /= 7.0;
     }
-    // REPLACE (bounded) rather than add: the metal already carries the probe/IBL reflection, so adding SSR on top
-    // double-counts and blows out. lerp keeps the result within [base, reflColor].
+    // lerp, not add: the surface already carries the probe/IBL reflection, so adding would double-count.
     float  k = saturate(refl * g_Intensity * fade);
     return float4(lerp(base, reflColor, k), 1.0);
 }

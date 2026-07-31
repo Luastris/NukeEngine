@@ -106,14 +106,12 @@ Config* Config::getSingleton()
 {
     static Config instance;
     static bool   loaded = false;
-    if (!loaded) { instance.reload(&instance); loaded = true; }   // load once — NOT every call (was re-reading the file + log-spamming per frame)
+    if (!loaded) { instance.reload(&instance); loaded = true; }   // load once, not on every call
     return &instance;
 }
 
-// config/ lives NEXT TO THE EXECUTABLE, never in the process working directory: a packaged
-// game launched from a shortcut / another folder has an arbitrary CWD, and a CWD-relative
-// path silently loaded NOTHING — every config parameter fell back to defaults (D3D11,
-// decorated window, console on). Falls back to the CWD only if the exe path is unavailable.
+// config/ lives NEXT TO THE EXECUTABLE, never in the working directory (a game launched from
+// a shortcut has an arbitrary CWD). Falls back to the CWD only if the exe path is unavailable.
 bfs::path Config::baseDir()
 {
     boost::system::error_code ec;
@@ -157,9 +155,8 @@ void Config::reload(Config* instance)
         win.resizable   = w.value("resizable",   win.resizable);
         win.floating    = w.value("floating",    win.floating);
         win.maximized   = w.value("maximized",   win.maximized);
-        // `mode` is the ONLY display-mode key, and it is HUMAN-READABLE: "windowed" /
-        // "borderless" / "exclusive". Legacy configs are still accepted (a 0/1/2 number, or
-        // the ancient `fullscreen` bool -> exclusive); the legacy keys vanish on next save.
+        // `mode` is the ONLY display-mode key, human-readable ("windowed"/"borderless"/
+        // "exclusive"); a legacy 0/1/2 number or `fullscreen` bool is still accepted.
         if (w.contains("mode") && w["mode"].is_string())
         {
             const std::string m = w["mode"].get<std::string>();
@@ -209,10 +206,8 @@ void Config::reload(Config* instance)
 
 void Config::saveWindow() { saveWindowTo((baseDir() / "config" / "main.json").string()); }
 
-// Persist the window block into an arbitrary json file (read-modify-write). saveWindow routes
-// here; the seam stays for any caller that needs the block written elsewhere. In the EDITOR
-// Game.Set* persists NOTHING (the shipped game's config is formed by the Package Project
-// dialog — see Game.cpp SaveGameWindow).
+// Persist the window block into an arbitrary json file (read-modify-write). In the EDITOR
+// Game.Set* persists nothing — the shipped config is formed by the Package Project dialog.
 void Config::saveWindowTo(const std::string& path)
 {
     bfs::path cfg(path);
@@ -227,7 +222,7 @@ void Config::saveWindowTo(const std::string& path)
     w["width"]       = window.w;
     w["height"]      = window.h;
     if (!window.mainFont.empty()) w["mainFont"] = window.mainFont;
-    w.erase("title");   // legacy key: the window title is not config (editor = fixed, game = project name)
+    w.erase("title");   // legacy key: the window title is not config
     w["decorated"]   = window.decorated;
     w["resizable"]   = window.resizable;
     w["floating"]    = window.floating;

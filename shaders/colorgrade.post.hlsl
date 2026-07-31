@@ -1,5 +1,4 @@
-// Stock post-process effect: exposure + colour grade. A custom post shader — sample g_Source, read params
-// from PostParams (auto-shown in the inspector), output linear HDR. Drop it from the chain or replace it.
+// Stock post effect: exposure + colour grade. Samples g_Source, outputs linear HDR.
 Texture2D    g_Source;
 SamplerState g_Source_sampler;
 cbuffer PostParams

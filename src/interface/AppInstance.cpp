@@ -1,5 +1,4 @@
-// Header-only boost.chrono, defined BEFORE any boost include (same mode as Time.cpp /
-// Clock.cpp — the lib flavor double-defines steady_clock::now inside the engine DLL).
+// Must precede any boost include: the lib flavor double-defines steady_clock::now in the engine DLL.
 #define BOOST_CHRONO_HEADER_ONLY
 #include "interface/AppInstance.h"
 #include "API/Model/World.h"
@@ -36,8 +35,6 @@ std::string AppInstance::ResolveContent(const std::string& path) const
 	return path;
 }
 
-// The canonical on-disk path for a world: ALWAYS under the project content root (worlds live in
-// the project content, never "wherever"). Absolute paths pass through unchanged.
 std::string AppInstance::WorldFullPath(const std::string& relPath) const
 {
 	boost::filesystem::path rp(relPath);
@@ -45,8 +42,6 @@ std::string AppInstance::WorldFullPath(const std::string& relPath) const
 	return (boost::filesystem::path(contentRoot) / rp).string();
 }
 
-// Read a content-relative file through every layer: the raw project/overlay from disk,
-// mounted paks from MEMORY (packed content is bytes-only — it never touches the disk).
 bool AppInstance::ReadContent(const std::string& relPath, std::string& out) const
 {
 	std::string full = ResolveContent(relPath);
@@ -61,10 +56,6 @@ bool AppInstance::ReadContent(const std::string& relPath, std::string& out) cons
 	return false;
 }
 
-// A world's FINAL data string, resolved through every source: the raw content file from
-// disk, or the mounted pak layers MERGED (base game + mods + overlay). THREAD-SAFE —
-// filesystem reads + mutex-guarded Package reads, no engine-object mutation — so both the
-// synchronous OpenWorld and the async loader's background job run through here.
 bool AppInstance::ComposeWorldData(const std::string& relPath, std::string& out)
 {
 	boost::system::error_code ec;
@@ -78,12 +69,8 @@ bool AppInstance::ComposeWorldData(const std::string& relPath, std::string& out)
 		out.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
 		return true;
 	}
-	// Packed runtime (3.2): the world lives in a mounted pak — load it from bytes.
-	// SEVERAL layers may carry this world (base game + mods editing it): they MERGE
-	// semantically (World::MergeWorldLayers) instead of the top file winning outright.
-	// Each layer diffs against ITS OWN baseline: an ordinary mod against the base game,
-	// a patch-mod against base + the mods it requires (mod.json), the modder's raw
-	// overlay against everything mounted below it (the session it was authored in).
+	// The world lives in a mounted pak. SEVERAL layers may carry it, so they MERGE semantically
+	// (World::MergeWorldLayers) instead of the top file winning, each against ITS OWN baseline.
 	std::vector<std::pair<std::string, std::string>> hits;   // (data, source pak; "" = raw)
 	if (Package::MountedCount() > 0 && Package::ReadAllInfo("content/" + relPath, hits) > 0)
 	{
@@ -103,9 +90,8 @@ bool AppInstance::ComposeWorldData(const std::string& relPath, std::string& out)
 				for (size_t j = 1; j < i; ++j) deps[i].push_back((int)j);
 				continue;
 			}
-			// The layer's own recorded BASELINE (Package Mod stores the world exactly as
-			// the mod's author saw it under "basis/<rel>"): the diff applies the author's
-			// ACTUAL point changes — a stale mod can't wipe what the base gained since.
+			// The layer's own recorded baseline ("basis/<rel>"): diffing against it applies the
+			// author's ACTUAL point changes, so a stale mod can't wipe what the base gained since.
 			if (i > 0)
 			{
 				Package::File pf;
@@ -134,9 +120,8 @@ bool AppInstance::ComposeWorldData(const std::string& relPath, std::string& out)
 bool AppInstance::OpenWorld(const std::string& relPath)
 {
 	if (relPath.empty() || !currentWorld) return false;
-	// Mid-tick call (a script's Game.LoadWorld inside Update/FixedUpdate): loading NOW
-	// would replace the hierarchy the tick is iterating. Queue it — World::Update applies
-	// it at the frame boundary. `true` = accepted (a missing world logs on apply).
+	// Mid-tick: loading now would replace the hierarchy the tick is iterating, so queue it
+	// for the frame boundary. `true` = accepted (a missing world logs on apply).
 	if (worldTickActive)
 	{
 		pendingWorldLoad = relPath;
@@ -153,11 +138,9 @@ bool AppInstance::OpenWorld(const std::string& relPath)
 	return true;
 }
 
-// --- async world load (Game.LoadWorldAsync; task #147) --------------------------------
-// The background job reads + merges + PARSES (the heavy part for big worlds). The staged
-// document then waits for the script's ActivateLoadedWorld — applied by World::Update at
-// the frame boundary via ApplyAsyncWorldLoad. A new Start supersedes a pending one (the
-// generation counter makes the stale job drop its result silently).
+// --- async world load ------------------------------------------------------------------
+// The background job reads + merges + parses; the staged document is applied at the frame
+// boundary by ApplyAsyncWorldLoad. A new Start supersedes a pending one (generation counter).
 
 bool AppInstance::StartWorldLoadAsync(const std::string& relPath)
 {
@@ -176,7 +159,7 @@ bool AppInstance::StartWorldLoadAsync(const std::string& relPath)
 	{
 		std::string data;
 		const bool ok = ComposeWorldData(relPath, data);
-		if (asyncLoadGen != my || Jobs::Stopping()) return;   // superseded/cancelled/exiting — drop silently
+		if (asyncLoadGen != my || Jobs::Stopping()) return;   // superseded, cancelled or exiting
 		if (!ok)
 		{
 			asyncLoadState = 3;
@@ -232,8 +215,7 @@ void AppInstance::CancelWorldLoadAsync()
 	asyncLoadActivate = false;
 	asyncLoadState = 0;
 	asyncLoadProgress = 0.f;
-	// A GROWING world is dropped as-is (partial) — the only cancel site outside gameplay is
-	// PIE stop, which restores the edit scene wholesale right after.
+	// A still-growing world is dropped as-is, partial.
 	activationActive = false;
 	activationQueue.clear();
 	activationDoc.reset();
@@ -254,8 +236,7 @@ void AppInstance::ApplyAsyncWorldLoad()
 	asyncLoadProgress = 0.f;
 	++asyncLoadGen;
 	if (!doc) return;
-	// A new world superseding one still GROWING: the header teardown below wipes its atoms
-	// anyway — just drop the leftover queue so it can't keep instantiating into the new world.
+	// Drop any leftover growth queue so it can't keep instantiating into the new world.
 	activationActive = false;
 	activationQueue.clear();
 	activationDoc.reset();
@@ -269,9 +250,8 @@ void AppInstance::ApplyAsyncWorldLoad()
 		std::cout << "[World]\t\t\t" << "async world activated: '" << path << "'" << std::endl;
 		return;
 	}
-	// INCREMENTAL activation: swap to the world header now (old world torn down, calendar/
-	// settings applied), then let the world GROW — root atoms instantiate over the next
-	// frames within the ms budget, optionally ordered outward from the activation origin.
+	// INCREMENTAL activation: swap to the world header now, then let the world GROW — root
+	// atoms instantiate over the next frames within the ms budget, ordered from the origin.
 	currentWorld->LoadHeaderFromJson(*doc);
 	currentWorldPath = path;
 	NameWorldFromPath(path);
@@ -302,7 +282,7 @@ void AppInstance::ApplyAsyncWorldLoad()
 	activationActive = true;
 	std::cout << "[World]\t\t\t" << "async world activating incrementally: '" << path << "' ("
 	          << activationTotal << " root atoms, " << activationBudgetMs << " ms/frame)" << std::endl;
-	ContinueWorldActivation();   // first slice THIS frame — the origin-nearest atoms pop in at once
+	ContinueWorldActivation();   // first slice runs THIS frame
 }
 
 // --- incremental activation (the "world grows around the player" pattern) --------------
@@ -335,8 +315,7 @@ void AppInstance::ContinueWorldActivation(bool ignoreBudget)
 		++activationDone;
 		if (a)
 		{
-			// The GAME drives the appearance effect (wireframe fade / particles / goo) —
-			// the engine only announces the atom. Payload keys: id (stable), name.
+			// The engine only announces the atom; the game drives any appearance effect.
 			nlohmann::json p{ { "id", (long long)a->id.id }, { "name", a->GetName() } };
 			Events::Emit("world.atomActivated", p.dump());
 		}
@@ -363,9 +342,6 @@ void AppInstance::ContinueWorldActivation(bool ignoreBudget)
 
 void AppInstance::FlushWorldActivation() { ContinueWorldActivation(true); }
 
-// A world with no authored name (older files / never named) reads its name from the file
-// stem, so Game.GetWorld().Name is meaningful ("MusicVisTest") instead of the constructor
-// default. An explicitly named world (LoadFromString set it) is left untouched.
 void AppInstance::NameWorldFromPath(const std::string& relPath)
 {
 	if (currentWorld && currentWorld->name.empty())
@@ -445,17 +421,15 @@ void AppInstance::StartUpdateThread()
 	boost::thread updt(boost::bind(&AppInstance::UpdateThread, this));
 }
 
-// Fixed-frequency loop: ticks World::FixedUpdate at the world's fixedDt using an absolute
-// deadline (sleep_until), so the cadence never depends on frames or on how long a step
-// took — a fast render loop doesn't speed it up, a slow one doesn't starve it.
+// Fixed-frequency loop: ticks World::FixedUpdate at the world's fixedDt off an ABSOLUTE
+// deadline, so the cadence depends on neither the frame rate nor how long a step took.
 void AppInstance::FixedThread()
 {
 	namespace bch = boost::chrono;
 
 #ifdef _WIN32
-	// Pin the simulation to its own core (config "physicsCore": -1 = auto -> the LAST
-	// core, keeping it off core 0 where the OS scheduler and the main thread live;
-	// -2 = don't pin) and bump priority so a busy render loop can't starve the cadence.
+	// Pin the sim to its own core (config physicsCore: -1 = auto/last core, -2 = don't pin)
+	// and raise priority so a busy render loop can't starve the cadence.
 	{
 		int core = config ? config->physicsCore : -1;
 		if (core == -1)
@@ -473,10 +447,8 @@ void AppInstance::FixedThread()
 	{
 		World* w = currentWorld;
 		const double dt = (w && w->settings.fixedDt > 0.0001f) ? w->settings.fixedDt : 1.0 / 60.0;
-		// Game speed (Game.SetTimeScale): one FixedUpdate is always ONE fixedDt of GAME time,
-		// so at scale s the cadence runs s× faster in real time (2x = twice the steps per
-		// real second — the sim fast-forwards without changing the step size). Scale 0 =
-		// frozen: no steps at all, idle at the base cadence waiting for unpause.
+		// One FixedUpdate is always ONE fixedDt of GAME time, so at time scale s the cadence
+		// runs s× faster in real time. Scale 0 = frozen: no steps, idle at the base cadence.
 		const double s = Time::getSingleton()->scale;
 		const bool   frozen = s <= 0.0001;
 		if (w && playState == 1 && !frozen)

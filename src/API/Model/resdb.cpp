@@ -1,7 +1,7 @@
 #include "API/Model/resdb.h"
 #include <cstring>
 #include "API/Model/Package.h"   // packed-content scan (3.2)
-#include "API/Model/Jobs.h"      // Stopping(): boot-time scans bail out so process exit isn't blocked
+#include "API/Model/Jobs.h"      // Stopping(): background scans bail on shutdown
 #include "API/Model/Prefab.h"   // PrefabGuid (register prefab guid<->path)
 #include "render/irender.h"
 #include "interface/AppInstance.h"   // GuidForContentPath: content root + ResolveContent
@@ -31,8 +31,8 @@ ResDB::ResDB()
 	def->guid = "builtin:default";
 	def->matName = "Default";
 	RegisterMaterial(def);
-	// Green foliage default: the builtin grass/bush/tree meshes carry no texture — the
-	// material color is the look. Users swap in their own material per layer.
+	// Green foliage default: the builtin grass/bush/tree meshes carry no texture, so the
+	// material color is the whole look.
 	Material* grn = new Material();
 	grn->guid = "builtin:grass";
 	grn->matName = "Grass";
@@ -156,9 +156,7 @@ int ResDB::BuildShaderPipelinesStep(iRender* r, int maxCount)
 		                              : r->createShaderPipeline(s->name.c_str(), s->vsSource.c_str(), s->psSource.c_str());
 		std::cout << "[ResDB]\t" << (s->isPost ? "post" : "shader") << " pipeline '" << s->name
 		          << "' -> handle " << s->rendererHandle << std::endl;
-		// A failed build keeps handle 0 — count it as done for THIS pass so the boot pump
-		// can't spin on it forever; the full BuildShaderPipelines/hot-reload can retry later.
-		++built;
+		++built;   // count failures too, so a broken shader can't spin the caller forever
 	}
 	return left;
 }
@@ -199,8 +197,8 @@ void ResDB::HotReloadShaders(iRender* r)
 	}
 }
 
-// Renderer-internal pass pairs (fed to the renderer by LoadBuiltinShaders, never material
-// shaders). ONE list for the disk scan and the packed scan — extend HERE for new passes.
+// Renderer-internal pass pairs, never material shaders. ONE list for the disk scan and the
+// packed scan: extend HERE for new passes.
 static bool RendererInternalShader(const std::string& name)
 {
 	return name == "ui" || name == "shadow" || name == "sky" || name == "post" || name == "debug"
@@ -216,11 +214,10 @@ void ResDB::LoadShadersDir(const std::string& dir)
 	for (bfs::recursive_directory_iterator it(dir, ec), end; it != end; it.increment(ec))
 	{
 		if (ec) break;
-		if (Jobs::Stopping()) return;   // boot-time worker job — bail so Shutdown's join returns
+		if (Jobs::Stopping()) return;   // let Shutdown's join return
 		if (bfs::is_directory(it->path())) continue;
 		std::string fn = it->path().filename().string();
-		// Post-process effect shader: a single "<name>.post.hlsl" (fullscreen PS; paired with the built-in
-		// post.vs by the renderer). Registered as a Shader asset with isPost = true.
+		// Post-process effect shader: a single "<name>.post.hlsl" (the renderer pairs it with post.vs).
 		const std::string posuf = ".post.hlsl";
 		if (fn.size() > posuf.size() && fn.compare(fn.size() - posuf.size(), posuf.size(), posuf) == 0)
 		{
@@ -302,8 +299,7 @@ std::string ResDB::GuidForContentPath(const std::string& contentRel) const
 		g = GuidForPath(abs);
 		if (!g.empty()) return g;
 	}
-	// Form-insensitive: compare content-relative normalized tails. Registered paths come from
-	// scans/imports (absolute, native slashes) - a few hundred entries, a load-time-rare call.
+	// Form-insensitive fallback: compare content-relative normalized tails.
 	const std::string want = NormForContent(contentRel, std::string());
 	for (const auto& kv : guidByPath)
 		if (NormForContent(kv.first, app->contentRoot) == want)
@@ -314,8 +310,8 @@ std::string ResDB::GuidForContentPath(const std::string& contentRel) const
 void ResDB::HotReloadAssets(iRender* r)
 {
 	boost::system::error_code ec;
-	// Textures: same Texture* is shared by every material that resolves it, so reloading pixels +
-	// dropping the GPU cache refreshes the image EVERYWHERE (templates + live instances). Skip RTs.
+	// Textures: the same Texture* is shared by every material that resolves it, so reloading
+	// pixels + dropping the GPU cache refreshes the image everywhere. Skip render targets.
 	for (auto& kv : texByGuid)
 	{
 		Texture* t = kv.second; if (!t || t->renderTexture) continue;
@@ -406,20 +402,19 @@ void ResDB::LoadContentDir(const std::string& dir)
 	for (bfs::recursive_directory_iterator it(dir, ec), end; it != end; it.increment(ec))
 	{
 		if (ec) break;
-		if (Jobs::Stopping()) return;   // runs on a worker at boot — must not block process exit
+		if (Jobs::Stopping()) return;   // let Shutdown's join return
 		if (bfs::is_directory(it->path())) continue;
 		LoadContentFile(it->path().string());
 	}
 }
 
-// Packed runtime (3.2): the same registration pass over the Package layer stack. Raw
-// overlay files load from disk; pak entries load from MEMORY — packed content is never
-// written out (SetAssetPath is skipped for those: no file to locate).
+// Packed runtime: the same registration pass over the Package layer stack. Raw overlay files
+// load from disk; pak entries load from MEMORY (no SetAssetPath: there is no file to locate).
 void ResDB::LoadContentPackaged()
 {
 	for (const std::string& rel : Package::List("content/"))
 	{
-		if (Jobs::Stopping()) return;   // boot-time worker job — must not block process exit
+		if (Jobs::Stopping()) return;   // let Shutdown's join return
 		std::string disk = Package::ResolveRead(rel);   // raw overlay only
 		if (!disk.empty()) { LoadContentFile(disk); continue; }
 		std::string bytes;
@@ -484,10 +479,8 @@ void ResDB::LoadContentEntry(const std::string& rel, const std::string& bytes)
 	}
 }
 
-// Packed runtime (3.2): shaders from the Package layers — .vs/.ps pairs matched by base
-// name + single .post.hlsl files, built straight from the pak bytes. Two prefixes:
-// "content/" = project shaders (everything registers), "shaders/" = engine built-ins
-// (renderer-internal pass pairs are skipped, same rule as the disk scan).
+// Shaders from the Package layers: .vs/.ps pairs matched by base name + single .post.hlsl files.
+// "content/" = project shaders (all register), "shaders/" = engine built-ins (internal passes skipped).
 static void ScanPakShaders(ResDB* db, const std::string& prefix, bool builtins)
 {
 	std::map<std::string, std::pair<std::string, std::string>> pairs;   // base -> (vsRel, psRel)
@@ -560,9 +553,8 @@ void ResDB::LoadContentFile(const std::string& path)
 		if (tx->guid.empty()) { delete tx; return; }
 		if (texByGuid.count(tx->guid))
 		{
-			// A silently skipped duplicate = an asset that never registers -> everything
-			// referencing it by path stays invisible with no error. Scream. (Typical cause: a
-			// file copied on disk - the GUID is embedded, so the copy collides.)
+			// A silently skipped duplicate never registers, so anything referencing it by path
+			// stays invisible with no error: log loudly.
 			std::cout << "[ResDB]	DUPLICATE GUID '" << tx->guid << "': '" << path
 			          << "' collides with '" << PathForGuid(tx->guid)
 			          << "' - file SKIPPED (re-import or re-save one of them)" << std::endl;
@@ -572,7 +564,7 @@ void ResDB::LoadContentFile(const std::string& path)
 		SetAssetPath(tx->guid, path);
 		std::cout << "[ResDB]	loaded texture '" << tx->guid << "' (" << tx->width << "x" << tx->height << ")" << std::endl;
 	}
-	else if (ext == ".nuinput")   // gameplay input map (actions/contexts/bindings) -> Input system, not a GUID'd asset
+	else if (ext == ".nuinput")   // input map -> Input system, not a GUID'd asset
 	{
 		if (Input::LoadAsset(path)) std::cout << "[ResDB]	loaded input map '" << p.filename().string() << "'" << std::endl;
 	}

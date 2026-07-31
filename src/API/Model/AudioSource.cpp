@@ -1,7 +1,4 @@
-// AudioSource — component driver over the audio service. Voice lifetime follows PLAY
-// mode: playOnStart fires on the first playing Update (both PIE and Player), Pause()
-// halts the voice (per-voice; the global game pause in World::Render also covers it),
-// Destroy/Reset stop it (PIE Stop restores the snapshot, which destroys the component).
+// AudioSource — component driver over the audio service; voice lifetime follows play mode.
 #include "API/Model/AudioSource.h"
 #include "API/Model/Audio.h"
 #include "API/Model/Atom.h"
@@ -35,7 +32,7 @@ void AudioSource::Play()
 		d.pos[0] = (float)p.x; d.pos[1] = (float)p.y; d.pos[2] = (float)p.z;
 		d.minDist = minDist; d.maxDist = maxDist;
 	}
-	voice = Audio::PlayDesc(clip, d);   // raw file by path; pak entry from memory (3.2)
+	voice = Audio::PlayDesc(clip, d);   // raw file by path; pak entry from memory
 	lastVolume = volume; lastPitch = pitch;
 }
 

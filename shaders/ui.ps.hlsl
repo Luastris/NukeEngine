@@ -1,4 +1,4 @@
-// Generic textured 2D pass — pixel shader. SRGBA_TO_LINEAR is injected as a macro by the host.
+// Generic textured 2D pixel shader. SRGBA_TO_LINEAR is injected as a macro by the host.
 struct PSInput { float4 pos : SV_POSITION; float4 col : COLOR; float2 uv : TEXCOORD; };
 Texture2D    Texture;
 SamplerState Texture_sampler;

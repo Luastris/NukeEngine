@@ -11,8 +11,7 @@
 
 namespace nuke {
 
-// Deterministic LOCAL rng: same seed + same rules = the same scatter, and painting never
-// disturbs the engine's global seeded streams.
+// Deterministic local rng, kept separate from the engine's global seeded streams.
 struct FolRng
 {
 	unsigned s;
@@ -28,8 +27,8 @@ static glm::mat4 AtomWorldM(Atom* a)
 	     * glm::scale(glm::mat4(1.0f), glm::vec3((float)S.x, (float)S.y, (float)S.z));
 }
 
-// The foliage LAYER's frame: position + rotation only, NO scale — must mirror the render
-// composition (ScaleWithAtom() == false), or painted world points and drawn instances drift.
+// The foliage layer's frame: position + rotation, no scale. Must mirror the render
+// composition (ScaleWithAtom() == false) or painted points and drawn instances drift.
 static glm::mat4 AtomTRM(Atom* a)
 {
 	Transform& t = a->GetTransform();
@@ -53,12 +52,9 @@ static glm::quat UpTo(const glm::vec3& axis)
 Foliage::Foliage()
 {
 	name = (char*)"Foliage";
-	// A fresh layer is GRASS out of the box: builtin clump mesh + green material. Swap
-	// either for imported assets per layer.
 	meshGuid = "builtin:grassclump";
 	matGuid  = "builtin:grass";
-	// On RT hardware shadows/reflections ray-query the TLAS — foliage participates out of
-	// the box (dense layers get stride-subsampled above the cap; see World's RT gather).
+	// Foliage joins the RT TLAS by default; dense layers are stride-subsampled above the cap.
 	inReflections  = true;
 	rtMaxInstances = 8192;
 }
@@ -73,9 +69,8 @@ float Foliage::MeshHeight()
 	return std::max(0.05f, mesh->aabbMax[1] - mesh->aabbMin[1]);
 }
 
-// Write the bend coefficients into every instance's custom.zw (the vertex shader reads
-// them: z = wind, w = interaction; both normalized by mesh height² so the TOP of the mesh
-// sways and the base stays planted regardless of the mesh used). Hot-applies on prop edits.
+// Write the bend coefficients into every instance's custom.zw — the vertex shader reads
+// z = wind, w = interaction, both normalized by mesh height².
 void Foliage::SyncBendParams(bool force)
 {
 	if (!mesh || instances.empty()) return;
@@ -97,9 +92,6 @@ bool Foliage::EnsureRenderReady(iRender* r)
 
 // ---- scatter ------------------------------------------------------------------------------
 
-// Area-weighted sampling over every triangle of the surface subtree's meshes, in WORLD
-// space (honest under any transform), masked by slope / height band / patch noise; the
-// accepted points convert to THIS atom's local space (instances ride the foliage atom).
 void Foliage::Scatter(const Vector3& brushPos, float brushR, float densMul)
 {
 	Atom* root = SurfaceRoot();
@@ -110,8 +102,7 @@ void Foliage::Scatter(const Vector3& brushPos, float brushR, float densMul)
 	Quaternion AQ = atom->GetTransform().globalRotation();
 	const glm::quat invARot = glm::inverse(glm::quat((float)AQ.w, (float)AQ.x, (float)AQ.y, (float)AQ.z));
 
-	// Brush strokes must differ per position (a fixed seed would stack identical samples),
-	// while Fill stays fully deterministic by `seed`.
+	// Brush strokes hash in the position so strokes differ; Fill stays deterministic by `seed`.
 	unsigned s0 = (unsigned)seed * 2654435761u + 12345u;
 	if (brushR > 0.0f)
 		s0 ^= (unsigned)(brushPos.x * 73856093.0) ^ (unsigned)(brushPos.y * 19349663.0) ^ (unsigned)(brushPos.z * 83492791.0);

@@ -7,9 +7,7 @@ namespace nuke {
 
 namespace {
 
-// Seed-mixed integer hash (splitmix64 finalizer) — the permutation source. Stateless:
-// every call derives gradients from (seed, lattice coords) directly, so there is no
-// permutation table to build or store per seed.
+// Seed-mixed integer hash (splitmix64 finalizer); stateless — no per-seed permutation table.
 inline uint64_t HashU64(uint64_t x)
 {
 	x += 0x9e3779b97f4a7c15ULL;

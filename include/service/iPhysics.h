@@ -5,10 +5,8 @@
 
 namespace nuke {
 
-// Backend-neutral rigid-body description crossing the physics seam. POD only — no
-// backend (Jolt/PhysX) and no engine model types, exactly like the iRender seam.
-// Scale is BAKED into the shape dimensions by the caller (physics engines don't scale
-// bodies); changing an atom's scale after body creation requires a recreate.
+// Backend-neutral POD rigid-body description crossing the physics seam. Scale is BAKED into
+// the shape dimensions by the caller, so changing an atom's scale requires a body recreate.
 struct NukeBodyDesc
 {
 	// Shape (matches Collider::Shape): 0 = Box, 1 = Sphere, 2 = Capsule, 3 = Mesh.
@@ -17,20 +15,16 @@ struct NukeBodyDesc
 	float radius = 0.5f;                            // Sphere/Capsule
 	float halfHeight = 0.5f;                        // Capsule: half of the CYLINDER part
 
-	// Mesh shape (shape == 3): TRIANGLE SOUP — 3 floats per vertex, every 3 consecutive
-	// vertices form one triangle (the engine bakes world scale in before the call).
-	// The pointer is only read DURING createBody; the backend copies what it needs.
-	// convex=false -> static triangle mesh (motion is forced Static by the backend);
-	// convex=true  -> convex hull of the vertices (dynamic-capable).
+	// Mesh shape (shape == 3): triangle soup, 3 floats per vertex, every 3 consecutive vertices
+	// form one triangle. Read only DURING createBody. convex=false -> static triangle mesh
+	// (motion is forced Static); convex=true -> convex hull (dynamic-capable).
 	const float* meshVerts = nullptr;
 	int   meshVertCount = 0;
 	bool  convex = false;
 
-	// Trigger (sensor): reports contact events, applies NO collision response.
-	bool  isTrigger = false;
+	bool  isTrigger = false;                        // sensor: reports contacts, no collision response
 
-	// Motion (matches the component model): 0 = Static (Collider without Rigidbody),
-	// 1 = Dynamic, 2 = Kinematic (Rigidbody.isKinematic — moved by gameplay, pushes others).
+	// Motion: 0 = Static, 1 = Dynamic, 2 = Kinematic (moved by gameplay, pushes others).
 	int   motion = 0;
 	float mass = 1.0f;                              // Dynamic only
 	float friction = 0.5f;
@@ -53,7 +47,7 @@ struct NukeShapeDesc
 };
 
 // One contact transition, reported by fetchContacts after a step. Trigger-vs-collision
-// classification happens ENGINE-side (it knows the components' isTrigger flags).
+// classification happens engine-side.
 struct NukeContactEvent
 {
 	uint64_t bodyA = 0, bodyB = 0;
@@ -62,10 +56,8 @@ struct NukeContactEvent
 	float normal[3] = { 0, 0, 0 };   // world contact normal, from A to B (begin only)
 };
 
-// Backend-neutral CHARACTER controller description. A character is a virtual kinematic
-// capsule (not a rigid body): it slides along walls, walks stairs/slopes and pushes
-// dynamic bodies, driven purely by a desired velocity per fixed step. The PIVOT is at
-// the FEET (bottom of the capsule) — transforms map 1:1 to standing position.
+// Character controller: a virtual kinematic capsule (not a rigid body) driven by a desired
+// velocity per fixed step. The PIVOT is at the FEET (bottom of the capsule).
 struct NukeCharacterDesc
 {
 	float radius = 0.35f;            // capsule radius (scale-baked by the caller)
@@ -76,13 +68,12 @@ struct NukeCharacterDesc
 	float mass = 70.0f;              // how hard the character pushes dynamic bodies
 	float maxStrength = 100.0f;      // max push force (N)
 	float padding = 0.02f;           // collision skin around the shape
-	bool  innerBody = true;          // also add a kinematic capsule BODY at the character's pose:
-	                                 // raycasts/queries/contacts see the character (recommended)
-	float up[3] = { 0, 1, 0 };       // up axis (arbitrary — wall-walking games can tilt it)
+	bool  innerBody = true;          // also add a kinematic capsule body so queries/contacts see the character
+	float up[3] = { 0, 1, 0 };       // up axis
 	float pos[3] = { 0, 0, 0 };      // initial FEET position (world)
 };
 
-// Ground classification after a step (matches Jolt's EGroundState semantics).
+// Ground classification after a step.
 enum NukeGroundState
 {
 	NUKE_GROUND_ON        = 0,   // standing on walkable ground
@@ -91,13 +82,9 @@ enum NukeGroundState
 	NUKE_GROUND_AIR       = 3,   // airborne
 };
 
-// The PHYSICS service contract (unified plugin model). The active physics backend
-// (NukePhysicsJolt today, a PhysX module later) implements this and hands it to the
-// loader via NUKEModule::queryService(); the ENGINE drives it from World's fixed-step
-// update — the backend only simulates. Bodies are opaque uint64 handles (0 = invalid).
-//
-// Threading: everything is called from the game update thread (the fixed-step loop);
-// backends may parallelize INTERNALLY (job system) but the API is single-threaded.
+// The physics service contract: the active backend implements it and hands it to the loader
+// via NUKEModule::queryService(). Bodies are opaque uint64 handles (0 = invalid).
+// Threading: called only from the game update thread; backends may parallelize internally.
 class iPhysics
 {
 public:
@@ -105,8 +92,7 @@ public:
 
 	virtual ~iPhysics() {}
 
-	// World lifecycle. init is idempotent; reset destroys ALL bodies (play stop / world
-	// switch) without tearing the backend down.
+	// World lifecycle. init is idempotent; reset destroys ALL bodies without tearing the backend down.
 	virtual bool init() = 0;
 	virtual void reset() = 0;
 	virtual void setGravity(const float g[3]) = 0;
@@ -119,9 +105,8 @@ public:
 	virtual void setBodyPose(uint64_t body, const float pos[3], const float quat[4]) = 0;
 	virtual bool getBodyPose(uint64_t body, float pos[3], float quat[4]) = 0;
 
-	// Kinematic drive: move the body to the target pose over ONE fixed step, deriving the
-	// velocities — riders standing on it get carried (a teleport would leave them behind).
-	// dt <= 0 falls back to a teleport.
+	// Move the body to the target pose over ONE fixed step, deriving velocities so riders get
+	// carried. dt <= 0 falls back to a teleport.
 	virtual void moveKinematic(uint64_t body, const float pos[3], const float quat[4], float dt) = 0;
 
 	// Dynamics (Dynamic bodies).
@@ -135,66 +120,65 @@ public:
 	// Advance the simulation by ONE fixed step.
 	virtual void step(float dt) = 0;
 
-	// Drain contact transitions collected during step() (begin/end, triggers included).
-	// Returns how many events were written to `out` (up to `max`); call repeatedly until
-	// it returns less than `max` to drain a burst. Events do not persist across steps.
+	// Drain contact transitions collected during step(), triggers included. Returns how many
+	// events were written (up to `max`); call repeatedly until it returns less than `max`.
+	// Events do not persist across steps.
 	virtual int fetchContacts(NukeContactEvent* out, int max) = 0;
 
 	// Nearest-hit ray cast. False on miss. hitBody receives the body handle.
 	virtual bool raycast(const float from[3], const float dir[3], float maxDist,
 	                     uint64_t& hitBody, float hitPoint[3], float hitNormal[3]) = 0;
 
-	// Nearest-hit SHAPE cast: sweep `shape` (oriented by `quat`) from `from` along `dir`
-	// for up to maxDist. Catches what a thin ray slips past. False on miss.
+	// Nearest-hit shape cast: sweep `shape` (oriented by `quat`) from `from` along `dir`
+	// for up to maxDist. False on miss.
 	virtual bool shapeCast(const NukeShapeDesc& shape, const float from[3], const float quat[4],
 	                       const float dir[3], float maxDist,
 	                       uint64_t& hitBody, float hitPoint[3], float hitNormal[3]) = 0;
 
-	// Collect every body overlapping `shape` placed at pos/quat. Returns how many handles
-	// were written to `outBodies` (up to `max`); triggers are included.
+	// Collect every body overlapping `shape` placed at pos/quat, triggers included. Returns how
+	// many handles were written to `outBodies` (up to `max`).
 	virtual int overlap(const NukeShapeDesc& shape, const float pos[3], const float quat[4],
 	                    uint64_t* outBodies, int max) = 0;
 
-	// ---- CHARACTER controllers (END of vtable — appended after the 1.1 surface) --------
+	// ---- CHARACTER controllers (ABI: appended at the END of the vtable) ---------------
 	// Characters step INSIDE step(dt): set the desired velocity before the step, read the
-	// resulting state after. Characters collide with bodies AND with each other.
+	// resulting state after. They collide with bodies and with each other.
 	virtual uint64_t createCharacter(const NukeCharacterDesc& desc) = 0;   // 0 on failure
 	virtual void     destroyCharacter(uint64_t ch) = 0;
-	// Desired velocity for the NEXT step (world units/s, full 3D — the caller owns gravity
-	// integration and platform inheritance; the backend only resolves collisions).
+	// Desired velocity for the NEXT step (world units/s). The caller owns gravity integration
+	// and platform inheritance; the backend only resolves collisions.
 	virtual void setCharacterVelocity(uint64_t ch, const float v[3]) = 0;
 	// The ACTUAL velocity after the last step (post slide/step-up resolution).
 	virtual void getCharacterVelocity(uint64_t ch, float v[3]) = 0;
 	virtual void setCharacterPosition(uint64_t ch, const float pos[3]) = 0;   // teleport (feet)
-	// Post-step state: feet position, ground classification, ground normal, the ground's
-	// own velocity (moving platforms) and the ground body handle (0 = none).
+	// Post-step state: feet position, ground classification, ground normal, the ground's own
+	// velocity, and the ground body handle (0 = none).
 	virtual bool getCharacterState(uint64_t ch, float pos[3], int& groundState,
 	                               float groundNormal[3], float groundVel[3],
 	                               uint64_t& groundBody) = 0;
-	// Live tuning of the walk parameters (inspector edits mid-play; shape changes recreate).
+	// Live tuning of the walk parameters; shape changes need a recreate.
 	virtual void setCharacterParams(uint64_t ch, float maxSlopeDeg, float stepHeight,
 	                                float stickDistance) = 0;
 
-	// The character's INNER kinematic body handle (0 = created without one). Feed it to
+	// The character's inner kinematic body handle (0 = created without one). Feed it to
 	// raycastIgnore so camera booms / aim rays skip the character itself.
 	virtual uint64_t characterBodyId(uint64_t ch) = 0;
 
-	// Nearest-hit ray cast that IGNORES one body (rays starting inside a character's own
-	// capsule would otherwise report an inside-hit at distance 0). ignoreBody 0 = plain cast.
+	// Nearest-hit ray cast that IGNORES one body — a ray starting inside a character's own
+	// capsule would otherwise report an inside-hit at distance 0. ignoreBody 0 = plain cast.
 	virtual bool raycastIgnore(const float from[3], const float dir[3], float maxDist,
 	                           uint64_t ignoreBody,
 	                           uint64_t& hitBody, float hitPoint[3], float hitNormal[3]) = 0;
 
-	// Shape cast with the same one-body exclusion (camera booms probe with a SPHERE so
-	// they don't flicker on edges a thin ray alternately hits and misses).
+	// Shape cast with the same one-body exclusion.
 	virtual bool shapeCastIgnore(const NukeShapeDesc& shape, const float from[3], const float quat[4],
 	                             const float dir[3], float maxDist, uint64_t ignoreBody,
 	                             uint64_t& hitBody, float hitPoint[3], float hitNormal[3]) = 0;
 
-	// --- water/buoyancy (7.5). Appended at the END (ABI: never insert mid-vtable). ---
-	// Force applied at a world POINT (generates torque about the COM) — per-probe buoyancy.
+	// ABI: appended at the END; never insert mid-vtable.
+	// Force applied at a world point (generates torque about the COM).
 	virtual void addForceAtPoint(uint64_t body, const float force[3], const float point[3]) = 0;
-	// The body's velocity AT a world point (linear + omega x r) — per-probe water drag.
+	// The body's velocity AT a world point (linear + omega x r).
 	virtual void getPointVelocity(uint64_t body, const float point[3], float outVel[3]) = 0;
 };
 

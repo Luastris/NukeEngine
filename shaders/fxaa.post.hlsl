@@ -1,7 +1,4 @@
-// Stock post-process effect: FXAA (fast approximate anti-aliasing) — Timothy Lottes' classic edge-blur, one pass.
-// A cheap AA that complements/replaces MSAA (smooths shader/specular aliasing MSAA misses). Add it LAST in a
-// camera's post chain (after tonemap-affecting effects; it works on whatever colour is in the chain). Custom post
-// shader: sample g_Source, params in PostParams, resolution in PostFrame, output what it samples' space (linear HDR).
+// FXAA: single-pass edge-blur anti-aliasing over whatever colour is currently in the post chain.
 Texture2D    g_Source;
 SamplerState g_Source_sampler;
 cbuffer PostParams
@@ -14,11 +11,10 @@ cbuffer PostFrame
 };
 struct PSIn { float4 pos : SV_POSITION; float2 uv : TEXCOORD0; };
 
-// Perceptual-ish luma. The chain is linear HDR, so sqrt approximates gamma for edge detection (FXAA expects
-// perceptual luma). Tone down huge HDR values so bright highlights don't dominate the edge search.
+// Perceptual luma for edge detection: the chain is linear HDR, so range-compress and sqrt-approximate gamma.
 float FxLuma(float3 c)
 {
-    c = c / (1.0 + max(max(c.r, c.g), c.b));          // soft range compress (HDR-safe)
+    c = c / (1.0 + max(max(c.r, c.g), c.b));
     return sqrt(dot(c, float3(0.299, 0.587, 0.114)));
 }
 

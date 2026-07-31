@@ -92,9 +92,8 @@ bool Reflect_SetField(void* obj, const Field& f, const ReflectValue& v)
 	}
 }
 
-// LIST props cross the script bridge as JSON arrays (ReflectValue cannot hold a vector) —
-// encoded/decoded by the SAME SaveField/LoadField the world serializer uses, so scripts,
-// inspector and worlds agree byte-for-byte on the list format.
+// LIST props cross the script bridge as JSON arrays (ReflectValue cannot hold a vector),
+// through the SAME SaveField/LoadField the world serializer uses.
 std::string Reflect_GetFieldJson(void* obj, const Field& f)
 {
 	void* p = f.addr ? f.addr(obj) : nullptr;
@@ -118,7 +117,7 @@ std::vector<std::string> Reflect_ComponentTypes()
 {
 	std::vector<std::string> out;
 	for (TypeInfo* t : Registry_All())
-		if (t && t->create && Registry_IsComponentType(t)) out.push_back(t->name);   // whole base chain (7.4)
+		if (t && t->create && Registry_IsComponentType(t)) out.push_back(t->name);   // whole base chain
 	return out;
 }
 
@@ -151,11 +150,9 @@ Component* Reflect_ResolveComponent(unsigned long atomId, unsigned long componen
 	return nullptr;
 }
 
-// ---- reflected OBJECTS (task #67) --------------------------------------------------------------
-// The engine-owned handle table: scripts hold ONLY ids. Handles never dangle into freed
-// memory by construction: created assets register into ResDB (which owns them forever,
-// like imported ones), wrapped instances belong to their owners — a wrapped material dies
-// only with its MeshRenderer, whose (atom, component) pair the scripts also track.
+// ---- reflected OBJECTS --------------------------------------------------------------------
+// Engine-owned handle table: scripts hold ONLY ids. Created assets register into ResDB;
+// wrapped instances live exactly as long as their owner does.
 
 namespace {
 struct ObjHandle
@@ -193,8 +190,7 @@ unsigned long StoreHandle(void* obj, TypeInfo* ti, const std::string& guid)
 
 bool Reflect_IsAssetType(const std::string& typeName)
 {
-	// The ResDB-backed asset classes: guid-identified, findable by name/guid, materialized
-	// on Create. Keep in sync with Reflect_CreateObject / Reflect_ObjectFromGuid below.
+	// Keep in sync with Reflect_CreateObject / Reflect_ObjectFromGuid below.
 	return typeName == "Material" || typeName == "Texture" || typeName == "Mesh"
 	    || typeName == "AnimClip" || typeName == "Shader";
 }
@@ -206,8 +202,7 @@ unsigned long Reflect_CreateObject(const std::string& typeName)
 	void* obj = ti->create();
 	if (!obj) return 0;
 
-	// Asset types register into ResDB under a fresh guid — a script-made material/texture
-	// behaves exactly like an imported one (components resolve it by guid, it persists).
+	// Asset types register into ResDB under a fresh guid, so they behave like imported ones.
 	std::string guid;
 	ResDB* db = ResDB::getSingleton();
 	if      (typeName == "Material") { Material* m = (Material*)obj; m->guid = ResDB::NewGuid(); m->matName = "Script Material"; db->RegisterMaterial(m); guid = m->guid; }
@@ -297,8 +292,7 @@ bool Reflect_ObjectSet(unsigned long id, const std::string& field, const Reflect
 	if (it == ObjTable().end()) return false;
 	const Field* f = Reflect_FindField(it->second.ti, field);
 	if (!f || !Reflect_SetField(it->second.obj, *f, v)) return false;
-	// An asset REFERENCE changed (shader/texture guids): re-resolve the runtime pointers
-	// right away — a script-assigned shader/map takes effect this frame, not on reload.
+	// An asset reference changed: re-resolve now so it takes effect this frame, not on reload.
 	if (!f->asset.empty() && it->second.ti->name == "Material")
 		((Material*)it->second.obj)->Resolve();
 	return true;

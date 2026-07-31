@@ -12,10 +12,8 @@ class Material;
 class Texture;
 class Shader;
 
-// Public asset-database facade: find/enumerate assets by GUID (the id worlds and
-// components reference) without reaching into ResDB internals. A Resource is a light
-// DESCRIPTOR; live objects come from the typed getters (null when the guid is unknown
-// or belongs to another type).
+// Public asset-database facade: find/enumerate assets by GUID without reaching into ResDB.
+// A Resource is a light DESCRIPTOR; live objects come from the typed getters (null if unknown).
 class NUKEENGINE_API Resource
 {
 public:

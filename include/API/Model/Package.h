@@ -10,38 +10,27 @@
 
 namespace nuke {
 
-// Release packaging (roadmap 3.2): the NUPAK container + the layered content resolver.
-//
-// ONE container format for both artifacts:
-//   * game.nupak — the packed PROJECT (manifest + content), an immutable release
-//     artifact, max compression (zstd by default);
-//   * <name>.numod — a MOD overlay (editable in the editor, store by default), mounted
-//     ABOVE the project pak so same-path entries override and new entries add.
-//
-// Entry paths are PROJECT-relative, '/'-separated ("game.nuproj", "content/Worlds/x.nuworld"),
-// matched case-insensitively (Windows content habits).
-//
-// The RESOLVER is a layer stack: the RAW project/overlay directory on top (dev + modder
-// edits), then mounted paks by priority. Packed content is served as BYTES ONLY (Read) —
-// pak entries are NEVER written to disk: laying the decompressed project out beside the
-// pak would void its whole point. ResolveRead() serves the raw layer alone (loaders take
-// the file path in dev, the memory variants in packed runtime).
+// Release packaging: the NUPAK container + the layered content resolver. One format for both
+// game.nupak (packed project) and <name>.numod (mod overlay mounted above it).
+// Entry paths are PROJECT-relative, '/'-separated, matched case-insensitively.
+// The resolver is a layer stack: raw project directory on top, then mounted paks by priority.
+// Pak entries are served as bytes only and are NEVER written to disk; ResolveRead() serves the
+// raw layer alone.
 class NUKEENGINE_API Package
 {
 public:
 	// Entry compression method (per entry; a pak may mix them).
 	enum Method { M_Store = 0, M_Zlib = 1, M_Zstd = 2 };
 
-	// ---- writer ------------------------------------------------------------------------
-	// Pack `files` (projectRelativePath -> source disk file) into `outPak`. `method` +
-	// `level` apply to every entry (level: zlib 1..9, zstd 1..22; ignored for store);
-	// entries that don't shrink are stored raw automatically. `progress` (optional) gets
+	// ---- writer ----
+	// Pack `files` (projectRelativePath -> source disk file) into `outPak`. `level`: zlib 1..9,
+	// zstd 1..22, ignored for store; entries that don't shrink are stored raw. `progress` gets
 	// (done, total). False on any IO error (partial output is deleted).
 	static bool Create(const std::vector<std::pair<std::string, std::string>>& files,
 	                   const std::string& outPak, int method, int level,
 	                   const std::function<void(int, int)>& progress = nullptr);
 
-	// ---- standalone pak handle (editor tooling: mod diff, pak inspection) ---------------
+	// ---- standalone pak handle (editor tooling) ----
 	struct Entry
 	{
 		std::string path;         // project-relative, '/'-separated (original case)
@@ -64,7 +53,7 @@ public:
 		std::vector<Entry> entries;
 	};
 
-	// ---- mounted layer stack (runtime resolver) -----------------------------------------
+	// ---- mounted layer stack (runtime resolver) ----
 	// Higher priority wins. False when the pak can't be parsed.
 	static bool Mount(const std::string& pakPath, int priority);
 	static bool Unmount(const std::string& pakPath);   // drop ONE layer (path-equivalent match)
@@ -72,14 +61,10 @@ public:
 	static int  MountedCount();
 	static std::vector<std::string> MountedPaks();   // pak paths, priority order (top first)
 
-	// ---- pak manifest (base game / DLC identity + platform tags) --------------------------
+	// ---- pak manifest (base game / DLC identity + platform tags) ----
 	// Every .nupak may carry a reserved "pak.json" entry:
 	//   {"kind": "base"|"dlc", "name": "...", "base": "<base pak name>", "platforms": ["win64"]}
-	// The base game pak is written with kind "base". A DLC is the SAME container, but it
-	// DEPENDS on its base (mounted only when the base pak's name matches its "base"), carries
-	// only new/changed entries (built as a crc diff against the base), and is never editable
-	// as a project — a developer-only artifact rebuilt from the raw project. A pak without
-	// pak.json is a legacy base. Empty "platforms" = runs anywhere.
+	// A DLC mounts only onto the base whose name matches its "base". No pak.json = a legacy base.
 	struct PakInfo
 	{
 		std::string kind;                     // "" (legacy base) / "base" / "dlc"
@@ -88,24 +73,19 @@ public:
 		std::vector<std::string> platforms;   // empty = any platform
 	};
 	static bool ReadPakInfo(const std::string& pakPath, PakInfo& out);   // false = no/bad pak.json
-	// The platform tag this binary was built for ("win64" today) — matched against pak.json
-	// "platforms" and mod.json "platform" ("any" or missing = cross-platform).
+	// The platform tag this binary was built for ("win64"), matched against pak.json
+	// "platforms" and mod.json "platform".
 	static const char* CurrentPlatform();
-	// Mount every DLC pak in <gameRoot>/content/dlc (filename order, priority 1..K — above the
-	// base at 0, below the mods at 1000+). Skips with a log: no dlc manifest, base-name
-	// mismatch vs `baseName`, platform excluded. Returns how many mounted.
+	// Mount every DLC pak in <gameRoot>/content/dlc, filename order, priorities 1..K (above the
+	// base at 0, below the mods at 1000+). Returns how many mounted.
 	static int MountDlcs(const std::string& gameRoot, const std::string& baseName);
 
-	// ---- mods with dependencies (mods-on-mods) -------------------------------------------
+	// ---- mods with dependencies (mods-on-mods) ----
 	// Every .numod may carry a "mod.json" manifest:
 	//   {"name": "...", "requires": ["OtherMod"], "platform": "any"|"win64",
-	//    "parts": ["X.textures.numod", ...]}           (the split parts of THIS mod)
-	// or, for a split PART pak: {"name": "...", "part_of": "<main mod name>"} — parts are
-	// mounted by their main mod (same priority) and never listed/mounted as mods themselves.
-	// `requires` = the mods that were MOUNTED in the authoring session (a compatibility
-	// patch depends on the mods it patches; a mod reusing another mod's system depends on
-	// it) — they must load BELOW the dependent mod. `platform` beyond "any" marks a mod
-	// carrying native code (platform-bound); content-only mods stay cross-platform.
+	//    "parts": ["X.textures.numod", ...]}
+	// or, for a split part pak: {"name": "...", "part_of": "<main mod name>"}.
+	// `requires` = the mods MOUNTED in the authoring session; they must load BELOW this mod.
 	struct ModInfo
 	{
 		std::string pakPath;                 // mounted file
@@ -115,16 +95,11 @@ public:
 		std::vector<std::string> parts;      // split-part pak filenames (mounted with this mod)
 		std::string partOf;                  // non-empty = this pak IS a part (skip as a mod)
 	};
-	// Mount every mod enabled in <gameRoot>/config/mods.json above the base pak: tolerant
-	// path resolution (as written -> mods/<entry> -> mods/<filename>), dependency-aware
-	// order (a mod mounts AFTER everything it requires; the config order is kept among
-	// independent mods; a mod whose dependency is missing/disabled is SKIPPED with a log).
-	// Returns how many mods mounted. Shared by the Player boot and the editor session.
+	// Mount every mod enabled in <gameRoot>/config/mods.json above the base pak, dependency-aware
+	// (a mod mounts AFTER everything it requires; config order kept among independent mods; a mod
+	// with a missing/disabled dependency is skipped). Returns how many mounted.
 	static int MountMods(const std::string& gameRoot);
-	// The same dependency-aware mounting with an EXPLICIT entry list (resolved against the
-	// game root) instead of config/mods.json. The config is the PLAYER's mod list — an
-	// EDITOR session mounts only what it was explicitly told to (its own separate list, or
-	// an opened mod's `requires` chain), through this.
+	// Same dependency-aware mounting with an explicit entry list instead of config/mods.json.
 	static int MountModList(const std::string& gameRoot, const std::vector<std::string>& entries);
 	// Metadata of the mounted mods (mount order, bottom-up). The base pak is not a mod.
 	static const std::vector<ModInfo>& Mods();
@@ -135,19 +110,16 @@ public:
 	static const std::string& RawRoot();
 
 	// Resolve project-relative -> content. Read() returns bytes from the TOP layer;
-	// ResolveRead() returns a disk path from the RAW layer only ("" for pak-only entries
-	// — packed content never touches the disk).
+	// ResolveRead() returns a disk path from the RAW layer only ("" for pak-only entries).
 	static bool        Read(const std::string& rel, std::string& out);
-	// EVERY layer's copy of `rel`, BOTTOM-UP (base pak, then mods by ascending priority,
-	// the raw overlay last). Returns the count. Feeds World::MergeWorldLayers — two mods
-	// touching the same world must MERGE, not have the top copy replace the other.
+	// EVERY layer's copy of `rel`, BOTTOM-UP (base pak, mods by ascending priority, raw overlay
+	// last). Returns the count; feeds World::MergeWorldLayers.
 	static int         ReadAll(const std::string& rel, std::vector<std::string>& out);
-	// Same, tagged with each copy's source pak path ("" = the raw overlay) — the world
-	// merge needs to know WHICH mod a copy came from to pick that mod's diff baseline.
+	// Same, tagged with each copy's source pak path ("" = the raw overlay) — the world merge
+	// picks a mod's diff baseline from it.
 	static int         ReadAllInfo(const std::string& rel,
 	                               std::vector<std::pair<std::string, std::string>>& out);   // (data, pakPath)
-	// Bytes from the top MOUNTED layer only (raw overlay skipped) — what the game stack
-	// provides UNDER the modder's edits; Package Mod diffs the work tree against this.
+	// Bytes from the top MOUNTED layer only (raw overlay skipped); Package Mod diffs against this.
 	static bool        ReadMounted(const std::string& rel, std::string& out);
 	static bool        Exists(const std::string& rel);
 	static std::string ResolveRead(const std::string& rel);
@@ -156,7 +128,7 @@ public:
 	// (top layer's casing wins), sorted. Raw-layer scan skips the usual dev noise.
 	static std::vector<std::string> List(const std::string& prefix);
 
-	// crc32 helper (zlib) — shared by the writer, the extractor and the editor's mod diff.
+	// crc32 helper (zlib).
 	static uint32_t Crc32(const void* data, size_t size, uint32_t seed = 0);
 };
 

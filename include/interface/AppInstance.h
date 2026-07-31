@@ -44,8 +44,7 @@ public:
 	//void PushWindow(string &key, boost::function<void()> fWindow);
 	void PopWindow(string key);
 
-	// Per-window open/closed flag, owned by the host and keyed by window id (created open on
-	// first access). Plugins/panels use it for ImGui::Begin p_open so the editor can persist it.
+	// Per-window open/closed flag, keyed by window id (created open on first access).
 	bool* WindowOpen(const char* key);
 
 
@@ -57,27 +56,21 @@ public:
     iRender* render = nullptr;
 	std::map<std::string, bool> windowOpen;   // window id -> open flag (persisted by the editor)
 
-	// Root for CONTENT relative paths (scripts, assets referenced by path) — the project's
-	// content folder. Engine resources (config/fonts/shaders/modules) stay relative to the
-	// EXE/cwd; only content resolves here, so a script "scripts/spin.lua" is found in the
-	// project, not the exe root. Set by the host (editor/player) at startup.
+	// Root for CONTENT relative paths — the project's content folder. Engine resources
+	// (config/fonts/shaders/modules) stay relative to the EXE/cwd; only content resolves here.
 	std::string contentRoot;
 	// Resolve a content path: absolute -> as-is; else prefer <contentRoot>/path, falling back
-	// to a cwd-relative path if that exists (so nothing root-relative breaks).
+	// to a cwd-relative path if that exists.
 	std::string ResolveContent(const std::string& path) const;
 
-	// --- World (a.k.a. "level") load/save API. Paths are relative to the project content root
-	// (resolved via ResolveContent), so worlds always live IN the project content, not "wherever".
-	// Shared by the editor (New/Open/Save) and the game (loads the project's default world).
+	// --- World load/save. Paths are relative to the project content root (ResolveContent).
 	std::string currentWorldPath;                     // content-relative path of the open world ("" = unsaved)
-	// GAME-INITIATED world switches (Game.LoadWorld from a script) arrive MID-TICK — while
-	// World::Update/FixedUpdate iterate the very hierarchy a load would replace. The tick
-	// sets worldTickActive (under the game lock); OpenWorld then only QUEUES the path and
-	// World::Update applies it at the frame boundary, after its traversal.
+	// Script-initiated world switches arrive MID-TICK, while Update/FixedUpdate iterate the very
+	// hierarchy a load would replace. The tick sets worldTickActive under the game lock; OpenWorld
+	// then only QUEUES the path and World::Update applies it at the frame boundary.
 	bool        worldTickActive = false;
 	std::string pendingWorldLoad;
-	// SAVEGAME load (Game.LoadGame, 6.6): an ABSOLUTE .nusave path, applied by World::Update
-	// at the frame boundary via LoadFromFile — same mid-tick safety rule as pendingWorldLoad.
+	// Absolute .nusave path applied by World::Update at the frame boundary; same mid-tick rule.
 	std::string pendingSaveLoad;
 	std::string WorldFullPath(const std::string& relPath) const;   // canonical content path for a world
 	bool        ReadContent(const std::string& relPath, std::string& out) const; // bytes via all layers (pak = memory)
@@ -98,34 +91,28 @@ public:
 	void UpdateThread();
 	void StartUpdateThread();
 
-	// Where the runtime GUI (NukeGUI) draws + the on-screen rect to map input into. The host sets this
-	// each frame: editor -> the viewport RT + its screen rect; Player -> 0 (backbuffer) + full window.
-	// (ABI: new members at the END to keep existing offsets for non-rebuilt modules.)
+	// Where the runtime GUI draws + the on-screen rect to map input into; set by the host each frame.
+	// ABI: new members go at the END so existing offsets survive for non-rebuilt modules.
 	uint64_t uiTarget = 0;            // render-target id (0 = backbuffer)
 	int      uiX = 0, uiY = 0;        // target top-left in window pixels (input offset)
 	int      uiW = 0, uiH = 0;        // target size in pixels
 
 	// --- Fixed-frequency update thread ------------------------------------------------
-	// World::FixedUpdate (physics + Component::FixedUpdate) runs on ITS OWN THREAD at the
-	// world's fixedDt cadence — fully independent of the render frame rate. Gated to play
-	// mode (playState == 1): in the editor it idles until PIE, in the Player it always
-	// ticks. Hosts call StartFixedThread() once at boot and StopFixedThread() at shutdown.
-	// (ABI: fixedThreadRun at the END of the class.)
+	// World::FixedUpdate runs on its own thread at the world's fixedDt cadence, independent of
+	// the render frame rate, and is gated to play mode. Hosts call Start once at boot, Stop at
+	// shutdown. ABI: fixedThreadRun lives at the END of the class.
 	void StartFixedThread();
 	void StopFixedThread();
 	void FixedThread();               // thread body (public for the thread bind, not for calling)
 	volatile bool fixedThreadRun = false;
 
-	// Pending screenshot request (Game.Screenshot): captured at the END of World::Render -
-	// the frame is fully drawn there; capturing from a script (mid-Update, pre-render) would
-	// read a stale/undefined rotated backbuffer. (ABI: appended at the END of the class.)
+	// Pending screenshot request, captured at the END of World::Render — capturing mid-Update
+	// would read an undefined backbuffer. ABI: appended at the END of the class.
 	std::string pendingScreenshot;
 
-	// --- ASYNC world load (Game.LoadWorldAsync): hide the wait behind a transition level.
-	// A background job (nuke::Jobs) does the HEAVY part — content read, pak-layer merge,
-	// JSON parse; the game thread only instantiates atoms, at the FRAME BOUNDARY, and only
-	// when the script activates the staged world (World::Update -> ApplyAsyncWorldLoad).
-	// The transition level keeps running the whole time. (ABI: appended at the END.)
+	// --- ASYNC world load. A background job does the heavy part (content read, pak-layer merge,
+	// JSON parse); the game thread only instantiates atoms, at the frame boundary, and only once
+	// the script activates the staged world. ABI: appended at the END.
 	std::atomic<int>      asyncLoadState{ 0 };       // 0 idle / 1 loading / 2 ready / 3 failed
 	std::atomic<float>    asyncLoadProgress{ 0.f };  // coarse 0..1 while loading (1 = staged)
 	std::atomic<unsigned> asyncLoadGen{ 0 };         // supersede/cancel: a stale job drops its result
@@ -135,8 +122,7 @@ public:
 	boost::mutex          asyncLoadLock;             // job -> game thread handoff guard
 
 	// Compose a world's FINAL data string: the raw content file, or the mounted pak layers
-	// merged (base + mods + overlay, per-layer baselines). Thread-safe (filesystem + locked
-	// Package reads) — shared by the synchronous OpenWorld and the async loader's job.
+	// merged (base + mods + overlay). Thread-safe; shared by OpenWorld and the async loader.
 	bool   ComposeWorldData(const std::string& relPath, std::string& out);
 	bool   StartWorldLoadAsync(const std::string& relPath); // begin/replace a background load
 	double WorldLoadProgress();      // -1 idle/failed, else 0..1 (1 = staged, ready to activate)
@@ -145,16 +131,9 @@ public:
 	void   CancelWorldLoadAsync();   // drop the loading/staged world
 	void   ApplyAsyncWorldLoad();    // frame boundary (World::Update): perform the queued swap
 
-	// --- INCREMENTAL (budgeted) activation: the async-loaded world GROWS over frames instead
-	// of appearing in one hitch — optionally outward from an origin point (the player spawn),
-	// the "world assembles around the character" pattern. With a budget set, activation swaps
-	// to the world HEADER immediately and then instantiates root atoms within the per-frame
-	// ms budget; already-created atoms live normally (scripts run, physics bodies appear).
-	// The engine emits events for the GAME to drive spawn effects (wireframe fade, particles,
-	// goo — effects are game-side, never engine-side):
-	//   "world.atomActivated"       {"id":<atomId>,"name":"<name>"}   per root atom (subtree)
-	//   "world.activationComplete"  {"path":"<world path>"}
-	// (ABI: appended at the END of the class.)
+	// --- INCREMENTAL (budgeted) activation: root atoms instantiate over frames within a per-frame
+	// ms budget, optionally sorted outward from an origin. Emits "world.atomActivated"
+	// {"id","name"} per root atom and "world.activationComplete" {"path"}. ABI: appended at the END.
 	float activationBudgetMs  = 0.f;    // per-frame instantiation budget; 0 = whole world in one frame
 	bool  activationOriginSet = false;  // sort root atoms by distance from activationOrigin
 	float activationOrigin[3] = { 0.f, 0.f, 0.f };
@@ -170,7 +149,7 @@ public:
 	void   ClearWorldActivationOrigin();
 	double WorldActivationProgress();                       // -1 idle, else 0..1 roots instantiated
 	void   ContinueWorldActivation(bool ignoreBudget = false); // frame boundary: next budget slice
-	void   FlushWorldActivation();                          // finish instantly (a new load needs a whole world)
+	void   FlushWorldActivation();                          // finish instantly
 };
 
 }  // namespace nuke

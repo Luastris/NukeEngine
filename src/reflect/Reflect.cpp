@@ -24,12 +24,10 @@ TypeInfo& Registry_GetOrCreate(const std::string& name)
     return *ti;
 }
 
-// --- base-class field/method inheritance (7.4) ---------------------------------------------
-// A reflected type whose base is ANOTHER reflected type (e.g. Foliage : InstancedMesh)
-// inherits the base's fields and methods: they are merged into the derived TypeInfo the
-// first time both sides exist. Field addr functors bind the BASE class — valid on a derived
-// instance because single non-virtual inheritance keeps the base subobject at offset 0.
-// Lazy + idempotent: registration order (engine vs module load) doesn't matter.
+// --- base-class field/method inheritance ---------------------------------------------------
+// Merge a reflected base's fields/methods into the derived TypeInfo, lazily and idempotently
+// (registration order doesn't matter). Base addr functors stay valid on a derived instance:
+// single non-virtual inheritance keeps the base subobject at offset 0.
 static void MergeBaseInto(TypeInfo* ti, int depth = 0)
 {
     if (ti->baseMerged || depth > 8) return;
@@ -59,8 +57,7 @@ static void MergeBaseInto(TypeInfo* ti, int depth = 0)
     ti->baseMerged = true;
 }
 
-// Walk the base chain: is this type a Component (directly or through reflected bases)?
-// The Add Component menus must accept Foliage (base InstancedMesh), not just base=="Component".
+// Walk the base chain: is this type a Component, directly or through reflected bases?
 bool Registry_IsComponentType(const TypeInfo* ti)
 {
     auto& r = registry();
@@ -119,10 +116,9 @@ std::vector<std::string> Reflect_AllEnumNames()
     return out;
 }
 
-// --- AtomRef prop fixup: refs load as stable ids and resolve AFTER the whole world exists ------------
-// LoadField can't resolve an Atom* immediately (the target atom may not be loaded yet), so it queues
-// the slot + id here; World::Load* / prefab instantiation call Reflect_ResolveAtomRefs() once the
-// hierarchy is complete. Unresolvable ids become null.
+// --- AtomRef prop fixup ----------------------------------------------------------------------
+// LoadField cannot resolve an Atom* immediately (the target may not be loaded yet), so it queues
+// the slot + stable id here; Reflect_ResolveAtomRefs() runs once the hierarchy is complete.
 static std::vector<std::pair<Atom**, unsigned long>>& pendingAtomRefs()
 {
     static std::vector<std::pair<Atom**, unsigned long>> v;

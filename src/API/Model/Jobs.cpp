@@ -42,9 +42,9 @@ struct Pool
 	std::deque<std::pair<std::shared_ptr<JobState>, boost::function<void()>>> queue;
 	boost::mutex              qm;
 	boost::condition_variable qcv;
-	boost::atomic<bool> stop{ false };   // atomic: Jobs::Stopping() polls it lock-free from jobs
+	boost::atomic<bool> stop{ false };   // atomic: Stopping() polls it lock-free from jobs
 	bool  inited = false;
-	boost::atomic<int> busy{ 0 };   // jobs executing right now (status-bar jobs list)
+	boost::atomic<int> busy{ 0 };   // jobs executing right now
 
 	// main-thread delivery queue (RunOnMain -> PumpMain)
 	boost::mutex                            mm;
@@ -55,11 +55,8 @@ Pool g_pool;
 void WorkerLoop(int core)
 {
 #ifdef _WIN32
-	// SOFT affinity: spread the workers one-per-core but let the scheduler migrate a
-	// worker whose core got taken (render/driver threads). A hard SetThreadAffinityMask
-	// here stalled the whole pool: a preempted worker held its job for an OS quantum
-	// while every waiter (e.g. the physics barrier) sat blocked — verified by the
-	// kinematic-lift regression (fixed ticks dropped 30 -> 17 per 0.5 s, riders kicked).
+	// SOFT affinity only: a hard SetThreadAffinityMask lets a preempted worker hold its job
+	// for an OS quantum and stall every waiter (e.g. the physics barrier).
 	if (core >= 0 && core < 64)
 		SetThreadIdealProcessor(GetCurrentThread(), (DWORD)core);
 #endif
@@ -96,8 +93,7 @@ void Jobs::Init(int workers, bool pinCores)
 
 	const int cores = (int)boost::thread::hardware_concurrency();
 
-	// Reserved cores: 0 (OS + the main/render thread) and the physics core (the fixed
-	// thread is pinned there — see AppInstance::FixedThread / config "physicsCore").
+	// Core 0 (OS + main/render) and the physics core (config "physicsCore") are reserved.
 	int physCore = -1;
 	if (Config* cfg = Config::getSingleton())
 	{

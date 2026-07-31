@@ -68,8 +68,8 @@ void InstancedMesh::Destroy()
 void InstancedMesh::ReleaseRTChunks()
 {
 	if (rtChunkMeshes.empty()) return;
-	// The renderer caches GPU buffers + BLASes keyed by Mesh* — drop those entries BEFORE
-	// deleting, or a later allocation at the same address would be served stale GPU data.
+	// Renderer caches GPU buffers + BLASes keyed by Mesh* — invalidate BEFORE delete, or a later
+	// allocation at the same address gets served stale GPU data.
 	iRender* r = AppInstance::GetSingleton() ? AppInstance::GetSingleton()->render : nullptr;
 	for (Mesh* m : rtChunkMeshes)
 	{
@@ -89,9 +89,8 @@ void InstancedMesh::FixedUpdate() {}
 void InstancedMesh::Pause() {}
 void InstancedMesh::Reset() { mesh = nullptr; }
 
-// The serialized store is the base64 blob: 17 floats per instance (pos3 quat4 scale3 color4
-// custom4 = the Inst layout verbatim, little-endian). Reflection saves `data` as an ordinary
-// string prop — thousands of instances stay ONE compact JSON value.
+// Serialized store = base64 of the raw Inst records (pos3 quat4 scale3 color4 custom4,
+// little-endian), saved as one ordinary reflected string prop.
 void InstancedMesh::OnBeforeSave()
 {
 	EnsureDecoded();
@@ -176,16 +175,12 @@ int InstancedMesh::InstanceCount() { EnsureDecoded(); return (int)instances.size
 
 // ---- render sync --------------------------------------------------------------------------
 
-// Rebuild chunks + upload the packed instance records when anything changed: the instance set
-// (dirty) or the ATOM's world transform (instances are local to the atom). Instances upload
-// GROUPED BY SPATIAL CELL so a chunk is one contiguous [first, count) range; the authoring
-// order (script indices) is never reordered — only the upload order is.
+// Instances upload GROUPED BY SPATIAL CELL so a chunk is one contiguous [first, count) range;
+// the authoring order (script indices) is never reordered — only the upload order is.
 bool InstancedMesh::EnsureRenderReady(iRender* r)
 {
 	if (!r) return false;
-	// HOT-APPLY asset resolution: re-resolve on any prop change (assign/replace/reset) —
-	// a latched first state must never survive an inspector edit. The material is an OWNED
-	// clone, so a swap tears the old instance down properly.
+	// Re-resolve on any prop change; the material is an OWNED clone, so a swap tears the old one down.
 	if (meshGuid != meshGuidRes)
 	{
 		mesh = meshGuid.empty() ? nullptr : ResDB::getSingleton()->GetMesh(meshGuid);
@@ -206,8 +201,7 @@ bool InstancedMesh::EnsureRenderReady(iRender* r)
 	if (cellSize != cellSizeRes) { cellSizeRes = cellSize; dirty = true; }   // live re-chunk on edit
 	if (!mesh || instances.empty()) return false;
 
-	// Atom world matrix (glm column-major; v' = M*v). Compare against the snapshot — an atom
-	// that moved (platform carrying its scatter) re-uploads with the new composition.
+	// Atom world matrix (glm column-major; v' = M*v); compared against the snapshot to detect movement.
 	Transform& t = atom->GetTransform();
 	Vector3 P = t.globalPosition(); Quaternion Q = t.globalRotation(); Vector3 S = t.globalScale();
 	if (!ScaleWithAtom()) S = Vector3(1, 1, 1);   // scatter layers ignore the atom's scale (7.4)
@@ -244,12 +238,9 @@ bool InstancedMesh::EnsureRenderReady(iRender* r)
 		cells[{ (int)floorf(wp.x / cs), (int)floorf(wp.y / cs), (int)floorf(wp.z / cs) }].push_back(i);
 	}
 
-	// RT merged chunks (see header): bake each cell's instances into ONE Mesh in ATOM-LOCAL
-	// space — a single TLAS entry per chunk. Built alongside the raster chunks so the two
-	// can never drift; pooled Mesh objects are refilled in place (version bump re-uploads
-	// GPU buffers and the BLAS lazily). Skipped entirely when RT is off for this set.
-	// Merged chunks serve RT shadows AND reflections; the renderer bends them with the
-	// NukeBend compute + BLAS refit every frame, so the rays hit SWAYING blades.
+	// RT merged chunks (see header): bake each cell's instances into ONE Mesh in ATOM-LOCAL space
+	// = a single TLAS entry per chunk. Pooled Mesh objects are refilled in place; a version bump
+	// re-uploads GPU buffers and rebuilds the BLAS lazily.
 	const bool rtWanted = r->rtAvailable() && (castShadows || inReflections) && rtMaxInstances > 0 &&
 	                      mesh->vertexArray && mesh->normalArray && mesh->uvArray;
 	if (rtWanted)
@@ -300,8 +291,7 @@ bool InstancedMesh::EnsureRenderReady(iRender* r)
 					n = q * n;   // rotation only (scale skew ignored — foliage scales ~uniformly)
 					*np++ = n.x; *np++ = n.y; *np++ = n.z;
 					*up++ = mesh->uvArray[v * 2]; *up++ = mesh->uvArray[v * 2 + 1];
-					// Bend streams for the RT compute (bend.cs): gates from the instance custom
-					// (z/w), pivot = the instance origin — the same phase hash the raster VS uses.
+					// Bend streams for bend.cs: gates from custom z/w, pivot = instance origin (mirrors the raster VS).
 					*bp++ = localY; *bp++ = in.custom[2]; *bp++ = in.custom[3]; *bp++ = 0.0f;
 					*pv2++ = tr.x; *pv2++ = tr.y; *pv2++ = tr.z; *pv2++ = 0.0f;
 				}
@@ -338,8 +328,7 @@ bool InstancedMesh::EnsureRenderReady(iRender* r)
 		chunks.push_back(c);
 	}
 
-	// Pool meshes beyond the live chunk count: zero them out and drop their renderer caches so
-	// the RT gather skips them (kept allocated for reuse; freed for real in ReleaseRTChunks).
+	// Pool meshes beyond the live chunk count: zeroed + cache-invalidated so the RT gather skips them.
 	for (size_t k = rtCi; k < rtChunkMeshes.size(); ++k)
 		if (rtChunkMeshes[k] && rtChunkMeshes[k]->numVerts) { rtChunkMeshes[k]->numVerts = 0; r->invalidateMesh(rtChunkMeshes[k]); }
 

@@ -1,5 +1,4 @@
-// Stock post-process effect: vignette (darkens toward the corners). Custom post shader — sample g_Source,
-// params from PostParams, output linear HDR.
+// Stock post effect: vignette, darkening toward the corners. Outputs linear HDR.
 Texture2D    g_Source;
 SamplerState g_Source_sampler;
 cbuffer PostParams

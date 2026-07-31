@@ -5,20 +5,16 @@
 #include <string>
 #include <vector>
 
-// Data model for the gameplay input system (see input/Input.h for the runtime + reflected API).
-// Everything is STRING-KEYED so device providers (plugins) can add arbitrary controls and games can
-// author actions/contexts by name — no fixed enums to run out of. Serialized in the .nuinput asset.
+// Data model for the gameplay input system (input/Input.h holds the runtime API). Everything is
+// string-keyed so plugins can add arbitrary controls. Serialized in the .nuinput asset.
 namespace nuke {
 
-// How an action's value reads. Bool = digital (0/1); Axis1 = analog scalar (trigger, scroll, one axis);
-// Axis2 = 2D vector (stick, WASD composed from 4 buttons).
+// Bool = digital (0/1); Axis1 = analog scalar; Axis2 = 2D vector (stick, or WASD from 4 buttons).
 enum class ActionValueType { Bool = 0, Axis1 = 1, Axis2 = 2 };
 
-// WHEN a binding fires, derived from a control's timing in the core (thresholds below).
-//  Pressed     - edge down this frame
-//  Held        - down (continuous, every frame while held)
-//  Released    - edge up this frame
-//  Tap         - pressed and released within tapMax (a quick press; for touch this is the "click")
+// When a binding fires, derived from a control's timing (thresholds below).
+//  Pressed/Held/Released - edge down / continuous / edge up
+//  Tap         - pressed and released within tapMax
 //  LongPress   - held past longMin (fires ONCE when the threshold is crossed)
 //  DoublePress - two Pressed edges within doubleWindow
 enum class InputPhase { Pressed = 0, Held = 1, Released = 2, Tap = 3, LongPress = 4, DoublePress = 5 };
@@ -32,7 +28,6 @@ struct InputBinding
 	std::vector<std::string> modifiers;            // extra controls that must ALSO be held (Ctrl/Shift/any control)
 	InputPhase               phase = InputPhase::Pressed;
 
-	// Value shaping (analog / axis actions). For Axis2, `axis` selects the component this binding drives.
 	int    axis   = 0;                             // Axis2: 0 = X, 1 = Y (ignored for Bool/Axis1)
 	float  scale  = 1.0f;                          // multiply the control value (use -1 for the opposite direction)
 	float  deadzone = 0.0f;                        // ignore |value| below this (analog sticks)
@@ -40,8 +35,8 @@ struct InputBinding
 
 	bool   consume = false;                        // eat the control from LOWER-priority contexts when this matches
 
-	// Timing thresholds (seconds). Sensible defaults; per-binding overridable so a "hold to charge" and a
-	// "tap to jump" can coexist on the same control in different bindings.
+	// Timing thresholds in seconds, per-binding so a "hold to charge" and a "tap to jump" can
+	// coexist on the same control.
 	float  tapMax       = 0.20f;                   // Tap: press->release under this
 	float  longMin      = 0.50f;                   // LongPress: held at least this
 	float  doubleWindow = 0.30f;                   // DoublePress: two presses within this
@@ -55,8 +50,8 @@ struct InputAction
 	ActionValueType type = ActionValueType::Bool;
 };
 
-// A mapping context ("gameplay", "menu", "vehicle", ...). Several can be active at once; higher priority
-// is evaluated first and a consuming binding hides the control from lower contexts. Swapped on the fly.
+// A mapping context ("gameplay", "menu", "vehicle", ...). Several can be active at once; higher
+// priority is evaluated first and a consuming binding hides the control from lower contexts.
 struct InputContext
 {
 	std::string               name;

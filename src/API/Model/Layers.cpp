@@ -4,8 +4,7 @@
 
 namespace nuke {
 
-// Slot names live process-wide; the PROJECT is the source of truth (editor Project Settings ->
-// game.nuproj "layers"), pushed here by the hosts at load. Index 0 = "Default" unless renamed.
+// Slot names live process-wide; the project (game.nuproj "layers") is the source of truth.
 static std::array<std::string, Layers::kCount>& Slots()
 {
 	static std::array<std::string, Layers::kCount> s = [] {

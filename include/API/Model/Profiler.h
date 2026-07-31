@@ -7,12 +7,8 @@
 
 namespace nuke {
 
-// Per-phase frame timings (colony-sim base, Phase 6.8) — the numbers that VALIDATE the
-// perf budget instead of guessing. The engine reports its own phases every frame
-// ("update" — World::Update incl. scripts/events, "fixed" — one FixedUpdate step,
-// "render" — World::Render CPU side); game modules report theirs with the same call
-// (Profiler::Report from a scoped timer). Values are EMA-smoothed milliseconds.
-// Reflected → nuke.Profiler.* / C# Profiler.*; the editor status bar shows the trio live.
+// Per-phase frame timings in EMA-smoothed milliseconds. The engine reports "update", "fixed"
+// and "render" every frame; game modules report their own phases via Report/Scope.
 class NUKEENGINE_API Profiler
 {
 	NUKE_CLASS_NOCREATE(Profiler, Object)

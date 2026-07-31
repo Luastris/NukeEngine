@@ -1,7 +1,7 @@
 #include "API/Model/SpriteAnimator.h"
 #include "API/Model/Sprite.h"
-#include "API/Model/Texture.h"   // tex->width/height + sprite grid (Usage=Sprite)
-#include "API/Model/resdb.h"     // resolve the sprite's texture (grid lives on it)
+#include "API/Model/Texture.h"
+#include "API/Model/resdb.h"
 #include "API/Model/Time.h"
 
 namespace nuke {
@@ -18,8 +18,7 @@ void SpriteAnimator::Init(Atom* parent)
 	Apply();
 }
 
-// The sprite's texture (only when flagged Usage=Sprite) owns the grid. Resolves the texture on demand so
-// the grid is available even before the first render (editor preview).
+// The sprite's texture (Usage=Sprite) owns the grid; resolved on demand so it exists before the first render.
 Texture* SpriteAnimator::SheetTex() const
 {
 	Sprite* sp = atom ? atom->GetComponent<Sprite>() : nullptr;
@@ -46,8 +45,7 @@ void SpriteAnimator::Apply()
 	int cell = firstFrame + (current % Count());
 	int x0 = 0, y0 = 0, cw = 0, ch = 0;
 	if (!t || !t->SpriteCellRect(cell, x0, y0, cw, ch)) { sp->SetFrame(0, 0, 1, 1); return; }
-	// Inset the cell by HALF a texel on every side: linear filtering otherwise samples the neighbouring
-	// cell at the edge (the classic sprite-sheet "bleed" — bits of the next frame poking in).
+	// Inset by half a texel per side: linear filtering otherwise bleeds the neighbouring cell in.
 	float iu = 0.5f, iv = 0.5f;
 	float u0 = (x0 + iu) / (float)t->width,  u1 = (x0 + cw - iu) / (float)t->width;
 	float v0 = (y0 + iv) / (float)t->height, v1 = (y0 + ch - iv) / (float)t->height;

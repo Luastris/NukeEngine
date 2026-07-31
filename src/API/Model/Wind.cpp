@@ -1,7 +1,7 @@
 #include "API/Model/Wind.h"
 #include "API/Model/Noise.h"
 #include "API/Model/Atom.h"
-#include "API/Model/BendVolumes.h"   // zones export as shader bend volumes (7.4)
+#include "API/Model/BendVolumes.h"   // zones export as shader bend volumes
 #include <nlohmann/json.hpp>
 #include <boost/thread/mutex.hpp>
 #include <glm/glm.hpp>
@@ -17,10 +17,9 @@ static float  gDir[3] = { 1, 0, 0 };
 static float  gStrength = 0.0f;        // default: no wind
 static float  gGustAmount = 0.0f, gGustFreq = 0.5f;
 static float  gTurbAmount = 0.0f, gTurbScale = 20.0f;
-static double gTime = 0.0;   // Wind's own smooth clock (Advance: scaled game delta per frame)
+static double gTime = 0.0;   // Wind's own clock, advanced by the scaled game delta
 
-// WindZone registry. Guarded: Sample may be called from the fixed thread (future cloth) while
-// zones register/unregister on the game thread.
+// WindZone registry; the lock covers Sample() running off the game thread.
 static boost::mutex gZoneLock;
 static std::vector<WindZone*> gZones;
 
@@ -62,7 +61,7 @@ void Wind::SetDirection(const Vector3& dir)
 {
 	glm::vec3 d((float)dir.x, (float)dir.y, (float)dir.z);
 	float len = glm::length(d);
-	if (len < 1e-6f) return;   // a zero direction is meaningless — keep the current one
+	if (len < 1e-6f) return;   // zero direction: keep the current one
 	d /= len;
 	gDir[0] = d.x; gDir[1] = d.y; gDir[2] = d.z;
 }
@@ -87,8 +86,7 @@ void Wind::SetTurbulence(double amount, double scale)
 double Wind::TurbulenceAmount() { return gTurbAmount; }
 double Wind::TurbulenceScale()  { return gTurbScale; }
 
-// Gusted strength multiplier right now (shared by Sample and the renderer push): a slow
-// Perlin swell over GAME time — pauses when the world is frozen, like everything gameplay.
+// Current strength with the gust swell applied (slow Perlin over the wind clock).
 static float GustedStrength(double t)
 {
 	if (gGustAmount <= 0.f || gGustFreq <= 0.f) return gStrength;
@@ -154,8 +152,7 @@ Vector3 Wind::Sample(const Vector3& worldPos)
 			float len = glm::length(out);
 			zdir = len > 1e-5f ? out / len : glm::vec3(0, 1, 0);
 		}
-		// Per-zone gusts: swell this zone's strength on the wind clock (Perlin, so it
-		// breathes instead of ticking) — same idea as the global gusts, local rate/amount.
+		// Per-zone gust swell on the wind clock (local rate/amount).
 		float zs = zn->strength;
 		if (zn->gustAmount > 0.f)
 		{
@@ -177,8 +174,7 @@ Vector3 Wind::Sample(const Vector3& worldPos)
 	return Vector3(v.x, v.y, v.z);
 }
 
-// Every enabled zone as an analytic shader volume (7.4 foliage bend). Direction/strength
-// mirror Sample()'s zone term, including the per-zone gust swell on the same wind clock.
+// Every enabled zone as an analytic shader bend volume; must mirror Sample()'s zone term.
 void Wind::CollectZones(std::vector<BendVolume>& out)
 {
 	boost::mutex::scoped_lock l(gZoneLock);
@@ -227,7 +223,7 @@ void Wind::CollectZones(std::vector<BendVolume>& out)
 
 void Wind::SaveJson(nlohmann::json& j)
 {
-	// Written only when any parameter is non-default — a windless world stays clean.
+	// Written only when a parameter is non-default, so a windless world stays clean.
 	if (gStrength <= 0.f && gGustAmount <= 0.f && gTurbAmount <= 0.f) return;
 	j["wind"] = { { "dir", { gDir[0], gDir[1], gDir[2] } }, { "strength", gStrength },
 	              { "gustAmount", gGustAmount }, { "gustFreq", gGustFreq },

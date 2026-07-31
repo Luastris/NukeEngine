@@ -7,11 +7,9 @@
 
 namespace nuke {
 
-// Placeholder for a component whose type is not registered (its plugin isn't loaded).
-// It preserves the original type name + serialized props verbatim and does nothing, so a
-// scene that references plugin types without the plugin loads intact, stays inert, and
-// round-trips on save (the data isn't lost). When the plugin loads, a reload restores the
-// real component.
+// Placeholder for a component whose type is not registered (its plugin isn't loaded). Preserves
+// the original type name + serialized props verbatim and does nothing, so a world referencing
+// plugin types round-trips on save; a reload restores the real component once the plugin loads.
 class NUKEENGINE_API UnknownComponent : public Component
 {
 public:

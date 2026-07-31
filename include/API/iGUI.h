@@ -7,19 +7,10 @@
 
 namespace nuke {
 
-// Retained/declarative runtime-UI layer (roadmap 2.5) on top of the immediate iGUI core.
-//
-// The game DECLARES widgets once (or keeps re-declaring — creation is idempotent by id)
-// and polls events; the engine re-emits the whole tree through nuke::GUI() every frame
-// (the GUI backend calls Ui::Emit() after the Component::OnGUI sweep). No imgui, no
-// renderer types — this layer only speaks iGUI.
-//
-// Ids are user strings, globally unique. Widgets attach to a window by its id. Everything
-// is safe from any thread (internal lock); scripts normally build the UI in start() and
-// read events in update():
-//   nuke.Ui.Window("hud", "HUD")
-//   nuke.Ui.Button("hud.fire", "hud", "Fire!")
-//   if nuke.Ui.Clicked("hud.fire") then ... end
+// Retained/declarative runtime-UI layer on top of the immediate iGUI core. The game declares
+// widgets (creation is idempotent by id) and polls events; the engine re-emits the whole tree
+// through nuke::GUI() every frame. Ids are globally unique user strings and widgets attach to a
+// window by its id. Safe to call from any thread (internal lock).
 class NUKEENGINE_API Ui
 {
 	NUKE_CLASS_NOCREATE(Ui, Object)
@@ -57,8 +48,8 @@ public:
 	[[nuke::func]] static void        SetText(const std::string& id, const std::string& text);   // text/input/overlay
 	[[nuke::func]] static void        SetLabel(const std::string& id, const std::string& label);
 
-	// Re-emit the whole tree through the immediate backend. Called by the GUI plugin once
-	// per frame (after the OnGUI component sweep); harmless to call with no backend.
+	// Re-emit the whole tree through the immediate backend. Called once per frame by the GUI
+	// plugin; harmless with no backend.
 	static void Emit();
 };
 

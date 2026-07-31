@@ -1,9 +1,9 @@
 #include "API/Model/CharacterController.h"
 #include "API/Model/Atom.h"
-#include "API/Model/MeshRenderer.h"   // FitToMesh: capsule from the visual's bounds
+#include "API/Model/MeshRenderer.h"
 #include "API/Model/Mesh.h"
 #include "API/Model/World.h"
-#include "interface/NUKEEInteface.h"   // AppInstance (GroundAtom: id -> live atom)
+#include "interface/NUKEEInteface.h"
 #include "interface/Services.h"
 #include "service/iPhysics.h"
 
@@ -20,7 +20,6 @@ void CharacterController::Init(Atom* parent)
 
 void CharacterController::Destroy()
 {
-	// The backend character dies with its component (atom deleted / world cleared).
 	if (charId)
 	{
 		if (iPhysics* p = GetService<iPhysics>())
@@ -29,7 +28,7 @@ void CharacterController::Destroy()
 	}
 }
 
-// ---- gameplay API (members only — the world's fixed driver talks to the seam) --------
+// ---- gameplay API --------
 
 void CharacterController::SetMove(const Vector3& v)
 {
@@ -58,8 +57,7 @@ Vector3 CharacterController::GroundVelocity() { return groundVel; }
 
 Atom* CharacterController::GroundAtom()
 {
-	// The fixed driver resolves the ground BODY to its atom id each step (bodyMap);
-	// resolving by STABLE id here keeps the answer safe if the atom died meanwhile.
+	// Resolve by stable id — safe if the atom died since the last fixed step.
 	if (!groundAtomId) return nullptr;
 	AppInstance* app = AppInstance::GetSingleton();
 	return (app && app->currentWorld) ? app->currentWorld->GetById((long)groundAtomId) : nullptr;
@@ -79,9 +77,7 @@ bool CharacterController::FitToMesh()
 	mesh->EnsureBounds();
 	const float* mn = mesh->aabbMin;
 	const float* mx = mesh->aabbMax;
-	// Capsule from the LOCAL bounds: whatever the mesh's own pivot, pivot=Center plus the
-	// bounds' center as the offset lands the capsule exactly on the visual. The driver
-	// recreates the backend character on the size change automatically.
+	// Capsule from LOCAL bounds: pivot=Center plus the bounds center offset lands it on the visual.
 	pivot = P_Center;
 	capsuleOffset = Vector3((mn[0] + mx[0]) * 0.5, (mn[1] + mx[1]) * 0.5, (mn[2] + mx[2]) * 0.5);
 	height = std::max(0.2f, mx[1] - mn[1]);

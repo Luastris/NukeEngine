@@ -9,12 +9,9 @@
 
 namespace nuke {
 
-// Centralized, conflict-aware hotkey registry shared by the editor AND plugins. A chord is stored as
-// an opaque int (callers use ImGui key-chord values, e.g. ImGuiMod_Ctrl | ImGuiKey_S); the engine
-// never interprets it — it only stores, compares, serializes, and hands chords back for dispatch.
-// Conflict rule: each chord maps to at most ONE bound hotkey. If two hotkeys want the same chord
-// (e.g. two plugins), the later one registers UNBOUND so nothing fires twice; the user assigns it a
-// free chord manually in Project Settings. Bindings save/load with the project.
+// Conflict-aware hotkey registry shared by the editor and plugins. A chord is an opaque int (callers
+// use ImGui key-chord values); the engine only stores, compares and serializes it. Each chord maps to
+// at most ONE bound hotkey — a later claimant registers UNBOUND rather than firing twice.
 struct Hotkey
 {
     std::string           id;             // stable unique id, e.g. "editor.world.save"
@@ -30,8 +27,7 @@ class NUKEENGINE_API Hotkeys
 public:
     static Hotkeys* Get();
 
-    // Register (or refresh the action/name of) a hotkey. If defaultChord is free it's bound; if it's
-    // already taken by another bound hotkey, this registers UNBOUND (a conflict to resolve in UI).
+    // Register (or refresh) a hotkey. Bound if defaultChord is free, else registered UNBOUND.
     void Register(const std::string& id, const std::string& name, int defaultChord, std::function<void()> action);
 
     bool Rebind(const std::string& id, int chord);   // false if the chord is taken by another bound hotkey
@@ -42,7 +38,7 @@ public:
     const std::vector<Hotkey>& All() const { return hotkeys; }
     bool                       ChordTaken(int chord, const std::string& exceptId = "") const;
 
-    // Persistence (id -> chord; 0 = unbound). The editor stores this in the .nuproj.
+    // Persistence (id -> chord; 0 = unbound).
     std::map<std::string, int> ExportBindings() const;
     void                       ApplyBindings(const std::map<std::string, int>& binds);
 

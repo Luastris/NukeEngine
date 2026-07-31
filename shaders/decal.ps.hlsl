@@ -18,19 +18,18 @@ float4 main(float4 svpos : SV_POSITION) : SV_TARGET
     float2 uv = svpos.xy / g_Res.xy;
     float  d  = g_Depth.SampleLevel(g_Depth_sampler, uv, 0).r;
 
-    // reconstruct the world position of the scene surface under this pixel (D3D clip: y up, z in [0,1])
+    // World position of the scene surface under this pixel (D3D clip: y up, z in [0,1]).
     float4 clip = float4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, d, 1.0);
     float4 wp = mul(g_InvViewProj, clip);
     wp /= wp.w;
 
-    // into the decal box's local space; discard anything outside the unit box
     float3 lp = mul(g_InvWorld, float4(wp.xyz, 1.0)).xyz;
     if (abs(lp.x) > 0.5 || abs(lp.y) > 0.5 || abs(lp.z) > 0.5) discard;
 
     float2 duv = float2(lp.x + 0.5, 0.5 - lp.y);          // box local -> UV (y down)
     float4 tex = g_DecalTex.Sample(g_DecalTex_sampler, duv) * g_Tint;
 
-    // angle fade: surface normal from depth derivatives, vs the projection axis (grazing surfaces fade)
+    // Angle fade: surface normal from depth derivatives, against the projection axis.
     float3 n   = normalize(cross(ddx(wp.xyz), ddy(wp.xyz)));
     float  ndl = abs(dot(n, g_ProjAxis.xyz));
     float  fade = (g_Params.y > 0.001) ? smoothstep(0.0, g_Params.y, ndl) : 1.0;

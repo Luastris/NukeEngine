@@ -3,7 +3,7 @@
 #include "API/Model/Atom.h"
 #include "API/Model/Transform.h"
 #include "API/Model/Texture.h"
-#include "API/Model/Screen.h"   // screen->world rays live in game-screen pixel space (6.7)
+#include "API/Model/Screen.h"   // screen->world rays use game-screen pixel space
 #include "interface/AppInstance.h"
 #include <cmath>
 #include <algorithm>
@@ -21,8 +21,8 @@ Camera::Camera(iRender* renderer) : Component("Camera")
 	renderer->fov = fov;
 	renderer->Far = _far;
 	renderer->Near = _near;
-	// Secondary (render-target) cameras own their renderer and must init it.
-	// The main renderer is the one held by AppInstance and is initialized by the bootstrap.
+	// Secondary (render-target) cameras own their renderer and must init it; the main one is
+	// held by AppInstance and initialized by the bootstrap.
 	if (renderer != AppInstance::GetSingleton()->render)
 		{ WindowDesc _wd; _wd.w = r_width; _wd.h = r_height; renderer->init(_wd); }
 	else
@@ -36,18 +36,18 @@ Camera::Camera(Atom* parent, iRender* renderer) : Component("Camera")
 }
 
 Vector3 Camera::ScreenPosToWorldRay(
-	int mouseX, int mouseY,             // Mouse position, in pixels, from bottom-left corner of the window
-	int screenWidth, int screenHeight,  // Window size, in pixels
-	glm::mat4 ViewMatrix,               // Camera position and orientation
-	glm::mat4 ProjectionMatrix         // Camera parameters (ratio, field of view, near and far planes)
+	int mouseX, int mouseY,             // pixels, bottom-left window origin
+	int screenWidth, int screenHeight,  // window size in pixels
+	glm::mat4 ViewMatrix,               // camera position and orientation
+	glm::mat4 ProjectionMatrix         // ratio, fov, near/far
 	, glm::vec3& out_origin
 ) {
 
-	// The ray Start and End positions, in Normalized Device Coordinates (Have you read Tutorial 4 ?)
+	// Ray start/end in Normalized Device Coordinates.
 	glm::vec4 RayStart_NDC(
-		(2.0f * mouseX) / screenWidth - 1.0f, // [0,1024] -> [-1,1]
-		1.0f - (2.0f * mouseY) / screenHeight, // [0, 768] -> [-1,1]
-		-1.0, // The near plane maps to Z=-1 in Normalized Device Coordinates
+		(2.0f * mouseX) / screenWidth - 1.0f,
+		1.0f - (2.0f * mouseY) / screenHeight,
+		-1.0, // the near plane maps to Z=-1 in NDC
 		1.0f
 	);
 	glm::vec4 RayEnd_NDC(
@@ -58,12 +58,8 @@ Vector3 Camera::ScreenPosToWorldRay(
 	);
 
 
-	// The Projection matrix goes from Camera Space to NDC.
-	// So inverse(ProjectionMatrix) goes from NDC to Camera Space.
 	glm::mat4 InverseProjectionMatrix = glm::inverse(ProjectionMatrix);
 
-	// The View Matrix goes from World Space to Camera Space.
-	// So inverse(ViewMatrix) goes from Camera Space to World Space.
 	glm::mat4 InverseViewMatrix = glm::inverse(ViewMatrix);
 
 	glm::vec4 RayStart_camera = InverseProjectionMatrix * RayStart_NDC;
@@ -93,11 +89,11 @@ Vector3 Camera::ScreenPosToWorldRay(
 
 bool  Camera::RayOBBIntersection(
 	glm::vec3 ray_origin,        // Ray origin, in world space
-	glm::vec3 ray_direction,     // Ray direction (NOT target position!), in world space. Must be normalize()'d.
-	glm::vec3 aabb_min,          // Minimum X,Y,Z coords of the mesh when not transformed at all.
-	glm::vec3 aabb_max,          // Maximum X,Y,Z coords. Often aabb_min*-1 if your mesh is centered, but it's not always the case.
-	glm::mat4 ModelMatrix,       // Transformation applied to the mesh (which will thus be also applied to its bounding box)
-	float& intersection_distance // Output : distance between ray_origin and the intersection with the OBB
+	glm::vec3 ray_direction,     // world space, must be normalized (direction, NOT a target position)
+	glm::vec3 aabb_min,          // untransformed mesh min X,Y,Z
+	glm::vec3 aabb_max,          // untransformed mesh max X,Y,Z
+	glm::mat4 ModelMatrix,       // mesh transform (applied to the box too)
+	float& intersection_distance // out: distance from ray_origin to the OBB hit
 ) {
 
 	// Intersection method from Real-Time Rendering and Essential Mathematics for Games
@@ -117,14 +113,11 @@ bool  Camera::RayOBBIntersection(
 
 		if (fabs(f) > 0.001f) { // Standard case
 
-			float t1 = (e + aabb_min.x) / f; // Intersection with the "left" plane
-			float t2 = (e + aabb_max.x) / f; // Intersection with the "right" plane
-			// t1 and t2 now contain distances betwen ray origin and ray-plane intersections
+			float t1 = (e + aabb_min.x) / f; // "left" plane
+			float t2 = (e + aabb_max.x) / f; // "right" plane
 
-			// We want t1 to represent the nearest intersection,
-			// so if it's not the case, invert t1 and t2
 			if (t1 > t2) {
-				float w = t1; t1 = t2; t2 = w; // swap t1 and t2
+				float w = t1; t1 = t2; t2 = w;
 			}
 
 			// tMax is the nearest "far" intersection (amongst the X,Y and Z planes pairs)
@@ -134,14 +127,12 @@ bool  Camera::RayOBBIntersection(
 			if (t1 > tMin)
 				tMin = t1;
 
-			// And here's the trick :
-			// If "far" is closer than "near", then there is NO intersection.
-			// See the images in the tutorials for the visual explanation.
+			// "far" closer than "near" = no intersection
 			if (tMax < tMin)
 				return false;
 
 		}
-		else { // Rare case : the ray is almost parallel to the planes, so they don't have any "intersection"
+		else { // rare case: the ray is almost parallel to the planes
 			if (-e + aabb_min.x > 0.0f || -e + aabb_max.x < 0.0f)
 				return false;
 		}
@@ -149,7 +140,6 @@ bool  Camera::RayOBBIntersection(
 
 
 	// Test intersection with the 2 planes perpendicular to the OBB's Y axis
-	// Exactly the same thing than above.
 	{
 		glm::vec3 yaxis(ModelMatrix[1].x, ModelMatrix[1].y, ModelMatrix[1].z);
 		float e = glm::dot(yaxis, delta);
@@ -178,7 +168,6 @@ bool  Camera::RayOBBIntersection(
 
 
 	// Test intersection with the 2 planes perpendicular to the OBB's Z axis
-	// Exactly the same thing than above.
 	{
 		glm::vec3 zaxis(ModelMatrix[2].x, ModelMatrix[2].y, ModelMatrix[2].z);
 		float e = glm::dot(zaxis, delta);
@@ -267,10 +256,8 @@ double Camera::GetOrthoSize()            { return orthoSize; }
 void   Camera::SetLayerMask(double mask) { layerMask = (int)(long long)mask; }
 double Camera::GetLayerMask()            { return (double)(unsigned int)layerMask; }
 
-// --- screen -> world (6.7) -----------------------------------------------------------------
-// Mirrors the renderer's projection exactly (incl. the live persp<->ortho blend): NDC from
-// game-screen pixels over Screen dims; perspective spreads DIRECTION from the camera origin,
-// orthographic spreads ORIGIN across the view rectangle with a fixed direction.
+// --- screen -> world -------------------------------------------------------------------------
+// Must mirror the renderer's projection (incl. the live persp<->ortho blend).
 
 Vector3 Camera::ScreenRayOrigin(double px, double py)
 {
@@ -320,9 +307,7 @@ void Camera::Pause() {}
 
 void Camera::Destroy()
 {
-	// NEVER deinit the MAIN renderer — this camera doesn't own it. Deleting a camera
-	// atom used to tear the whole device down mid-session (render safety). Only a
-	// camera-OWNED secondary renderer (init'ed in Init when renderer != main) is ours.
+	// NEVER deinit the MAIN renderer: only a camera-OWNED secondary renderer is ours.
 	if (renderer && renderer != AppInstance::GetSingleton()->render)
 		renderer->deinit();
 	renderer = nullptr;

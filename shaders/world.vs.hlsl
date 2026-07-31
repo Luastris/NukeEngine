@@ -1,20 +1,11 @@
-// World (3D) pass — vertex shader. Position + normal + uv; outputs world-space pos & normal for PBR.
-//
-// NUKE_INSTANCED (7.1): the instanced variant reads the per-instance world transform as three
-// HLSL-READY rows (row_i · (pos,1) = world-space coord; translation sits in row_i.w) plus a tint
-// and a free custom float4 from PER-INSTANCE vertex attributes (ATTRIB3..7). The CB then carries
-// VIEW*PROJ in g_WVP and identity in g_World. Normals use the row 3x3 directly — exact for
-// rotation + uniform scale (the standard instancing tradeoff; non-uniform scale skews normals).
-// A CUSTOM shader opts into instancing by handling this same define; sources that ignore it
-// simply never get an instanced pipeline (the renderer falls back to the default world shader).
+// World (3D) vertex shader: outputs world-space position and normal for the PBR pixel shader.
+// NUKE_INSTANCED opt-in: the per-instance world transform arrives as three HLSL-ready rows in
+// ATTRIB3..5 (dot(row_i, float4(pos,1)) = world coord, translation in row_i.w), tint in ATTRIB6,
+// custom float4 in ATTRIB7; g_WVP then holds VIEW*PROJ and g_World is identity.
 cbuffer CB { float4x4 g_WVP; float4x4 g_World; };
 #if NUKE_INSTANCED
-// Foliage bend (7.4): wind sway + pusher parting for instances that OPT IN through the
-// custom attribute (z = wind coefficient, w = interaction coefficient; both are
-// bendAmount / meshHeight² packed CPU-side, so the top of the mesh moves and the base
-// stays planted). Rigid instances (0,0) pass through untouched.
-// KEEP IN SYNC: world.vs.hlsl / gbuffer.vs.hlsl / shadow.vs.hlsl carry the same code —
-// depth, velocity and shadows must bend exactly like the lit surface.
+// Foliage bend, opt-in via iCustom (z = wind coefficient, w = interaction coefficient).
+// KEEP IN SYNC with gbuffer.vs.hlsl and shadow.vs.hlsl: depth, velocity and shadows must bend identically.
 #include "nukebend.hlsl"
 struct VSIn { float3 pos : ATTRIB0; float3 nrm : ATTRIB1; float2 uv : ATTRIB2;
               float4 iRow0 : ATTRIB3; float4 iRow1 : ATTRIB4; float4 iRow2 : ATTRIB5;

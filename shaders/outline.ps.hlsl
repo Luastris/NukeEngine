@@ -1,4 +1,4 @@
-// Selection outline — pixel shader. Flat editor-highlight color (orange).
+// Selection outline pixel shader: flat editor-highlight color.
 struct PSIn { float4 pos : SV_POSITION; };
 float4 main(in PSIn i) : SV_Target
 {

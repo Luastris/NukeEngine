@@ -1,5 +1,5 @@
-// Header-only boost.chrono BEFORE any boost include (project rule — the lib flavor
-// double-defines steady_clock::now inside the engine DLL; boost/thread pulls chrono).
+// Header-only boost.chrono BEFORE any boost include (boost/thread pulls chrono) — the
+// lib flavor double-defines steady_clock::now inside the engine DLL.
 #define BOOST_CHRONO_HEADER_ONLY
 #define BOOST_ERROR_CODE_HEADER_ONLY
 #include "API/Model/Events.h"
@@ -105,8 +105,7 @@ void Events::Pump(const std::function<void(const std::string&, const std::string
 		else ++i;
 	}
 
-	// 2) Drain the queue. Snapshot first: handlers may Emit (delivered NEXT pump — no
-	//    infinite same-frame cascades), and emits may arrive from other threads meanwhile.
+	// 2) Drain via a snapshot: handler emits land in the NEXT pump (no same-frame cascades).
 	std::vector<QueuedEvent> batch;
 	{
 		boost::mutex::scoped_lock lock(g_evMutex);

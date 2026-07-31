@@ -263,9 +263,8 @@ Mesh* Mesh::CreateSphere() {
 	return m;
 }
 
-// A helper shared by cylinder/capsule generation: append one triangle-souped quad (a,b,c,d)
-// as two tris (a,b,c)(a,c,d) — the SAME winding CreateSphere uses (a=upper, b=lower, c=lower
-// next, d=upper next), so all built-in primitives face out consistently.
+// Append one triangle-souped quad (a,b,c,d) as two tris (a,b,c)(a,c,d), with the SAME winding
+// CreateSphere uses (a=upper, b=lower, c=lower next, d=upper next).
 namespace {
 struct PV { float p[3], n[3], uv[2]; };
 inline void PushQuad(std::vector<float>& v, std::vector<float>& n, std::vector<float>& uv,
@@ -321,8 +320,7 @@ Mesh* Mesh::CreateCapsule() {
 	const float R = 0.5f, ch = 0.5f;  // radius, cylinder HALF-height (total height = 2*ch + 2*R = 2)
 	const float PI = 3.14159265358979f;
 	std::vector<float> v, n, uv;
-	// a point on a hemisphere of radius R centred at (0,yc,0): dir = (sinφcosθ, cosφ, sinφsinθ),
-	// pos = centre + R*dir, normal = dir.
+	// A point on a hemisphere of radius R centred at (0,yc,0); normal = dir.
 	auto vert = [&](float phi, float th, float yc, float u, float vv) -> PV {
 		float d[3] = { sinf(phi)*cosf(th), cosf(phi), sinf(phi)*sinf(th) };
 		return PV{{R*d[0], yc + R*d[1], R*d[2]}, {d[0],d[1],d[2]}, {u,vv}};
@@ -362,12 +360,9 @@ Mesh* Mesh::CreateCapsule() {
 }
 
 // ---- native .numesh (binary) -------------------------------------------------
-// Layout: magic "NUMESH\0\0" | u32 version | u32 nameLen + name | u32 guidLen + guid |
-//         i32 numVerts | f32 pos[3N] | u8 hasNormals (+ f32 nrm[3N]) | u8 hasUV (+ f32 uv[2N])
-// v2 appends the SKIN block: u8 hasSkin { u32 boneCount, per bone: str name | i32 parent |
-//         f32 invBind[16] | f32 localPos[3] | f32 localRot[4] | f32 localScale[3];
-//         boneIndex[4N] | f32 boneWeight[4N] }.  v1 files load with no skin.
-// v3: boneIndex widened u8 -> u16 (FBX helper-node skeletons exceed 255 joints).
+// Layout: magic "NUMESH\0\0" | u32 version | str name | str guid | i32 numVerts | f32 pos[3N] |
+//         u8 hasNormals (+ f32 nrm[3N]) | u8 hasUV (+ f32 uv[2N]).
+// v2 appends the SKIN block (bones + boneIndex[4N] + boneWeight[4N]); v3 widened boneIndex u8 -> u16.
 namespace {
 	const char  kMagic[8] = { 'N','U','M','E','S','H','\0','\0' };
 	const uint32_t kVersion = 3;
@@ -511,9 +506,8 @@ struct TriBuilder
 inline float FolHash(int i, int k) { float s = sinf((float)(i * 127 + k * 311) * 12.9898f) * 43758.5453f; return s - floorf(s); }
 }  // namespace
 
-// A clump of tapered grass blades. All normals point UP — the classic grass-lighting trick
-// (blades shade like the ground under them instead of flickering per-face). Double-sided
-// by mirrored winding, so it renders with the default backface-culled world pipeline.
+// A clump of tapered grass blades. All normals point UP (blades shade like the ground under
+// them); double-sided by mirrored winding, so backface culling stays on.
 Mesh* Mesh::CreateGrassClump()
 {
 	TriBuilder tb;

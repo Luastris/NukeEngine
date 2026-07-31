@@ -65,9 +65,7 @@ Material* Material::Clone() const
 void Material::Resolve()
 {
 	ResDB* db = ResDB::getSingleton();
-	// Re-bind when the pointer is missing OR no longer matches the guid (e.g. a material instance
-	// whose shaderGuid/texture was overridden after the clone). A stale guard here caused the
-	// shader override to be ignored on world load (Player + PIE stop) — kept rendering "world".
+	// Re-bind when the pointer is missing OR no longer matches the guid (instance overrides).
 	if (diffuseGuid.empty())                              diff = nullptr;
 	else if (!diff   || diff->guid   != diffuseGuid)     diff   = db->GetTexture(diffuseGuid);
 	if (normalGuid.empty())                              norm = nullptr;

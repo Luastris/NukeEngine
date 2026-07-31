@@ -1,5 +1,5 @@
-// Header-only boost.chrono BEFORE any boost include (project rule — the lib flavor
-// double-defines steady_clock::now inside the engine DLL; boost/thread pulls chrono).
+// Header-only boost.chrono must precede any boost include: the lib flavor double-defines
+// steady_clock::now inside the engine DLL.
 #define BOOST_CHRONO_HEADER_ONLY
 #define BOOST_ERROR_CODE_HEADER_ONLY
 #include "API/Model/Rand.h"
@@ -12,8 +12,7 @@ namespace nuke {
 
 namespace {
 
-// PCG32 (Melissa O'Neill, pcg-random.org, minimal variant): tiny state, excellent quality,
-// fully deterministic across platforms — exactly what mapgen/storyteller replay needs.
+// PCG32 (pcg-random.org, minimal variant): deterministic across platforms.
 struct Pcg32
 {
 	uint64_t state = 0x853c49e6748fea9bULL;
@@ -32,13 +31,12 @@ struct Pcg32
 		uint32_t rot = (uint32_t)(old >> 59u);
 		return (xorshifted >> rot) | (xorshifted << ((32 - rot) & 31));
 	}
-	// gaussSpare: Box-Muller produces pairs; the spare is part of the stream's determinism.
-	double gaussSpare = 0.0;
+	double gaussSpare = 0.0;   // Box-Muller pair spare; part of the stream's determinism
 	bool   hasSpare = false;
 };
 
-boost::mutex g_randMutex;   // stream map + draws (scripts may roll from any thread)
-// std::map: node-stable — StreamHandle pointers stay valid as streams are added.
+boost::mutex g_randMutex;   // guards the stream map + draws (callable from any thread)
+// std::map is node-stable: StreamHandle pointers stay valid as streams are added.
 std::map<std::string, Pcg32> g_streams;
 
 Pcg32& StreamFor(const std::string& name)
@@ -46,8 +44,7 @@ Pcg32& StreamFor(const std::string& name)
 	auto it = g_streams.find(name);
 	if (it != g_streams.end()) return it->second;
 	Pcg32& s = g_streams[name];
-	// Un-seeded stream: derive a stable default from the name (deterministic, but SEED IT
-	// for real reproducibility — the default just avoids identical cross-stream sequences).
+	// Un-seeded stream: stable default seed derived from the name (FNV-1a).
 	uint64_t h = 1469598103934665603ULL;
 	for (char c : name) { h ^= (unsigned char)c; h *= 1099511628211ULL; }
 	s.seed(h);
@@ -113,14 +110,10 @@ double Rand::Gauss(const std::string& stream, double mean, double dev)
 	return mean + dev * mag * std::cos(6.283185307179586 * u2);
 }
 
-// State round-trip for savegames. A double's 53-bit mantissa can't carry the full 64-bit
-// state losslessly, so the reflected form splits it via the stream's inc being derived
-// from the seed: we pack the STATE ONLY (inc survives via Seed at load) — the practical
-// contract is Seed(stream, seed) at load then SetState(stream, State()) captured at save.
 double Rand::State(const std::string& stream)
 {
 	boost::mutex::scoped_lock lock(g_randMutex);
-	// Expose the low 52 bits (mantissa-safe); the generator re-anchors on SetState.
+	// Only the low 52 bits fit a double's mantissa; `inc` is restored by Seed() at load.
 	return (double)(StreamFor(stream).state & 0x000FFFFFFFFFFFFFULL);
 }
 

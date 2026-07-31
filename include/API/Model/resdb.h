@@ -23,9 +23,9 @@ class iRender;   // fwd (BuildShaderPipelines / HotReloadShaders take it)
 
 namespace bc = boost::container;
 
-// The asset database. ONE shared instance lives in the engine DLL (getSingleton is
-// defined out-of-line, not inline) so the editor, plugins and the runtime all see the
-// same assets. Meshes are addressable by a stable GUID (built-ins use "builtin:<name>").
+// The asset database, addressed by stable GUID (built-ins use "builtin:<name>"). ONE shared
+// instance lives in the engine DLL — getSingleton is defined OUT-OF-LINE, never inline, so the
+// editor, plugins and the runtime all see the same assets.
 class NUKEENGINE_API ResDB
 {
     ResDB();
@@ -35,8 +35,8 @@ public:
     bc::list<Texture*> textures;
     bc::list<Material*> materials;
     bc::list<Shader*> shaders;
-    bc::list<AnimClip*> clips;                     // animation clips (.nuanim, roadmap 3.1)
-    bc::list<BoneMap*>  boneMaps;                  // retarget maps (.nubonemap, roadmap 3.1)
+    bc::list<AnimClip*> clips;                     // animation clips (.nuanim)
+    bc::list<BoneMap*>  boneMaps;                  // retarget maps (.nubonemap)
     bc::list<Atom*> prefabs;
 
     std::map<std::string, Mesh*>     meshByGuid;   // GUID -> mesh asset
@@ -69,14 +69,13 @@ public:
 
     BoneMap* GetBoneMap(const std::string& guid);     // nullptr if unknown
     void     RegisterBoneMap(BoneMap* b);             // add to boneMaps + index by b->guid
-    // Scan a dir (recursively) for "<name>.vs.hlsl" + "<name>.ps.hlsl" pairs -> Shader assets.
-    // Used for both roots: the engine's built-in `shaders/` and the project content folder.
+    // Scan a dir recursively for "<name>.vs.hlsl" + "<name>.ps.hlsl" pairs -> Shader assets.
     void     LoadShadersDir(const std::string& dir);
-    // Build a renderer pipeline for each loaded shader (sets Shader::rendererHandle). Call once
-    // after render init. HotReloadShaders re-reads changed shader files + rebuilds their pipeline.
+    // Build a renderer pipeline for each loaded shader (sets Shader::rendererHandle); call once
+    // after render init.
     void     BuildShaderPipelines(iRender* r);
-    // Incremental variant: build up to `maxCount` missing pipelines and return how many still
-    // lack one (0 = done). The editor boot compiles a couple per frame so the UI keeps breathing.
+    // Incremental variant: build up to `maxCount` missing pipelines, return how many are still
+    // missing (0 = done).
     int      BuildShaderPipelinesStep(iRender* r, int maxCount);
     void     HotReloadShaders(iRender* r);
     // Create an iRender render target for every loaded RenderTexture (sets Texture::rtId). After init.
@@ -84,12 +83,12 @@ public:
     // Hot-reload edited .numat/.nutex into their LIVE ResDB objects + re-Resolve / re-upload (no restart).
     void     HotReloadAssets(iRender* r);
 
-    // Scan a content folder (recursively) and load every native asset (.numesh) into the DB,
-    // indexed by the GUID stored in the file. Skips GUIDs already registered. Call at startup
-    // so meshGuid references in saved worlds resolve.
+    // Scan a content folder recursively and load every native asset into the DB, indexed by the
+    // GUID stored in the file (already-registered GUIDs are skipped). Call at startup so asset
+    // references in saved worlds resolve.
     void  LoadContentDir(const std::string& dir);
-    // Same, over the PACKAGE layer stack (packed runtime, roadmap 3.2): raw overlay files
-    // load from disk, pak entries from MEMORY (packed content never touches the disk).
+    // Same, over the PACKAGE layer stack: raw overlay files load from disk, pak entries from
+    // MEMORY (packed content never touches the disk).
     void  LoadContentPackaged();
     // Load ONE content file by disk path (the shared per-extension dispatch of the scans).
     void  LoadContentFile(const std::string& path);
@@ -106,15 +105,12 @@ public:
     std::string PathForGuid(const std::string& guid) const;   // "" if unknown
     std::string GuidForPath(const std::string& path) const;   // "" if unknown (EXACT key match)
     // Path-FORM-insensitive lookup for a CONTENT-RELATIVE reference ("Tilesets/atlas.nutex"):
-    // registered keys are whatever the scan/import produced (absolute, native slashes), so an
-    // exact GuidForPath on the relative form never matches. This resolves the reference against
-    // the content root and compares NORMALIZED (generic slashes, case-folded, relative-to-content
-    // when possible). Use it wherever assets are referenced by content path.
+    // registered keys are absolute with native slashes, so exact GuidForPath never matches a
+    // relative form. Use this wherever assets are referenced by content path.
     std::string GuidForContentPath(const std::string& contentRel) const;
 
-    // Live cleanup when a resource is deleted: drop it from the DB so it vanishes from pickers; and
-    // reset any LOADED material that references a guid back to defaults + re-Resolve (so the running
-    // session updates without a project reload).
+    // Live cleanup when a resource is deleted: drop it from the DB, and reset any LOADED material
+    // referencing the guid back to defaults + re-Resolve (no project reload needed).
     void RemoveByGuid(const std::string& guid);
     void UnlinkGuid(const std::string& guid);
 

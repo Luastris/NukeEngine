@@ -8,7 +8,7 @@ PostProcess::PostProcess() : Component("PostProcess") {}
 
 void PostProcess::Init(Atom* parent)
 {
-	transform = &parent->GetTransform();   // same pointer as the sibling Camera component on this atom
+	transform = &parent->GetTransform();
 	atom = parent;
 	parent->components.push_back(this);
 }

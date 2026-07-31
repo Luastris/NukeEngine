@@ -16,7 +16,6 @@ void Collider::Init(Atom* parent)
 
 void Collider::Destroy()
 {
-	// The body dies with its component (atom deleted / component removed / world cleared).
 	if (bodyId)
 	{
 		if (iPhysics* p = GetService<iPhysics>())

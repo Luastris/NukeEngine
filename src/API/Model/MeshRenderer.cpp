@@ -1,6 +1,6 @@
 #include "API/Model/MeshRenderer.h"
 #include "API/Model/resdb.h"
-#include "reflect/ReflectBind.h"   // Reflect_DropObject: kill script handles to the owned material
+#include "reflect/ReflectBind.h"
 #include <render/irender.h>
 
 namespace nuke {
@@ -10,8 +10,7 @@ MeshRenderer::MeshRenderer() : Component("MeshRenderer"), mesh(nullptr), mat(nul
 void MeshRenderer::Init(Atom* parent) {
 	transform = &parent->GetTransform();
 	parent->components.push_back(this);
-	// Resolve the mesh by GUID; clone the material asset into an owned INSTANCE (scene edits atom on
-	// the instance, the .numat stays untouched). World load applies saved overrides after this.
+	// Clone the material asset into an owned instance so edits never touch the .numat.
 	if (!mesh && !meshGuid.empty()) mesh = ResDB::getSingleton()->GetMesh(meshGuid);
 	if (!mat && !matGuid.empty())
 	{
@@ -24,9 +23,7 @@ void MeshRenderer::Destroy() {
 	if (mat) { Reflect_DropObject(mat); delete mat; mat = nullptr; }   // owned instance; script handles die with it
 }
 
-// MeshRenderer is now pure data (mesh + material + enabled). Drawing is done by
-// the render pass (World::Render), separate from the logic Update — this keeps
-// the editor (always rendering) and Play mode (logic Update) cleanly split.
+// Pure data (mesh + material + enabled); drawing happens in the render pass, not here.
 void MeshRenderer::Update() {}
 
 void MeshRenderer::FixedUpdate() {}

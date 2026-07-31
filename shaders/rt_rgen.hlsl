@@ -1,8 +1,7 @@
 #include "rt_common.hlsl"
 
-// Ray generation: per pixel, find the primary reflector (G-buffer + camera-ray re-find), spawn ONE reflection
-// ray through the RT pipeline, and composite the returned radiance onto the base colour. Recursion (mirror in
-// mirror) happens natively inside the closest-hit shader via TraceRay.
+// Ray generation: per pixel, find the primary reflector, trace one reflection ray and composite the
+// returned radiance onto the base colour. Further bounces happen inside the closest-hit shader.
 [shader("raygeneration")]
 void main()
 {
@@ -25,12 +24,13 @@ void main()
     if (dot(N, V) > 0.0) N = -N;
     float  NoV = saturate(dot(N, -V));
     float  F0  = lerp(0.04, 1.0, metal);
-    float  roughFade = 1.0 - smoothstep(g_RTParams.w * 0.4, g_RTParams.w, rough);   // fade out toward the configured roughness cutoff
+    float  roughFade = 1.0 - smoothstep(g_RTParams.w * 0.4, g_RTParams.w, rough);   // fade toward the roughness cutoff
     float  refl = (F0 + (1.0 - F0) * pow(1.0 - NoV, 5.0)) * (1.0 - rough) * roughFade;
     float  intensity = g_RTParams.x;
     if (refl < 0.01 || intensity <= 0.0) { g_Output[px] = float4(base, 1.0); return; }
 
-    // Exact primary surface via camera-ray trace (gbuffer depth drifts on curved surfaces -> origin inside object).
+    // Re-find the exact primary surface with a camera ray: G-buffer depth drifts on curved
+    // surfaces and can place the reflection origin inside the object.
     {
         RayDesc cray; cray.Origin = g_RTCam.xyz; cray.Direction = V; cray.TMin = 0.0; cray.TMax = 1.0e5;
         RayQuery<RAY_FLAG_CULL_NON_OPAQUE | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> cq;
@@ -39,9 +39,8 @@ void main()
         {
             wpos = g_RTCam.xyz + V * cq.CommittedRayT();
             uint ci = cq.CommittedInstanceID();
-            // NOTE: primary reflector normal is geometric only. Normal-mapping the reflector here would sample the
-            // bindless g_MatTex from the ray-gen stage, where it is NOT bound (bindless array is a closest-hit
-            // resource) -> device removal. The reflected surfaces still get full normal mapping in the hit shaders.
+            // Geometric normal only: g_MatTex is a closest-hit resource and is NOT bound in ray-gen,
+            // so sampling a normal map here causes device removal.
             N = FetchWorldNormal(g_Instances[ci].nrmOffset, cq.CommittedPrimitiveIndex(),
                                  cq.CommittedTriangleBarycentrics(), cq.CommittedObjectToWorld3x4());
             if (dot(N, V) > 0.0) N = -N;
@@ -55,10 +54,8 @@ void main()
     TraceRay(g_TLAS, RAY_FLAG_NONE, RT_REFLECT_MASK, 0, 1, 0, ray, p);   // only reflection-visible instances
 
     float k = saturate(refl * intensity);
-    // Water occlusion: the G-buffer holds no water, so a mirror under the surface used to get
-    // its reflection pasted OVER the drawn water ("видно сквозь воду будто её и нет"). The
-    // camera->reflector segment loses whatever water it crossed (same absorption scale as the
-    // body's Opacity Depth), so grazing views through a lot of water hide the mirror entirely.
+    // The G-buffer holds no water, so attenuate the reflection by whatever water the
+    // camera -> reflector segment crossed.
     k *= RTWaterTrans(g_RTCam.xyz, wpos);
     g_Output[px] = float4(lerp(base, p.color, k), 1.0);
 }

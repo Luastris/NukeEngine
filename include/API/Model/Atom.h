@@ -18,8 +18,7 @@ namespace nuke {
 #pragma pack(push, 1)
 class NUKEENGINE_API Atom
 {
-	// Reflected for METHOD dispatch (name/tag/parenting/destroy work identically in every
-	// scripting language). Atoms still travel as AtomRef stable ids, never object handles.
+	// Reflected for METHOD dispatch; atoms travel as AtomRef stable ids, never object handles.
 	NUKE_CLASS_NOCREATE(Atom, Object)
 protected:
 
@@ -28,33 +27,24 @@ public:
 
 	std::string name = "Atom";
 	std::string tag = "Untagged";
-	// Which MOD added this atom (world-merge provenance, RUNTIME only — never serialized):
-	// "" = native to the base game. The editor badges non-native atoms with it.
-	std::string modOrigin;
+	std::string modOrigin;   // mod that added this atom ("" = native); RUNTIME only, never serialized
 	Atom* parent = nullptr;
 	Transform transform = Transform(this);
 	
 	ID id;
 	std::string prefabGuid;   // if set, this atom is an INSTANCE of that prefab (manual apply/reset only)
 
-	// Render layer INDEX (0..31, see nuke::Layers): cameras render an atom only when their
-	// layerMask has this bit set. 0 = "Default"; 31 is conventionally the editor's own objects.
-	int layer = 0;
+	int layer = 0;   // render layer index 0..31 (see nuke::Layers); cameras filter by layerMask
 
-	// PERSISTENT atom (the DontDestroyOnLoad pattern): a persistent ROOT atom survives a GAME
-	// world switch (Game.LoadWorld / async activation) — its subtree, components and live
-	// script state carry into the next world instead of being torn down. Only in PLAY (player
-	// or PIE playing): editor edit-mode loads never carry atoms (opening world B must not
-	// leak world A's content into its file), and a SAVEGAME load restores the full snapshot
-	// (the save already contains the carried atoms — persisting would duplicate them).
+	// A persistent ROOT atom survives a GAME world switch with its subtree and live script
+	// state (DontDestroyOnLoad). PLAY mode only — editor loads and savegame loads never carry.
 	bool persistent = false;
 
     bc::list<Component*> components = bc::list<Component*>();
     bc::list<Atom*> children = bc::list<Atom*>();
 
-	// Whole-atom switch (the SetActive pattern): a disabled atom — and its entire subtree —
-	// neither updates, renders, receives events, nor keeps physics bodies alive. Distinct from
-	// per-component `enabled`. APPENDED at the END of the data members (cross-DLL layout).
+	// Whole-atom switch: a disabled atom and its subtree do not update, render or simulate.
+	// Must stay APPENDED at the END of the data members (cross-DLL layout).
 	bool enabled = true;
 
 	Atom();
@@ -71,7 +61,7 @@ public:
 	[[nuke::func]] void SetPersistent(bool on);     // survive game world switches (root atoms; see `persistent`)
 	[[nuke::func]] bool IsPersistent();
 	[[nuke::func]] void SetEnabled(bool on);        // whole-atom switch incl. subtree (see `enabled`)
-	[[nuke::func]] bool IsEnabled();                // this atom's own flag (parents may still disable it)
+	[[nuke::func]] bool IsEnabled();                // this atom's OWN flag (an ancestor may still disable it)
 	Transform& GetTransform();
 	
 	template<class T>
@@ -115,8 +105,7 @@ public:
 
 	void Reset();
 	void Pause();
-	// DEFERRED destruction (delegates to World::QueueDestroy): the subtree is removed and
-	// deleted at the end of the current Update — safe from scripts, callbacks, anywhere.
+	// DEFERRED destruction: the subtree is deleted at the end of the current Update.
 	[[nuke::func]] void Destroy();
 
 private:

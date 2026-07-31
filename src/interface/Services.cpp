@@ -7,10 +7,9 @@
 
 namespace nuke {
 
-// Single instance inside the engine DLL (like GetModules) — every host/plugin sees the
-// same registry through the NUKEENGINE_API functions. A service maps to a LIST of live
-// providers: exclusive services hold at most one (the loader displaces), shared services
-// (scripting) may hold several. Registration order is preserved — GetService() = first.
+// Single instance inside the engine DLL, so every host/plugin sees the same registry. A
+// service maps to a LIST of live providers (exclusive services hold at most one, shared ones
+// may hold several) in registration order — GetService() returns the first.
 static std::map<std::string, std::vector<void*>>& Registry()
 {
 	static std::map<std::string, std::vector<void*>> s;

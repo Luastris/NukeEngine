@@ -12,8 +12,7 @@ void RectAnchor::Init(Atom* parent)
 	parent->components.push_back(this);
 }
 
-// The layout itself is applied by the WORLD before rendering (ApplyCanvasLayouts in World.cpp) —
-// it needs the owning canvas's rectangle, which the component alone doesn't know.
+// Layout is applied by the world before rendering (ApplyCanvasLayouts) — it needs the canvas rect.
 void RectAnchor::Update()      {}
 void RectAnchor::FixedUpdate() {}
 void RectAnchor::Reset()       {}

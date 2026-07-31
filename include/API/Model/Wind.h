@@ -8,9 +8,8 @@
 
 namespace nuke {
 
-// Local wind volume (7.2): adds to the global wind inside its shape. Directional mode blows
-// along the atom's FORWARD (a fan, a vent); Radial blows outward from the atom's position
-// (an explosion, a downdraft with negative strength). Additive with every other zone.
+// Local wind volume: adds to the global wind inside its shape. Directional mode blows along the
+// atom's FORWARD, Radial outward from its position. Additive with every other zone.
 class NUKEENGINE_API WindZone : public Component
 {
 	NUKE_CLASS(WindZone, Component, "World")
@@ -21,8 +20,7 @@ public:
 	[[nuke::prop(label="Mode", enum="Directional,Radial")]] int   mode = 0;
 	[[nuke::prop(label="Strength")]]                        float strength = 5.0f;     // m/s (negative radial = suction)
 	[[nuke::prop(label="Falloff", min=0, max=1, tip="0 = full strength to the edge, 1 = linear fade to the edge.")]] float falloff = 1.0f;
-	// Per-zone animation, layered on top of the global wind's own gusts/turbulence: this
-	// zone's contribution swells (gusts) and its direction jitters spatially (turbulence).
+	// Per-zone animation layered on top of the global wind's own gusts/turbulence.
 	[[nuke::prop(label="Turbulence", min=0, tip="m/s of spatial direction noise added inside the zone.")]] float turbulence = 0.0f;
 	[[nuke::prop(label="Turbulence Scale", min=0.1, tip="World units per turbulence feature.")]] float turbulenceScale = 4.0f;
 	[[nuke::prop(label="Gust Amount", min=0, max=1, tip="0 = steady; 1 = strength swells fully on and off.")]] float gustAmount = 0.0f;
@@ -37,12 +35,10 @@ public:
 	void Reset() override;
 };
 
-// THE wind field (7.2): a GLOBAL directional wind (strength + gusts + turbulence, animated
-// through nuke::Noise over game time) plus every enabled WindZone, sampleable at any world
-// point. WORLD STATE: saved in the .nuworld ("wind" block, like the calendar), edited in the
-// World Settings window. Consumers: foliage vertex bend, VFX particles, cloth, water wave
-// direction, weather. The CURRENT animated global (direction * gusted strength) is pushed to
-// the renderer every frame (iRender::setWind -> FrameCB g_Wind/g_Wind2) for shader consumers.
+// THE wind field: a GLOBAL directional wind (strength + gusts + turbulence, animated over game
+// time) plus every enabled WindZone, sampleable at any world point. WORLD STATE: saved in the
+// .nuworld "wind" block. The current animated global is pushed to the renderer every frame
+// (iRender::setWind -> FrameCB g_Wind/g_Wind2) for shader consumers.
 class NUKEENGINE_API Wind
 {
 	NUKE_CLASS_NOCREATE(Wind, Object)
@@ -66,21 +62,18 @@ public:
 	[[nuke::func]] static Vector3 Sample(const Vector3& worldPos);
 
 	// ---- engine ----------------------------------------------------------------------------
-	// Wind's own smooth clock, advanced once per frame by World::Update with the SCALED game
-	// delta (freezes with the world). The calendar's totalgt ticks in whole game seconds —
-	// integer lattice coordinates where gradient Perlin is exactly 0, killing the gust swell.
+	// Wind's own smooth clock (scaled game delta, once per frame). Must NOT use the calendar's
+	// totalgt: whole-second lattice coordinates make gradient Perlin exactly 0, killing gusts.
 	static void Advance(double dt);
-	// Every enabled WindZone as a shader BendVolume (7.4 foliage): sphere zones exact; box
-	// zones approximated by their bounding sphere (the vertex shader keeps volumes analytic).
-	// Per-zone gusts are baked into the strength here (same clock as Sample).
+	// Every enabled WindZone as a shader BendVolume: sphere zones exact, box zones approximated
+	// by their bounding sphere. Per-zone gusts are baked into the strength (same clock as Sample).
 	static void CollectZones(std::vector<struct BendVolume>& out);
 	static void Register(WindZone* z);     // WindZone lifecycle (Init/Destroy)
 	static void Unregister(WindZone* z);
 	static void SaveJson(nlohmann::json& j);         // world "wind" block
 	static void LoadJson(const nlohmann::json& j);
 	static void ResetDefaults();                     // world without a wind block
-	// The CURRENT animated global for the renderer push: gusted strength along the direction
-	// (zones/turbulence are per-point — shaders apply their own local variation off g_Wind2).
+	// The CURRENT animated global for the renderer push: gusted strength along the direction.
 	static void ShaderParams(float outDirStrength[4], float outParams[4]);
 };
 

@@ -9,9 +9,7 @@
 
 namespace nuke {
 
-// Echo logs to the real console/IDE output? Off = the slow conhost write is skipped (the
-// ring/Console panel still receives lines when the tee is active). Read on the hot path.
-static std::atomic<bool> g_consoleEcho{true};
+static std::atomic<bool> g_consoleEcho{true};   // echo to the OS console; read on the hot path
 static bool              g_captured = false;   // CaptureStd installed the tee (editor)
 
 // ---- the ring ---------------------------------------------------------------------------------
@@ -26,7 +24,7 @@ void Log::Write(LogLevel level, const std::string& tag, const std::string& text,
                 const std::string& file, int line)
 {
 	boost::mutex::scoped_lock l(gLogLock);
-	// Consecutive duplicates collapse (a per-frame error would flood the ring in seconds).
+	// Consecutive duplicates collapse into a count instead of new entries.
 	if (!gRing.empty())
 	{
 		LogEntry& last = gRing.back();
@@ -110,8 +108,7 @@ static bool ContainsCI(const std::string& hay, const char* needle)
 	return false;
 }
 
-// Find a "path.ext:123" fragment — the entry's SOURCE (a Lua runtime error carries its
-// script and line; compiler-style engine messages carry the .cpp). Hand-rolled, no <regex>.
+// Find a "path.ext:123" fragment in `s` and return it as file + line.
 static void FindSource(const std::string& s, std::string& file, int& line)
 {
 	static const char* exts[] = { ".lua:", ".cpp:", ".h:", ".hpp:", ".hlsl:", ".cs:", ".nuworld:", ".json:" };
@@ -144,7 +141,6 @@ static void FindSource(const std::string& s, std::string& file, int& line)
 static void IngestLine(const std::string& raw, bool fromErr)
 {
 	std::string s = StripAnsi(raw);
-	// Trim trailing \r and surrounding whitespace.
 	while (!s.empty() && (s.back() == '\r' || s.back() == ' ' || s.back() == '\t')) s.pop_back();
 	size_t b = 0;
 	while (b < s.size() && (s[b] == ' ' || s[b] == '\t')) ++b;
@@ -178,8 +174,7 @@ static void IngestLine(const std::string& raw, bool fromErr)
 	Log::Write(lv, tag, s, file, line);
 }
 
-// A tee streambuf: every char continues to the ORIGINAL buffer (the real console/IDE
-// output keeps working), completed lines are ingested into the ring.
+// Tee streambuf: forwards to the original buffer and ingests completed lines into the ring.
 class TeeBuf : public std::streambuf
 {
 public:
@@ -195,8 +190,7 @@ protected:
 	}
 	std::streamsize xsputn(const char* p, std::streamsize n) override
 	{
-		// BATCH the console write (one syscall, not per-char) and gate it on the echo flag —
-		// the char-by-char loop was itself a cost. Scan separately to feed the ring by line.
+		// One batched console write, then a separate scan to feed the ring line by line.
 		if (orig_ && g_consoleEcho.load(std::memory_order_relaxed)) orig_->sputn(p, n);
 		for (std::streamsize i = 0; i < n; ++i)
 		{
@@ -226,8 +220,7 @@ void Log::CaptureStd()
 	std::cout << "[Log]\t\tconsole capture active (cout+cerr -> Console panel)" << std::endl;
 }
 
-// A discard streambuf for hosts WITHOUT capture (the Player): when the OS console echo is
-// off there's no ring to feed, so cout/cerr just drop their bytes cheaply.
+// Discard streambuf for hosts without capture: drops bytes when echo is off.
 namespace {
 struct NullBuf : std::streambuf
 {
@@ -243,8 +236,8 @@ void Log::SetConsoleEcho(bool on)
 {
 	g_consoleEcho.store(on, std::memory_order_relaxed);
 	if (g_captured)
-		return;   // the tee gates the OS write on g_consoleEcho; the ring keeps receiving.
-	// No tee (Player): redirect cout/cerr to a null sink when off (drop output), restore when on.
+		return;   // the tee already gates the OS write on g_consoleEcho
+	// No tee: swap cout/cerr to a null sink while off, restore on.
 	if (!on)
 	{
 		if (!g_savedCout) { g_savedCout = std::cout.rdbuf(); g_savedCerr = std::cerr.rdbuf(); }

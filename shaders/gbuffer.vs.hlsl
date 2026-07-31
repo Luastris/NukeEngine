@@ -1,14 +1,10 @@
-// G-buffer prepass vertex shader. Like world.vs but ALSO outputs the current + previous clip position so the pixel
-// shader can write a screen-space motion vector (velocity) for TAA. g_PrevWVP = prevWorld * prevView * prevProj
-// (per-object previous transform + previous camera), both UNjittered — TAA reprojection must be jitter-free.
-// NUKE_INSTANCED (7.1): per-instance world rows (ATTRIB3..5); g_WVP/g_PrevWVP then carry the CURRENT and
-// PREVIOUS camera view*proj only — instance motion is camera-only (per-instance previous transforms are
-// not stored; static instances get exact velocity, moving ones fall back to camera reprojection).
+// G-buffer prepass vertex shader: world.vs plus current/previous clip position for the TAA motion vector.
+// g_PrevWVP = prevWorld * prevView * prevProj, UNjittered (TAA reprojection must be jitter-free).
+// NUKE_INSTANCED opt-in: g_WVP/g_PrevWVP then carry only the current/previous camera view*proj.
 cbuffer CB { float4x4 g_WVP; float4x4 g_World; float4x4 g_PrevWVP; };
 #if NUKE_INSTANCED
-// Foliage bend (7.4) — KEEP IN SYNC with world.vs.hlsl (same code, same CB): the depth and
-// velocity the TAA/SSR consume must match the bent lit surface. Sway itself is excluded
-// from velocity (prevClip uses the SAME bent position) — small smear beats false motion.
+// KEEP IN SYNC with world.vs.hlsl: the depth and velocity must match the bent lit surface.
+// prevClip uses the SAME bent position, so sway is deliberately excluded from velocity.
 #include "nukebend.hlsl"
 struct VSIn { float3 pos : ATTRIB0; float3 nrm : ATTRIB1; float2 uv : ATTRIB2;
               float4 iRow0 : ATTRIB3; float4 iRow1 : ATTRIB4; float4 iRow2 : ATTRIB5;
@@ -26,7 +22,7 @@ void main(in VSIn i, out PSIn o)
     o.uv       = i.uv;
     o.curClip  = o.pos;
     o.prevClip = mul(g_PrevWVP, float4(o.wpos, 1.0));
-    // Per-INSTANCE id: hash of the instance translation (rows' .w) — same contract as per-object.
+    // Per-instance id: hash of the instance translation, same contract as the per-object id below.
     float3 pivot = float3(i.iRow0.w, i.iRow1.w, i.iRow2.w);
     o.objId = frac(sin(dot(pivot, float3(127.1, 311.7, 74.7))) * 43758.5453);
 }
@@ -43,9 +39,7 @@ void main(in VSIn i, out PSIn o)
     o.uv       = i.uv;
     o.curClip  = o.pos;
     o.prevClip = mul(g_PrevWVP, float4(i.pos, 1.0));
-    // Generic per-OBJECT id: a stable hash of the object's pivot, flat across the draw.
-    // Consumers derive whatever they need from it (musicvis: a pitch class; outlines /
-    // per-object masks later) — the G-buffer itself carries NO effect semantics.
+    // Generic per-object id: a stable hash of the object's pivot, flat across the draw.
     float3 pivot = mul(g_World, float4(0.0, 0.0, 0.0, 1.0)).xyz;
     o.objId = frac(sin(dot(pivot, float3(127.1, 311.7, 74.7))) * 43758.5453);
 }

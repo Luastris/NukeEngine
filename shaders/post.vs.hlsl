@@ -1,4 +1,4 @@
-// Post-process — fullscreen triangle (no vertex buffer). uv covers the screen; clip-space y flipped
+// Post-process fullscreen triangle (no vertex buffer). uv covers the screen; clip-space y flipped
 // so uv (0,0) = top-left (matches the scene render targets).
 struct PSIn { float4 pos : SV_POSITION; float2 uv : TEXCOORD0; };
 void main(uint id : SV_VertexID, out PSIn o)

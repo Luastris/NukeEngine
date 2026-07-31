@@ -30,16 +30,15 @@ public:
 	[[nuke::func]] Vector3 globalPosition();
 	[[nuke::func]] Quaternion globalRotation();
 	[[nuke::func]] Vector3 globalScale();
-	// Set local values so the WORLD pose equals these (inverse of the global* getters, relative to the
-	// current parent). Keeps an object in place when reparented / drives gizmo write-back.
+	// Set local values so the WORLD pose equals these (inverse of the global* getters, relative
+	// to the current parent).
 	[[nuke::func]] void    SetGlobal(const Vector3& pos, const Quaternion& rot, const Vector3& scale);
 
 	// Euler helpers (degrees) for the inspector / authoring. Internally quaternion.
 	[[nuke::func]] void    SetEulerDeg(const Vector3& deg);
 	[[nuke::func]] Vector3 EulerDeg();
-	// Legacy SCRIPT-facing aliases, reflected on purpose: older scripts call
-	// transform:setEuler(x, y, z) / transform:euler(). Real methods (not binder shims) so
-	// the Lua surface stays 100% reflection-driven.
+	// Legacy SCRIPT-facing aliases, reflected on purpose (real methods, not binder shims, so the
+	// script surface stays 100% reflection-driven).
 	[[nuke::func]] void    setEuler(double x, double y, double z);
 	[[nuke::func]] Vector3 euler();
 

@@ -1,8 +1,5 @@
-// Temporal anti-aliasing — built-in post effect (renderer special-cases it: isTAA). Accumulates sub-pixel-jittered
-// frames over time. The renderer jitters ONLY the colour projection each frame; the depth prepass + these matrices
-// are UNJITTERED, so reprojection stays clean. Reprojects the previous resolved frame by depth + previous view/proj,
-// clamps it to the local 3x3 colour neighbourhood (anti-ghosting), and blends. Camera + static motion handled;
-// fast dynamic objects may ghost (no velocity buffer yet). Mirrors SSR's mul(Matrix, vector) convention.
+// Temporal anti-aliasing: reprojects the previous resolved frame, clamps it to the local 3x3 colour
+// neighbourhood and blends. The depth prepass and these matrices are UNJITTERED; only colour is jittered.
 Texture2D    g_Source;   SamplerState g_Source_sampler;    // current (jittered) HDR colour
 Texture2D    g_Depth;    SamplerState g_Depth_sampler;     // current (UNjittered) prepass depth
 Texture2D    g_History;  SamplerState g_History_sampler;   // previous resolved frame
@@ -30,7 +27,7 @@ float4 main(in PSIn i) : SV_Target
 
     float depth = g_Depth.Sample(g_Depth_sampler, i.uv).r;
     float2 puv;
-    if (depth < 0.99999)   // geometry: use the motion vector (handles camera + static + DYNAMIC objects)
+    if (depth < 0.99999)   // geometry: use the motion vector
     {
         puv = i.uv - g_Velocity.Sample(g_Velocity_sampler, i.uv).rg;
     }
@@ -49,7 +46,7 @@ float4 main(in PSIn i) : SV_Target
 
     float3 hist = g_History.Sample(g_History_sampler, puv).rgb;
 
-    // Neighbourhood clamp (anti-ghosting): constrain history to the local colour AABB.
+    // Anti-ghosting: constrain history to the local colour AABB.
     float2 rcp = g_TAARes.zw;
     float3 mn = cur, mx = cur;
     [unroll] for (int y = -1; y <= 1; ++y)

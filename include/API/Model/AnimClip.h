@@ -9,13 +9,10 @@
 
 namespace nuke {
 
-// One animation clip asset (.nuanim, roadmap 3.1). Channels address skeleton joints BY
-// NAME (retarget-friendly: any mesh whose bones carry the same names can play the clip);
-// key times are SECONDS (import already divides by the source ticks-per-second).
-// Sampling/blending lives in the Animator component — the clip is pure data.
+// One animation clip asset (.nuanim): pure data. Channels address joints BY NAME (retarget-
+// friendly); key times are in SECONDS. Sampling/blending lives in the Animator component.
 class NUKEENGINE_API AnimClip
 {
-	// Reflected ASSET class (scripts create/edit/assign it like any engine object).
 	NUKE_CLASS(AnimClip, Object)
 public:
 	std::string guid;    // asset id (ResDB)
@@ -30,8 +27,8 @@ public:
 	};
 	std::vector<Channel> channels;
 
-	// Named time markers (v2): the Animator fires Component::OnAnimEvent on its atom when
-	// the playhead crosses one (loop-aware). Kept sorted by t (AddEvent inserts in order).
+	// Named time markers; the Animator fires Component::OnAnimEvent when the playhead
+	// crosses one. Kept sorted by t (AddEvent inserts in order).
 	struct Event { float t; std::string name; };
 	std::vector<Event> events;
 	[[nuke::func]] void AddEvent(float t, const std::string& name);

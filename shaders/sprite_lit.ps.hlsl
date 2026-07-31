@@ -1,17 +1,14 @@
-// Lit textured sprite (tilemap layers with a normal map): diffuse * tint, Lambert-lit by
-// the scene's light list (FrameCB — the same buffer the world PS uses; this shader declares
-// only the prefix it reads). The quad's tangent basis is constant per batch (SpriteLitCB):
-// tiles of one map share a plane, so no per-vertex TBN. No shadows/specular — 2D top-down
-// maps read best with plain diffuse + ambient.
+// Lit textured sprite (tilemap layers with a normal map): diffuse * tint, Lambert-lit by the scene lights.
+// The tangent basis is constant per batch, since all tiles of one map share a plane.
 Texture2D    g_Sprite;  SamplerState g_Sprite_sampler;
 Texture2D    g_Normal;  SamplerState g_Normal_sampler;
 
 // g_T/g_B/g_N = the batch plane's world tangent/bitangent/normal.
-// g_N.w: normal-map green convention — >0 = OpenGL (+Y, flip green; the default for
-// imported atlases), <0 = DirectX (no flip). Matches the world PS's per-material rule.
+// g_N.w = green convention: >0 = OpenGL (flip), <0 = DirectX.
 cbuffer SpriteLitCB { float4 g_T; float4 g_B; float4 g_N; };
 
-#define MAX_LIGHTS 256   // per-particle light sources (VFX) need a real budget; unattenuated lights early-out
+// FrameCB below declares only the prefix this shader reads; the layout must match world.ps.
+#define MAX_LIGHTS 256
 struct Light { float4 posType; float4 dirRange; float4 colorIntensity; float4 spot; };
 cbuffer FrameCB { float4 g_CamPos; float4 g_Ambient; float4 g_LightCount; Light g_Lights[MAX_LIGHTS]; };
 
@@ -22,7 +19,7 @@ float4 main(in PSIn i) : SV_TARGET
     float4 albedo = g_Sprite.Sample(g_Sprite_sampler, i.uv) * i.col;
 
     float3 nTS = g_Normal.Sample(g_Normal_sampler, i.uv).xyz * 2.0 - 1.0;
-    if (g_N.w > 0.0) nTS.y = -nTS.y;   // OpenGL-authored map: +Y up -> flip green
+    if (g_N.w > 0.0) nTS.y = -nTS.y;   // OpenGL-authored map: flip green
     float3 N = normalize(g_T.xyz * nTS.x + g_B.xyz * nTS.y + g_N.xyz * nTS.z);
 
     float3 lit = g_Ambient.rgb * g_Ambient.a;
@@ -36,7 +33,7 @@ float4 main(in PSIn i) : SV_TARGET
         {
             L = normalize(-lt.dirRange.xyz);
         }
-        else                                  // point / spot (same falloff as the world PS)
+        else                                  // point / spot
         {
             float3 d = lt.posType.xyz - i.wpos;
             float  dist = length(d);

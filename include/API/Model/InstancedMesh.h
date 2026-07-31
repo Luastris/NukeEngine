@@ -9,14 +9,9 @@
 
 namespace nuke {
 
-// GPU-instanced mesh scatter (7.1): ONE mesh + material drawn N times in a handful of draw
-// calls. Instances are LOCAL to the atom (the atom's world transform applies on top), stored
-// compactly (base64 blob in the hidden `data` prop — thousands of instances never hit the
-// JSON tree as objects) and grouped into SPATIAL CHUNKS for per-camera frustum culling.
-// Consumers: foliage scatter, debris, VFX mesh swarms, modular architecture.
-// The renderer draws chunks through renderObjectInstanced / renderShadowInstanced /
-// renderGBufferInstanced (world / shadow / velocity passes); RT reflections take the
-// instances individually up to `rtMaxInstances` (a TLAS entry per instance is not free).
+// GPU-instanced mesh scatter: one mesh + material drawn N times. Instances are atom-local,
+// stored as a base64 blob in the hidden `data` prop and grouped into spatial chunks for
+// per-camera frustum culling.
 class NUKEENGINE_API InstancedMesh : public Component
 {
 	NUKE_CLASS(InstancedMesh, Component, "Rendering")
@@ -25,11 +20,7 @@ public:
 	Material* mat  = nullptr;   // OWNED instance (clone of the matGuid asset), like MeshRenderer
 	std::string meshGuidRes, matGuidRes;   // guid each cache was resolved from (hot-apply, no latch)
 	float cellSizeRes = -1.f;              // cell size the chunks were built with (live re-chunk)
-	// RT presence, MERGED (7.4): one Mesh per spatial chunk with all its instances baked in
-	// ATOM-LOCAL space — a single TLAS entry per chunk instead of one per instance, so the
-	// WHOLE set ray-traces (shadows, reflections, self-shadow) at flat TLAS cost. Rebuilt
-	// alongside the chunks; pooled Meshes are reused in place (version bump re-uploads).
-	std::vector<Mesh*> rtChunkMeshes;
+	std::vector<Mesh*> rtChunkMeshes;   // one merged atom-local Mesh per chunk = one TLAS entry per chunk
 
 	[[nuke::prop(asset="mesh", label="Mesh")]]         std::string meshGuid;
 	[[nuke::prop(asset="material", label="Material")]] std::string matGuid;
@@ -40,7 +31,7 @@ public:
 	[[nuke::prop(label="Cell Size", min=1, tip="Spatial chunk size (world units) for frustum culling.")]] float cellSize = 16.0f;
 	[[nuke::prop(hidden)]] std::string data;   // packed instances (base64 of floats) — the serialized store
 
-	// ---- reflected instance API (scripts author scatters through these) --------------------
+	// ---- reflected instance API ----
 	[[nuke::func]] int  AddInstance(const Vector3& pos, const Vector3& eulerDeg, const Vector3& scale);
 	[[nuke::func]] void SetInstancePos(int index, const Vector3& pos);
 	[[nuke::func]] void SetInstanceTint(int index, double r, double g, double b, double a);
@@ -49,7 +40,7 @@ public:
 	[[nuke::func]] void ClearInstances();
 	[[nuke::func]] int  InstanceCount();
 
-	// ---- runtime (not serialized) ----------------------------------------------------------
+	// ---- runtime (not serialized) ----
 	struct Inst { float pos[3]; float quat[4]; float scale[3]; float color[4]; float custom[4]; };
 	std::vector<Inst> instances;
 	bool     dirty = true;        // instances/props changed -> re-chunk + re-upload
@@ -69,14 +60,10 @@ public:
 	void Reset() override;
 	void OnBeforeSave() override;   // pack `instances` back into the `data` blob
 
-	// Called by the render pass (World::Render): resolve assets, decode the blob, rebuild
-	// chunks + upload when dirty or the atom moved. Returns false when there is nothing to draw.
-	// VIRTUAL: derived scatters (Foliage, 7.4) sync their per-instance params first.
+	// Resolve assets, decode the blob, rebuild chunks + upload when dirty or the atom moved.
+	// Returns false when there is nothing to draw.
 	virtual bool EnsureRenderReady(iRender* r);
-	// Whether the ATOM's scale multiplies into the instances. Foliage returns false: a layer
-	// on a stretched ground atom (e.g. scale 40x1x40) must not blow every blade up into a
-	// 40 m sheet — it follows the atom's position/rotation only, instance scale stays world.
-	virtual bool ScaleWithAtom() const { return true; }
+	virtual bool ScaleWithAtom() const { return true; }   // whether the atom's scale multiplies into instances
 
 protected:
 	void EnsureDecoded();

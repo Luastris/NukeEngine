@@ -9,14 +9,8 @@
 
 namespace nuke {
 
-// Engine-wide logging — the editor Console's backbone. Two inputs feed ONE ring:
-//   * the typed API below (Info/Warn/Error, optionally with a source file:line);
-//   * CaptureStd(): std::cout/std::cerr are tee'd through the ring, so EVERY existing
-//     "[tag]  message" line from the engine, the modules and the hosts lands here too
-//     (still printed to the real console). Captured lines are parsed: the "[tag]" prefix,
-//     an error/warning severity heuristic (cerr defaults to error), ANSI codes stripped,
-//     and any "path.ext:line" fragment becomes the entry's SOURCE — the console's
-//     double-click jumps there (a Lua runtime error carries its script and line).
+// Engine-wide logging. Two inputs feed one ring: the typed API below, and CaptureStd() which tees
+// std::cout/std::cerr through it, parsing "[tag]" prefixes, severity and "path.ext:line" sources.
 // Thread-safe; the ring keeps the most recent kMaxEntries.
 
 enum LogLevel { LOG_INFO = 0, LOG_WARN = 1, LOG_ERROR = 2 };
@@ -44,16 +38,12 @@ public:
 	[[nuke::func]] static void Warn (const std::string& tag, const std::string& text) { Write(LOG_WARN,  tag, text); }
 	[[nuke::func]] static void Error(const std::string& tag, const std::string& text) { Write(LOG_ERROR, tag, text); }
 
-	// Route std::cout / std::cerr through the ring (they keep printing where they did).
-	// Idempotent; call once early in the host (before modules load, so their boot logs
-	// are captured too).
+	// Route std::cout / std::cerr through the ring. Idempotent; call before modules load so
+	// their boot logs are captured too.
 	static void CaptureStd();
 
-	// Enable/disable echoing logs to the OS console (conhost) — that write is SLOW and can
-	// cost frame time under heavy logging. When OFF: if CaptureStd is active (editor) the OS
-	// echo is gated but the ring (Console panel) keeps receiving everything; otherwise (Player)
-	// std::cout/std::cerr are redirected to a null sink so the output is dropped cheaply.
-	// Idempotent; a host calls it once after config load with config.logToConsole.
+	// Enable/disable echoing to the OS console (that write is slow). Off still feeds the ring
+	// when CaptureStd is active; otherwise the streams go to a null sink. Idempotent.
 	static void SetConsoleEcho(bool on);
 
 	static uint64_t Version();                   // bumps on every append (cheap change check)

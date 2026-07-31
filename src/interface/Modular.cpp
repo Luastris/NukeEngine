@@ -1,3 +1,5 @@
+// Must precede any boost header: the lib flavor of chrono double-defines steady_clock::now (LNK2005).
+#define BOOST_CHRONO_HEADER_ONLY
 #include "interface/Modular.h"
 #include "interface/Services.h"
 #include "reflect/Reflect.h"
@@ -18,13 +20,13 @@ static bc::vector<std::shared_ptr<NUKEModule>> g_modules;
 static AppInstance* g_instance = nullptr;   // host, captured at discovery (for EnablePlugin)
 static std::map<std::string, std::string> g_typePlugin;   // component type -> owning dll name
 static std::map<const NUKEModule*, int> g_moduleAbi;      // per-DLL ABI stamp (see NUKEEInteface.h)
+static std::map<const NUKEModule*, boost::thread> g_runThreads;   // joined before the DLL is freed
+static std::set<const NUKEModule*> g_runawayModules;      // Run() ignored stop: DLL must stay mapped
 
 bc::vector<std::shared_ptr<NUKEModule>>& GetModules() { return g_modules; }
 
-// The ABI level a module's DLL was built against (its exported nuke_module_abi, read at
-// discovery; 1 when the DLL predates the stamp). Callers of vtable-appended virtuals guard
-// with this so a stale module DEGRADES (new virtual = its default) instead of crashing the
-// host on a vtable slot the DLL doesn't have.
+// The ABI level a module's DLL was built against (exported nuke_module_abi; 1 when absent).
+// Guard calls to vtable-appended virtuals with this — a stale DLL lacks the slot.
 int ModuleAbi(const NUKEModule* m)
 {
 	auto it = g_moduleAbi.find(m);
@@ -56,10 +58,9 @@ bool IsTypeActive(const std::string& type)
 }
 
 #ifdef _WIN32
-// Read two exports from a DLL's PE export table by parsing the FILE — no LoadLibrary of any
-// kind (see the gate below for why). Sets `hasPlugin` when an exported "plugin" symbol exists
-// and `engineAbi` from the exported `nuke_engine_abi` int (1 = pre-stamp build). Returns false
-// when the file isn't a parseable x64 PE — callers then fall back to the post-load gate.
+// Read two exports out of a DLL's PE export table by parsing the file — no LoadLibrary.
+// `hasPlugin` = an exported "plugin" symbol exists; `engineAbi` = the exported
+// nuke_engine_abi int (1 when absent). Returns false when the file isn't a parseable PE32+.
 static bool PreflightPeExports(const std::string& path, bool& hasPlugin, int& engineAbi)
 {
 	hasPlugin = false; engineAbi = 1;
@@ -80,7 +81,7 @@ static bool PreflightPeExports(const std::string& path, bool& hasPlugin, int& en
 	IMAGE_OPTIONAL_HEADER64 oh;
 	if (!rd(dos.e_lfanew + 4 + sizeof(fh), &oh, sizeof(oh)) || oh.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC) return false;
 	const IMAGE_DATA_DIRECTORY& expDir = oh.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
-	if (!expDir.VirtualAddress) return true;   // parsed fine — just exports nothing
+	if (!expDir.VirtualAddress) return true;   // valid PE that exports nothing
 	std::vector<IMAGE_SECTION_HEADER> secs(fh.NumberOfSections);
 	if (secs.empty() || !rd(dos.e_lfanew + 4 + sizeof(fh) + fh.SizeOfOptionalHeader,
 	                        secs.data(), secs.size() * sizeof(IMAGE_SECTION_HEADER))) return false;
@@ -112,7 +113,7 @@ static bool PreflightPeExports(const std::string& path, bool& hasPlugin, int& en
 		if (so < 0) continue;
 		char nm[64] = {};
 		f.clear(); f.seekg((std::streamoff)so);
-		f.read(nm, sizeof(nm) - 1);              // partial read at EOF is fine — gcount bytes
+		f.read(nm, sizeof(nm) - 1);              // a short read at EOF is fine
 		nm[f.gcount() > 0 ? f.gcount() : 0] = 0;
 		if (strcmp(nm, "plugin") == 0) hasPlugin = true;
 		else if (strcmp(nm, "nuke_engine_abi") == 0 && ordinals[i] < ed.NumberOfFunctions)
@@ -126,12 +127,8 @@ static bool PreflightPeExports(const std::string& path, bool& hasPlugin, int& en
 }
 #endif
 
-// ---- SEH shields around FOREIGN module code -------------------------------------------------
-// The loader's contract: NO broken, stale or config-mismatched DLL may ever take the host
-// down. Stamps (above) catch the KNOWN mismatches cheaply; these shields catch everything
-// else — an access violation (or any exception) inside module code refuses that module and
-// the host keeps running. MSVC C++ exceptions ride on SEH too, so both kinds are caught.
-// C++ unwinding can't cross __try, hence the tiny raw wrapper functions (no C++ locals).
+// Shields around foreign module code: a fault inside a module refuses that module instead of
+// taking the host down. Separate wrappers because __try frames cannot hold C++ destructors.
 static NUKEModule* DiscoverModuleFileBody(const std::string& absPath);
 NUKEModule* DiscoverModuleFile(const std::string& absPath)
 {
@@ -144,6 +141,8 @@ NUKEModule* DiscoverModuleFile(const std::string& absPath)
 	}
 }
 
+#ifdef _WIN32
+// MSVC: __try/__except catches access violations AND C++ exceptions (C++ EH rides on SEH).
 static bool SehOnLoad(NUKEModule* m)
 {
 	__try { m->OnLoad(); return true; }
@@ -161,16 +160,29 @@ static bool SehShutdown(NUKEModule* m)
 	__try { m->Shutdown(); return true; }
 	__except (EXCEPTION_EXECUTE_HANDLER) { return false; }
 }
+#else
+// Portable fallback: C++ exceptions only — a hard fault is the crash reporter's business.
+static bool SehOnLoad(NUKEModule* m)       { try { m->OnLoad(); return true; } catch (...) { return false; } }
+static void* SehQueryService(NUKEModule* m){ try { return m->queryService(); } catch (...) { return nullptr; } }
+static bool SehShutdown(NUKEModule* m)     { try { m->Shutdown(); return true; } catch (...) { return false; } }
+#endif
 
-// The plugin's Run() executes on its own background thread — an unshielded crash there kills
-// the process no matter how careful the loader was. Same rule: log, stop, host lives.
+// Run() executes on its own thread: an unshielded crash there kills the whole process.
 static void SehRunGuard(NUKEModule* m, AppInstance* inst)
 {
+#ifdef _WIN32
 	__try { m->Run(inst); }
 	__except (EXCEPTION_EXECUTE_HANDLER)
 	{
 		cout << "[Modular]\tplugin Run() crashed (module survives disabled): " << m->moduleFile << endl;
 	}
+#else
+	try { m->Run(inst); }
+	catch (...)
+	{
+		cout << "[Modular]\tplugin Run() threw (module survives disabled): " << m->moduleFile << endl;
+	}
+#endif
 }
 
 // Import ONE plugin DLL into the pool. Skips non-plugins (no "plugin" export) and file
@@ -186,19 +198,14 @@ static NUKEModule* DiscoverModuleFileBody(const std::string& absPath)
 	try
 	{
 #ifdef _WIN32
-		// Engine BINARY-compat gate WITHOUT running the DLL's code, and WITHOUT the OS loader:
-		// LoadLibraryEx(DONT_RESOLVE_DLL_REFERENCES) is a trap — it plants an uninitialized
-		// image in the loader's cache, and the later REAL LoadLibrary can be handed that same
-		// image (imports unresolved, statics never run; seen live: NukeCSharp discovered as ''
-		// with a garbage moduleFile, then a null service provider crash). So the stamps are
-		// read by parsing the PE export table straight from the FILE BYTES (PreflightPeExports
-		// below) — zero loader-state side effects, statics of a stale module never execute.
+		// ABI gate BEFORE the DLL's code can run. Not LoadLibraryEx(DONT_RESOLVE_DLL_REFERENCES):
+		// that plants an uninitialized image the later real LoadLibrary can be handed back.
 		{
 			bool hasPlugin = false; int engineAbi = 1;
 			if (PreflightPeExports(p.string(), hasPlugin, engineAbi))
 			{
 				if (!hasPlugin)
-					return nullptr;   // not a NUKE module — skip without ever loading it
+					return nullptr;   // not a NUKE module
 				if (engineAbi != NUKE_ENGINE_ABI)
 				{
 					cout << "[Modular]\t" << file << " REFUSED: built against engine ABI " << engineAbi
@@ -207,19 +214,15 @@ static NUKEModule* DiscoverModuleFileBody(const std::string& absPath)
 					return nullptr;
 				}
 			}
-			// Unparseable/foreign binary: fall through — the post-load gate below still refuses
-			// a stale ABI (worst case its statics ran, same as before the pre-flight existed).
 		}
 #endif
-		// Extension plugins export an unmangled "plugin" symbol — skip any other DLL.
-		// ALTERED SEARCH PATH: a module's DLL dependencies resolve from the MODULE'S OWN
-		// directory first (a game module linking NukeTilemap.dll finds it beside itself in
-		// modules/ — the default search only looks next to the EXE).
+		// Plugins export an unmangled "plugin" symbol. ALTERED SEARCH PATH: a module's DLL
+		// dependencies resolve from the MODULE'S OWN dir first, not only next to the EXE.
 		boost::dll::shared_library lib(p.string(), boost::dll::load_mode::load_with_altered_search_path);
 		if (!lib.has("plugin"))
 			return nullptr;
 
-		// Second line of the ABI gate (non-Windows path: no pre-flight probe above).
+		// Second line of the ABI gate (and the only one where there is no pre-flight above).
 		{
 			int engineAbi = 1;
 			if (lib.has("nuke_engine_abi")) engineAbi = lib.get<const int>("nuke_engine_abi");
@@ -237,8 +240,7 @@ static NUKEModule* DiscoverModuleFileBody(const std::string& absPath)
 		plugin->modulePath = p.generic_string();
 		plugin->moduleFile = file;
 		plugin->loaded     = false;
-		// ABI stamp: how new a NUKEModule vtable this DLL carries. No stamp = level 1
-		// (built before it existed) — appended virtuals must not be called on it.
+		// ABI stamp: how new a NUKEModule vtable this DLL carries; no stamp = level 1.
 		int abi = 1;
 		if (lib.has("nuke_module_abi")) abi = lib.get<const int>("nuke_module_abi");
 		g_moduleAbi[plugin.get()] = abi;
@@ -275,18 +277,14 @@ void InitModules(AppInstance* instance)
 {
 	g_instance = instance;
 
-	// modules/ sits NEXT TO THE EXECUTABLE (editor and dist layouts alike) — resolve against
-	// the exe dir, never the CWD: a shortcut-launched packaged game (arbitrary working dir)
-	// otherwise scans a random folder and finds no modules at all.
+	// modules/ sits NEXT TO THE EXECUTABLE — resolve against the exe dir, never the CWD
+	// (a shortcut-launched game has an arbitrary working dir).
 	boost::system::error_code ec;
 	bfs::path exeDir = boost::dll::program_location(ec).parent_path();
 	if (ec || exeDir.empty()) exeDir = bfs::current_path();
 #ifdef _WIN32
-	// Module DLLs load with LOAD_WITH_ALTERED_SEARCH_PATH, which REPLACES the application
-	// directory with the module's own dir in the dependency search — their runtime deps
-	// (glfw3, boost, ...) live in the EXE dir and were only ever found via the CWD slot.
-	// Pin the exe dir into the standard search order so a launch from any working
-	// directory (shortcut, terminal elsewhere) resolves them.
+	// LOAD_WITH_ALTERED_SEARCH_PATH replaces the application dir in the dependency search, so
+	// pin the exe dir: module deps (glfw3, boost, ...) live there and must resolve from any CWD.
 	SetDllDirectoryW(exeDir.wstring().c_str());
 #endif
 	const bfs::path modulesDir = exeDir / "modules";
@@ -299,9 +297,8 @@ void InitModules(AppInstance* instance)
 	DiscoverModulesIn(modulesDir.string());
 }
 
-// Phase 6.0: unload a module's DLL so a rebuild can overwrite the file. The pool's
-// shared_ptr is the lock — dropping it frees the library (boost::dll). PHASE_BOOT
-// providers (the renderer) can never be torn down mid-run.
+// Unload a module's DLL so a rebuild can overwrite the file; the pool's shared_ptr is the
+// lock. PHASE_BOOT providers (the renderer) can never be torn down mid-run.
 bool UnloadModuleDll(const std::string& moduleFile)
 {
 	for (size_t i = 0; i < g_modules.size(); ++i)
@@ -354,10 +351,8 @@ void EnablePlugin(NUKEModule* m)
 {
 	if (!m || m->loaded) return;
 
-	// One active provider per EXCLUSIVE service. A PHASE_BOOT provider (the renderer: it
-	// owns the window/device) cannot be swapped live in either direction — the UI persists
-	// the new choice, which takes effect on the next start. SHARED services (scripting)
-	// skip the displacement entirely: Lua and C# providers load side by side.
+	// One active provider per EXCLUSIVE service. A PHASE_BOOT provider cannot be swapped live
+	// (the choice applies at next start); SHARED services load their providers side by side.
 	const std::string service = m->provides();
 	if (!service.empty() && !m->sharedService())
 	{
@@ -380,9 +375,7 @@ void EnablePlugin(NUKEModule* m)
 	// Diff the registry around OnLoad() to learn which component types this plugin provides.
 	std::set<std::string> before;
 	for (TypeInfo* t : Registry_All()) before.insert(t->name);
-	// SEH-shielded: OnLoad runs FOREIGN code. A crash refuses the plugin instead of killing
-	// the host (classic victim: a project Game.dll built against another engine build or the
-	// other Debug/Release configuration — the ABI stamp can't see a config mismatch).
+	// Shielded: OnLoad runs foreign code, and the ABI stamp cannot see a Debug/Release mismatch.
 	if (!SehOnLoad(m))
 	{
 		cout << "[Modular]\t" << m->moduleFile << " REFUSED: crashed in OnLoad — stale or built "
@@ -395,52 +388,61 @@ void EnablePlugin(NUKEModule* m)
 	for (TypeInfo* t : Registry_All())
 		if (!before.count(t->name)) g_typePlugin[t->name] = m->moduleFile;
 
-	// Live upgrade: turn any inert placeholders of this plugin's types back into real
-	// components now that the type is available again.
+	// Live upgrade: inert placeholders of this plugin's types become real components again.
 	if (g_instance && g_instance->currentWorld)
 		g_instance->currentWorld->RestorePluginComponents(m->moduleFile);
 
-	// Service providers register their interface instance under the service name. Loader-
-	// bound (not done by the plugin itself) so provide/revoke can never get out of sync
-	// with the plugin lifecycle.
+	// Registration is loader-bound, not left to the plugin, so provide/revoke cannot get out
+	// of sync with the plugin lifecycle.
 	if (!service.empty())
 		if (void* iface = SehQueryService(m))
 			Services_Provide(service.c_str(), iface);
 
 	cout << "[Modular]\tenabled '" << m->title << "'" << endl;
-	boost::thread(boost::bind(&SehRunGuard, m, g_instance));   // shielded: a crashing Run() must not kill the host
+	// Kept, not detached: DisablePlugin joins it before the DLL can be freed.
+	g_runThreads[m] = boost::thread(boost::bind(&SehRunGuard, m, g_instance));
 }
 
 void DisablePlugin(NUKEModule* m)
 {
 	if (!m || !m->loaded) return;
 
-	// Revoke THIS module's interface FIRST so no consumer can grab it while it's dying —
-	// by instance, not by name: a shared service's other providers must stay registered.
+	// Revoke FIRST, and by instance rather than by name — a shared service's other providers
+	// must stay registered.
 	if (*m->provides())
 		Services_RevokeIface(m->provides(), SehQueryService(m));
 
-	// Live downgrade FIRST (while the type's reflection + vtable are still valid): convert this
-	// plugin's live components into inert placeholders so nothing dangles after it goes away.
+	// Downgrade live components to inert placeholders FIRST, while the type's reflection and
+	// vtable are still valid.
 	if (g_instance && g_instance->currentWorld)
 		g_instance->currentWorld->ConvertPluginToUnknown(m->moduleFile);
 
-	if (!SehShutdown(m))   // shielded like OnLoad — teardown of a broken module must not kill the host
+	if (!SehShutdown(m))   // shielded like OnLoad
 		cout << "[Modular]\t" << m->moduleFile << ": Shutdown crashed (module dropped anyway)" << endl;
+	// Reap Run() BEFORE anyone can free this DLL — a live thread in unmapped code is an AV.
+	{
+		auto rt = g_runThreads.find(m);
+		if (rt != g_runThreads.end())
+		{
+			if (!rt->second.try_join_for(boost::chrono::seconds(2)))
+			{
+				rt->second.detach();
+				g_runawayModules.insert(m);
+				cout << "[Modular]\t" << m->moduleFile << ": Run() ignored stop for 2 s — its DLL "
+				     << "stays mapped until process exit (unloading under a live thread = crash)" << endl;
+			}
+			g_runThreads.erase(rt);
+		}
+	}
 	m->loaded = false;
 	cout << "[Modular]\tdisabled '" << m->title << "'" << endl;
 }
 
 void UnloadModules()
 {
-	// Two passes: runtime plugins first, boot providers (the renderer) LAST — a scripting
-	// or GUI plugin's Shutdown may still touch the renderer; the reverse can't happen.
-	// FULL DisablePlugin per module (not a bare Shutdown): the live-component downgrade must
-	// run so module-owned components DIE (and e.g. unsubscribe their Events lambdas) before
-	// g_modules.clear() frees the DLLs — else engine statics hold std::functions whose code
-	// is gone and the CRT teardown segfaults (hit by NukeNativeRim's RimGame subscriptions).
-	// Teardown breadcrumbs go to STDERR raw: cout is tee'd into the log ring, and at this
-	// point a wedged stream/thread can hang or assert inside the tee — stderr can't.
+	// Two passes: runtime plugins first, boot providers (the renderer) LAST. FULL DisablePlugin,
+	// not a bare Shutdown: module-owned components must die (unsubscribing their lambdas) before
+	// the DLLs are freed. Breadcrumbs go to raw stderr — cout can assert this late in teardown.
 	for (int phase : { PHASE_RUNTIME, PHASE_BOOT })
 		for (auto i : g_modules)
 		{
@@ -448,8 +450,21 @@ void UnloadModules()
 			fprintf(stderr, "[Unload]\tdisabling %s\n", i->moduleFile.c_str()); fflush(stderr);
 			DisablePlugin(i.get());
 		}
-	fprintf(stderr, "[Unload]\tfreeing module DLLs\n"); fflush(stderr);
-	g_modules.clear();
+	while (!g_modules.empty())
+	{
+		auto m = g_modules.back();
+		g_modules.pop_back();
+		if (m && g_runawayModules.count(m.get()))
+		{
+			// Deliberate leak: a runaway Run() thread still executes this DLL's code, so the
+			// mapping must outlive it (the OS reclaims it at process exit).
+			fprintf(stderr, "[Unload]\tkeeping %s mapped (runaway Run thread)\n", m->moduleFile.c_str()); fflush(stderr);
+			new std::shared_ptr<NUKEModule>(m);
+			continue;
+		}
+		fprintf(stderr, "[Unload]\tfreeing %s\n", m ? m->moduleFile.c_str() : "?"); fflush(stderr);
+		m.reset();   // last ref -> boost::dll unmaps the DLL here
+	}
 	fprintf(stderr, "[Unload]\tdone\n"); fflush(stderr);
 }
 
@@ -480,8 +495,8 @@ void LoadBuiltinShaders(iRender* render, const std::string& dir)
 	}
 }
 
-// Packed runtime (3.2): the engine built-ins ride INSIDE game.nupak under "shaders/" — feed
-// them to the renderer from the Package layers (so mods can override them like any entry).
+// Feed the renderer the built-in shaders packed under "shaders/" in the Package layers
+// (so mods can override them like any other entry).
 void LoadBuiltinShadersPackaged(iRender* render)
 {
 	if (!render) return;

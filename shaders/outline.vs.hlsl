@@ -1,6 +1,5 @@
-// Selection outline — vertex shader. Plain transform; the outline thickness comes from a uniform
-// scale-up applied on the CPU side (works for flat planes too, unlike normal extrusion). Used by
-// both the stencil-mark pass (normal transform) and the draw pass (scaled-up transform).
+// Selection outline vertex shader, used by both the stencil-mark and draw passes.
+// Thickness comes from a uniform scale-up applied CPU-side, not from normal extrusion.
 cbuffer CB { float4x4 g_WVP; float4x4 g_World; };
 struct VSIn { float3 pos : ATTRIB0; float3 nrm : ATTRIB1; float2 uv : ATTRIB2; };
 struct PSIn { float4 pos : SV_POSITION; };

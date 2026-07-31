@@ -15,22 +15,9 @@ namespace nuke {
 class Mesh;
 class MeshRenderer;
 
-// Skeletal animation player (roadmap 3.1). Sits NEXT TO the skinned MeshRenderer: each
-// frame it samples the current clip (cross-fading from the previous one), builds the
-// bone palette and skins the mesh on the SHARED job pool (nuke::Jobs, 2.4) into an
-// instance-owned dynamic mesh which the MeshRenderer then draws — every existing pass
-// (lit / gbuffer / shadows / outline, any custom shader) renders it with no special
-// pipeline. RT reflections use the bind-pose source (Mesh::rtProxy; per-frame BLAS
-// rebuilds are a non-goal).
-//
-// TRANSFORM (node) animation: independently of skinning, channels also drive matching
-// ATOM transforms by name (searched from the Animator's ROOT ancestor) — a skeleton
-// prefab without any mesh animates its joint atoms, a DCC door/elevator just moves.
-// The retarget map applies to atom matching too. A mesh is NOT required to Play().
-//
-// Clips address bones BY NAME (see AnimClip). A minimal STATE MACHINE is built at
-// runtime from scripts: AddState/AddTransition/SetState (a transition's fade drives the
-// cross-fade); Play/CrossFade work directly with clip guids or names as well.
+// Skeletal animation player next to a skinned MeshRenderer: samples the current clip (cross-fading
+// from the previous), builds the bone palette and skins the mesh on the job pool. Channels also
+// drive matching atom transforms by name, so a mesh is NOT required to Play().
 class NUKEENGINE_API Animator : public Component
 {
 	NUKE_CLASS(Animator, Component, "Animation")
@@ -40,8 +27,7 @@ public:
 	[[nuke::prop(label="Play On Start")]]        bool  playOnStart = true;
 	[[nuke::prop(label="Loop")]]                 bool  loop = true;
 	[[nuke::prop(min=0, max=10, label="Speed")]] float speed = 1.0f;
-	// Serialized state machine (hidden: edited via the Animator window / script API, saved
-	// with the world/prefab): {"states":{name:{clip,loop,speed}},"transitions":[...],"entry":...}.
+	// Serialized state machine: {"states":{name:{clip,loop,speed}},"transitions":[...],"entry":...}.
 	[[nuke::prop(hidden)]] std::string smJson;
 
 	Animator();
@@ -52,7 +38,7 @@ public:
 	void Pause() override;
 	void Reset() override;
 
-	// --- script surface (auto-bound: comp:Play("walk") ...) ----------------------------
+	// --- script surface (auto-bound) ---
 	[[nuke::func]] void Play(const std::string& clip);                    // guid OR clip name
 	[[nuke::func]] void CrossFade(const std::string& clip, double fade);  // fade seconds
 	[[nuke::func]] void Stop();
@@ -60,8 +46,7 @@ public:
 	[[nuke::func]] std::string CurrentClip();                             // playing clip's NAME ("" = none)
 	[[nuke::func]] double ClipTime();
 	[[nuke::func]] void SetClipTime(double t);
-	// state machine — SERIALIZED with the component (smJson); build it in the editor's
-	// Animator window or from scripts, either way it persists and auto-enters `entry`.
+	// State machine — serialized with the component (smJson); auto-enters `entry` on play.
 	[[nuke::func]] void AddState(const std::string& name, const std::string& clip, bool stateLoop, double stateSpeed);
 	[[nuke::func]] void RemoveState(const std::string& name);
 	[[nuke::func]] void AddTransition(const std::string& from, const std::string& to, double fade);
@@ -70,24 +55,21 @@ public:
 	[[nuke::func]] std::string Entry();
 	[[nuke::func]] void SetState(const std::string& name);                // cross-fades if a transition matches
 	[[nuke::func]] std::string State();
-	// animation events: fired as Component::OnAnimEvent on every sibling component when
-	// the playhead crosses the marker (loop-aware). AddEvent targets a clip (guid or name).
+	// Add a marker to a clip (guid or name); fired as Component::OnAnimEvent on siblings.
 	[[nuke::func]] void AddEvent(const std::string& clip, double t, const std::string& name);
-	// retargeting: rename clip channels onto this skeleton's bone names (e.g.
-	// MapBone("mixamorig:Hips", "Hips")); applies to every clip this Animator plays.
+	// Retarget: rename clip channels onto this skeleton's bone names, for every clip played.
 	[[nuke::func]] void MapBone(const std::string& from, const std::string& to);
 	[[nuke::func]] void ClearBoneMap();
-	// IK (post-pass on the sampled pose): pull `tipBone` toward a WORLD-space target;
-	// weight [0..1] blends against the clip. Default chain = 2 segments (tip<-mid<-root,
-	// analytic); SetIKChain lengthens it (FABRIK). SetIKPole aims the bend plane at a
-	// WORLD-space pole (elbow/knee direction control).
+	// IK post-pass on the sampled pose: pull `tipBone` toward a WORLD-space target, weight
+	// [0..1] blends against the clip. Chain 2 = analytic two-bone, more = FABRIK; the pole
+	// is a WORLD-space point aiming the bend plane.
 	[[nuke::func]] void SetIK(const std::string& tipBone, const Vector3& target, double weight);
 	[[nuke::func]] void SetIKPole(const std::string& tipBone, const Vector3& pole);
 	[[nuke::func]] void SetIKChain(const std::string& tipBone, double segments);
 	[[nuke::func]] void ClearIK(const std::string& tipBone);
 
 private:
-	// One playing clip layer: time cursor + per-channel bone mapping (resolved per mesh).
+	// One playing clip layer: time cursor + per-channel bone mapping.
 	struct Layer
 	{
 		AnimClip* clip = nullptr;
@@ -115,7 +97,7 @@ private:
 		int    segments = 2;   // 2 = analytic two-bone; >2 = FABRIK over that many segments
 	};
 
-public:   // the editor's Animator window edits the (deserialized) machine directly
+public:   // the editor's Animator window edits the deserialized machine directly
 	std::map<std::string, StateDef> states;
 	std::map<std::string, std::map<std::string, double>> transitions;   // from -> to -> fade
 	std::string entryState;

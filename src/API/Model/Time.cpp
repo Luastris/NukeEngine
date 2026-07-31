@@ -1,5 +1,5 @@
-// Header-only boost.chrono BEFORE any include that may pull boost (AppInstance.h does) —
-// the lib flavor double-defines steady_clock::now inside the engine DLL.
+// Header-only boost.chrono BEFORE any include that pulls boost — the lib flavor
+// double-defines steady_clock::now inside the engine DLL.
 #define BOOST_CHRONO_HEADER_ONLY
 #define BOOST_ERROR_CODE_HEADER_ONLY
 #include "API/Model/Time.h"
@@ -54,11 +54,8 @@ void Time::NewFrame()
 	}
 	last = now;
 	have = true;
-	++frame;   // tick-interval stagger (6.8)
-	// Game clock: scaled while PLAYING, FROZEN while PIE is PAUSED (pause means the game
-	// world stands still — water, animators, everything on game time), and equal to real
-	// time in edit mode so editor previews (animators in asset editors, etc.) never freeze
-	// on the game-speed setting.
+	++frame;   // tick-interval stagger
+	// Game clock: scaled while playing, frozen while paused, real time in edit mode.
 	const int ps = AppInstance::GetSingleton()->playState;   // 0 edit, 1 playing, 2 paused
 	gameDelta = (ps == 1) ? delta * scale : (ps == 2 ? 0.0 : delta);
 }
@@ -67,9 +64,8 @@ Time::Time() {}
 
 Time::~Time() {}
 
-// Advance the calendar by gameDeltaSeconds of GAME-CLOCK time (already speed-scaled):
-// game-world seconds = gameDeltaSeconds × gtr, ticked through the date chain whole-second
-// at a time (at gtr=60 and 3x speed that's ~180 iterations/frame at 60fps — trivial).
+// Advance the calendar by gameDeltaSeconds of already-scaled game-clock time
+// (game-world seconds = gameDeltaSeconds × gtr, ticked one whole second at a time).
 void Time::Advance(double gameDeltaSeconds)
 {
 	if (gameDeltaSeconds <= 0.0) return;
@@ -79,7 +75,7 @@ void Time::Advance(double gameDeltaSeconds)
 		secCarry -= 1.0;
 		Tick();
 	}
-	// Sub-second precision for schedulers/shaders: totalgt/tod include the fraction.
+	// Sub-second precision: tod includes the carry fraction.
 	tod = (sec + minute * 60 + hour * 3600 + secCarry) / 86400.0;
 }
 
@@ -158,8 +154,7 @@ void Time::TickSecond()
 	tod = (sec + minute * 60 + hour * 3600) / 86400.0;
 }
 
-// One game second, frame-driven (Advance() calls this; no sleeping — the old blocking
-// wall-clock ticker is gone, the calendar rides the frame loop now).
+// One game second, frame-driven (called by Advance).
 void Time::Tick()
 {
 	totalgt += 1.0;

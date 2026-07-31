@@ -6,14 +6,14 @@
 #include "API/Model/Jobs.h"
 #include "API/Model/Time.h"
 #include "API/Model/resdb.h"
-#include "interface/AppInstance.h"   // renderer access: invalidateMesh on skinned release
+#include "interface/AppInstance.h"
 #include "render/irender.h"
 #include <nlohmann/json.hpp>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/type_ptr.hpp>
-#include <glm/gtx/quaternion.hpp>   // glm::rotation (shortest arc; GLM_ENABLE_EXPERIMENTAL is engine-wide)
+#include <glm/gtx/quaternion.hpp>   // glm::rotation; needs GLM_ENABLE_EXPERIMENTAL (set engine-wide)
 #include <algorithm>
 #include <cstring>
 #include <iostream>
@@ -34,8 +34,6 @@ void Animator::Pause() {}
 
 void Animator::Reset()
 {
-	// Play stop / world reload: drop the runtime state; the sibling MeshRenderer re-resolves
-	// its mesh from meshGuid on its own Reset, so the bind-pose source comes back by itself.
 	ReleaseSkinned();
 	mr = nullptr; srcMesh = nullptr;
 	cur = Layer(); prev = Layer();
@@ -52,8 +50,7 @@ void Animator::Reset()
 void Animator::ReleaseSkinned()
 {
 	if (!skinnedMesh) return;
-	// The renderer caches GPU buffers keyed by Mesh* — drop that entry BEFORE deleting,
-	// or a later allocation at the same address would be served the stale buffers.
+	// Drop the renderer's Mesh*-keyed cache entry BEFORE deleting: addresses get reused.
 	if (iRender* r = AppInstance::GetSingleton() ? AppInstance::GetSingleton()->render : nullptr)
 		r->invalidateMesh(skinnedMesh);
 	delete[] skinnedMesh->vertexArray;
@@ -100,9 +97,7 @@ void Animator::BindLayer(Layer& l) const
 	}
 }
 
-// Transform (node) animation: match the current clip's channels against the atom TREE
-// (from the Animator's ROOT ancestor, so joint atoms that are siblings of the mesh atom
-// are found too). Rebound whenever the playing clip changes.
+// Collect a subtree's atoms by name (first one wins).
 static void CollectAtoms(Atom* a, std::map<std::string, Atom*>& out)
 {
 	if (!a) return;
@@ -125,7 +120,6 @@ void Animator::BindAtoms()
 		auto it = byName.find(MapName(cur.clip->channels[c].bone));
 		if (it != byName.end()) channelAtoms[c] = it->second;
 	}
-	// Outgoing clip's channels by bone name (cross-fade blending of atom TRS).
 	prevChanByBone.clear();
 	if (prev.clip)
 		for (size_t c = 0; c < prev.clip->channels.size(); ++c)
@@ -272,7 +266,7 @@ void Animator::SetState(const std::string& name)
 		auto tt = ft->second.find(name);
 		if (tt != ft->second.end()) fade = tt->second;
 	}
-	EnsureTargets();   // mesh optional (transform-only animation)
+	EnsureTargets();
 	StartClip(ResolveClip(it->second.clip), it->second.loop, it->second.speed, fade);
 	curState = name;
 }
@@ -329,7 +323,7 @@ void SampleKeys(const std::vector<AnimClip::Key>& keys, double t, float out[4])
 	if (keys.size() == 1 || t <= keys.front().t) { memcpy(out, keys.front().v, sizeof(float) * 4); return; }
 	if (t >= keys.back().t) { memcpy(out, keys.back().v, sizeof(float) * 4); return; }
 	size_t hi = 1;
-	while (hi < keys.size() && keys[hi].t < (float)t) ++hi;   // tracks are short; linear scan is fine
+	while (hi < keys.size() && keys[hi].t < (float)t) ++hi;
 	const AnimClip::Key& a = keys[hi - 1];
 	const AnimClip::Key& b = keys[hi];
 	const float f = (b.t > a.t) ? ((float)t - a.t) / (b.t - a.t) : 0.0f;
@@ -392,8 +386,7 @@ double Advance(double t, double dt, double duration, bool loop)
 
 void Animator::FixedUpdate() {}
 
-// Write the current clip's sampled TRS onto matched atoms (transform/node animation).
-// Runs whether or not a skinned mesh exists; cross-fade blends against the outgoing clip.
+// Write the current clip's sampled TRS onto matched atoms; cross-fade blends the outgoing clip.
 void Animator::ApplyAtomAnimation()
 {
 	if (!cur.clip) return;
@@ -437,8 +430,7 @@ void Animator::ApplyAtomAnimation()
 
 void Animator::Update()
 {
-	// Auto-start once (play mode only — World doesn't Update otherwise): the serialized
-	// machine's ENTRY state wins; the bare initial clip is the no-machine fallback.
+	// Auto-start once: the machine's ENTRY state wins, the bare initial clip is the fallback.
 	if (!started)
 	{
 		started = true;
@@ -463,8 +455,7 @@ void Animator::Update()
 	const double prevT = cur.t;
 	cur.t = Advance(cur.t, dt * cur.speed, cur.clip->duration, cur.loop);   // non-loop clamps: holds the last pose
 
-	// Events crossed this step (collected now, DISPATCHED after skinning — a handler may
-	// legally Play()/SetState() and must not mutate the pose mid-computation).
+	// Crossed events: collected now, DISPATCHED after skinning (a handler may Play()/SetState()).
 	std::vector<std::string> fired;
 	if (dt > 0.0)
 	{
@@ -482,7 +473,6 @@ void Animator::Update()
 		fadeLeft -= dt;
 	}
 
-	// Transform (node) animation: drive matching atoms regardless of skinning.
 	ApplyAtomAnimation();
 
 	if (haveSkin)
@@ -522,8 +512,6 @@ void Animator::Update()
 	forwardPass();
 
 	// --- IK post-pass: FABRIK over the goal's chain (2..N segments) + optional pole ------
-	// Solved on joint POSITIONS, converted back to LOCAL rotations (weighted slerp), then
-	// the forward pass re-runs — so IK composes with clips, fades and multiple goals.
 	if (!ikGoals.empty())
 	{
 		// World-space goals -> the mesh's model space (skinning happens pre-transform).
@@ -580,8 +568,7 @@ void Animator::Update()
 			}
 			else
 			{
-				// Pole pre-swing: rotate intermediate joints around the root->target axis so the
-				// bend plane faces the pole (keeps radii; FABRIK repairs lengths right after).
+				// Pole pre-swing: swing intermediate joints around the root->target axis (keeps radii).
 				auto polePass = [&]()
 				{
 					if (!goal.second.hasPole) return;
@@ -613,8 +600,7 @@ void Animator::Update()
 				}
 			}
 
-			// Positions -> LOCAL rotations, root to tip; the forward pass after each joint
-			// keeps the "current direction" honest for the next one.
+			// Positions -> LOCAL rotations, root to tip.
 			const float w = (float)goal.second.weight;
 			for (size_t i = 0; i < S; ++i)
 			{
@@ -628,7 +614,7 @@ void Animator::Update()
 				const glm::quat parentG = par >= 0 ? glm::quat_cast(global[par]) : glm::quat(1, 0, 0, 0);
 				const glm::quat newLocal = glm::inverse(parentG) * (delta * glm::quat_cast(global[bi]));
 				pose[bi].r = glm::slerp(pose[bi].r, glm::normalize(newLocal), w);
-				forwardPass();                            // few bones — recompute is nothing
+				forwardPass();                            // keeps the next joint's direction honest
 			}
 			touched = true;
 		}
@@ -673,8 +659,7 @@ void Animator::Update()
 	mr->mesh = skinnedMesh;              // the sibling renderer draws the posed instance
 	}   // haveSkin
 
-	// Fire the crossed events LAST: handlers may Play()/SetState() freely — this frame's
-	// pose is already committed. Game thread, game lock held (same contract as OnGUI).
+	// Fired LAST, after the pose is committed. Game thread, game lock held.
 	for (const std::string& name : fired)
 		if (atom)
 			for (Component* c : atom->components)

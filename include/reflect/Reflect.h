@@ -2,13 +2,9 @@
 #ifndef NUKEE_REFLECT_H
 #define NUKEE_REFLECT_H
 #include "NukeAPI.h"
-// Lightweight reflection: declare fields with NUKE_PROP and they auto-(de)serialize
-// (project + save) and auto-draw in the inspector. C++ has no built-in reflection,
-// so a per-type schema is built at static-init time from member pointers.
-//
-// The engine must NOT depend on ImGui, so a field only stores a TYPE TAG (FT) and a
-// raw address accessor; the editor switches on FT to pick a widget. Serialization
-// (JSON) lives here in the engine.
+// Lightweight reflection: a per-type schema built at static-init time from member pointers.
+// A field stores only a TYPE TAG (FT) + a raw address accessor — the engine must not depend
+// on ImGui, so the editor switches on FT to pick a widget.
 
 #include <cstddef>
 #include <string>
@@ -19,41 +15,34 @@
 #include <functional>
 #include "API/Model/Vector.h"
 #include "API/Model/Color.h"
-// NOTE: no <nlohmann/json.hpp> here on purpose — this header is pulled in by widely
-// included component headers (and the render/UI modules). JSON (de)serialization lives
-// in ReflectJson.h, included only where serialization actually happens.
+// No <nlohmann/json.hpp> here on purpose — this header is pulled in by widely included component
+// headers. JSON (de)serialization lives in ReflectJson.h.
 
 namespace nuke {
 
-class Atom;   // AtomRef values resolve through the live world (Reflect_AtomById below)
+class Atom;
 
-// Supported field types. Extend as needed (Color/asset-refs/etc. added later).
-// AtomRef = a reference to a live Atom, carried across the boundary as its stable id —
-// stale-safe: a dead atom resolves to null, never to freed memory.
-// ObjectRef = a pointer to ANY reflected (NUKE_CLASS) instance, carried as its engine
-// OBJECT-HANDLE id (ReflectBind's table) — World*, Transform*, Clock*, Mesh*, ... become
-// legal [[nuke::func]] parameter/return types with zero per-class glue.
-// ABI: values are compiled into module DLLs — append new tags at the END, never mid-enum.
+// Supported field types. AtomRef = a live Atom carried as its stable id (a dead atom resolves to
+// null, never freed memory). ObjectRef = a pointer to any reflected instance, carried as its
+// engine object-handle id. ABI: append new tags at the END, never mid-enum.
 enum class FT { Unknown, Bool, Int, Float, Double, String, Vec2, Vec3, Vec4, Quat, Color, AtomRef, ObjectRef,
                 IntList, FloatList, DoubleList, StringList };   // std::vector<T> props (arrays in the inspector)
 
-// AtomRef <-> live atom (defined in Reflect.cpp; walks the CURRENT world by stable id).
+// AtomRef <-> live atom: walks the CURRENT world by stable id.
 NUKEENGINE_API Atom*         Reflect_AtomById(unsigned long id);
 NUKEENGINE_API unsigned long Reflect_AtomId(Atom* a);
-// AtomRef PROPS ([[nuke::prop]] Atom* fields) serialize as stable ids; loading queues a fixup that
-// resolves once the whole hierarchy exists (World::Load* / prefab instantiation call Resolve).
+// AtomRef props serialize as stable ids; loading queues a fixup resolved once the whole
+// hierarchy exists.
 NUKEENGINE_API void Reflect_QueueAtomRefFixup(Atom** slot, unsigned long id);
 NUKEENGINE_API void Reflect_ResolveAtomRefs();
-// Clone support (prefab instantiate, editor copy/paste): the freshly loaded subtree got NEW atom
-// ids, so queued fixup ids that pointed INSIDE it must follow the old->new map BEFORE Resolve —
-// a duplicated rig must reference its own copies. Ids not in the map (external refs) stay put.
+// Remap queued fixup ids through a clone's old->new atom id map, BEFORE Resolve, so a duplicated
+// subtree references its own copies. Ids not in the map stay put.
 NUKEENGINE_API void Reflect_RemapPendingAtomRefs(const std::map<unsigned long, unsigned long>& oldToNew);
 
-// ObjectRef <-> live reflected instance (defined in ReflectBind.cpp — the object-handle
-// table). Reflect_ObjectPtr is IS-A checked: the handle's type must be `typeName` or
-// derive from it (base chain), else null. Reflect_WrapObjectPtr wraps without ownership
-// (null-safe, dedups per instance). Reflect_DropObject invalidates every handle to the
-// instance — owners MUST call it right before deleting a wrapped/wrappable object.
+// ObjectRef <-> live reflected instance. Reflect_ObjectPtr is IS-A checked against `typeName`
+// (base chain), else null. Reflect_WrapObjectPtr wraps without ownership, deduped per instance.
+// Reflect_DropObject invalidates every handle to the instance — owners MUST call it right
+// before deleting a wrapped object.
 NUKEENGINE_API void*         Reflect_ObjectPtr(unsigned long id, const char* typeName);
 NUKEENGINE_API unsigned long Reflect_WrapObjectPtr(void* obj, const char* typeName);
 NUKEENGINE_API void          Reflect_DropObject(void* obj);
@@ -65,10 +54,8 @@ template<class T> struct IsReflected<T, std::void_t<decltype(T::__NukeTypeName()
 }  // namespace detail
 
 // ---- reflected ENUM types ----------------------------------------------------------------
-// A [[nuke::func]] parameter/return whose C++ type is a REFLECTED enum generates a real typed
-// enum in every binding (C# `enum WindowMode`, Lua `nuke.WindowMode`) instead of a bare int.
-// To reflect an enum, specialize NukeEnumInfo for it (see Game.h / WindowMode). Unspecialized
-// enums stay ints. The name + labels register into a global table the generators read.
+// Specialize NukeEnumInfo for an enum (see Game.h / WindowMode) and [[nuke::func]] slots of that
+// type generate a real typed enum in every binding. Unspecialized enums stay ints.
 NUKEENGINE_API void Reflect_RegisterEnum(const std::string& name, const std::vector<std::string>& labels);
 NUKEENGINE_API const std::vector<std::string>* Reflect_EnumLabels(const std::string& name);   // null if unknown
 NUKEENGINE_API std::vector<std::string>        Reflect_AllEnumNames();
@@ -80,9 +67,8 @@ template<class E> struct NukeEnumInfo {
 };
 
 namespace detail {
-// The reflected-enum name of a param/return type ("" = plain int / not reflected). Registers
-// the enum's labels on first use, so the registry is populated by the same static-init pass
-// that builds the type registry.
+// The reflected-enum name of a param/return type ("" = plain int). Registers the enum's labels
+// on first use.
 template<class T>
 inline const char* EnumNameRegister()
 {
@@ -97,11 +83,10 @@ inline const char* EnumNameRegister()
 }
 }  // namespace detail
 
-// Map a C++ type -> FT tag. Primary: ENUMS reflect as Int (the label list comes from the
-// [[nuke::prop(enum="...")]] metadata; engine prop-enums declare `: int` so the generic
-// addr-based int read/write is layout-exact); POINTERS to reflected classes are ObjectRef
-// ([[nuke::func]] params/returns only — never a serialized field); everything else
-// unknown unless specialized.
+// Map a C++ type -> FT tag. Enums reflect as Int (engine prop-enums declare `: int` so the
+// addr-based int read/write is layout-exact); pointers to reflected classes are ObjectRef
+// (func params/returns only, never a serialized field); everything else is Unknown unless
+// specialized below.
 template<class T> constexpr FT FieldTypeOf()
 {
 	if constexpr (std::is_pointer_v<T>)
@@ -133,27 +118,19 @@ struct Field {
     FT type = FT::Unknown;
     std::function<void*(void*)> addr;   // returns &(obj->field)
     bool hidden = false;                // serialized, but not drawn in the auto-inspector
-    // Editor hint from [[nuke::prop(asset="...")]]: a String field that holds an asset GUID
-    // ("mesh"/"material"/"shader"/"texture"). The inspector draws an asset picker instead of a
-    // raw text box. Empty = plain field. Keeps asset wiring out of the editor's hardcode.
+    // [[nuke::prop(asset="...")]]: this String field holds an asset GUID of that kind
+    // ("mesh"/"material"/"shader"/"texture") — the inspector draws an asset picker. "" = plain field.
     std::string asset;
-    std::string label;   // [[nuke::prop(label="...")]] display name in the inspector (else `name`)
-    // [[nuke::prop(min=..,max=..)]] on a numeric field -> the inspector draws a slider in [fmin,fmax]
-    // instead of a drag box. fmax > fmin means "has a range".
-    float fmin = 0.0f, fmax = 0.0f;
-    // [[nuke::prop(enum="A,B,C")]] on an int field -> the inspector draws a dropdown; the int is the index.
-    std::vector<std::string> enumLabels;
-    // [[nuke::prop(tip="...")]] -> the inspector shows this as a tooltip when the field is hovered.
-    // Every non-obvious prop should carry one — a bare numeric box with no explanation is banned.
-    std::string tip;
-    // [[nuke::prop(widget="...")]] -> the inspector draws a NAMED custom widget instead of the
-    // type-default one. Known: "layers" (int = bitmask over nuke::Layers -> named multi-select).
-    // Unknown names fall back to the default widget, so plugins degrade gracefully.
+    std::string label;   // [[nuke::prop(label="...")]] inspector display name (else `name`)
+    float fmin = 0.0f, fmax = 0.0f;     // [[nuke::prop(min,max)]] slider range; fmax > fmin = has a range
+    std::vector<std::string> enumLabels;// [[nuke::prop(enum="A,B,C")]] dropdown labels; the int is the index
+    std::string tip;                    // [[nuke::prop(tip="...")]] inspector tooltip
+    // [[nuke::prop(widget="...")]] named custom widget. Known: "layers" (int bitmask over
+    // nuke::Layers). Unknown names fall back to the default widget.
     std::string widget;
 };
 
-// ---- language-neutral value (reflection <-> scripting boundary) --------------------
-// One reflected value crossing the boundary. `type` says which member is valid:
+// One reflected value crossing the scripting boundary. `type` says which member is valid:
 // Bool -> b; Int/Float/Double -> num; String -> str;
 // Vec2/Vec3/Vec4/Quat -> v as (x,y,z,w); Color -> v as (r,g,b,a). Unknown = void/none.
 struct ReflectValue
@@ -168,10 +145,8 @@ struct ReflectValue
 };
 
 namespace detail {
-// ReflectValue -> typed argument. The PRIMARY handles enums (as their numeric value) and
-// pointers to reflected classes (resolved is-a-checked through the object-handle table);
-// every other supported FT type specializes below — tagging a method with an unsupported
-// parameter type is a COMPILE error, not a runtime surprise.
+// ReflectValue -> typed argument. The primary handles enums and pointers to reflected classes;
+// every other supported FT specializes below, so an unsupported parameter type is a compile error.
 template<class T> T FromRV(const ReflectValue& v)
 {
 	if constexpr (std::is_enum_v<T>)
@@ -209,8 +184,8 @@ inline void ToRV(long long x, ReflectValue& o)          { o.type = FT::Int;    o
 // Enum return -> its numeric value (matches the FieldTypeOf primary: enums are Int).
 template<class T> inline std::enable_if_t<std::is_enum_v<T>> ToRV(T x, ReflectValue& o)
 { o.type = FT::Int; o.num = (double)(long long)x; }
-// Reflected-class pointer return -> a (deduped, non-owning) object handle. The exact
-// ToRV(Atom*) overload below still wins for Atom* — atoms stay on the AtomRef channel.
+// Reflected-class pointer return -> a deduped, non-owning object handle. The exact ToRV(Atom*)
+// overload below still wins for Atom*, keeping atoms on the AtomRef channel.
 template<class T> inline std::enable_if_t<IsReflected<T>::value> ToRV(T* x, ReflectValue& o)
 { o.type = FT::ObjectRef; o.obj = Reflect_WrapObjectPtr((void*)x, T::__NukeTypeName()); }
 inline void ToRV(float x, ReflectValue& o)              { o.type = FT::Float;  o.num = x; }
@@ -225,27 +200,24 @@ inline void ToRV(Atom* x, ReflectValue& o)              { o.type = FT::AtomRef; 
 }  // namespace detail
 
 // ---- method reflection (tag with [[nuke::func]]; nukegen emits MakeMethod calls) ----
-// A reflected method: FT-typed signature + a type-erased invoker. Scripting backends
-// (Lua/C#) call ANY tagged method through this — no per-class wrappers. Overloads are
-// NOT supported (one reflected method per name); parameters/returns must be supported
-// FT types (by value or const&; return void or by value).
+// A reflected method: FT-typed signature + a type-erased invoker. Overloads are NOT supported
+// (one reflected method per name); parameters/returns must be supported FT types (by value or
+// const&; return void or by value).
 struct Method {
     std::string name;
     FT ret = FT::Unknown;                 // FT::Unknown = void
     std::vector<FT> params;               // declared parameter types, in order
-    // Reflected CLASS names behind the ref-typed slots ("" = plain value): paramClass[i]
-    // names the class of an AtomRef/ObjectRef parameter ("Atom" for AtomRef), retClass the
-    // return's. Typed-wrapper GENERATORS (C#) read these to emit real classes.
+    // Reflected class names behind ref-typed slots ("" = plain value); "Atom" for AtomRef.
+    // Typed-wrapper generators read these to emit real classes.
     std::vector<std::string> paramClass;
     std::string retClass;
-    // Reflected ENUM names behind Int-typed slots ("" = plain int): paramEnum[i]/retEnum name
-    // a registered enum (see NukeEnumInfo) so generators emit the real enum type, not an int.
+    // Reflected enum names behind Int-typed slots ("" = plain int), so generators emit the
+    // real enum type instead of an int.
     std::vector<std::string> paramEnum;
     std::string retEnum;
-    bool isStatic = false;                // static/free function: invoke ignores `obj` —
-                                          // script binders expose it as <Type>.<name>(...)
-    // Invoke on an instance of the owning type (null for statics). `args` must match
-    // params (count is checked, types are trusted — the caller converted by `params`).
+    bool isStatic = false;                // static/free function: invoke ignores `obj`
+    // Invoke on an instance of the owning type (null for statics). `args` must match params:
+    // the count is checked, the types are trusted.
     std::function<bool(void* obj, const ReflectValue* args, std::size_t n, ReflectValue& ret)> invoke;
 };
 
@@ -254,25 +226,22 @@ struct TypeInfo {
     std::string base;
     std::vector<Field> fields;
     std::vector<Method> methods;          // [[nuke::func]]-tagged methods
-    std::function<void*()> create;   // factory (set by NUKE_REGISTER) — create-by-name on load
-    // Editor grouping (Add Component menu): NUKE_CLASS(Class, Base, "Category"). "" = Other.
-    std::string category;
-    // Base-inheritance merge state (7.4): when `base` names ANOTHER reflected type, its
-    // fields/methods fold into this TypeInfo lazily (Registry_Find/Registry_All). Fine for
-    // single non-virtual inheritance (base subobject at offset 0 — addr functors stay valid).
+    std::function<void*()> create;        // factory for create-by-name on load
+    std::string category;                 // Add Component menu grouping; "" = Other
+    // When `base` names another reflected type its fields/methods fold in lazily. Valid only for
+    // single non-virtual inheritance (base subobject at offset 0, so addr functors stay valid).
     bool baseMerged = false;
 };
 
 // Registry (defined in Reflect.cpp).
 NUKEENGINE_API TypeInfo& Registry_GetOrCreate(const std::string& name);
 NUKEENGINE_API TypeInfo* Registry_Find(const std::string& name);
-NUKEENGINE_API std::vector<TypeInfo*> Registry_All();   // every registered type (for "Add Component")
-// True when the type IS a component through the whole reflected base chain (a derived
-// component like Foliage : InstancedMesh has base "InstancedMesh", not "Component").
+NUKEENGINE_API std::vector<TypeInfo*> Registry_All();   // every registered type
+// True when the type is a component through the whole reflected base chain.
 NUKEENGINE_API bool Registry_IsComponentType(const TypeInfo* ti);
 
-// Defined in the generated Reflect.gen.cpp — registers every reflected type's schema +
-// factory. Call once (from World's ctor) so the generated .obj is linked and runs.
+// Registers every reflected type's schema + factory; defined in the generated Reflect.gen.cpp.
+// Must be called once so the generated .obj is linked and runs.
 NUKEENGINE_API bool NukeReflectInit();
 
 // One TypeInfo per reflected type T (lazily created on first use).
@@ -315,8 +284,8 @@ bool InvokeImpl(M mf, C* obj, const ReflectValue* a, ReflectValue& out, std::ind
     return true;
 }
 
-// The reflected class name behind a ref-typed slot ("Atom" for Atom*, the NUKE_CLASS name
-// for reflected pointers, "" for plain values) — generator metadata, see Method::paramClass.
+// The reflected class name behind a ref-typed slot ("Atom" for Atom*, the NUKE_CLASS name for
+// reflected pointers, "" for plain values). See Method::paramClass.
 template<class T>
 inline const char* RefClassOf()
 {
@@ -352,8 +321,8 @@ Method MakeMethodImpl(const char* name, M mf) {
 }
 }  // namespace detail
 
-// Build a Method from a member-function pointer (deduces the FT signature). Same void*
-// contract as Field::addr: invoke's `obj` is an instance of C.
+// Build a Method from a member-function pointer (deduces the FT signature). invoke's `obj`
+// must be an instance of C.
 template<class C, class R, class... A>
 Method MakeMethod(const char* name, R (C::*mf)(A...)) {
     return detail::MakeMethodImpl<C, decltype(mf), R, A...>(name, mf);
@@ -377,9 +346,7 @@ bool InvokeFreeImpl(F fn, const ReflectValue* a, ReflectValue& out, std::index_s
 }
 }  // namespace detail
 
-// STATIC/free function overload ([[nuke::func]] on a `static` method — a static member
-// pointer IS a plain function pointer, so overload resolution picks this automatically).
-// Script binders expose these as <Type>.<name>(...) — facade APIs bind with zero hardcode.
+// Static/free function overload; script binders expose these as <Type>.<name>(...).
 template<class R, class... A>
 Method MakeMethod(const char* name, R (*fn)(A...)) {
     Method m;
@@ -398,18 +365,11 @@ Method MakeMethod(const char* name, R (*fn)(A...)) {
 } // namespace nuke
 
 // --- authoring macros -------------------------------------------------------
-// Put NUKE_TYPE once at the top of the class, NUKE_PROP per serialized field,
-// and NUKE_REGISTER(Type) once at file scope.
-// UE-like reflection markers:
-//   NUKE_CLASS(Camera, Component, "Rendering")        // one line in the class body (like UCLASS)
-//   [[nuke::prop]] float fov = 90.0f;    // attribute on each field (like UPROPERTY)
-//
-// NUKE_CLASS provides the type name + virtual GetType(). The actual field/factory
-// REGISTRATION is emitted into Reflect.gen.cpp by the codegen tool (tools/nukegen.py),
-// which scans for NUKE_CLASS + [[nuke::prop]]. The compiler ignores [[nuke::prop]];
-// when C++26 reflection lands, the same attribute is read natively and the tool is dropped.
-// Optional 3rd argument = the editor CATEGORY ("Rendering", "Physics", ...) shown in the
-// Add Component menu's grouping; nukegen reads it, the macro itself just swallows it.
+//   NUKE_CLASS(Camera, Component, "Rendering")   // one line in the class body
+//   [[nuke::prop]] float fov = 90.0f;            // attribute on each serialized field
+// NUKE_CLASS provides the type name + virtual GetType(); the field/factory registration is
+// emitted into Reflect.gen.cpp by tools/nukegen.py, which scans for NUKE_CLASS + [[nuke::prop]].
+// The optional 3rd argument is the editor category; nukegen reads it, the macro swallows it.
 #define NUKE_CLASS(Class_, Base_, ...)                                              \
     public:                                                                        \
         using Self = Class_;                                                       \

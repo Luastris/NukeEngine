@@ -1,53 +1,53 @@
-// Header-only boost.chrono, BEFORE any include that pulls boost headers (the lib flavor
-// double-defines steady_clock::now inside the engine DLL - same trap as Clock.cpp).
+// Header-only boost.chrono must come BEFORE any boost include: the lib flavor double-defines
+// steady_clock::now inside the engine DLL.
 #define BOOST_CHRONO_HEADER_ONLY
 #include <boost/chrono.hpp>
 #include "API/Model/World.h"
 #include "render/irender.h"
 #include "API/Model/Camera.h"
 #include "API/Model/MeshRenderer.h"
-#include "API/Model/Material.h"   // material instance (mr->mat) save/load
-#include "API/Model/Light.h"      // scene lights -> iRender::setLights (PBR)
-#include "API/Model/Environment.h"// world sky/ambient -> iRender::setSky
-#include "API/Model/PostProcess.h"// per-camera post-process -> iRender::setPostChain
-#include "API/Model/Shader.h"     // post-effect shader props (pack PostParams per stage)
-#include "API/Model/ReflectionProbe.h" // scene-captured reflection cubemap
-#include "API/Model/Time.h"       // animated-texture (GIF) frame advance + fixed-step accumulator
-#include "API/Model/Events.h"     // event bus pump (6.3) + calendar/schedule world serialization
-#include "API/Model/Profiler.h"   // per-phase frame timings (6.8)
-#include "API/Model/Game.h"       // FlushScreenshot: queued Game.Screenshot fires post-render
-#include "API/Model/StatusBar.h"  // live profiler line in the editor status bar
-#include "API/Model/Sprite.h"     // 2D sprite quads (drawn after opaque, back-to-front)
-#include "API/Model/Canvas.h"     // 2D layout container (WorldSpace rect + editor gizmo)
-#include "API/Model/RectAnchor.h" // canvas anchors/layout (applied before rendering)
-#include "API/Model/Decal.h"      // screen-space decals (composited from the depth prepass)
-#include "API/Model/Collider.h"   // physics: shape components -> iPhysics bodies
-#include "API/Model/Jobs.h"       // PumpMain each game-thread frame (2.4)
-#include "API/Model/Rigidbody.h"  // physics: dynamic/kinematic body settings
-#include "API/Model/CharacterController.h"   // physics: virtual character capsules
-#include "API/Model/DebugDraw.h"   // editor gizmos (selection wire shapes)
-#include "API/Model/InstancedMesh.h" // GPU-instanced scatters (7.1: chunked instanced draws)
-#include "API/Model/Wind.h"          // global wind field (7.2: world state + renderer push)
-#include "interface/WorldHooks.h"    // module loop hooks (water params/captures/prepass, weather, ...)
-#include "API/Model/BendVolumes.h"   // foliage bend volumes: zones + module submissions (7.4)
-#include "interface/Services.h"   // GetService<iPhysics>()
-#include "service/iPhysics.h"     // the physics service seam (fixed-step driver below)
-#include "service/iAudio.h"       // the audio service seam (per-frame pump in Render)
-#include "API/Model/Audio.h"      // analysis snapshot cache + g_Nuke* system post-params
-#include "API/Model/AudioListener.h" // spatial-audio listener pose (Render pump)
+#include "API/Model/Material.h"
+#include "API/Model/Light.h"
+#include "API/Model/Environment.h"
+#include "API/Model/PostProcess.h"
+#include "API/Model/Shader.h"
+#include "API/Model/ReflectionProbe.h"
+#include "API/Model/Time.h"
+#include "API/Model/Events.h"
+#include "API/Model/Profiler.h"
+#include "API/Model/Game.h"
+#include "API/Model/StatusBar.h"
+#include "API/Model/Sprite.h"
+#include "API/Model/Canvas.h"
+#include "API/Model/RectAnchor.h"
+#include "API/Model/Decal.h"
+#include "API/Model/Collider.h"
+#include "API/Model/Jobs.h"
+#include "API/Model/Rigidbody.h"
+#include "API/Model/CharacterController.h"
+#include "API/Model/DebugDraw.h"
+#include "API/Model/InstancedMesh.h"
+#include "API/Model/Wind.h"
+#include "interface/WorldHooks.h"
+#include "API/Model/BendVolumes.h"
+#include "interface/Services.h"
+#include "service/iPhysics.h"
+#include "service/iAudio.h"
+#include "API/Model/Audio.h"
+#include "API/Model/AudioListener.h"
 #include <cmath>
 #include <map>
 #include <set>
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/glm.hpp>
-#include <glm/gtx/quaternion.hpp>  // glm::rotation (sun look-rotation for time-of-day)
+#include <glm/gtx/quaternion.hpp>
 #include "API/Model/Mesh.h"
 #include "API/Model/Texture.h"
 #include "API/Model/resdb.h"
 #include "API/Model/UnknownComponent.h"
 #include "API/Model/Prefab.h"
-#include "interface/AppInstance.h"   // Prefabs::Spawn reads content through the host
-#include "input/Input.h"             // per-frame input evaluation (Input::Update)
+#include "interface/AppInstance.h"
+#include "input/Input.h"
 #include "interface/Modular.h"
 #include "reflect/ReflectJson.h"
 #include <boost/filesystem/fstream.hpp>
@@ -64,11 +64,11 @@
 namespace nuke {
 
 World::World() : name("Default scene"), hierarchy(new bc::list<Atom*>()) {
-	NukeReflectInit();   // ensure reflection schemas are registered (forces Reflect.gen.obj to link)
+	NukeReflectInit();   // forces Reflect.gen.obj to link
 	std::cout << "[World]\t\t\t" << "This:" << this << ", Hierarchy is " << hierarchy << ", Hierarchy size: " << hierarchy->size() << std::endl;
 }
 
-// --- ray picking (editor viewport click-to-select) ---
+// --- ray picking ---
 
 static glm::quat ToGlmQ(const Quaternion& q) { return glm::quat((float)q.w, (float)q.x, (float)q.y, (float)q.z); }
 
@@ -111,12 +111,10 @@ static void PickRec(bc::list<Atom*>& gos, const glm::vec3& ro, const glm::vec3& 
 {
 	for (auto atom : gos)
 	{
-		if (!atom || !atom->enabled) continue;   // disabled = not rendered, so clicks pass through
+		if (!atom || !atom->enabled) continue;   // not rendered -> clicks pass through
 		// A canvas re-parents the coordinate space for its subtree (same rule as rendering).
 		Canvas* here = atom->GetComponent<Canvas>();
 		Canvas* cur  = here ? here : ctx;
-		// The canvas ITSELF is pickable by its rectangle (world units; screen-space at 1/ppu px —
-		// the same plane the editor camera renders it on).
 		if (here && here->transform)
 		{
 			const float es = (here->mode == CanvasMode::WorldSpace) ? 1.0f : here->PxToWorld();
@@ -157,9 +155,7 @@ static void PickRec(bc::list<Atom*>& gos, const glm::vec3& ro, const glm::vec3& 
 				}
 			}
 		}
-		// Sprites have no mesh — pick their textured quad (else clicks pass straight through).
-		// Canvas children pick WHERE THEY RENDER: screen-space children sit on the canvas's editor
-		// plane at their true world offsets (WYSIWYG), world-canvas children pinned to the plane.
+		// Sprites have no mesh: pick their textured quad, and canvas children pick where they render.
 		if (auto* sp = atom->GetComponent<Sprite>())
 		{
 			if (sp->enabled)
@@ -179,8 +175,7 @@ static void PickRec(bc::list<Atom*>& gos, const glm::vec3& ro, const glm::vec3& 
 					glm::vec3 c0((float)cp.x, (float)cp.y, (float)cp.z);
 					if (cur->mode != CanvasMode::WorldSpace)
 					{
-						// Editor plane mapping (matches DrawSprites' editor path): children keep their
-						// TRUE world offsets/sizes on the plane (px = world*ppu, plane = px/ppu -> 1:1).
+						// Matches DrawSprites' editor path: children keep true world offsets on the plane.
 						const float dx = (float)(p.x - cp.x), dy = (float)(p.y - cp.y);
 						center = c0 + rgt * dx + up * dy;
 					}
@@ -206,8 +201,7 @@ static void PickRec(bc::list<Atom*>& gos, const glm::vec3& ro, const glm::vec3& 
 					rgt = glm::normalize(glm::vec3((float)R.x, (float)R.y, (float)R.z));
 					up  = glm::normalize(glm::vec3((float)U.x, (float)U.y, (float)U.z));
 				}
-				// Quad centre = atom origin shifted by the pivot (matches DrawSprites). Canvas
-				// children draw centre-on-origin (no pivot shift in the canvas paths).
+				// Quad centre = atom origin shifted by the pivot; canvas children draw centre-on-origin.
 				float px = onCanvas ? 0.0f : 1.0f - 2.0f * sp->pivotX;
 				float py = onCanvas ? 0.0f : 1.0f - 2.0f * sp->pivotY;
 				glm::vec3 qc = center + rgt * (halfW * px) + up * (halfH * py);
@@ -233,7 +227,7 @@ Atom* World::Pick(const Vector3& origin, const Vector3& dir) { float d; return P
 
 World::~World()
 {
-	Reflect_DropObject(this);   // script handles to this world atom stale-safe dead
+	Reflect_DropObject(this);   // invalidate script handles to this world
 }
 
 static Atom* FindByName(Atom* node, const std::string& name)
@@ -286,7 +280,7 @@ void World::Add(Atom* atom)
 Atom* World::CreateAtom(const std::string& name)
 {
 	boost::recursive_mutex::scoped_lock lock(gameLock);   // scripts create mid-frame
-	Atom* a = new Atom();                                 // fresh stable id (monotonic ID ctor)
+	Atom* a = new Atom();
 	a->name = name.empty() ? "Atom" : name;
 	Add(a);
 	return a;
@@ -309,8 +303,8 @@ void World::UnlockGame() { gameLock.unlock(); }
 
 void World::Update()
 {
-	Profiler::Scope profScope("update");   // scripts + events + traversal (6.8)
-	Jobs::PumpMain();   // deliver background-job results on the game thread (2.4)
+	Profiler::Scope profScope("update");
+	Jobs::PumpMain();   // deliver background-job results on the game thread
 	static int slowLog = 0;
 	auto t0 = boost::chrono::steady_clock::now();
 	boost::recursive_mutex::scoped_lock lock(gameLock);
@@ -323,18 +317,15 @@ void World::Update()
 	AppInstance* app = AppInstance::GetSingleton();
 	app->worldTickActive = true;   // scripts' Game.LoadWorld queues instead of reloading mid-loop
 	Input::Update(Time::getSingleton()->delta);   // evaluate input once per tick, BEFORE scripts query it
-	// Game calendar: advance by the speed-scaled frame delta (6.1) — rolls hours/days and
-	// emits the time.* events. Then pump the event bus (6.3): due scheduled entries + queued
-	// emits are delivered to native subscribers and every enabled component's OnEvent hook.
 	Time::getSingleton()->Advance(Time::getSingleton()->gameDelta);
-	Wind::Advance(Time::getSingleton()->gameDelta);   // wind's smooth clock (gusts/turbulence drift; freezes with the world)
+	Wind::Advance(Time::getSingleton()->gameDelta);
 	Events::Pump([this](const std::string& n, const std::string& p)
 	{
 		std::function<void(bc::list<Atom*>&)> deliver = [&](bc::list<Atom*>& gos)
 		{
 			for (Atom* atom : gos)
 			{
-				if (!atom || !atom->enabled) continue;   // disabled atom = whole subtree off
+				if (!atom || !atom->enabled) continue;
 				for (Component* c : atom->components)
 					if (c && c->enabled) c->OnEvent(n, p);
 				deliver(atom->children);
@@ -347,21 +338,20 @@ void World::Update()
 		atom->Update();
 	}
 	app->worldTickActive = false;
-	// Flush deferred destruction (Atom::Destroy / world:QueueDestroy) at a SAFE point —
-	// after the traversal, still under the game lock. Swap first: RemoveAtomById tears
-	// down components whose Destroy might queue more (those wait one frame).
+	// Flush deferred destruction after the traversal, still under the game lock. Swap first:
+	// RemoveAtomById may queue more destroys, and those must wait one frame.
 	if (!destroyQueue.empty())
 	{
 		std::vector<long> doomed;
 		doomed.swap(destroyQueue);
 		for (long id : doomed)
 		{
-			if (!GetById(id))   // queued id that no longer resolves — say so instead of silence
+			if (!GetById(id))
 				std::cout << "[World]\t\t\t" << "destroy flush: atom " << id << " not found" << std::endl;
 			RemoveAtomById(id);
 		}
 	}
-	// Apply a script-queued world switch at the FRAME BOUNDARY (traversal done, lock held).
+	// Script-queued world switch, applied at the frame boundary (traversal done, lock held).
 	if (!app->pendingWorldLoad.empty())
 	{
 		std::string path;
@@ -370,28 +360,23 @@ void World::Update()
 		if (!app->OpenWorld(path))
 			std::cout << "[World]\t\t\t" << "Game.LoadWorld: world '" << path << "' not found" << std::endl;
 	}
-	// Savegame load (Game.LoadGame, 6.6): a full runtime snapshot from the save dir —
-	// LoadFromFile restores atoms + calendar + event schedule + script/tilemap state.
+	// Savegame load: a full runtime snapshot (atoms + calendar + schedule + script/tilemap state).
 	if (!app->pendingSaveLoad.empty())
 	{
 		std::string path;
 		path.swap(app->pendingSaveLoad);
 		std::cout << "[World]\t\t\t" << "Game.LoadGame -> '" << path << "'" << std::endl;
 		app->FlushWorldActivation();   // a still-growing world completes before the save replaces it
-		suppressPersistOnce = true;    // the save IS the full state — carrying persistent atoms would duplicate them
+		suppressPersistOnce = true;    // the save is the full state; persistent atoms would duplicate
 		LoadFromFile(path);
 	}
-	// Async-loaded world activation (Game.ActivateLoadedWorld): the staged, pre-parsed
-	// document swaps in HERE — traversal done, lock held, same safety as the loads above.
-	app->ApplyAsyncWorldLoad();
-	// Incremental activation (budgeted): instantiate this frame's slice of a GROWING world.
-	app->ContinueWorldActivation();
+	app->ApplyAsyncWorldLoad();      // staged async world swaps in here (traversal done, lock held)
+	app->ContinueWorldActivation();  // budgeted slice of a still-growing world
 }
 
-// --- fixed-step physics driver (service/iPhysics.h; no-op without a provider) ---------
+// --- fixed-step physics driver (no-op without an iPhysics provider) ---
 
-// Lazily create the physics body for an atom's Collider, and drive KINEMATIC bodies from
-// the Transform (gameplay moves them; the simulation follows and pushes dynamics away).
+// Lazily creates each Collider's physics body and drives kinematic bodies from the Transform.
 // Fills `bodyMap` (bodyId -> Collider) for contact-event dispatch after the step.
 static void SyncBodies(bc::list<Atom*>& gos, iPhysics* p, std::map<uint64_t, Collider*>& bodyMap, float dt,
                        bool off = false)
@@ -399,18 +384,11 @@ static void SyncBodies(bc::list<Atom*>& gos, iPhysics* p, std::map<uint64_t, Col
 	for (Atom* atom : gos)
 	{
 		if (!atom) continue;
-		// Whole-atom switch acts down the subtree: a disabled atom's bodies (and its children's)
-		// must GO, same as a disabled collider — so keep recursing with `kill` instead of skipping.
-		const bool kill = off || !atom->enabled;
+		const bool kill = off || !atom->enabled;   // recurse to destroy nested bodies, don't skip
 		if (Collider* col = atom->GetComponent<Collider>())
 		{
-			// A CharacterController OWNS its atom's collision (virtual capsule + inner
-			// body). A Collider body here would FIGHT the character: the static body gets
-			// pose-synced onto the moving character every step and the capsule depenetrates
-			// out of it — permanent jitter. Skip it (and kill a stale body if the
-			// controller was added mid-play).
-			// Disabled collider: the body must GO — `enabled` unticked mid-play previously
-			// left the body alive forever (create was gated, destroy never happened).
+			// A CharacterController owns its atom's collision; a Collider body would fight it.
+			// Either case (or a disabled collider) must also destroy an already-created body.
 			if (atom->GetComponent<CharacterController>() || !col->enabled || kill)
 			{
 				if (col->bodyId)
@@ -427,9 +405,8 @@ static void SyncBodies(bc::list<Atom*>& gos, iPhysics* p, std::map<uint64_t, Col
 			Rigidbody* rb = atom->GetComponent<Rigidbody>();
 			Transform& t = atom->GetTransform();
 
-			// Motion type changed live (Rigidbody added/removed, Kinematic toggled in the
-			// inspector mid-play)? Recreate — e.g. MoveKinematic on a stale STATIC body is
-			// silently ignored by the backend ("kinematic doesn't move at all").
+			// Motion type changed live: recreate. The backend silently ignores moveKinematic
+			// on a body that was created static.
 			const int desiredMotion = rb ? (rb->isKinematic ? 2 : 1) : 0;
 			if (col->bodyId && col->bodyMotion != desiredMotion)
 			{
@@ -501,22 +478,15 @@ static void SyncBodies(bc::list<Atom*>& gos, iPhysics* p, std::map<uint64_t, Col
 				float fq[4] = { (float)rot.x, (float)rot.y, (float)rot.z, (float)rot.w };
 				if (desiredMotion == 2)
 				{
-					// Kinematic tracking servo. Scripts write the transform at RENDER cadence,
-					// the simulation consumes it at the FIXED cadence, and the two BEAT:
-					// per-step deltas jitter between zero and twice the true speed. Riders are
-					// punted by velocity JUMPS (acceleration), so the body is driven with a
-					// velocity that is smooth BY CONSTRUCTION: the exponentially-smoothed
-					// write velocity (feedforward) plus a soft proportional pull towards the
-					// newest write (kills lag and drift). A script that moves the platform in
-					// fixedUpdate makes this exact tracking; update-rate scripts get a
-					// millimetre-level ripple instead of kicks.
+					// Kinematic tracking servo: render-cadence writes vs fixed-cadence steps beat,
+					// so drive a smoothed feedforward velocity plus a proportional pull to the
+					// newest write rather than the raw per-step delta.
 					const double dx = pos.x - col->lastSyncPos.x, dy = pos.y - col->lastSyncPos.y, dz = pos.z - col->lastSyncPos.z;
 					const double qd = fabs(Quaternion::Dot(rot, col->lastSyncRot));
 					const bool moved = !col->hasSync || (dx * dx + dy * dy + dz * dz) > 1e-10 || qd < 1.0 - 1e-7;
 					if (moved && col->quietSteps > 30)
 					{
-						// Parked (>0.5 s idle) and then moved: that's a TELEPORT, not a glide -
-						// snap, don't crawl there at (jump / idle-time) speed.
+						// Parked then moved = teleport, not a glide: snap instead of gliding.
 						p->setBodyPose(col->bodyId, fp, fq);
 						col->kinVelEma = Vector3();
 						col->kinAngVelEma = Vector3();
@@ -527,9 +497,7 @@ static void SyncBodies(bc::list<Atom*>& gos, iPhysics* p, std::map<uint64_t, Col
 					{
 						if (moved)
 						{
-							// Fresh write: instantaneous velocity = the delta since the LAST
-							// write over the time that actually elapsed. Adopt instantly out of
-							// rest, then smooth (the beat spikes single deltas to ~2x).
+							// Instantaneous velocity = delta since the last write over elapsed time.
 							const double span = dt * (col->quietSteps + 1);
 							const Vector3 instV(dx / span, dy / span, dz / span);
 							Quaternion dq = (rot * col->lastSyncRot.conjugate()).Normalized();
@@ -547,9 +515,7 @@ static void SyncBodies(bc::list<Atom*>& gos, iPhysics* p, std::map<uint64_t, Col
 						}
 						else
 						{
-							// Short gaps ARE the beat - keep the feedforward alive. A long gap
-							// means the writes stopped: bleed the velocity off so the body
-							// settles instead of sailing past the parked transform.
+							// Short gaps are the beat; a long gap means writes stopped, so bleed off.
 							++col->quietSteps;
 							if (col->quietSteps > 3)
 							{
@@ -561,8 +527,7 @@ static void SyncBodies(bc::list<Atom*>& gos, iPhysics* p, std::map<uint64_t, Col
 						float bp[3], bq[4];
 						if (p->getBodyPose(col->bodyId, bp, bq))
 						{
-							// v = feedforward + Kp * error, under an absolute ceiling so a huge
-							// error (missed teleport, spawn) closes fast but never violently.
+							// v = feedforward + Kp * error, capped so a huge error closes fast but calmly.
 							const double Kp = 5.0;   // 1/s: ~0.2 s to absorb tracking error
 							Vector3 v = col->kinVelEma
 							          + Vector3(col->lastSyncPos.x - bp[0], col->lastSyncPos.y - bp[1], col->lastSyncPos.z - bp[2]) * Kp;
@@ -580,8 +545,8 @@ static void SyncBodies(bc::list<Atom*>& gos, iPhysics* p, std::map<uint64_t, Col
 							if (vLen > vMax) v *= vMax / vLen;
 							if (wLen > wMax) w *= wMax / wLen;
 
-							// Compose next step's pose from the velocity command and let the
-							// backend derive the (smooth) velocities riders are carried with.
+							// Compose the next pose from the velocity command; the backend derives
+							// the velocities that carry riders.
 							const Vector3 np(bp[0] + v.x * dt, bp[1] + v.y * dt, bp[2] + v.z * dt);
 							Quaternion nq = qb;
 							const double wA = w.abs();
@@ -598,9 +563,8 @@ static void SyncBodies(bc::list<Atom*>& gos, iPhysics* p, std::map<uint64_t, Col
 				}
 				else
 				{
-					// Static/dynamic: push only EXTERNAL transform changes (script, moving
-					// parent, editor teleport). The driver's own dynamic write-backs refresh
-					// lastSync in PullDynamicPoses, so they don't re-trigger here.
+					// Static/dynamic: push only external transform changes. PullDynamicPoses
+					// refreshes lastSync, so the driver's own write-backs don't re-trigger here.
 					const double dx = pos.x - col->lastSyncPos.x, dy = pos.y - col->lastSyncPos.y, dz = pos.z - col->lastSyncPos.z;
 					const double qd = fabs(Quaternion::Dot(rot, col->lastSyncRot));
 					const bool moved = !col->hasSync || (dx * dx + dy * dy + dz * dz) > 1e-10 || qd < 1.0 - 1e-7;
@@ -616,7 +580,7 @@ static void SyncBodies(bc::list<Atom*>& gos, iPhysics* p, std::map<uint64_t, Col
 		}
 		else if (kill)
 		{
-			// No collider here, but the subtree is switched off — keep walking to kill nested bodies.
+			// No collider here, but the subtree is off: keep walking to kill nested bodies.
 			if (!atom->children.empty())
 				SyncBodies(atom->children, p, bodyMap, dt, true);
 			continue;
@@ -626,11 +590,9 @@ static void SyncBodies(bc::list<Atom*>& gos, iPhysics* p, std::map<uint64_t, Col
 	}
 }
 
-// --- character controllers (virtual capsules; see CharacterController.h) --------------
+// --- character controllers (virtual capsules) ---
 
-// The capsule FEET position relative to the atom's position (scaled local units):
-// Pivot Feet = the atom stands at its position; Pivot Center = the capsule is centered
-// on the atom (centered-pivot meshes); capsuleOffset fine-tunes either.
+// Capsule feet position relative to the atom position, in scaled local units.
 static Vector3 CharFeetLocal(CharacterController* cc, const Vector3& scl)
 {
 	Vector3 f(cc->capsuleOffset.x * scl.x, cc->capsuleOffset.y * scl.y, cc->capsuleOffset.z * scl.z);
@@ -639,29 +601,26 @@ static Vector3 CharFeetLocal(CharacterController* cc, const Vector3& scl)
 	return f;
 }
 
-// Lazily create backend characters, compose each one's desired velocity for this step
-// (gravity/jump/platform under autoGravity; the raw velocity verbatim otherwise) and
-// push it to the seam. Runs under the game lock, BEFORE step().
+// Lazily creates backend characters, composes each one's desired velocity for the step and
+// pushes it to the seam. Runs under the game lock, before step().
 static void SyncCharacters(bc::list<Atom*>& gos, iPhysics* p, const float gravity[3], float dt,
                            bool off = false)
 {
 	for (Atom* atom : gos)
 	{
 		if (!atom) continue;
-		const bool kill = off || !atom->enabled;   // whole-atom switch acts down the subtree
+		const bool kill = off || !atom->enabled;   // acts down the subtree
 		if (CharacterController* cc = atom->GetComponent<CharacterController>())
 		{
 			Transform& t = atom->GetTransform();
-			// Disabled (component or whole atom): the backend character must GO (mirrors the
-			// Collider rule — a stale character would keep steering the transform).
+			// Disabled component or atom: destroy the backend character, else it keeps steering.
 			if (!cc->enabled || kill)
 			{
 				if (cc->charId) { p->destroyCharacter(cc->charId); cc->charId = 0; }
 				if (!atom->children.empty()) SyncCharacters(atom->children, p, gravity, dt, kill);
 				continue;
 			}
-			// Bake the world scale into the capsule (like Collider); a live size/scale
-			// change recreates the character in place (position is preserved).
+			// Bake the world scale into the capsule; a live size change recreates in place.
 			const Vector3 scl = t.globalScale();
 			const float rScale = (float)std::max(fabs(scl.x), fabs(scl.z));
 			const float r  = std::max(0.05f, cc->radius * rScale);
@@ -689,7 +648,7 @@ static void SyncCharacters(bc::list<Atom*>& gos, iPhysics* p, const float gravit
 				cc->liveSlope = cc->maxSlope; cc->liveStep = cc->stepHeight; cc->liveStick = cc->stickDistance;
 			}
 			if (!cc->charId) continue;
-			// Live walk-parameter edits (inspector mid-play) — no recreate needed.
+			// Live walk-parameter edits: no recreate needed.
 			if (cc->liveSlope != cc->maxSlope || cc->liveStep != cc->stepHeight || cc->liveStick != cc->stickDistance)
 			{
 				p->setCharacterParams(cc->charId, cc->maxSlope, cc->stepHeight, cc->stickDistance);
@@ -697,7 +656,7 @@ static void SyncCharacters(bc::list<Atom*>& gos, iPhysics* p, const float gravit
 			}
 			if (cc->pendingTeleport)
 			{
-				// Teleport takes an ATOM position — convert to the capsule's feet.
+				// Teleport takes an atom position: convert to the capsule's feet.
 				const Vector3 fl = CharFeetLocal(cc, scl);
 				float tp[3] = { (float)(cc->teleportPos.x + fl.x),
 				                (float)(cc->teleportPos.y + fl.y),
@@ -710,8 +669,7 @@ static void SyncCharacters(bc::list<Atom*>& gos, iPhysics* p, const float gravit
 			Vector3 v;
 			if (!cc->autoGravity && cc->rawSet)
 			{
-				// Raw mode: the caller's velocity verbatim — their movement code owns
-				// gravity, jumps, dashes; we only resolve collisions.
+				// Raw mode: caller's velocity verbatim; we only resolve collisions.
 				v = cc->rawVelocity;
 			}
 			else
@@ -719,17 +677,16 @@ static void SyncCharacters(bc::list<Atom*>& gos, iPhysics* p, const float gravit
 				// Managed mode: horizontal from SetMove; vertical integrated here.
 				const bool grounded = cc->groundState == NUKE_GROUND_ON;
 				if (grounded && cc->verticalVel <= 0)
-					cc->verticalVel = 0;                     // landed — stop falling
+					cc->verticalVel = 0;                     // landed
 				if (grounded && cc->pendingJump > 0)
 				{
 					cc->verticalVel = cc->pendingJump;       // lift off
 					cc->pendingJump = 0;
 				}
 				if (!grounded || cc->verticalVel > 0)
-					cc->verticalVel += gravity[1] * cc->gravityScale * dt;   // in the air: fall
-				cc->pendingJump = 0;                         // a jump not consumed while grounded expires
+					cc->verticalVel += gravity[1] * cc->gravityScale * dt;
+				cc->pendingJump = 0;                         // an unconsumed jump expires
 				v = Vector3(cc->moveInput.x, cc->verticalVel, cc->moveInput.z);
-				// Moving ground carries the character (elevators, platforms).
 				if (grounded && cc->inheritPlatform)
 					v += cc->groundVel;
 			}
@@ -741,8 +698,8 @@ static void SyncCharacters(bc::list<Atom*>& gos, iPhysics* p, const float gravit
 	}
 }
 
-// Write stepped character positions back into the Transforms and snapshot the ground
-// state for the query API. Runs under the game lock, AFTER step().
+// Writes stepped character positions back into the Transforms and snapshots the ground state
+// for the query API. Runs under the game lock, after step().
 static void PullCharacters(bc::list<Atom*>& gos, iPhysics* p, const std::map<uint64_t, Collider*>& bodyMap)
 {
 	for (Atom* atom : gos)
@@ -756,9 +713,8 @@ static void PullCharacters(bc::list<Atom*>& gos, iPhysics* p, const std::map<uin
 			if (p->getCharacterState(cc->charId, pos, state, n, gv, gb))
 			{
 				Transform& t = atom->GetTransform();
-				// The character owns POSITION only — rotation stays gameplay's (a capsule
-				// has no meaningful physical orientation; scripts yaw the transform).
-				// The backend reports the capsule's FEET — map back through the pivot.
+				// The character owns position only; rotation stays gameplay's. The backend
+				// reports the capsule's feet, so map back through the pivot.
 				const Vector3 fl = CharFeetLocal(cc, t.globalScale());
 				t.SetGlobal(Vector3(pos[0] - fl.x, pos[1] - fl.y, pos[2] - fl.z),
 				            t.globalRotation(), t.globalScale());
@@ -778,8 +734,8 @@ static void PullCharacters(bc::list<Atom*>& gos, iPhysics* p, const std::map<uin
 	}
 }
 
-// Route drained contact transitions to BOTH atoms' components: trigger pairs (either
-// collider is a trigger) -> OnTriggerEnter/Exit, the rest -> OnCollisionEnter/Exit.
+// Routes drained contact transitions to both atoms' components: trigger pairs go to
+// OnTriggerEnter/Exit, the rest to OnCollisionEnter/Exit.
 static void DispatchContacts(iPhysics* p, const std::map<uint64_t, Collider*>& bodyMap)
 {
 	NukeContactEvent ev[128];
@@ -829,14 +785,9 @@ static void PullDynamicPoses(bc::list<Atom*>& gos, iPhysics* p)
 				t.SetGlobal(Vector3(fp[0], fp[1], fp[2]),
 				            Quaternion(fq[0], fq[1], fq[2], fq[3]),
 				            t.globalScale());
-				// This write is OURS - refresh the cache so SyncBodies doesn't see it as an
-				// external move next step (which would teleport-fight the simulation).
-				// CRITICAL: cache what the transform will actually RETURN, not the raw values
-				// written - the write goes through the transform's internal representation
-				// (quat->euler->quat), which shifts a tumbling body's rotation by a couple of
-				// degrees. Caching the raw quat made every rotating dynamic body register as
-				// "externally rotated" and get pose-snapped EVERY step, fighting the solver
-				// (boxes bounced off platforms as if elastic).
+				// Cache what the transform will RETURN, not the raw values written: the write
+				// round-trips quat->euler->quat, so raw values would read back as an external
+				// move and make SyncBodies pose-snap the body every step.
 				col->lastSyncPos = t.globalPosition();
 				col->lastSyncRot = t.globalRotation();
 				col->hasSync = true;
@@ -849,14 +800,12 @@ static void PullDynamicPoses(bc::list<Atom*>& gos, iPhysics* p)
 
 void World::FixedUpdate()
 {
-	Profiler::Scope profScope("fixed");   // one physics/fixed step (6.8)
-	// ONE fixed step. The CADENCE lives in AppInstance::FixedThread (fixed frequency,
-	// frame-independent) — this function must not know about frames or accumulate time.
-	// Locking: world phases hold the game lock; the Jolt solve itself runs OUTSIDE it,
-	// so the simulation overlaps the frame (Update/render) instead of serializing with it.
+	Profiler::Scope profScope("fixed");
+	// ONE fixed step; the cadence lives in AppInstance::FixedThread, so this must not know
+	// about frames or accumulate time. World phases hold the game lock, the solve does not.
 	const float dt = settings.fixedDt > 0.0001f ? settings.fixedDt : 1.0f / 60.0f;
 	iPhysics* p = GetService<iPhysics>();
-	std::map<uint64_t, Collider*> bodyMap;   // this step's live bodies (contact dispatch)
+	std::map<uint64_t, Collider*> bodyMap;   // this step's live bodies, for contact dispatch
 
 	if (p)
 	{
@@ -868,7 +817,7 @@ void World::FixedUpdate()
 	}
 
 	if (p)
-		p->step(dt);   // UNLOCKED: Jolt solves on its workers while the frame proceeds
+		p->step(dt);   // unlocked: the backend solves while the frame proceeds
 
 	{
 		boost::recursive_mutex::scoped_lock lock(gameLock);
@@ -878,10 +827,10 @@ void World::FixedUpdate()
 		{
 			PullDynamicPoses(*hierarchy, p);
 			PullCharacters(*hierarchy, p, bodyMap);   // positions + ground snapshots
-			DispatchContacts(p, bodyMap);    // OnCollision/OnTrigger hooks — DIRECT, incl. scripts
+			DispatchContacts(p, bodyMap);
 		}
-		for (Atom* atom : *hierarchy)          // the EXISTING fixed chain: Atom -> components
-			atom->FixedUpdate();               // (scripts' fixedUpdate runs HERE, under the lock)
+		for (Atom* atom : *hierarchy)
+			atom->FixedUpdate();               // scripts' fixedUpdate runs here, under the lock
 		app->worldTickActive = false;
 	}
 }
@@ -892,18 +841,16 @@ static void CollectCameras(bc::list<Atom*>& gos, std::vector<Camera*>& out)
 {
 	for (auto atom : gos)
 	{
-		if (!atom || !atom->enabled) continue;   // disabled atom = whole subtree off (all collectors)
+		if (!atom || !atom->enabled) continue;   // disabled atom = whole subtree off
 		if (auto* c = atom->GetComponent<Camera>())
-			if (c->enabled) out.push_back(c);   // a disabled camera renders nothing
+			if (c->enabled) out.push_back(c);
 		if (atom->children.size() > 0)
 			CollectCameras(atom->children, out);
 	}
 }
 
-// The game's view camera (UE "possess"): the first ENABLED camera whose mainCamera flag is set;
-// if none is marked, the first enabled camera in hierarchy order (a single camera = itself).
-// Editor infrastructure cameras never qualify. Callers: PIE game-camera view, audio listener
-// fallback, scripts (World.GetMainCamera).
+// The game's view camera: the first enabled camera flagged mainCamera, else the first enabled
+// camera in hierarchy order. Editor cameras never qualify. Null when the world has none.
 Camera* World::GetMainCamera()
 {
 	std::vector<Camera*> cams;
@@ -930,8 +877,7 @@ static void CollectLights(bc::list<Atom*>& gos, std::vector<Light*>& out)
 	}
 }
 
-// First enabled AudioListener's transform (spatial-audio ears), depth-first. Null when the
-// world has none — the caller falls back to the first camera.
+// First enabled AudioListener's transform, depth-first. Null when the world has none.
 static Transform* FindAudioListener(bc::list<Atom*>& gos)
 {
 	for (auto atom : gos)
@@ -945,7 +891,7 @@ static Transform* FindAudioListener(bc::list<Atom*>& gos)
 	return nullptr;
 }
 
-// Post-process components (one may sit beside each Camera on the same atom — matched by shared transform).
+// Post-process components; one may sit beside each Camera, matched by shared transform.
 static void CollectPostProcess(bc::list<Atom*>& gos, std::vector<PostProcess*>& out)
 {
 	for (auto atom : gos)
@@ -984,8 +930,7 @@ static Environment* FindEnvironment(bc::list<Atom*>& gos)
 struct DrawItem { Mesh* mesh; Material* mat; float pos[3], quat[4], scale[3]; Vector3 wpos; int blend; bool inReflections;
                   float prevPos[3], prevQuat[4], prevScale[3]; bool hasPrev; };   // prev transform for TAA velocity
 
-// Render-layer filter: bit i of `mask` = render atoms with Atom::layer == i (see nuke::Layers).
-// The default (all bits) keeps the GLOBAL passes (shadows, probes, the RT scene) layer-blind.
+// Render-layer filter: bit i of `mask` = render atoms with Atom::layer == i.
 static inline bool LayerVisible(Atom* atom, unsigned int mask) { return (mask >> (atom->layer & 31)) & 1u; }
 
 static void CollectMeshes(bc::list<Atom*>& gos, std::vector<DrawItem>& out, unsigned int mask = 0xFFFFFFFFu)
@@ -1009,7 +954,7 @@ static void CollectMeshes(bc::list<Atom*>& gos, std::vector<DrawItem>& out, unsi
 				it.wpos = p;
 				it.blend = mr->mat ? mr->mat->blendMode : 0;   // 0 = opaque, 1/2 = transparent/additive
 				it.inReflections = mr->inReflections;
-				it.hasPrev = mr->hasPrev;   // previous global transform (TAA velocity); false the first frame -> zero motion
+				it.hasPrev = mr->hasPrev;   // false on the first frame -> zero motion
 				for (int k = 0; k < 3; ++k) it.prevPos[k] = mr->prevPos[k];
 				for (int k = 0; k < 4; ++k) it.prevQuat[k] = mr->prevQuat[k];
 				for (int k = 0; k < 3; ++k) it.prevScale[k] = mr->prevScale[k];
@@ -1020,8 +965,8 @@ static void CollectMeshes(bc::list<Atom*>& gos, std::vector<DrawItem>& out, unsi
 	}
 }
 
-// Frustum cull: transform the mesh's 8 local-AABB corners to clip space (via the renderer's view*proj) and
-// drop the object when all 8 are outside the same frustum plane (D3D clip: x/y in [-w,w], z in [0,w]).
+// Frustum cull: true when all 8 corners of the mesh AABB fall outside the same clip plane.
+// D3D clip convention: x/y in [-w,w], z in [0,w].
 static bool FrustumCull(const DrawItem& it, const float vp[16])
 {
 	if (!it.mesh) return false;
@@ -1046,7 +991,7 @@ static bool FrustumCull(const DrawItem& it, const float vp[16])
 	return oL == 8 || oR == 8 || oB == 8 || oT == 8 || oN == 8 || oF == 8;
 }
 
-// Combined view*proj for the current camera (renderer's row-major matrices), for frustum culling.
+// Combined view*proj for the current camera; the renderer's matrices are row-major.
 static void CameraVP(iRender* r, float vp[16])
 {
 	float view[16], proj[16];
@@ -1056,7 +1001,7 @@ static void CameraVP(iRender* r, float vp[16])
 		{ float s = 0; for (int k = 0; k < 4; ++k) s += view[i*4+k] * proj[k*4+j]; vp[i*4+j] = s; }
 }
 
-// --- GPU instancing (7.1): InstancedMesh components draw as chunked instanced ranges -------
+// --- GPU instancing: InstancedMesh components draw as chunked instanced ranges ---
 
 static void CollectInstancedMeshes(bc::list<Atom*>& gos, std::vector<InstancedMesh*>& out, unsigned int mask = 0xFFFFFFFFu)
 {
@@ -1071,8 +1016,7 @@ static void CollectInstancedMeshes(bc::list<Atom*>& gos, std::vector<InstancedMe
 	}
 }
 
-// World-AABB against the current camera frustum — the same 8-corner clip test as FrustumCull,
-// but over a chunk's precomputed world bounds instead of a transformed mesh AABB.
+// Same 8-corner clip test as FrustumCull, over a chunk's precomputed world bounds.
 static bool CullAABB(const float mn[3], const float mx[3], const float vp[16])
 {
 	int oL = 0, oR = 0, oB = 0, oT = 0, oN = 0, oF = 0;
@@ -1090,7 +1034,7 @@ static bool CullAABB(const float mn[3], const float mx[3], const float vp[16])
 	return oL == 8 || oR == 8 || oB == 8 || oT == 8 || oN == 8 || oF == 8;
 }
 
-// Camera-pass draw: every visible chunk of every InstancedMesh = ONE instanced draw call.
+// Camera pass: every visible chunk of every InstancedMesh becomes one instanced draw call.
 static void DrawInstancedMeshes(std::vector<InstancedMesh*>& ims, iRender* r, bool cull)
 {
 	if (ims.empty()) return;
@@ -1104,7 +1048,7 @@ static void DrawInstancedMeshes(std::vector<InstancedMesh*>& ims, iRender* r, bo
 	}
 }
 
-// G-buffer/velocity prepass: opaque instanced sets only (same rule as DrawGBuffer).
+// G-buffer/velocity prepass: opaque instanced sets only.
 static void DrawInstancedGBuffer(std::vector<InstancedMesh*>& ims, iRender* r, bool cull)
 {
 	if (ims.empty()) return;
@@ -1119,7 +1063,7 @@ static void DrawInstancedGBuffer(std::vector<InstancedMesh*>& ims, iRender* r, b
 	}
 }
 
-// Shadow depth pass: all chunks (the light frustum is not the camera's — no camera culling).
+// Shadow depth pass: all chunks; the light frustum is not the camera's, so no camera culling.
 static void DrawInstancedShadows(std::vector<InstancedMesh*>& ims, iRender* r)
 {
 	for (InstancedMesh* im : ims)
@@ -1132,8 +1076,8 @@ static void DrawInstancedShadows(std::vector<InstancedMesh*>& ims, iRender* r)
 	}
 }
 
-// End of frame: snapshot each MeshRenderer's current global transform as its "previous" for next frame's TAA
-// motion vectors. Runs once per frame (transforms are camera-independent), after all cameras have rendered.
+// Snapshots each MeshRenderer's global transform as "previous" for next frame's TAA motion
+// vectors. Must run once per frame, after all cameras have rendered.
 static void UpdatePrevTransforms(bc::list<Atom*>& gos)
 {
 	for (auto atom : gos)
@@ -1151,8 +1095,8 @@ static void UpdatePrevTransforms(bc::list<Atom*>& gos)
 	}
 }
 
-// SSR G-buffer prepass: opaque geometry only (transparent doesn't occlude / write the colour-pass depth).
-// Same cull setting as the colour pass so depths line up.
+// SSR G-buffer prepass: opaque geometry only. Must use the same cull setting as the colour
+// pass so the depths line up.
 static void DrawGBuffer(std::vector<DrawItem>& items, iRender* r, bool cull)
 {
 	float vp[16]; if (cull) CameraVP(r, vp);
@@ -1162,8 +1106,8 @@ static void DrawGBuffer(std::vector<DrawItem>& items, iRender* r, bool cull)
 			                       it.hasPrev ? it.prevPos : nullptr, it.hasPrev ? it.prevQuat : nullptr, it.hasPrev ? it.prevScale : nullptr);
 }
 
-// Draw a gathered scene for one camera: opaque first (depth write on), then transparent/additive sorted
-// back-to-front by distance from the camera (the renderer disables depth write for those). Frustum-culled.
+// Draws a gathered scene for one camera: opaque first, then transparent/additive sorted
+// back-to-front by camera distance. Frustum-culled when `cull`.
 static void DrawCollected(std::vector<DrawItem>& items, const Vector3& camPos, iRender* r, bool cull)
 {
 	float vp[16]; if (cull) CameraVP(r, vp);
@@ -1186,18 +1130,14 @@ static void DrawCollected(std::vector<DrawItem>& items, const Vector3& camPos, i
 	}
 }
 
-// --- Sprites (Sprite component): unlit textured quads. WORLD sprites (standalone or under a
-// WorldSpace canvas) draw after the meshes, back-to-front. SCREEN sprites (under a ScreenSpace
-// canvas) draw in the canvas's reference-pixel space via drawSpriteScreen. -------------------------
+// --- Sprites: unlit textured quads. World sprites draw after the meshes, back-to-front;
+// screen sprites draw in their canvas's reference-pixel space via drawSpriteScreen. ---
 
-// Standalone WORLD sprites have no canvas pixel basis — nine-slice borders (texture px) convert to
-// world units through this constant (matches the default canvas Pixels Per Unit).
+// Texture px -> world units for standalone world sprites; matches the default canvas Pixels Per Unit.
 static const float kSpritePxToWorld = 1.0f / 100.0f;
 
-// Nine-slice grid: 3x3 sub-rects (centre-origin offsets + sizes in OUTPUT units) and the matching
-// UV grid lines. Borders come from the texture's slice insets (pre-swapped for flips by the caller),
-// converted to output units via pxToOut and shrunk proportionally when the output is smaller than
-// the borders themselves. Returns false when there is nothing to slice.
+// Builds the nine-slice 3x3 sub-rects (centre-origin offsets/sizes in OUTPUT units) and the
+// matching UV grid lines. Returns false when there is nothing to slice.
 struct NinePatch { float rx[3], rw[3], ry[3], rh[3]; float u[4], v[4]; };
 static bool BuildNinePatch(Texture* tex, int sl, int sr, int st, int sb,
                            float u0, float v0, float u1, float v1,
@@ -1229,8 +1169,7 @@ static bool BuildNinePatch(Texture* tex, int sl, int sr, int st, int sb,
 	return true;
 }
 
-// Emit one SCREEN sprite — a single rect, or the 3x3 nine-slice grid when enabled (flips swap the
-// border sides so mirrored art keeps its corners).
+// Emits one screen sprite: a single rect, or the 3x3 nine-slice grid when enabled.
 static void EmitScreenSprite(iRender* r, Sprite* sp, const float rect[4], const float refSize[2],
                              const float uvr[4], const float tn[4], int queue, int scaleMode)
 {
@@ -1255,8 +1194,8 @@ static void EmitScreenSprite(iRender* r, Sprite* sp, const float rect[4], const 
 	r->drawSpriteScreenEx(sp->tex, rect, refSize, uvr, tn, queue, scaleMode);
 }
 
-// Emit one WORLD-quad sprite (centre + UNIT axes + half extents) — single quad, or the nine-slice
-// grid. pxToOut converts the texture's slice pixels into the quad's units (world/editor plane).
+// Emits one world-quad sprite (centre + unit axes + half extents), single quad or nine-slice.
+// pxToOut converts the texture's slice pixels into the quad's units.
 static void EmitWorldSprite(iRender* r, Sprite* sp, const Vector3& center, const Vector3& Rn, const Vector3& Un,
                             float halfW, float halfH, float pxToOut, const float uvr[4], const float tn[4])
 {
@@ -1302,7 +1241,7 @@ static void GatherSprites(bc::list<Atom*>& gos, Canvas* ctx, std::vector<ScreenS
 				if (sp->enabled)
 				{
 					if (cur && cur->mode != CanvasMode::WorldSpace) screen.push_back({ sp, cur });
-					else                                            world.push_back({ sp, cur });   // cur = WorldSpace canvas or null
+					else                                            world.push_back({ sp, cur });
 				}
 		GatherSprites(atom->children, cur, world, screen, mask);
 	}
@@ -1314,12 +1253,9 @@ static void DrawSprites(bc::list<Atom*>& hierarchy, const NukeCameraDesc& d, con
 	std::vector<ScreenSpr> screen;
 	GatherSprites(hierarchy, nullptr, sprites, screen, mask);
 
-	// --- SCREEN-space canvas sprites: rect in canvas reference pixels (centre-origin; child offset =
-	// its position relative to the canvas, Z IGNORED — children are pinned to the canvas surface),
-	// queue = the canvas's Render Queue (before/after post). Optional camera binding: a canvas with
-	// `targetCamera` set draws only for that camera. The EDITOR camera is the exception: it never
-	// pins screen-space canvases to itself — they render as world-plane rectangles at the canvas
-	// transform (1 ref px = 1/ppu world units) so they can be seen, picked and edited. ---
+	// Screen-space canvas sprites: rect in canvas reference pixels, centre-origin, Z ignored.
+	// The editor camera is the exception: it draws them as world-plane rectangles so they can
+	// be seen, picked and edited.
 	if (!screen.empty())
 	{
 		const bool editorCam = cam && cam->editorCamera;
@@ -1339,14 +1275,11 @@ static void DrawSprites(bc::list<Atom*>& hierarchy, const NukeCameraDesc& d, con
 			float uvr[4] = { u0, v0, u1, v1 };
 			float tn[4]  = { sp->tint.r, sp->tint.g, sp->tint.b, sp->tint.a };
 
-			// Children keep world-authored units: positions/sizes convert to reference pixels
-			// through the canvas's pixelsPerUnit (a width-1 sprite = ppu pixels, never 1 px).
+			// Children keep world-authored units: convert to reference pixels via pixelsPerUnit.
 			const float ppu = cv->pixelsPerUnit > 0.01f ? cv->pixelsPerUnit : 100.0f;
 			if (editorCam)
 			{
-				// World-plane preview: the canvas rect lives at its transform; children sit on the
-				// plane at their TRUE world offsets/sizes (px = world*ppu, plane = px/ppu -> always
-				// exactly 1:1 with the world, whatever ppu is — drags never over/undershoot).
+				// World-plane preview: children sit on the plane at their true world offsets, 1:1.
 				if (!cv->transform) continue;
 				Vector3 R = cv->transform->right(), U = cv->transform->up();
 				const float dx = (float)(spos.x - cpos.x), dy = (float)(spos.y - cpos.y);
@@ -1359,7 +1292,7 @@ static void DrawSprites(bc::list<Atom*>& hierarchy, const NukeCameraDesc& d, con
 				EmitWorldSprite(r, sp, c, R, U, hw, hh, 1.0f / ppu, uvr, tn);
 				continue;
 			}
-			// Camera binding: a bound canvas draws ONLY for its camera (compare by owning atom).
+			// A bound canvas draws only for its camera; compare by owning atom.
 			if (cv->targetCamera && (!cam || cv->targetCamera != cam->atom)) continue;
 			float rect[4]    = { (float)(spos.x - cpos.x) * ppu, (float)(spos.y - cpos.y) * ppu,
 			                     sp->width * (float)sc.x * ppu, sp->height * (float)sc.y * ppu };
@@ -1398,8 +1331,8 @@ static void DrawSprites(bc::list<Atom*>& hierarchy, const NukeCameraDesc& d, con
 		float halfH = sp->height * 0.5f * (float)sc.y;
 		Vector3 rU = (sp->mode == SpriteMode::Billboard) ? camR : t->right();
 		Vector3 uU = (sp->mode == SpriteMode::Billboard) ? camU : t->up();
-		// Children of a WORLD-SPACE canvas are PINNED to its surface: position projected onto the
-		// canvas plane (the out-of-plane component removed) and the quad lies in the plane.
+		// Children of a world-space canvas are pinned to its surface: position projected onto
+		// the plane, quad lying in it.
 		if (ws.cv && ws.cv->transform)
 		{
 			Transform* ct = ws.cv->transform;
@@ -1408,7 +1341,7 @@ static void DrawSprites(bc::list<Atom*>& hierarchy, const NukeCameraDesc& d, con
 			double du = dv.x*R.x + dv.y*R.y + dv.z*R.z;
 			double dvU = dv.x*U.x + dv.y*U.y + dv.z*U.z;
 			pos = Vector3(cp.x + R.x*du + U.x*dvU, cp.y + R.y*du + U.y*dvU, cp.z + R.z*du + U.z*dvU);
-			rU = R; uU = U;   // in-plane orientation (billboard doesn't apply on a canvas)
+			rU = R; uU = U;   // in-plane orientation; billboard doesn't apply on a canvas
 		}
 		// The atom origin sits at the pivot; shift the quad centre so the pivot lands on the atom.
 		float px = 1.0f - 2.0f*sp->pivotX, py = 1.0f - 2.0f*sp->pivotY;
@@ -1424,12 +1357,9 @@ static void DrawSprites(bc::list<Atom*>& hierarchy, const NukeCameraDesc& d, con
 	}
 }
 
-// --- Canvas layout: apply RectAnchor components before rendering (edit mode included) --------------
-// Per-side anchors (see RectAnchor.h): every enabled side pins the element's matching EDGE at its
-// captured distance from that canvas side; two opposite sides pinned = the element stretches with
-// the canvas (its Sprite width/height follow). Distances/coords are in canvas units — reference px
-// on a screen canvas (transform units * pixelsPerUnit), world units on a world canvas. Placement
-// pins the element to the canvas SURFACE (Z never drifts).
+// Applies RectAnchor components before rendering (edit mode included): each enabled side pins the
+// matching edge, two opposite sides stretch the element. Distances are in canvas units: reference
+// px on a screen canvas, world units on a world canvas.
 static void ApplyCanvasLayouts(bc::list<Atom*>& gos, Canvas* ctx)
 {
 	for (Atom* atom : gos)
@@ -1462,7 +1392,7 @@ static void ApplyCanvasLayouts(bc::list<Atom*>& gos, Canvas* ctx)
 					}
 					else { cx = (float)(gpos.x - cp.x) * ppu; cy = (float)(gpos.y - cp.y) * ppu; }
 
-					// Element size in canvas units (its Sprite; anchors on a sprite-less atom pin the point).
+					// Element size in canvas units; anchors on a sprite-less atom pin the point.
 					Sprite* sp = atom->GetComponent<Sprite>();
 					float w = sp ? sp->width  * (float)gsc.x * ppu : 0.0f;
 					float h = sp ? sp->height * (float)gsc.y * ppu : 0.0f;
@@ -1496,12 +1426,8 @@ static void ApplyCanvasLayouts(bc::list<Atom*>& gos, Canvas* ctx)
 	}
 }
 
-// Editor-only: draw every canvas's rectangle as debug lines so its bounds are visible and it can be
-// laid out. WorldSpace rects are in world units; screen-space rects show the reference resolution on
-// the canvas's world plane at 1/ppu (the same mapping the editor camera renders children with).
-// Quiet by default: an unselected canvas gets a thin gray DEPTH-TESTED frame (scene geometry hides
-// it); only the SELECTED canvas gets the bright on-top highlight. Drawn ONLY in the editor camera's
-// pass (never in camera previews / possessed PIE view / render-texture cameras).
+// Editor-only: draws every canvas rectangle as debug lines. Unselected canvases get a thin
+// depth-tested frame, the selected one a bright on-top highlight.
 static void DrawCanvasGizmos(bc::list<Atom*>& gos, iRender* r, Atom* sel)
 {
 	for (Atom* atom : gos)
@@ -1538,7 +1464,7 @@ static void DrawCanvasGizmos(bc::list<Atom*>& gos, iRender* r, Atom* sel)
 	}
 }
 
-// --- Decals (Decal component): screen-space, composited onto the opaque colour from the depth prepass. ---
+// --- Decals: screen-space, composited onto the opaque colour from the depth prepass ---
 static void CollectDecals(bc::list<Atom*>& gos, std::vector<Decal*>& out, unsigned int mask = 0xFFFFFFFFu)
 {
 	for (Atom* atom : gos)
@@ -1565,9 +1491,7 @@ static void DrawDecals(std::vector<Decal*>& decals, iRender* r)
 		r->drawDecal(dc->tex, pos, quat, scale, tn, dc->intensity, dc->angleFade, (int)dc->mode);
 	}
 }
-// Editor-only: draw a decal's oriented box (wireframe) + its projection axis, so its bounds are visible.
-// Decal bounds are drawn ONLY for the selected atom (unlike an always-on overlay) — a scene full of
-// decals would otherwise be a cage of orange boxes. `sel` is the editor's selected atom.
+// Editor-only: draws the selected atom's decal box wireframe plus its projection axis.
 static void DrawDecalGizmos(bc::list<Atom*>& gos, iRender* r, Atom* sel)
 {
 	for (Atom* atom : gos)
@@ -1602,9 +1526,8 @@ static void DrawDecalGizmos(bc::list<Atom*>& gos, iRender* r, Atom* sel)
 	}
 }
 
-// Scene-render hook: fire Component::OnRender for every enabled component at `phase`. This is the seam
-// module components (particles, custom draws) use to render — the engine's render loop no longer needs
-// to hardcode each feature. The camera's view/proj is already bound; components draw via iRender seams.
+// Fires Component::OnRender for every enabled component at `phase`; the seam module components
+// use to draw. The camera's view/proj is already bound.
 static void DrawComponentHooks(bc::list<Atom*>& gos, iRender* r, RenderPhase phase, unsigned int mask = 0xFFFFFFFFu)
 {
 	for (auto atom : gos)
@@ -1618,7 +1541,7 @@ static void DrawComponentHooks(bc::list<Atom*>& gos, iRender* r, RenderPhase pha
 }
 
 // Depth-only traversal for the shadow pass: every enabled mesh whose material casts shadows
-// (null material = casts by default). Transparency is handled in the renderer (alpha-dither).
+// (null material = casts by default).
 static void RenderShadowMeshes(bc::list<Atom*>& gos, iRender* r)
 {
 	for (auto atom : gos)
@@ -1643,7 +1566,7 @@ static void RenderShadowMeshes(bc::list<Atom*>& gos, iRender* r)
 	}
 }
 
-// --- editor gizmos (debug-draw, roadmap 2.1): wire shapes for the SELECTED atom --------
+// --- editor gizmos: wire shapes for the selected atom ---
 static void EmitSelectionGizmos(Atom* a)
 {
 	Transform& t = a->GetTransform();
@@ -1659,8 +1582,7 @@ static void EmitSelectionGizmos(Atom* a)
 			DebugDraw::Arrow(pos, Vector3(pos.x + fwd.x * 3, pos.y + fwd.y * 3, pos.z + fwd.z * 3), c);
 		else if (l->type == 1)   // point: range sphere
 			DebugDraw::WireSphere(pos, l->range, c);
-		else                     // spot: cone. world.ps lights the cone around -dir
-		                         // (cd = dot(-dir, -L)), so the gizmo opens along -forward.
+		else                     // spot: world.ps lights around -dir, so the cone opens along -forward
 			DebugDraw::WireCone(pos, Vector3(-fwd.x, -fwd.y, -fwd.z), l->spotAngle, l->range, c);
 	}
 
@@ -1703,11 +1625,8 @@ static void EmitSelectionGizmos(Atom* a)
 
 	if (CharacterController* cc = a->GetComponent<CharacterController>())
 	{
-		// characters: orange capsule, placed exactly like the driver places the shape
-		// (pivot Feet/Center + capsuleOffset)
-		const Color c(1.0, 0.6, 0.15, 1.0);
-		// Same clamps the driver applies — the gizmo must show the capsule that will
-		// actually simulate, even if the inspector holds out-of-range numbers.
+		const Color c(1.0, 0.6, 0.15, 1.0);   // characters: orange capsule
+		// Must apply the same clamps as the driver so the gizmo shows what will simulate.
 		const double rScale = std::max(fabs(scl.x), fabs(scl.z));
 		const double r = std::max(0.05, (double)cc->radius * rScale);
 		const double H = std::max(0.2, (double)cc->height * fabs(scl.y));
@@ -1742,7 +1661,7 @@ static void EmitSelectionGizmos(Atom* a)
 					                 cptr.z + right.z * w * sx + up.z * h * sy);
 				}
 			};
-			// far plane clamped for readability (a 10km frustum is just noise in the viewport)
+			// far plane clamped for readability
 			Vector3 n[4], f[4];
 			plane(cam->_near, n);
 			plane(std::min((double)cam->_far, 25.0), f);
@@ -1766,8 +1685,7 @@ static void EmitSelectionGizmos(Atom* a)
 
 	if (WindZone* wz = a->GetComponent<WindZone>())
 	{
-		// wind zones: teal volume bounds + what the zone DOES (direction / radial arrows)
-		const Color c(0.35, 0.9, 0.75, 1.0);
+		const Color c(0.35, 0.9, 0.75, 1.0);   // wind zones: teal bounds + direction/radial arrows
 		if (wz->shape == 0)
 			DebugDraw::WireSphere(pos, wz->radius, c);
 		else
@@ -1796,10 +1714,9 @@ static void EmitSelectionGizmos(Atom* a)
 void World::Render(iRender* r)
 {
 	if (!r) return;
-	Profiler::Scope profScope("render");   // CPU side of the render pass (6.8)
+	Profiler::Scope profScope("render");   // CPU side of the render pass
 
-	// Live profiler line (updated ~2×/s from the REAL world only): the status bar shows the
-	// phase trio everywhere the bar exists; scripts read the same numbers via Profiler.Ms.
+	// Live profiler line, ~2x/s, real world only.
 	if (!auxiliary)
 	{
 		static double lastPush = 0.0;
@@ -1813,20 +1730,18 @@ void World::Render(iRender* r)
 		}
 	}
 
-	// Canvas anchors/layout FIRST (edit mode included): anchored elements follow their canvas's
-	// rectangle before anything gathers their transforms this frame.
+	// Layout must run before anything gathers transforms this frame.
 	ApplyCanvasLayouts(*hierarchy, nullptr);
 
-	// Editor gizmos for the selection (edit mode only; lines live for one frame).
+	// Editor gizmos for the selection; lines live for one frame.
 	{
 		AppInstance* app = AppInstance::GetSingleton();
 		if (app->isEditor() && app->playState == 0 && app->selectedInHieararchy)
 			EmitSelectionGizmos(app->selectedInHieararchy);
 	}
 
-	// Advance animated textures (GIF) by real frame time — the renderer samples Texture::curFrame.
-	// Only the CURRENT scene advances them: auxiliary worlds rendered in the same frame (the
-	// editor's asset preview) must not double-step the global animation clock.
+	// Advance animated textures by real frame time. Only the current world may do this, or an
+	// auxiliary world rendered in the same frame double-steps the global animation clock.
 	if (this == AppInstance::GetSingleton()->currentWorld)
 	{
 		double dtMs = Time::getSingleton()->delta * 1000.0;
@@ -1849,20 +1764,18 @@ void World::Render(iRender* r)
 	CollectCameras(*hierarchy, cams);
 	std::sort(cams.begin(), cams.end(), [](Camera* a, Camera* b) { return a->depth < b->depth; });
 
-	// Gather scene lights once for this frame (the renderer keeps them for every camera pass).
+	// Gather scene lights once for this frame; the renderer keeps them for every camera pass.
 	std::vector<Light*> lights;
 	CollectLights(*hierarchy, lights);
 
-	// Drive the audio service once per frame (Render runs every frame in BOTH hosts;
-	// World::Update only runs in play mode, so the pump can't live there — the editor's
-	// Preview bus and the analysis must work in edit mode too). Listener = the first
-	// enabled AudioListener, else the first camera; game pause halts Music/SFX voices.
+	// Audio pumps from Render, not Update: Update only runs in play mode, but the editor's
+	// preview bus and the analysis must work in edit mode too.
 	if (this == AppInstance::GetSingleton()->currentWorld)
 		if (iAudio* au = GetService<iAudio>())
 		{
-			au->init();   // idempotent (first call opens the device)
+			au->init();   // idempotent; the first call opens the device
 			Transform* ears = FindAudioListener(*hierarchy);
-			if (!ears)   // no listener -> the game's main camera (same rule as the view), else any camera
+			if (!ears)   // no listener -> the game's main camera, else any camera
 			{
 				Camera* mc = GetMainCamera();
 				if (!mc && !cams.empty()) mc = cams[0];
@@ -1878,17 +1791,16 @@ void World::Render(iRender* r)
 			}
 			au->setGamePaused(AppInstance::GetSingleton()->playState == 2);
 			au->update((float)Time::getSingleton()->delta);
-			Audio::Refresh();   // cache this frame's analysis (scripts + g_Nuke* post-params)
+			Audio::Refresh();   // cache this frame's analysis
 		}
-		else Audio::Refresh();   // no provider -> calm zeros for scripts/effects
+		else Audio::Refresh();   // no provider -> calm zeros
 
-	// Post-process components (each applies only to its own camera = the Camera on the same atom).
+	// Post-process components; each applies only to the Camera on its own atom.
 	std::vector<PostProcess*> pps;
 	CollectPostProcess(*hierarchy, pps);
 
-	// Time of day: drive the FIRST directional light (rotation/color/intensity) from the Environment's hour.
-	// The sky colours follow below. todElev: sun elevation (-1..1), used by the sky build.
-	float todElev = 0.0f;
+	// Time of day drives the first directional light from the Environment's hour.
+	float todElev = 0.0f;   // sun elevation -1..1, also used by the sky build
 	Environment* todEnv = FindEnvironment(*hierarchy);
 	const bool todOn = (todEnv && todEnv->useTimeOfDay);
 	if (todOn)
@@ -1902,15 +1814,14 @@ void World::Render(iRender* r)
 		todElev = std::sin(ang);
 		float sx = -std::cos(ang), sy = todElev, sz = 0.25f;        // direction TOWARD the sun
 		float sl = std::sqrt(sx*sx + sy*sy + sz*sz); if (sl > 1e-6f) { sx/=sl; sy/=sl; sz/=sl; }
-		// Daylight ramps up quickly once the sun clears the horizon (so the sky isn't black at dawn/dusk
-		// while the sun is still visible). Full day a little above the horizon; night only when well below.
+		// Daylight ramps up quickly once the sun clears the horizon.
 		float day = (todElev + 0.1f) / 0.3f; day = day < 0 ? 0.0f : (day > 1 ? 1.0f : day);
 		for (Light* L : lights)
 			if (L->type == 0 && L->transform)   // the first directional light = the sun
 			{
 				glm::quat q = glm::rotation(glm::vec3(0, 0, 1), glm::vec3(-sx, -sy, -sz));   // forward = travel dir
 				L->transform->rotation = Quaternion(q.x, q.y, q.z, q.w);
-				L->color = Color(1.0, 0.55 + 0.45 * day, 0.25 + 0.75 * day, 1.0);            // warm -> white
+				L->color = Color(1.0, 0.55 + 0.45 * day, 0.25 + 0.75 * day, 1.0);
 				L->intensity = day * 4.0f;
 				break;
 			}
@@ -1933,21 +1844,20 @@ void World::Render(iRender* r)
 		n.spotOuter = std::cos(outer); n.spotInner = std::cos(inner);
 		gpuLights.push_back(n);
 	}
-	// Module-submitted DYNAMIC lights (glowing particles, muzzle flashes): one-frame
-	// submissions appended after the scene's Light components, cleared once consumed.
+	// Module-submitted dynamic lights: one-frame submissions appended after the scene's Lights.
 	{
 		std::vector<NukeLight>& fl = FrameLights::Frame();
 		for (const NukeLight& n : fl) gpuLights.push_back(n);
 		fl.clear();
 	}
-	// Global shadow settings BEFORE setLights (the directional ortho extent uses shadowDistance).
+	// Must precede setLights: the directional ortho extent uses shadowDistance.
 	r->setShadowSettings(settings.shadowRes, settings.shadowDistance, settings.shadowDepthBias,
 	                     settings.shadowNormalBias, settings.shadowSoftness);
 	r->setLights(gpuLights.empty() ? nullptr : gpuLights.data(), (int)gpuLights.size());
 
-	// Environment (sky + ambient) — first Environment component; default sky if none (keeps old ambient).
+	// Environment (sky + ambient): first Environment component, default sky if none.
 	{
-		NukeSky sky;   // defaults match the renderer's old hardcoded ambient
+		NukeSky sky;
 		if (Environment* env = FindEnvironment(*hierarchy))
 		{
 			sky.mode = env->mode;
@@ -1957,8 +1867,8 @@ void World::Render(iRender* r)
 			sky.skyIntensity = env->skyIntensity;
 			sky.ambient[0]=(float)env->ambient.r; sky.ambient[1]=(float)env->ambient.g; sky.ambient[2]=(float)env->ambient.b;
 			sky.ambientIntensity = env->ambientIntensity;
-			sky.exposure = env->exposure; sky.whitePoint = env->whitePoint;   // SDR tonemap (post.ps + world.ps)
-			if (env->useTimeOfDay)   // override sky colours from the time of day (day=blue, dusk=orange, night=dark)
+			sky.exposure = env->exposure; sky.whitePoint = env->whitePoint;   // SDR tonemap
+			if (env->useTimeOfDay)   // sky colours overridden by the time of day
 			{
 				auto sat = [](float v){ return v < 0 ? 0.0f : (v > 1 ? 1.0f : v); };
 				auto lrp = [](float a, float b, float t){ return a + (b - a) * t; };
@@ -1971,14 +1881,14 @@ void World::Render(iRender* r)
 				sky.skyIntensity = lrp(0.15f, 1.0f, day);
 				sky.ambientIntensity = env->ambientIntensity * (0.15f + 0.85f * day);   // dark at night
 			}
-			if (env->stars)   // fade stars in as the sky darkens (ToD), or always-on when ToD is off
+			if (env->stars)
 			{
 				float night = 0.4f;
 				if (env->useTimeOfDay) { float d = (todElev + 0.1f) / 0.3f; d = d < 0 ? 0 : (d > 1 ? 1 : d); night = 1.0f - d; }
 				sky.stars = night < 0 ? 0 : night;
 				if (!env->starsTexGuid.empty()) sky.starsTex = ResDB::getSingleton()->GetTexture(env->starsTexGuid);
 			}
-			if (env->moon && !env->moonTexGuid.empty())   // textured moon opposite the sun, visible at night
+			if (env->moon && !env->moonTexGuid.empty())   // textured moon opposite the sun
 			{
 				sky.moonTex  = ResDB::getSingleton()->GetTexture(env->moonTexGuid);
 				sky.moonSize = env->moonSize * 0.01745329252f;   // deg -> radians
@@ -1986,7 +1896,7 @@ void World::Render(iRender* r)
 				for (Light* L : lights)
 					if (L->type == 0 && L->transform) { Vector3 d = L->transform->direction(); mx=(float)d.x; my=(float)d.y; mz=(float)d.z; break; }
 				float ml = std::sqrt(mx*mx + my*my + mz*mz); if (ml > 1e-6f) { mx/=ml; my/=ml; mz/=ml; }
-				sky.moonDir[0] = mx; sky.moonDir[1] = my; sky.moonDir[2] = mz;   // sun travel dir = opposite the sun
+				sky.moonDir[0] = mx; sky.moonDir[1] = my; sky.moonDir[2] = mz;   // sun travel dir
 				sky.moonPhase = env->moonPhase;
 				float vis = 0.8f;
 				if (env->useTimeOfDay) { float d = (todElev + 0.1f) / 0.3f; d = d < 0 ? 0 : (d > 1 ? 1 : d); vis = 1.0f - d; }
@@ -2006,16 +1916,14 @@ void World::Render(iRender* r)
 		r->setSky(sky);
 	}
 
-	// Scene view position — shared by the pusher cap below and the RT nearest-instance pick.
+	// Scene view position, shared by the pusher cap below and the RT nearest-instance pick.
 	Vector3 sceneCamP(0, 0, 0);
 
-	// Wind (7.2): push the CURRENT animated global to the renderer (FrameCB g_Wind/g_Wind2)
-	// for vertex-bend consumers. Zones/turbulence stay per-point on the CPU (Wind.Sample).
+	// Wind: push the current animated global to the renderer for vertex-bend consumers.
+	// Zones/turbulence stay per-point on the CPU (Wind::Sample).
 	{
-		// Foliage interaction (7.4): characters + awake dynamic bodies become "pushers" the
-		// instanced vertex shaders bend blades away from. Collected BEFORE setWind — the
-		// renderer writes both into the per-frame BendCB there. Cap 8 (nearest to the main
-		// camera when over).
+		// Characters and awake dynamic bodies become foliage "pushers". Must be collected
+		// before setWind, which writes them into the per-frame BendCB. Cap 8, nearest first.
 		struct Push { float x, y, z, r; };
 		std::vector<Push> pushers;
 		Vector3 camP(0, 0, 0); bool camMain = false, camAny = false;
@@ -2049,9 +1957,8 @@ void World::Render(iRender* r)
 			}
 		};
 		collect(*hierarchy);
-		// EDIT mode renders through the Editor Camera while game cameras sit parked wherever
-		// the world left them — anchor the camera-relative caps (pushers, RT nearest-pick) to
-		// the view actually on screen, or "nearest" quietly drifts to a parked game camera.
+		// Edit mode renders through the Editor Camera, so anchor the camera-relative caps to
+		// it; otherwise "nearest" drifts to a parked game camera.
 		{
 			AppInstance* app = AppInstance::GetSingleton();
 			if (app && app->isEditor() && app->playState == 0)
@@ -2073,9 +1980,8 @@ void World::Render(iRender* r)
 		for (const Push& p : pushers) flat.insert(flat.end(), { p.x, p.y, p.z, p.r });
 		r->setBendPushers(flat.empty() ? nullptr : flat.data(), (int)pushers.size());
 
-		// Bend VOLUMES (7.4): wind zones (collected live, exact this frame) + whatever the
-		// modules submitted since the last frame (VFX force fields etc., 1-frame latency).
-		// Capped at 16 nearest the camera — same policy as the pushers.
+		// Bend volumes: live wind zones plus module submissions from the last frame (1-frame
+		// latency). Capped at 16 nearest the camera, same policy as the pushers.
 		{
 			std::vector<BendVolume> vols;
 			Wind::CollectZones(vols);
@@ -2102,9 +2008,8 @@ void World::Render(iRender* r)
 			r->setBendVolumes(vflat.empty() ? nullptr : vflat.data(), (int)vols.size());
 		}
 
-		// EDIT-mode preview: the wind clock normally advances with World::Update (play only).
-		// Tick it here off the REAL frame delta so foliage/VFX sway is ALIVE in the edit
-		// viewport — a frozen clock made wind-bent grass look like it ignores the wind.
+		// Edit mode: World::Update doesn't run, so tick the wind clock here off the real frame
+		// delta, or foliage/VFX sway freezes in the edit viewport.
 		{
 			AppInstance* app = AppInstance::GetSingleton();
 			if (app->isEditor() && app->playState == 0)
@@ -2116,11 +2021,9 @@ void World::Render(iRender* r)
 	}
 
 
-	// Ray tracing (D3D12): build the scene TLAS from opaque meshes FIRST — before the probe capture and camera
-	// passes, both of which draw with the world PSO and ray-query g_TLAS (RT shadows). Must exist before any draw.
-	// Auxiliary worlds (asset previews) skip it: the TLAS is GLOBAL and the live scene must stay its last
-	// writer (and a preview doesn't need RT reflections).
-	// Instanced sets (7.1) are drawn in every pass below — gather them once per frame.
+	// The scene TLAS must be built before the probe capture and camera passes, which ray-query
+	// g_TLAS. Auxiliary worlds skip it: the TLAS is global and the live scene owns it.
+	// Instanced sets are drawn in every pass below, so gather them once per frame.
 	std::vector<InstancedMesh*> instSets;
 	CollectInstancedMeshes(*hierarchy, instSets);
 
@@ -2128,21 +2031,17 @@ void World::Render(iRender* r)
 	{
 		r->beginRTScene();
 		std::vector<DrawItem> rtItems; CollectMeshes(*hierarchy, rtItems);
-		// Dynamic meshes (skinned instances) provide a static stand-in for BLAS/TLAS —
-		// per-frame BLAS rebuilds are a non-goal (rtProxy = the bind-pose source).
+		// Skinned meshes enter via rtProxy, their static bind-pose stand-in.
 		for (auto& it : rtItems) if (it.blend == 0)
 		{
 			const bool cs = !it.mat || it.mat->castShadows;   // same gate as the raster shadow pass
-			if (!it.inReflections && !cs) continue;           // invisible to every ray kind -> skip
+			if (!it.inReflections && !cs) continue;           // invisible to every ray kind
 			r->addRTInstance(it.mesh->rtProxy ? it.mesh->rtProxy : it.mesh,
 			                 it.mat, it.pos, it.quat, it.scale, it.inReflections, cs);
 		}
-		// Instanced sets, MERGED (7.4): each spatial chunk is baked into ONE Mesh (built beside
-		// the raster chunks in EnsureRenderReady) and enters the TLAS as a single entry — no
-		// per-instance caps, no distance picks, a TLAS of dozens of entries. The renderer runs
-		// the NukeBend compute over these meshes and REFITS their BLAS every frame, so RT
-		// shadows AND reflections of the vegetation sway exactly like the raster blades.
-		// Visibility follows the mask bits (0x01 reflections, 0x02 shadow rays).
+		// Instanced sets enter merged: each spatial chunk is one baked Mesh and one TLAS entry.
+		// The renderer runs NukeBend over these and refits their BLAS every frame, so RT
+		// shadows and reflections sway with the raster blades.
 		for (InstancedMesh* im : instSets)
 		{
 			const bool csI = im->castShadows && (!im->mat || im->mat->castShadows);
@@ -2150,7 +2049,7 @@ void World::Render(iRender* r)
 			if (im->rtChunkMeshes.empty()) continue;
 			Transform& t = im->atom->GetTransform();
 			Vector3 P = t.globalPosition(); Quaternion Q = t.globalRotation();
-			Vector3 S = im->ScaleWithAtom() ? t.globalScale() : Vector3(1, 1, 1);   // Foliage: layer frame is T*R only
+			Vector3 S = im->ScaleWithAtom() ? t.globalScale() : Vector3(1, 1, 1);   // foliage frame is T*R only
 			float pos[3]   = { (float)P.x, (float)P.y, (float)P.z };
 			float quat[4]  = { (float)Q.x, (float)Q.y, (float)Q.z, (float)Q.w };
 			float scale[3] = { (float)S.x, (float)S.y, (float)S.z };
@@ -2158,26 +2057,14 @@ void World::Render(iRender* r)
 				if (rm && rm->numVerts > 0)
 					r->addRTInstance(rm, im->mat, pos, quat, scale, im->inReflections, csI);
 		}
-		// Module components contribute their OWN TLAS entries here (NukeVFX particles: a
-		// per-frame quad mesh so reflections and shadow rays see the sprites) — the gather
-		// is open only between beginRTScene and buildRTScene.
+		// Module components add their own TLAS entries; the gather is open only between
+		// beginRTScene and buildRTScene.
 		DrawComponentHooks(*hierarchy, r, RenderPhase::RTScene);
 		r->buildRTScene();
 	}
 
-	// Shadow depth passes (one per shadow-casting dir/spot light) before any camera pass — the renderer
-	// samples them during the world pass. Only shadow-casting surfaces (Material::castShadows) contribute.
-	// HYBRID under ray tracing: solids shadow via TLAS rays, but VEGETATION'S rays would FREEZE
-	// (the RT BLAS is a static bake — the raster shadow VS is what carries the wind bend). So with
-	// RT active the maps still render, holding ONLY the instanced sets, and the lit shader
-	// multiplies both terms: rays for solids, bent (SWAYING) raster shadows for foliage.
-	// SKIPPED when ray tracing is active: everything (foliage included) shadows via TLAS rays —
-	// the renderer bends the foliage BLAS with the NukeBend compute every frame, so the rays
-	// hit SWAYING blades and the maps would be pure waste (nothing samples them under RT).
-	// Module loop hooks (interface/WorldHooks.h): loop-level module systems run before the
-	// shadow/probe/camera passes — NukeWater pushes its wave state and renders its GPU
-	// bottom-depth captures here. The submitter draws every opaque mesh with the shadow path
-	// into whatever depth target the hook has bound. The engine stays module-blind.
+	// Module loop hooks run before the shadow/probe/camera passes. The submitter draws every
+	// opaque mesh through the shadow path into whatever depth target the hook has bound.
 	if (!auxiliary)
 		for (WorldRenderHook* hk : WorldRenderHooks())
 			hk->preRender(r, [&]()
@@ -2188,6 +2075,8 @@ void World::Render(iRender* r)
 						r->renderShadowObject(di.mesh, di.pos, di.quat, di.scale, di.mat);
 			});
 
+	// Shadow depth passes, one per shadow-casting dir/spot light, before any camera pass.
+	// Skipped under ray tracing: everything shadows via TLAS rays and nothing samples the maps.
 	if (!r->rtAvailable())
 		for (int sp = 0, spc = r->shadowPassCount(); sp < spc; ++sp)
 		{
@@ -2197,8 +2086,8 @@ void World::Render(iRender* r)
 			r->endShadowPass();
 		}
 
-	// Reflection probe: capture the scene into its cubemap (after shadows so reflections are lit/shadowed),
-	// then bind it for the camera passes. Static probes capture once; realtime / Bake re-capture.
+	// Reflection probe: capture into its cubemap after shadows (so reflections are lit), then
+	// bind it for the camera passes. Static probes capture once; realtime/Bake re-capture.
 	ReflectionProbe* probe = FindReflectionProbe(*hierarchy);
 	if (probe && probe->transform)
 	{
@@ -2209,14 +2098,12 @@ void World::Render(iRender* r)
 		float pos[3] = { (float)pp.x, (float)pp.y, (float)pp.z };
 		if (probe->cubeId && (!probe->captured || probe->realtime || probe->bake))
 		{
-			// One line per NON-realtime capture: brackets the 6-face render in the log, so a
-			// GPU fault during capture is attributable (realtime probes would spam).
+			// Bracket non-realtime captures in the log so a GPU fault is attributable.
 			if (!probe->realtime)
 				cout << "[World]\t\t\tprobe capture begin (res " << probe->Res() << ")" << endl;
 			std::vector<DrawItem> items; CollectMeshes(*hierarchy, items);   // no cull for capture
-			// Realtime capture budget (Faces Per Frame): the default renders ALL six faces every
-			// frame — fully live reflections. 1-5 = OPT-IN time-slicing round-robin (cheaper; fast
-			// motion in the mirror then updates in steps). First capture/Bake is always full.
+			// Faces Per Frame budget: 6 (default) is fully live, 1-5 time-slices round-robin.
+			// The first capture and Bake are always full.
 			const bool slice  = probe->realtime && probe->captured && !probe->bake &&
 			                    probe->sliceFaces > 0 && probe->sliceFaces < 6;
 			const int  budget = slice ? probe->sliceFaces : 6;
@@ -2225,7 +2112,7 @@ void World::Render(iRender* r)
 				const int f = slice ? (probe->sliceFace + k) % 6 : k;
 				r->beginCubeFace(probe->cubeId, f, pos, probe->nearZ, probe->farZ);
 				for (auto& it : items) if (it.blend == 0) r->renderObject(it.mesh, it.mat, it.pos, it.quat, it.scale);
-				DrawInstancedMeshes(instSets, r, false);   // instanced sets appear in reflections too (no cull for capture)
+				DrawInstancedMeshes(instSets, r, false);   // no cull for capture
 				r->endCubeFace(probe->cubeId, f);
 			}
 			if (slice) probe->sliceFace = (probe->sliceFace + budget) % 6;
@@ -2244,16 +2131,14 @@ void World::Render(iRender* r)
 	for (Camera* cam : cams)
 	{
 		if (!cam->transform) continue;
-		// A camera with a RenderTexture target renders into that texture's RT (resolved live).
+		// A camera with a RenderTexture target renders into that texture's RT.
 		if (!cam->targetTexGuid.empty())
 		{
 			Texture* rt = ResDB::getSingleton()->GetTexture(cam->targetTexGuid);
 			if (rt && rt->renderTexture && rt->rtId) cam->renderTarget = rt->rtId;
 		}
-		// In the editor the world is drawn ONLY into off-screen RTs (the viewport panel + the
-		// selected-camera preview). A world camera with target 0 would paint the backbuffer
-		// full-window — i.e. make the editor look like the Player. Skip those here; they render
-		// normally in the Player (isEditor() == false).
+		// In the editor the world is drawn only into off-screen RTs; a target-0 camera would
+		// paint the backbuffer full-window. Those still render normally in the Player.
 		if (editor && cam->renderTarget == 0) continue;
 		NukeCameraDesc d;
 		d.target = cam->renderTarget;
@@ -2270,8 +2155,7 @@ void World::Render(iRender* r)
 		d.nearZ = cam->_near;
 		d.farZ  = cam->_far;
 		d.editorCamera = cam->editorCamera ? 1 : 0;
-		// Projection: ease the runtime blend toward the target (Perspective 0 / Orthographic 1)
-		// so SetProjection / the editor toggle animate smoothly; hand the blend + size to the renderer.
+		// Ease the projection blend toward the target (Perspective 0 / Orthographic 1).
 		{
 			float tgt = (cam->projection == Projection::Orthographic) ? 1.0f : 0.0f;
 			if (!cam->projBlendInit) { cam->projBlend = tgt; cam->projBlendInit = true; }   // no open-time animation
@@ -2287,11 +2171,11 @@ void World::Render(iRender* r)
 			d.orthoSize = cam->orthoSize;
 		}
 
-		// This camera's post-process chain: the effects on the PostProcess component sitting on the same atom
-		// (shared transform). Each effect = a custom post-shader pipeline + its packed PostParams bytes.
+		// This camera's post chain: the effects on the PostProcess component sharing its transform.
+		// Each effect = a post-shader pipeline plus its packed PostParams bytes.
 		std::vector<std::vector<float>> ppBlobs; std::vector<uint64_t> ppHandles;
-		bool hasSSR = false;   // an SSR or RT-reflection effect in this camera's chain -> run the G-buffer prepass first
-		bool hasTAA = false;   // temporal AA -> also needs the depth prepass + camera jitter
+		bool hasSSR = false;   // needs the G-buffer prepass
+		bool hasTAA = false;   // needs the depth prepass + camera jitter
 		for (PostProcess* pp : pps)
 			if (pp->transform == cam->transform)
 			{
@@ -2301,18 +2185,17 @@ void World::Render(iRender* r)
 					if (!e.enabled) continue;
 					Shader* sh = ResDB::getSingleton()->GetShader(e.shaderGuid);
 					if (!sh || !sh->isPost || sh->rendererHandle == 0) continue;
-					if (sh->name == "ssr" || sh->name == "rtreflect") hasSSR = true;   // both need the G-buffer prepass
-					if (sh->name == "musicvis") hasSSR = true;   // ghost overlays sample the G-buffer normals + depth
-					if (sh->name == "taa") hasTAA = true;                              // TAA needs the depth prepass + jitter
+					if (sh->name == "ssr" || sh->name == "rtreflect") hasSSR = true;
+					if (sh->name == "musicvis") hasSSR = true;   // samples G-buffer normals + depth
+					if (sh->name == "taa") hasTAA = true;
 					std::vector<float> blob(64, 0.0f);   // 256-byte PostParams
 					for (const ShaderProp& sp : sh->props)
 					{
 						const float* v = sp.def;
 						auto pit = e.props.find(sp.name);
 						if (pit != e.props.end()) v = pit->second.data();
-						// System params (g_NukeAudio/g_NukeNote/g_NukeChromaA..C): engine-filled
-						// per frame from the audio analysis — this is what syncs audio-reactive
-						// effects to the music. User values/defaults never apply to these.
+						// g_Nuke* params are engine-filled from the audio analysis; user values
+						// and defaults never apply to them.
 						float sys[4];
 						if (sp.name.compare(0, 6, "g_Nuke") == 0 && Audio::SystemParam(sp.name, sys)) v = sys;
 						for (int c = 0; c < sp.components && (sp.offset / 4 + c) < 64; ++c)
@@ -2327,19 +2210,17 @@ void World::Render(iRender* r)
 		{ ppStages[k].pipeline = ppHandles[k]; ppStages[k].params = ppBlobs[k].data(); ppStages[k].paramFloats = 64; }
 		r->setPostChain(ppStages.empty() ? nullptr : ppStages.data(), (int)ppStages.size());
 
-		r->setCameraTAA(hasTAA);   // enable jitter + history for this camera (advances the jitter when on)
+		r->setCameraTAA(hasTAA);   // enable jitter + history for this camera
 
-		// Render-layer mask: this camera renders only atoms whose layer bit is set (see nuke::Layers).
+		// This camera renders only atoms whose layer bit is set.
 		const unsigned int camMask = (unsigned int)cam->layerMask;
 
 		// Decals reconstruct surfaces from the depth prepass, so their presence also forces it.
 		std::vector<Decal*> decals; CollectDecals(*hierarchy, decals, camMask);
-		// SSR / RT reflections / TAA / decals need scene depth (+ normals for SSR) — a single-sample prepass before colour.
-		// Instanced sets for THIS camera (its layer mask filters them like everything else).
 		std::vector<InstancedMesh*> camInstSets;
 		CollectInstancedMeshes(*hierarchy, camInstSets, camMask);
 
-		// Module hooks may demand scene depth too (water: shore foam/absorption/underwater fog).
+		// Module hooks may demand scene depth too.
 		bool hookPrepass = false;
 		for (WorldRenderHook* hk : WorldRenderHooks())
 			if (hk->wantsScenePrepass()) { hookPrepass = true; break; }
@@ -2357,18 +2238,16 @@ void World::Render(iRender* r)
 			std::vector<DrawItem> items;
 			CollectMeshes(*hierarchy, items, camMask);
 			DrawCollected(items, cp, r, settings.frustumCull);
-			DrawInstancedMeshes(camInstSets, r, settings.frustumCull);   // chunk-culled instanced sets
-			DrawComponentHooks(*hierarchy, r, RenderPhase::Opaque, camMask);        // module components: opaque draws
-			DrawDecals(decals, r);               // screen-space decals: composite onto the scene from the depth prepass
-			DrawSprites(*hierarchy, d, cp, r, cam, camMask);   // 2D sprites: after opaque, back-to-front, depth-tested
-			DrawComponentHooks(*hierarchy, r, RenderPhase::Transparent, camMask);   // module components: blended draws (particles, etc.)
-			// Canvas bounds: editor-CAMERA pass only (not previews / possessed PIE / RT cams);
-			// gray depth-tested by default, highlighted only for the selected canvas.
+			DrawInstancedMeshes(camInstSets, r, settings.frustumCull);
+			DrawComponentHooks(*hierarchy, r, RenderPhase::Opaque, camMask);
+			DrawDecals(decals, r);
+			DrawSprites(*hierarchy, d, cp, r, cam, camMask);   // after opaque, back-to-front
+			DrawComponentHooks(*hierarchy, r, RenderPhase::Transparent, camMask);
 			if (editor && cam->editorCamera) DrawCanvasGizmos(*hierarchy, r, AppInstance::GetSingleton()->selectedInHieararchy);
-			if (editor) DrawDecalGizmos(*hierarchy, r, AppInstance::GetSingleton()->selectedInHieararchy);   // only the SELECTED decal
-			DrawComponentHooks(*hierarchy, r, RenderPhase::Overlay, camMask);       // module components: on-top overlays / gizmos
+			if (editor) DrawDecalGizmos(*hierarchy, r, AppInstance::GetSingleton()->selectedInHieararchy);
+			DrawComponentHooks(*hierarchy, r, RenderPhase::Overlay, camMask);
 		}
-		// Selection highlight (editor only): outline the selected object after the scene.
+		// Editor only: outline the selected object after the scene.
 		if (editor)
 			if (Atom* sel = AppInstance::GetSingleton()->selectedInHieararchy)
 				if (auto* mr = sel->GetComponent<MeshRenderer>())
@@ -2386,19 +2265,19 @@ void World::Render(iRender* r)
 		r->endCamera();
 	}
 	UpdatePrevTransforms(*hierarchy);   // snapshot transforms for next frame's TAA motion vectors
-	Game::FlushScreenshot();            // queued Game.Screenshot: the frame is complete HERE
+	Game::FlushScreenshot();            // queued Game.Screenshot: the frame is complete here
 }
 
-// --- scene serialization (.nuworld JSON via reflection) ---
+// --- world serialization (.nuworld JSON via reflection) ---
 
 static void SaveAtom(Atom* atom, json& j)
 {
 	j["name"] = atom->GetName();
-	j["id"]   = atom->id.id;   // stable identity (survives the scene rebuild on PIE stop / reload)
+	j["id"]   = atom->id.id;   // stable identity across rebuilds
 	if (!atom->prefabGuid.empty()) j["prefab"] = atom->prefabGuid;   // instance link to a .nuprefab
-	if (atom->layer != 0) j["layer"] = atom->layer;                  // render layer index (0 = Default, omitted)
-	if (atom->persistent) j["persistent"] = true;                    // survives game world switches (omitted when off)
-	if (!atom->enabled) j["enabled"] = false;                        // whole-atom switch (omitted when on = default)
+	if (atom->layer != 0) j["layer"] = atom->layer;                  // 0 = Default, omitted
+	if (atom->persistent) j["persistent"] = true;                    // survives world switches
+	if (!atom->enabled) j["enabled"] = false;
 	Transform& t = atom->GetTransform();
 	if (TypeInfo* tti = t.GetType())
 		SaveObject(*tti, &t, j["transform"]);
@@ -2406,7 +2285,7 @@ static void SaveAtom(Atom* atom, json& j)
 	{
 		if (UnknownComponent* uc = dynamic_cast<UnknownComponent*>(c))
 		{
-			// Plugin type not loaded — write the preserved type + props back verbatim.
+			// Plugin type not loaded: write the preserved type + props back verbatim.
 			json cj;
 			cj["type"]  = uc->typeName;
 			cj["props"] = uc->rawProps.empty() ? json::object()
@@ -2418,20 +2297,19 @@ static void SaveAtom(Atom* atom, json& j)
 			continue;
 		}
 		TypeInfo* ti = c->GetType();
-		if (!ti) continue;                       // unreflected component — skip
+		if (!ti) continue;                       // unreflected component
 		c->OnBeforeSave();                       // live-state components re-encode into their props first
 		json cj;
 		cj["type"] = ti->name;
 		SaveObject(*ti, c, cj["props"]);
-		// Material INSTANCE overrides (color/shader/props) — these live on the per-object instance and
-		// save with the world; the referenced .numat asset (matGuid) is never modified by scene edits.
+		// Material instance overrides save with the world; the referenced .numat asset is never
+		// modified by world edits.
 		if (MeshRenderer* mr = dynamic_cast<MeshRenderer*>(c))
 			if (mr->mat)
 			{
 				json jm;
 				jm["color"]  = { mr->mat->color.r, mr->mat->color.g, mr->mat->color.b, mr->mat->color.a };
 				jm["shader"] = mr->mat->shaderGuid;
-				// PBR instance overrides (maps + scalar params).
 				jm["diffuse"]    = mr->mat->diffuseGuid;
 				jm["normal"]     = mr->mat->normalGuid;
 				jm["specularMap"]= mr->mat->specularGuid;
@@ -2458,7 +2336,7 @@ static void SaveAtom(Atom* atom, json& j)
 		const char* pl = PluginForType(ti->name);   // tag which plugin a component requires
 		if (pl && pl[0]) cj["plugin"] = pl;
 		cj["enabled"] = c->enabled;
-		if (c->tickEvery > 1) cj["tick"] = c->tickEvery;   // tick interval (6.8; 1 = default, omitted)
+		if (c->tickEvery > 1) cj["tick"] = c->tickEvery;   // 1 = default, omitted
 		cj["cid"]     = c->id.id;
 		j["components"].push_back(cj);
 	}
@@ -2474,11 +2352,11 @@ static Atom* LoadAtom(const json& j)
 {
 	Atom* atom = new Atom(j.value("name", std::string("Atom")).c_str());
 	if (j.contains("id")) { atom->id.id = j["id"].get<long>(); ID::observe(atom->id.id); }   // keep the saved identity
-	atom->prefabGuid = j.value("prefab", std::string());       // instance link (if any)
-	atom->modOrigin  = j.value("__mod", std::string());        // merge provenance (runtime only)
-	atom->layer      = std::max(0, std::min(31, j.value("layer", 0)));   // render layer index
-	atom->persistent = j.value("persistent", false);                     // survives game world switches
-	atom->enabled    = j.value("enabled", true);                         // whole-atom switch
+	atom->prefabGuid = j.value("prefab", std::string());
+	atom->modOrigin  = j.value("__mod", std::string());        // merge provenance, runtime only
+	atom->layer      = std::max(0, std::min(31, j.value("layer", 0)));
+	atom->persistent = j.value("persistent", false);
+	atom->enabled    = j.value("enabled", true);
 	if (j.contains("transform"))
 	{
 		Transform& t = atom->GetTransform();
@@ -2494,24 +2372,24 @@ static Atom* LoadAtom(const json& j)
 			{
 				Component* c = (Component*)ti->create();
 				c->enabled   = cj.value("enabled", true);
-				c->tickEvery = cj.value("tick", 1);   // tick interval (6.8)
+				c->tickEvery = cj.value("tick", 1);
 				c->id.id   = cj.value("cid", c->id.id); ID::observe(c->id.id);
-				c->modOrigin = cj.value("__mod", std::string());   // merge provenance (runtime only)
+				c->modOrigin = cj.value("__mod", std::string());   // merge provenance, runtime only
 				if (cj.contains("props")) LoadObject(*ti, c, cj["props"]);
-				atom->AddComponent(c);             // Init() wires transform/owner + clones the material instance
-				// Apply saved material-instance overrides onto the cloned instance (after Init).
+				atom->AddComponent(c);             // Init() wires transform/owner + clones the material
+				// Saved overrides must be applied after Init, onto the cloned instance.
 				if (MeshRenderer* mr = dynamic_cast<MeshRenderer*>(c))
 					if (cj.contains("material") && cj["material"].is_object())
 					{
 						const json& jm = cj["material"];
-						if (!mr->mat) mr->mat = new Material();   // matGuid empty / asset missing -> bare instance
+						if (!mr->mat) mr->mat = new Material();   // matGuid empty or asset missing
 						if (jm.contains("color") && jm["color"].is_array() && jm["color"].size() == 4)
 						{
 							mr->mat->color.r = jm["color"][0]; mr->mat->color.g = jm["color"][1];
 							mr->mat->color.b = jm["color"][2]; mr->mat->color.a = jm["color"][3];
 						}
 						if (jm.contains("shader")) mr->mat->shaderGuid = jm.value("shader", std::string("world"));
-						// PBR instance overrides (only when present, so older worlds keep the cloned asset maps).
+						// Applied only when present, so older worlds keep the cloned asset maps.
 						if (jm.contains("diffuse"))     mr->mat->diffuseGuid    = jm.value("diffuse", std::string());
 						if (jm.contains("normal"))      mr->mat->normalGuid     = jm.value("normal", std::string());
 						if (jm.contains("specularMap")) mr->mat->specularGuid   = jm.value("specularMap", std::string());
@@ -2538,13 +2416,12 @@ static Atom* LoadAtom(const json& j)
 									for (int i = 0; i < 4 && i < (int)it.value().size(); ++i) a[i] = it.value()[i].get<float>();
 									mr->mat->props[it.key()] = a;
 								}
-						mr->mat->Resolve();   // re-bind shader/textures (shaderGuid may differ from the asset)
+						mr->mat->Resolve();   // re-bind shader/textures
 					}
 			}
 			else
 			{
-				// Type inactive (its plugin isn't loaded) — keep it inert + preserve its data,
-				// and remember which plugin it needs so the editor can show that.
+				// Type inactive: keep it inert, preserve its data and the plugin it needs.
 				UnknownComponent* uc = new UnknownComponent();
 				uc->typeName = type;
 				uc->enabled = cj.value("enabled", true);
@@ -2577,10 +2454,9 @@ static void DowngradeAtom(Atom* a, const std::string& dll)
 		uc->requiredPlugin = dll;
 		uc->atom           = a;
 		uc->transform      = &a->GetTransform();
-		*it = uc;            // replace in place (preserves order)
-		// FULL teardown, not just the destructor: Destroy() is the component's lifecycle hook
-		// (native Events unsubscribes etc. live there) — skipping it leaked module-code
-		// std::functions into engine statics and segfaulted the CRT teardown after DLL unload.
+		*it = uc;            // replace in place, preserving order
+		// Destroy() before delete: the lifecycle hook unsubscribes module-code std::functions
+		// from engine statics, which would otherwise dangle after the DLL unloads.
 		c->Destroy();
 		delete c;
 	}
@@ -2605,7 +2481,7 @@ static void UpgradeAtom(Atom* a, const std::string& dll)
 		a->components.remove(uc);
 		Component* c = (Component*)ti->create();
 		LoadObject(*ti, c, props);
-		a->AddComponent(c);   // Init wires transform/owner + side effects (e.g. Lua compile)
+		a->AddComponent(c);   // Init wires transform/owner + side effects
 		delete uc;
 	}
 	for (Atom* ch : a->children) UpgradeAtom(ch, dll);
@@ -2624,15 +2500,15 @@ bool SavePrefab(Atom* root, const std::string& path)
 	return (bool)f;
 }
 
-// Fresh unique ids for a whole subtree, recording old->new so queued AtomRef fixups that
-// pointed INSIDE the subtree can follow their clones (external refs keep their ids).
+// Assigns fresh unique ids across a subtree, recording old->new so queued AtomRef fixups
+// pointing inside the subtree follow their clones.
 static void RegenIds(Atom* a, std::map<unsigned long, unsigned long>& oldToNew)
 {
 	if (!a) return;
 	const unsigned long old = (unsigned long)a->id.id;
-	a->id.generate();                    // each instantiated atom gets a fresh unique id
+	a->id.generate();
 	oldToNew[old] = (unsigned long)a->id.id;
-	for (Component* c : a->components) c->id.generate();   // and its components
+	for (Component* c : a->components) c->id.generate();
 	for (Atom* c : a->children) RegenIds(c, oldToNew);
 }
 
@@ -2651,9 +2527,9 @@ Atom* LoadPrefabFromString(const std::string& text)
 	if (j.is_discarded()) return nullptr;
 	Atom* a = LoadAtom(j);
 	std::map<unsigned long, unsigned long> ids;
-	RegenIds(a, ids);                    // instances are unique — don't share the prefab's saved ids
-	Reflect_RemapPendingAtomRefs(ids);   // refs INSIDE the subtree follow their clones
-	Reflect_ResolveAtomRefs();           // remaining (world-external) ids -> null
+	RegenIds(a, ids);                    // instances must not share the prefab's saved ids
+	Reflect_RemapPendingAtomRefs(ids);   // refs inside the subtree follow their clones
+	Reflect_ResolveAtomRefs();           // remaining world-external ids -> null
 	return a;
 }
 
@@ -2674,8 +2550,8 @@ std::string PrefabGuidFromString(const std::string& text)
 	return j.value("prefab", std::string());
 }
 
-// Script-facing prefab spawn: content bytes through the engine's layered resolution
-// (raw project or mounted pak + mods) -> reconstruct -> add to the current world root.
+// Script-facing prefab spawn: reads content through the engine's layered resolution,
+// reconstructs the subtree and adds it to the current world root.
 Atom* Prefabs::Spawn(const std::string& contentRelPath)
 {
 	AppInstance* app = AppInstance::GetSingleton();
@@ -2692,7 +2568,7 @@ Atom* Prefabs::Spawn(const std::string& contentRelPath)
 		std::cout << "[Prefab]\t\tInstantiate: '" << contentRelPath << "' is not a valid prefab" << std::endl;
 		return nullptr;
 	}
-	app->currentWorld->LockGame();   // scripts spawn mid-frame — same contract as CreateAtom
+	app->currentWorld->LockGame();   // scripts spawn mid-frame
 	app->currentWorld->Add(a);
 	app->currentWorld->UnlockGame();
 	return a;
@@ -2712,14 +2588,12 @@ Atom* LoadAtomFromString(const std::string& data)
 	json j = json::parse(data, nullptr, false);
 	if (j.is_discarded()) return nullptr;
 	Atom* a = LoadAtom(j);
-	Reflect_ResolveAtomRefs();   // AtomRef props in the restored subtree (undo/merge paths)
+	Reflect_ResolveAtomRefs();   // AtomRef props in the restored subtree
 	return a;
 }
 
-// CLONE variant (editor copy/paste/duplicate): same reconstruction, but the subtree gets FRESH
-// ids — the original stays in the world, and two atoms must never share a stable id. AtomRef
-// props that pointed inside the copied subtree follow their clones; refs to outside atoms
-// (a scene camera, a shared target) keep pointing at the originals.
+// Clone variant of LoadAtomFromString: the subtree gets fresh ids, since two atoms must never
+// share a stable id. AtomRefs inside the subtree follow their clones; external refs are kept.
 Atom* CloneAtomFromString(const std::string& data)
 {
 	if (data.empty()) return nullptr;
@@ -2739,9 +2613,8 @@ static void DeleteSubtree(Atom* a)
 {
 	if (!a) return;
 	for (Atom* c : a->children) DeleteSubtree(c);
-	// Proper teardown: components release what they own (Collider -> physics body,
-	// MeshRenderer -> material instance, ...) and every script handle into the atom
-	// (its Transform object, owned sub-objects) goes stale-safe dead before the memory does.
+	// Components must release what they own, and script handles into the atom must be dropped
+	// before the memory goes.
 	for (Component* c : a->components)
 		if (c) { c->Destroy(); Reflect_DropObject(c); delete c; }
 	a->components.clear();
@@ -2784,16 +2657,15 @@ std::string World::SaveToString()
 	json j;
 	j["type"] = "World";
 	j["version"] = 1;
-	j["name"] = name;                                     // authored world name (round-trips; see AppInstance::OpenWorld)
-	j["settings"] = {                                     // world-level render settings (shadow globals, ...)
+	j["name"] = name;
+	j["settings"] = {
 		{"shadowRes", settings.shadowRes}, {"shadowDistance", settings.shadowDistance},
 		{"shadowDepthBias", settings.shadowDepthBias}, {"shadowNormalBias", settings.shadowNormalBias},
 		{"shadowSoftness", settings.shadowSoftness}, {"frustumCull", settings.frustumCull},
 		{"gravity", { settings.gravity[0], settings.gravity[1], settings.gravity[2] }},
 		{"fixedDt", settings.fixedDt} };
-	// Game clock (6.1/6.3): capture the LIVE calendar + the pending event schedule, so a
-	// savegame resumes at the exact in-game moment with its incidents still due. Only the
-	// REAL world owns the clock — auxiliary preview worlds must never capture/clobber it.
+	// Capture the live calendar + pending event schedule so a savegame resumes at the exact
+	// in-game moment. Only the real world owns the clock; auxiliary worlds must not clobber it.
 	if (!auxiliary)
 	{
 		Time* t = Time::getSingleton();
@@ -2801,12 +2673,12 @@ std::string World::SaveToString()
 		                  {"hour", t->hour}, {"minute", t->minute}, {"sec", t->sec},
 		                  {"totalgt", t->totalgt}, {"totalgd", t->totalgd} };
 		j["events"] = Events::SaveJson();
-		Wind::SaveJson(j);   // 7.2: global wind is world state ("wind" block; omitted when windless)
+		Wind::SaveJson(j);   // "wind" block, omitted when windless
 	}
 	j["atoms"] = json::array();
 	for (Atom* atom : *hierarchy)
 	{
-		if (atom->GetName() == "Editor Camera") continue;   // editor infra, not part of the scene
+		if (atom->GetName() == "Editor Camera") continue;   // editor infra, not part of the world
 		json gj;
 		SaveAtom(atom, gj);
 		j["atoms"].push_back(gj);
@@ -2814,8 +2686,7 @@ std::string World::SaveToString()
 	return j.dump(2);
 }
 
-// Repair duplicate ids (e.g. worlds saved by the old address-based ID::generate, or prefab/duplicate
-// round-trips before the fix): atom ids must be globally unique; component ids unique within their atom.
+// Repairs duplicate ids: atom ids must be globally unique, component ids unique within an atom.
 static void FixDuplicateIds(bc::list<Atom*>& gos, std::set<unsigned long>& seenAtoms)
 {
 	for (Atom* atom : gos)
@@ -2832,19 +2703,14 @@ static void FixDuplicateIds(bc::list<Atom*>& gos, std::set<unsigned long>& seenA
 	}
 }
 
-// ---- packed-world layer merge (3.2 mods) ------------------------------------------------------
-// Two mods may each carry a copy of the SAME world (one swaps an audio track, another adds
-// a panel) — by file they'd overwrite each other, although the edits don't conflict at all.
-// So world files merge SEMANTICALLY: every layer is diffed against the BASE copy and the
-// diffs apply bottom-up. Granularity: atoms by id, components by cid inside a changed atom,
-// scalar atom fields (name/prefab/transform) individually — a layer only imposes what it
-// actually CHANGED vs the base, everything else keeps the lower layers' result. Additions
-// union; deletions apply; a true conflict (two layers changing the same thing) resolves to
-// the higher layer.
+// ---- packed-world layer merge (mods) ----
+// World files merge semantically, not by file: every layer is diffed against the base copy and
+// the diffs apply bottom-up, at atom (id), component (cid) and scalar-field granularity.
+// Additions union, deletions apply, conflicts go to the higher layer.
 namespace {
 struct MergeRec
 {
-	json atom;          // the atom object WITHOUT "children" (hierarchy tracked via parent)
+	json atom;          // the atom object without "children"; hierarchy tracked via parent
 	long parent = 0;    // 0 = world root
 	int  order  = 0;    // emit order (base order first, additions after)
 };
@@ -2864,10 +2730,9 @@ void FlattenAtoms(const json& arr, long parentId, std::map<long, MergeRec>& out,
 		if (a.contains("children")) FlattenAtoms(a["children"], id, out, counter);
 	}
 }
-// Three-way PER-FIELD object merge: impose onto `cur` ONLY the keys this layer actually
-// changed vs its baseline. `depth` recurses that many levels into nested OBJECTS — a mod
-// that touched one prop inside a component's "props" leaves every other prop to the lower
-// layers (arrays and scalars are atomic values). Shape change (non-object) = layer wins.
+// Three-way per-field object merge: imposes onto `cur` only the keys this layer changed vs
+// its baseline. `depth` recurses that many levels into nested objects; arrays and scalars are
+// atomic. A shape change to non-object makes the layer win outright.
 json MergeObject3(const json& baseO, json cur, const json& layerO, int depth)
 {
 	if (!cur.is_object() || !layerO.is_object())
@@ -2890,9 +2755,8 @@ json MergeObject3(const json& baseO, json cur, const json& layerO, int depth)
 	return cur;
 }
 
-// Apply ONE layer's atom onto the current merged atom, three-way against the base: only the
-// fields/components/PROPS the layer changed vs the base overwrite the merged state.
-// `layerName` = provenance: components the layer ADDS get tagged "__mod" (editor badge).
+// Applies one layer's atom onto the merged atom, three-way against the base. `layerName` tags
+// components the layer adds with "__mod" for provenance.
 json MergeAtomJson(const json& baseA, json cur, const json& layerA, const std::string& layerName)
 {
 	for (const char* key : { "name", "prefab" })
@@ -2902,8 +2766,7 @@ json MergeAtomJson(const json& baseA, json cur, const json& layerA, const std::s
 		if (l != b) { if (l.is_null()) cur.erase(key); else cur[key] = l; }
 	}
 	{
-		// Transform merges PER-SUBKEY (position/rotation/scale): a mod that moved an atom
-		// must not undo the base's later rescale.
+		// Transform merges per-subkey so a layer that moved an atom doesn't undo a rescale.
 		const json b = baseA.contains("transform") ? baseA["transform"] : json();
 		const json l = layerA.contains("transform") ? layerA["transform"] : json();
 		if (l != b)
@@ -2929,8 +2792,7 @@ json MergeAtomJson(const json& baseA, json cur, const json& layerA, const std::s
 			if (bC.count(cid) && !lC.count(cid)) continue;          // deleted by this layer
 			auto lit = lC.find(cid);
 			const bool changed = lit != lC.end() && (!bC.count(cid) || bC[cid] != lit->second);
-			// A changed component merges PER-PROP (depth 1 recurses into its "props" object):
-			// the layer imposes exactly the fields its author edited, nothing else.
+			// A changed component merges per-prop, so the layer imposes only edited fields.
 			comps.push_back(changed ? MergeObject3(bC.count(cid) ? bC[cid] : json(), c, lit->second, 2) : c);
 			emitted.insert(cid);
 		}
@@ -2959,8 +2821,8 @@ struct MergeState
 	std::map<long, MergeRec> atoms;
 	json settings = json::object();
 };
-// Apply ONE layer onto `cur`, three-way against `baseline` (what that layer's AUTHOR saw):
-// only what the layer changed vs its baseline lands; counters are optional (final pass).
+// Applies one layer onto `cur`, three-way against `baseline` (what that layer's author saw).
+// The counter pointers are optional.
 void ApplyLayer(MergeState& cur, const MergeState& baseline,
                 const json& Ldoc, const std::map<long, MergeRec>& lMap,
                 const std::string& layerName,
@@ -2977,7 +2839,7 @@ void ApplyLayer(MergeState& cur, const MergeState& baseline,
 		auto bit = baseline.atoms.find(kv.first);
 		if (bit == baseline.atoms.end())
 		{
-			// Added by this layer (or two layers add the same id — the higher wins).
+			// Added by this layer; if two layers add the same id the higher wins.
 			if (adds && !cur.atoms.count(kv.first)) ++*adds;
 			MergeRec r = kv.second;
 			if (!layerName.empty()) r.atom["__mod"] = layerName;   // provenance badge
@@ -3027,8 +2889,8 @@ std::string World::MergeWorldLayers(const std::vector<std::string>& layers,
 	json base = json::parse(layers[0], nullptr, false);
 	if (base.is_discarded() || !base.is_object()) return layers.back();   // unmergeable base: top wins
 
-	// Parse + flatten every layer once. A layer's additions get order slots AFTER the base
-	// block so rebuilt hierarchies keep the base order with additions appended.
+	// Parse + flatten every layer once. A layer's additions take order slots after the base
+	// block, so rebuilt hierarchies keep the base order with additions appended.
 	struct Parsed { json doc; std::map<long, MergeRec> flat; bool ok = false; };
 	std::vector<Parsed> P(layers.size());
 	int counter = 0;
@@ -3045,8 +2907,8 @@ std::string World::MergeWorldLayers(const std::vector<std::string>& layers,
 		FlattenAtoms(P[i].doc.contains("atoms") ? P[i].doc["atoms"] : json::array(), 0, P[i].flat, c);
 	}
 
-	// Recorded BASELINES: what layer i's author ACTUALLY saw at pack time (see the header).
-	// A layer with one never phantom-deletes content the base gained after it was authored.
+	// Recorded baselines: what layer i's author saw at pack time. A layer with one never
+	// phantom-deletes content the base gained after it was authored.
 	std::vector<Parsed> B(layers.size());
 	for (size_t i = 1; i < layers.size() && i < basis.size(); ++i)
 	{
@@ -3058,9 +2920,9 @@ std::string World::MergeWorldLayers(const std::vector<std::string>& layers,
 		FlattenAtoms(B[i].doc.contains("atoms") ? B[i].doc["atoms"] : json::array(), 0, B[i].flat, c);
 	}
 
-	// Transitive dependency closure per layer, ascending (mount order); base 0 implicit.
-	// A layer's diff BASELINE = the merged state of base + its dependencies — a patch-mod
-	// built on top of mods A+B must not re-impose A's and B's changes as its own.
+	// Transitive dependency closure per layer, ascending (mount order); base 0 implicit. A
+	// layer's diff baseline is base + its dependencies, so a patch built on A+B doesn't
+	// re-impose A's and B's changes as its own.
 	auto closureOf = [&](int idx) {
 		std::set<int> s;
 		std::function<void(int)> walk = [&](int i) {
@@ -3072,7 +2934,7 @@ std::string World::MergeWorldLayers(const std::vector<std::string>& layers,
 		return std::vector<int>(s.begin(), s.end());   // std::set: already ascending
 	};
 
-	// Merged state of base + an ascending index set (memoized — dependency sets repeat).
+	// Merged state of base + an ascending index set, memoized since dependency sets repeat.
 	std::map<std::string, MergeState> memo;
 	std::function<MergeState(const std::vector<int>&, int*, int*, int*)> mergeSet =
 		[&](const std::vector<int>& S, int* adds, int* changes, int* dels) -> MergeState
@@ -3093,8 +2955,7 @@ std::string World::MergeWorldLayers(const std::vector<std::string>& layers,
 			MergeState bl;
 			if (idx < (int)B.size() && B[idx].ok)
 			{
-				// The layer's own recorded basis wins over any reconstruction: the diff is
-				// exactly what its author changed, frozen at pack time.
+				// A recorded basis wins over any reconstruction: it is frozen at pack time.
 				bl.atoms = B[idx].flat;
 				if (B[idx].doc.contains("settings") && B[idx].doc["settings"].is_object())
 					bl.settings = B[idx].doc["settings"];
@@ -3113,8 +2974,8 @@ std::string World::MergeWorldLayers(const std::vector<std::string>& layers,
 	int adds = 0, changes = 0, dels = 0;
 	MergeState fin = mergeSet(all, &adds, &changes, &dels);
 
-	// Rebuild the nested hierarchy: children grouped by parent (orphans -> root), emit in
-	// (order, id) — base atoms keep their order, additions follow.
+	// Rebuild the nested hierarchy: children grouped by parent (orphans -> root), emitted in
+	// (order, id) so base atoms keep their order and additions follow.
 	std::map<long, std::vector<long>> kids;
 	std::vector<long> roots;
 	for (auto& kv : fin.atoms)
@@ -3156,8 +3017,7 @@ void World::LoadFromJson(const json& j)
 
 void World::LoadHeaderFromJson(const json& j)
 {
-	// The authored world name. Empty when the file carries none (older worlds / never named) —
-	// AppInstance::OpenWorld then fills it from the file stem so Game.GetWorld().Name is useful.
+	// Empty when the file carries no name; AppInstance::OpenWorld then fills it from the stem.
 	name = j.value("name", std::string());
 	settings = Settings{};   // defaults, then override from file
 	if (j.contains("settings") && j["settings"].is_object())
@@ -3173,10 +3033,9 @@ void World::LoadHeaderFromJson(const json& j)
 			for (int i = 0; i < 3; ++i) settings.gravity[i] = s["gravity"][i].get<float>();
 		settings.fixedDt = s.value("fixedDt", settings.fixedDt);
 	}
-	// Game clock (6.1/6.3): restore the calendar + the pending event schedule. Only the REAL
-	// world touches the global clock — auxiliary preview worlds (asset editors) skip it. A
-	// world without a calendar block (pre-6.1 or fresh) resets the schedule instead of
-	// inheriting the previous world's pending incidents.
+	// Restore the calendar + pending event schedule. Only the real world touches the global
+	// clock. A world without a calendar block resets the schedule rather than inheriting the
+	// previous world's pending incidents.
 	if (!auxiliary)
 	{
 		if (j.contains("calendar") && j["calendar"].is_object())
@@ -3192,17 +3051,15 @@ void World::LoadHeaderFromJson(const json& j)
 			Events::LoadJson(j["events"].get<std::string>());
 		else
 			Events::ResetSchedule();
-		Wind::LoadJson(j);   // 7.2: "wind" block, or defaults (windless) when absent
+		Wind::LoadJson(j);   // "wind" block, or windless defaults when absent
 	}
-	// The old atoms get a FULL teardown (Component::Destroy + delete): a leaked component
-	// keeps its module-owned resources alive — a game module's native Events subscriptions
-	// (std::functions whose CODE lives in the module DLL) then outlive the DLL and segfault
-	// the CRT teardown. Physics/audio still reset wholesale (bodies/voices re-create lazily).
-	// gameLock: the fixed thread must not step a hierarchy that is being torn down.
+	// Old atoms get a full teardown (Component::Destroy + delete): a leaked component keeps
+	// module-owned resources (e.g. std::functions whose code lives in a module DLL) alive past
+	// the DLL. The lock keeps the fixed thread off a hierarchy that is being torn down.
 	boost::recursive_mutex::scoped_lock fixedGuard(gameLock);
 	if (iPhysics* p = GetService<iPhysics>()) p->reset();
-	if (iAudio* au = GetService<iAudio>()) au->reset();   // world switch — silence game voices
-	AppInstance::GetSingleton()->selectedInHieararchy = nullptr;   // editor selection would dangle
+	if (iAudio* au = GetService<iAudio>()) au->reset();   // silence game voices
+	AppInstance::GetSingleton()->selectedInHieararchy = nullptr;   // would dangle otherwise
 	std::function<void(Atom*)> hardDestroy = [&](Atom* a)
 	{
 		if (!a) return;
@@ -3212,12 +3069,10 @@ void World::LoadHeaderFromJson(const json& j)
 		a->components.clear();
 		delete a;
 	};
-	// PERSISTENT atoms (DontDestroyOnLoad): during PLAY (player, or PIE playing/paused) a
-	// persistent ROOT atom's subtree survives the switch — live script state and all. Editor
-	// edit-mode loads never carry (world B's file must not absorb world A's atoms); a
-	// SAVEGAME load suppresses carry too (the snapshot already contains the carried atoms —
-	// keeping them would duplicate). Carried physics handles are STALE after the wholesale
-	// reset above — zero them so the fixed-step driver lazily re-creates bodies/characters.
+	// Persistent root atoms survive a switch during play, but never in editor edit mode (world
+	// B's file must not absorb world A's atoms) and never on a savegame load (the snapshot
+	// already holds them). Carried physics handles are stale after the reset above and must be
+	// zeroed so the fixed-step driver re-creates them.
 	AppInstance* app = AppInstance::GetSingleton();
 	const bool persistOk = !suppressPersistOnce && (!app->isEditor() || app->playState != 0);
 	suppressPersistOnce = false;
@@ -3229,7 +3084,7 @@ void World::LoadHeaderFromJson(const json& j)
 		if (CharacterController* cc = a->GetComponent<CharacterController>()) cc->charId = 0;
 		for (Atom* ch : a->children) healPhysics(ch);
 	};
-	for (auto it = hierarchy->begin(); it != hierarchy->end(); )   // keep editor camera + persistent, drop the rest
+	for (auto it = hierarchy->begin(); it != hierarchy->end(); )   // keep editor camera + persistent
 	{
 		if ((*it)->GetName() == "Editor Camera") { ++it; continue; }
 		if (persistOk && (*it)->persistent) { healPhysics(*it); ++carried; ++it; continue; }
@@ -3237,7 +3092,7 @@ void World::LoadHeaderFromJson(const json& j)
 	}
 	if (carried > 0)
 		std::cout << "[World]\t\t\t" << carried << " persistent atom(s) carried across the world switch" << std::endl;
-	destroyQueue.clear();   // pending deferred destroys referenced the just-freed atoms
+	destroyQueue.clear();   // its entries reference the just-freed atoms
 }
 
 Atom* World::AddAtomFromJson(const json& atomJ)
@@ -3252,16 +3107,16 @@ void World::FinalizeIncrementalLoad()
 {
 	boost::recursive_mutex::scoped_lock fixedGuard(gameLock);
 	std::set<unsigned long> seen;
-	FixDuplicateIds(*hierarchy, seen);   // heal any colliding ids from old saves / duplicates
-	Reflect_ResolveAtomRefs();           // AtomRef props: ids -> live atoms, now that everything exists
+	FixDuplicateIds(*hierarchy, seen);
+	Reflect_ResolveAtomRefs();           // ids -> live atoms, now that everything exists
 }
 
 void World::Clear()
 {
 	boost::recursive_mutex::scoped_lock fixedGuard(gameLock);   // don't tear down under the fixed thread
-	if (iPhysics* p = GetService<iPhysics>()) p->reset();   // atoms drop without Destroy — wipe bodies
-	if (iAudio* au = GetService<iAudio>()) au->reset();     // same: their voices must not outlive them
-	for (auto it = hierarchy->begin(); it != hierarchy->end(); )   // keep editor camera, drop the rest
+	if (iPhysics* p = GetService<iPhysics>()) p->reset();   // atoms drop without Destroy: wipe bodies
+	if (iAudio* au = GetService<iAudio>()) au->reset();     // and their voices
+	for (auto it = hierarchy->begin(); it != hierarchy->end(); )   // keep editor camera
 	{
 		if ((*it)->GetName() == "Editor Camera") ++it;
 		else it = hierarchy->erase(it);
@@ -3279,10 +3134,8 @@ void World::Reparent(Atom* a, Atom* newParent)
 {
 	if (!a || a == newParent) return;
 	if (newParent && (newParent == a || IsDescendantOf(newParent, a))) return;   // would create a cycle
-	// detach from current location
 	if (a->parent) a->parent->children.remove(a);
 	else           hierarchy->remove(a);
-	// attach to the new location
 	if (newParent) { newParent->children.push_back(a); a->parent = newParent; }
 	else           { hierarchy->push_back(a);          a->parent = nullptr;   }
 }
@@ -3292,10 +3145,8 @@ void World::ReparentBefore(Atom* a, Atom* sibling)
 	if (!a || !sibling || a == sibling) return;
 	Atom* newParent = sibling->parent;
 	if (newParent && (newParent == a || IsDescendantOf(newParent, a))) return;   // cycle
-	// detach a from its current location
 	if (a->parent) a->parent->children.remove(a);
 	else           hierarchy->remove(a);
-	// insert before `sibling` in the target list (sibling's parent, or the root list)
 	bc::list<Atom*>& lst = newParent ? newParent->children : *hierarchy;
 	auto it = std::find(lst.begin(), lst.end(), sibling);
 	lst.insert(it, a);

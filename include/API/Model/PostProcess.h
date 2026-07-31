@@ -20,9 +20,8 @@ struct PostEffect
 	std::map<std::string, std::array<float, 4>> props;
 };
 
-// Per-camera post-process: an ordered chain of custom post-shader effects (NOT hardcoded). Lives as a sibling
-// Component of Camera on the same atom; World::Render runs only the chain of the camera on that atom. The
-// effect list is stored on disk in the hidden `effectsData` JSON field; `effects` is the runtime form.
+// Per-camera post-process: an ordered chain of custom post-shader effects. Sibling Component of
+// Camera; World::Render runs only the chain of the camera on that atom.
 class NUKEENGINE_API PostProcess : public Component
 {
 	NUKE_CLASS(PostProcess, Component, "Rendering")

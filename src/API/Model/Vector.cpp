@@ -479,9 +479,7 @@ Quaternion Quaternion::operator - (const Quaternion& q)
 
 Quaternion Quaternion::operator * (const Quaternion& q)
 {
-	// Hamilton product. NOTE: the constructor takes (x, y, z, w) — W goes LAST.
-	// It used to be passed FIRST, silently turning every quaternion product into
-	// garbage (identity * identity came out as a 180-degree X flip).
+	// Hamilton product. The constructor takes (x, y, z, w) — W goes LAST.
 	return Quaternion(
 		w * q.x + x * q.w + y * q.z - z * q.y,
 		w * q.y + y * q.w + z * q.x - x * q.z,
@@ -547,8 +545,7 @@ bool  Quaternion::operator == (const Quaternion& q)
 
 Quaternion Quaternion::scale(double  s)
 {
-	// NOTE: the ctor is (x, y, z, w) — these used to pass (w, x, y, z) and permuted
-	// the components (scale/conjugate/inverse/UnitQuaternion all returned garbage).
+	// Ctor component order is (x, y, z, w).
 	return Quaternion(x * s, y * s, z * s, w * s);
 }
 
@@ -577,8 +574,7 @@ Quaternion Quaternion::UnitQuaternion()
 	return (*this).scale(1 / (*this).magnitude());
 }
 
-// ---- Rotation utilities (glm-backed; conventions shared with Transform:
-// degrees, euler order XYZ, forward = +Z) -------------------------------------------------
+// Rotation utilities (glm-backed). Conventions shared with Transform: degrees, euler order XYZ, forward = +Z.
 
 static glm::quat QToGlm(const Quaternion& q) { return glm::quat((float)q.w, (float)q.x, (float)q.y, (float)q.z); }
 static Quaternion QFromGlm(const glm::quat& g) { return Quaternion(g.x, g.y, g.z, g.w); }
@@ -601,7 +597,7 @@ Quaternion Quaternion::FromAxisAngle(const Vector3& axis, double deg)
 {
 	glm::vec3 a((float)axis.x, (float)axis.y, (float)axis.z);
 	float len = glm::length(a);
-	if (len < 1e-12f) return Quaternion();   // degenerate axis -> identity
+	if (len < 1e-12f) return Quaternion();
 	return QFromGlm(glm::angleAxis(glm::radians((float)deg), a / len));
 }
 
@@ -610,7 +606,7 @@ Quaternion Quaternion::LookRotation(const Vector3& forward, const Vector3& up)
 	glm::vec3 f((float)forward.x, (float)forward.y, (float)forward.z);
 	glm::vec3 u((float)up.x, (float)up.y, (float)up.z);
 	float fl = glm::length(f);
-	if (fl < 1e-12f) return Quaternion();    // no direction -> identity
+	if (fl < 1e-12f) return Quaternion();
 	f /= fl;
 	if (glm::length(glm::cross(f, u)) < 1e-6f)   // up (near-)parallel to forward -> new hint
 		u = (fabsf(f.y) < 0.99f) ? glm::vec3(0, 1, 0) : glm::vec3(0, 0, 1);

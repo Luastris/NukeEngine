@@ -21,10 +21,9 @@ struct ShaderProp
 	bool        isColor    = false;            // `// @color` annotation -> inspector shows a (HDR) color picker, not a vector
 };
 
-// A shader asset: a VS + PS source pair (HLSL). Loaded from "<name>.vs.hlsl" + "<name>.ps.hlsl"
-// pairs in two roots — the engine's built-in `shaders/` and the project's content folder.
-// Materials reference one by GUID (default = the engine "world" shader). The renderer will
-// build a pipeline per shader (next step); for now these are registered as ResDB assets.
+// A shader asset: a VS + PS HLSL source pair, loaded from "<name>.vs.hlsl" + "<name>.ps.hlsl"
+// in the engine's built-in `shaders/` and the project content folder. Materials reference one
+// by GUID (default = the engine "world" shader).
 class NUKEENGINE_API Shader
 {
 	// Reflected ASSET class (scripts look shaders up by name and assign them to materials).
@@ -42,14 +41,14 @@ public:
 
 	// Build a Shader from a VS/PS file pair. Returns nullptr if either file can't be read.
 	static Shader* LoadPair(const std::string& name, const std::string& vsPath, const std::string& psPath);
-	// Build a POST-process effect shader from a single fullscreen ".post.hlsl" pixel shader (the renderer
-	// pairs it with the built-in post.vs). Params come from its `cbuffer PostParams { ... }`.
+	// Build a POST effect shader from a single fullscreen ".post.hlsl" PS (paired with the built-in
+	// post.vs); params come from its `cbuffer PostParams`.
 	static Shader* LoadPostShader(const std::string& name, const std::string& psPath);
 	// Packed content (3.2): construct from source text (pak entries; no hot-reload paths).
 	static Shader* FromSources(const std::string& name, const std::string& vsSrc, const std::string& psSrc);
 	static Shader* PostFromSource(const std::string& name, const std::string& psSrc);
-	// Parse a named `cbuffer` block of a pixel shader into ShaderProp entries (engine-side reflection from
-	// source text). For MatCB the standard lit fields (g_Color/g_Params/...) are excluded.
+	// Parse a named `cbuffer` block of a pixel shader into ShaderProp entries. For MatCB the
+	// standard lit fields (g_Color/g_Params/...) are excluded.
 	static void ParseCBProps(const std::string& psSource, const char* cbName, std::vector<ShaderProp>& out);
 	static void ParseMatCBProps(const std::string& psSource, std::vector<ShaderProp>& out) { ParseCBProps(psSource, "MatCB", out); }
 };

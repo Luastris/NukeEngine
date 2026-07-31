@@ -1,6 +1,5 @@
-// Bloom — a BUILT-IN multi-pass post effect (bright-pass -> separable blur -> composite). This file only
-// declares the params (shown in the inspector) and marks the chain stage as "bloom"; the renderer runs the
-// actual passes (its main() here is just a passthrough and is never used for the effect).
+// Bloom: a built-in multi-pass effect (bright-pass -> separable blur -> composite) run by the renderer.
+// This file only declares the params and registers the chain stage; main() below is an unused passthrough.
 Texture2D    g_Source;
 SamplerState g_Source_sampler;
 cbuffer PostParams

@@ -1,44 +1,33 @@
-// World (3D) pass — pixel shader. Metallic-roughness PBR (Cook-Torrance), multiple scene lights
-// (directional / point / spot), base-color + normal maps. The "universal" lit shader.
-//
-// MatCB:  g_Color    = base color (rgba)
-//         g_Params   = (hasBaseTex, hasNormalTex, metallic, roughness)
-//         g_Params2  = (hasMetalRoughTex, hasOcclusionTex, hasEmissiveTex, specularFactor)
-//         g_Emissive2 = (emissive rgb, emissive intensity)  (texture g_Emissive is separate)
+// World (3D) lit pixel shader: metallic-roughness PBR, directional/point/spot lights, base-color + normal maps.
+// MatCB packing: g_Params = (hasBaseTex, hasNormalTex, metallic, roughness); g_Params2 = (hasMR, hasAO, hasEmissive, specularFactor); g_Emissive2 = (rgb, intensity).
 cbuffer MatCB { float4 g_Color; float4 g_Params; float4 g_Params2; float4 g_Emissive2; };
 
-#define MAX_LIGHTS 256   // per-particle light sources (VFX) need a real budget; unattenuated lights early-out
+#define MAX_LIGHTS 256   // must match the renderer's FrameCB light array
 struct Light { float4 posType; float4 dirRange; float4 colorIntensity; float4 spot; };
 #define MAX_SHADOWS 4
-// FrameCB: per-camera lighting. g_CamPos.xyz; g_Ambient = (rgb, intensity); g_LightCount.x = count.
-// g_ShadowVP[slot] = world->light-clip per shadow map; g_ShadowParams = (slotCount, _, texelSize, bias).
-// A light carries its shadow slot (or -1) in Light.spot.z.
+// Per-camera lighting. g_Ambient = (rgb, intensity); g_ShadowParams = (slotCount, normalOffset, texelSize, depthBias).
+// A light's shadow slot (or -1) lives in Light.spot.z (2D) / spot.w (cube).
 cbuffer FrameCB
 {
     float4 g_CamPos; float4 g_Ambient; float4 g_LightCount; Light g_Lights[MAX_LIGHTS];
     float4x4 g_ShadowVP[MAX_SHADOWS]; float4 g_ShadowParams;
-    // Procedural-sky IBL: gradient colours + g_SkyParams = (skyIntensity, hasSky, tonemapInShader, _).
+    // g_SkyParams = (skyIntensity, hasSky, tonemapInShader, tonemapWhite).
     float4 g_SkyTop; float4 g_SkyHorizon; float4 g_SkyGround; float4 g_SkyParams;
-    // Reflection probe: g_ProbePos = (pos.xyz, active); g_ProbeParams = (intensity, maxMip, _, _);
-    // g_ProbeBox = (boxHalf.xyz, parallaxValid) — parallax-correct the cubemap to a box centred on g_ProbePos.
+    // g_ProbePos = (pos.xyz, active); g_ProbeParams = (intensity, maxMip, _, _); g_ProbeBox = (boxHalf.xyz, parallaxValid).
     float4 g_ProbePos; float4 g_ProbeParams; float4 g_ProbeBox;
-    // Wind (7.2): g_Wind = (dir.xyz, gusted strength m/s); g_Wind2 = (turbulence amount,
-    // 1/turbulence scale, time, gust frequency). Consumed by vertex-bend shaders (foliage/
-    // VFX/custom NUKE_INSTANCED materials); the base world shader leaves it untouched.
+    // g_Wind = (dir.xyz, strength m/s); g_Wind2 = (turbulence, 1/turbScale, time, gustFreq); read by vertex-bend shaders.
     float4 g_Wind; float4 g_Wind2;
 };
 TextureCube  g_Probe;          // scene-captured reflection cubemap (when g_ProbePos.w > 0.5)
 SamplerState g_Probe_sampler;
 
-// Per-draw flags, written by the renderer before every object draw. x = receiveShadows:
-// 0 -> this surface ignores ALL shadowing (RT and shadow-map alike), stays fully lit.
+// g_DrawFlags.x = receiveShadows (0 -> surface ignores all shadowing).
 cbuffer DrawFlagsCB { float4 g_DrawFlags; };
 
-#ifdef RT_ENABLED   // D3D12 + DXR: inline ray-traced shadows (RayQuery, SM6.5) — replaces the shadow maps
+#ifdef RT_ENABLED   // D3D12 + DXR: inline ray-traced shadows (RayQuery, SM6.5) instead of shadow maps
 RaytracingAccelerationStructure g_TLAS;
-// BYTE-MIRROR of the renderer's RTInstanceData (96 bytes; only shadowShape/shadowAlpha read
-// here -- the other rows are typed loosely to keep the stride right). Change together with
-// NukeDiligentImpl.h + rt_common.hlsl.
+// BYTE-MIRROR of the renderer's RTInstanceData (96 bytes); only shadowShape/shadowAlpha are read here,
+// the rest is typed loosely to keep the stride. Change with NukeDiligentImpl.h + rt_common.hlsl.
 struct RTInstInfo
 {
     uint4  offs;          // nrmOffset, uvOffset, posOffset, matByteOffset
@@ -49,26 +38,22 @@ struct RTInstInfo
     uint   colOffset; uint shadowShape; float shadowAlpha; uint pad0;
 };
 StructuredBuffer<RTInstInfo> g_RTInst;
-// 1 = lit, 0 = occluded. Traces from the (biased) surface point toward the light; first opaque hit = shadowed.
+// Ray-traced shadow toward a light: 1 = lit, 0 = occluded.
 float RTShadow(float3 origin, float3 L, float maxDist)
 {
     RayDesc ray; ray.Origin = origin; ray.Direction = L; ray.TMin = 0.02; ray.TMax = maxDist;
     RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> q;
-    // Mask 0x02 = the shadow-caster bit of the TLAS instance mask: objects with Cast Shadows
-    // off are transparent to direct shadow rays (they may still appear in reflections, 0x01).
+    // 0x02 = shadow-caster bit of the TLAS instance mask (0x01 = visible in reflections).
     q.TraceRayInline(g_TLAS, RAY_FLAG_NONE, 0x02, ray);
-    // Opaque geometry commits through the fast path. NON-OPAQUE candidates are PARTICLE
-    // QUADS (canonical vertex order, two triangles per quad): each instance declares its
-    // shadow FOOTPRINT — full quad (stretched sprites), disc (round billboards) or a strip
-    // across u (trail ribbons) — plus an alpha gate. Analytic UV from the primitive parity
-    // + barycentrics; no texture fetch here (the bindless maps live only in the RT pipeline).
+    // Non-opaque candidates are particle quads: shadowShape selects the footprint (0 quad / 1 disc / 2 strip
+    // across u). UV is derived analytically from primitive parity + barycentrics; bindless maps are RT-only.
     while (q.Proceed())
         if (q.CandidateType() == CANDIDATE_NON_OPAQUE_TRIANGLE)
         {
             RTInstInfo inst = g_RTInst[q.CandidateInstanceID()];
             float2 bc = q.CandidateTriangleBarycentrics();
             float  w0 = 1.0 - bc.x - bc.y;
-            // even tri = (0,1)(1,1)(1,0), odd tri = (0,1)(1,0)(0,0) — the quad builder's UVs
+            // Quad builder's vertex order: even tri = (0,1)(1,1)(1,0), odd tri = (0,1)(1,0)(0,0)
             float2 uv = (q.CandidatePrimitiveIndex() & 1)
                       ? float2(0.0, 1.0) * w0 + float2(1.0, 0.0) * bc.x
                       : float2(0.0, 1.0) * w0 + float2(1.0, 1.0) * bc.x + float2(1.0, 0.0) * bc.y;
@@ -81,7 +66,7 @@ float RTShadow(float3 origin, float3 L, float maxDist)
 }
 #endif
 
-// Procedural sky colour for a world direction (matches sky.ps) — used for image-based lighting.
+// Procedural sky colour for a world direction, used for image-based lighting. Must match sky.ps.
 float3 SkyColor(float3 dir)
 {
     float up = dir.y;
@@ -92,9 +77,8 @@ float3 SkyColor(float3 dir)
 Texture2DArray          g_Shadow;
 SamplerComparisonState  g_Shadow_sampler;
 
-// Shadow factor (1 = lit, 0 = fully shadowed) for a light's shadow-map slot, with 3x3 PCF.
-// ndl = saturate(N.L) of the receiver: grazing surfaces (thin grass blades edge-on to the
-// sun) get a SLOPE-SCALED depth bias — a flat bias either acnes there or peter-pans everywhere.
+// Shadow factor (1 = lit, 0 = shadowed) for a light's 2D shadow-map slot, 3x3 PCF.
+// ndl = saturate(N.L) of the receiver, used to slope-scale the depth bias.
 float SampleShadow(float3 wpos, int slot, float ndl)
 {
     if (slot < 0) return 1.0;
@@ -113,8 +97,8 @@ float SampleShadow(float3 wpos, int slot, float ndl)
 TextureCubeArray        g_ShadowCube;
 SamplerComparisonState  g_ShadowCube_sampler;
 
-// Point-light shadow: sample the cube by world->light direction; reconstruct the perspective ZO depth
-// from the major-axis distance (the depth the cube face actually stored).
+// Point-light shadow: sample the cube by world->light direction, reconstructing the perspective
+// zero-to-one depth the cube face stored from the major-axis distance.
 float SamplePointShadow(float3 wpos, float3 lpos, int cube, float farZ)
 {
     if (cube < 0) return 1.0;
@@ -127,11 +111,8 @@ float SamplePointShadow(float3 wpos, float3 lpos, int cube, float farZ)
     return g_ShadowCube.SampleCmpLevelZero(g_ShadowCube_sampler, float4(dir, (float)cube), ndc);
 }
 
-// One shared sampler for every map (g_Tex_sampler). FXC merges identical samplers anyway, and a single
-// combined sampler keeps Diligent's combined-texture-sampler reflection happy (no "unassigned" warnings).
-// Combined-texture-sampler mode is ON (UseCombinedTextureSamplers) -> strict on D3D12: each texture MUST be sampled
-// through its OWN "<name>_sampler". Sharing g_Tex_sampler across maps breaks their sampler binding (normal/MR/AO/
-// emissive/spec read wrong -> no relief). One SamplerState per texture, one immutable sampler each in the PSO.
+// UseCombinedTextureSamplers is ON: each texture MUST be sampled through its own "<name>_sampler",
+// one SamplerState per texture and one immutable sampler each in the PSO.
 Texture2D    g_Tex;          SamplerState g_Tex_sampler;         // base color
 Texture2D    g_Normal;       SamplerState g_Normal_sampler;      // tangent-space normal map
 Texture2D    g_MetalRough;   SamplerState g_MetalRough_sampler;  // G = roughness, B = metallic (glTF)
@@ -139,8 +120,8 @@ Texture2D    g_Occlusion;    SamplerState g_Occlusion_sampler;   // R = ambient 
 Texture2D    g_Emissive;     SamplerState g_Emissive_sampler;    // emissive color
 Texture2D    g_Spec;         SamplerState g_Spec_sampler;        // specular reflectance (KHR); white = 0.04 F0
 
-// NUKE_INSTANCED (7.1): per-instance tint + custom float4 arrive as extra interpolants
-// (must mirror world.vs's instanced PSIn exactly); the tint multiplies the base color.
+// NUKE_INSTANCED opt-in: per-instance tint + custom float4 arrive as extra interpolants.
+// This struct must mirror world.vs's instanced PSIn exactly.
 #if NUKE_INSTANCED
 struct PSIn { float4 pos : SV_POSITION; float3 wpos : TEXCOORD0; float3 nrm : TEXCOORD1; float2 uv : TEXCOORD2;
               float4 icol : TEXCOORD3; float4 icustom : TEXCOORD4; };
@@ -164,19 +145,16 @@ float GeometrySmith(float3 N, float3 V, float3 L, float rough)
     float k = (rough + 1.0); k = k * k / 8.0;
     return GeometrySchlick(max(dot(N, V), 0.0), k) * GeometrySchlick(max(dot(N, L), 0.0), k);
 }
-// Tangent-space normal mapping WITHOUT mesh tangents — cotangent frame from screen-space derivatives (Schüler).
-// MUST use the world-space POSITION gradient (ddx(wpos)); the derivative of the *normalized* view vector loses the
-// radial component and collapses the frame -> normal maps add almost no relief. `wpos` = interpolated world position.
-// Derivatives (dp*/du*) are computed by the CALLER in main() and passed in — ddx/ddy MUST be evaluated where the
-// interpolated input is directly in scope; taking them inside a helper on a passed-in parameter miscompiles to zero
-// on DXC (the tangent frame collapses -> normal map has no effect). `dp1/dp2` = ddx/ddy of world pos, `du1/du2` = of uv.
+// Tangent-space normal mapping without mesh tangents: cotangent frame from screen-space derivatives.
+// dp1/dp2 = ddx/ddy of WORLD POSITION, du1/du2 = ddx/ddy of uv. They must be taken by the caller where the
+// interpolated input is in scope: ddx/ddy on a passed-in parameter miscompiles to zero on DXC.
 float3 PerturbNormal(float3 N, float3 n, float3 dp1, float3 dp2, float2 du1, float2 du2)
 {
     float3 dp2p = cross(dp2, N), dp1p = cross(N, dp1);
     float3 T = dp2p * du1.x + dp1p * du2.x;
     float3 B = dp2p * du1.y + dp1p * du2.y;
-    float inv = rsqrt(max(max(dot(T, T), dot(B, B)), 1e-20));   // tiny floor = div-by-zero guard ONLY; 1e-8 neutered
-    return normalize(T * (inv * n.x) + B * (inv * n.y) + N * n.z);   //   small tangent frames (fine texel/world ratio) -> flat
+    float inv = rsqrt(max(max(dot(T, T), dot(B, B)), 1e-20));   // floor is a div-by-zero guard only; 1e-8 flattens fine tangent frames
+    return normalize(T * (inv * n.x) + B * (inv * n.y) + N * n.z);
 }
 
 float4 main(in PSIn i) : SV_Target
@@ -196,12 +174,12 @@ float4 main(in PSIn i) : SV_Target
         rough = clamp(m.g, 0.04, 1.0); metallic = saturate(m.b);
     }
 
-    float3 specF = g_Params2.w * g_Spec.Sample(g_Spec_sampler, i.uv).rgb;   // KHR specular: factor × spec map (white default)
+    float3 specF = g_Params2.w * g_Spec.Sample(g_Spec_sampler, i.uv).rgb;   // KHR specular: factor x spec map
 
     float3 V = normalize(g_CamPos.xyz - i.wpos);
     float3 N = normalize(i.nrm);
-    // Normal map. g_Params.y encodes: 0 = none; >0 = present, OpenGL(+Y, flip green); <0 = present, DirectX (no flip).
-    // Sample RG only + reconstruct Z = sqrt(1-x^2-y^2): format-agnostic (BC5 stores no Z; also fine for BC1/BC3).
+    // g_Params.y: 0 = no normal map; >0 = OpenGL green (+Y, flip); <0 = DirectX green (no flip).
+    // RG only + reconstructed Z, so BC5 (which stores no Z) works.
     if (abs(g_Params.y) > 0.5)
     {
         float2 nxy = g_Normal.Sample(g_Normal_sampler, i.uv).rg * 2.0 - 1.0;
@@ -240,14 +218,12 @@ float4 main(in PSIn i) : SV_Target
             }
         }
         float ndl = max(dot(N, L), 0.0);
-        if (ndl <= 0.0 || atten <= 1e-6) continue;   // out of range / facing away: free skip (256-light budget)
+        if (ndl <= 0.0 || atten <= 1e-6) continue;
         float3 H = normalize(V + L);
         float3 radiance = lt.colorIntensity.rgb * lt.colorIntensity.w * atten;
-        if (g_DrawFlags.x > 0.5)   // receiveShadows: off -> the surface stays fully lit
+        if (g_DrawFlags.x > 0.5)   // receiveShadows
         {
 #ifdef RT_ENABLED
-            // RT shadows: ray-query toward the light. Vegetation sways here too — the renderer
-            // bends the foliage BLAS with the NukeBend compute (bend.cs) and refits it per frame.
             bool casts = (type > 0.5 && type < 1.5) ? ((int)lt.spot.w >= 0) : ((int)lt.spot.z >= 0);
             if (casts)
             {
@@ -279,27 +255,25 @@ float4 main(in PSIn i) : SV_Target
         if (g_ProbePos.w > 0.5)   // reflection probe captured the actual scene -> sample it
         {
             float mm = g_ProbeParams.y;
-            // Parallax (box) correction: intersect the reflection ray with the probe's box volume and sample by the
-            // direction from the probe centre to that hit -> reflections anchor to the geometry (match SSR), instead
-            // of "reflection at infinity" that slides with the probe position.
+            // Box-parallax correction: intersect R with the probe box and sample by probe-centre -> hit direction.
             float3 Rp = R;
             if (g_ProbeBox.w > 0.5)
             {
                 float3 c = g_ProbePos.xyz;
-                float3 invR = 1.0 / R;                       // inf on axis-aligned rays is fine (min/max picks the finite plane)
+                float3 invR = 1.0 / R;                       // inf on axis-aligned rays is fine: min/max picks the finite plane
                 float3 t1 = (c + g_ProbeBox.xyz - i.wpos) * invR;
                 float3 t2 = (c - g_ProbeBox.xyz - i.wpos) * invR;
                 float3 tmax = max(t1, t2);
                 float  t = min(min(tmax.x, tmax.y), tmax.z);
                 Rp = (i.wpos + R * t) - c;
             }
-            env = g_Probe.SampleLevel(g_Probe_sampler, Rp, saturate(rough) * mm).rgb * g_ProbeParams.x;  // specular (rough -> higher mip)
-            irr = g_Probe.SampleLevel(g_Probe_sampler, N, mm).rgb * g_ProbeParams.x;                     // diffuse (top mip)
+            env = g_Probe.SampleLevel(g_Probe_sampler, Rp, saturate(rough) * mm).rgb * g_ProbeParams.x;
+            irr = g_Probe.SampleLevel(g_Probe_sampler, N, mm).rgb * g_ProbeParams.x;
         }
         else
         {
-            irr = SkyColor(N);                                                 // analytic diffuse environment
-            env = lerp(SkyColor(R), avg, rough);                              // analytic specular env
+            irr = SkyColor(N);
+            env = lerp(SkyColor(R), avg, rough);
         }
         float3 Fr  = F0 + (max(float3(1.0 - rough, 1.0 - rough, 1.0 - rough), F0) - F0) * pow(1.0 - ndv, 5.0);
         float3 kd  = (1.0 - Fr) * (1.0 - metallic);
@@ -307,17 +281,15 @@ float4 main(in PSIn i) : SV_Target
     }
     else
         ambient = g_Ambient.rgb * g_Ambient.w * albedo * ao;                   // flat ambient (no sky)
-    // Emissive: color * intensity, modulated by the emissive map when present. No magic defaults — black emissive
-    // color means no emission even with a map (so emission stays fully script/artist-controlled).
     float3 emissive = g_Emissive2.rgb * g_Emissive2.w;
     if (g_Params2.z > 0.5) emissive *= g_Emissive.Sample(g_Emissive_sampler, i.uv).rgb;
     float3 color = ambient + Lo + emissive;
 
-    // HDR on (g_SkyParams.z == 0): output LINEAR HDR; the post pass tonemaps. HDR off (== 1): tonemap here.
+    // g_SkyParams.z == 0: emit linear HDR and let the post pass tonemap; == 1: tonemap here.
     if (g_SkyParams.z > 0.5)
     {
-        float W = (g_SkyParams.w > 1e-3) ? g_SkyParams.w : 1.0;   // tonemap white point (g_SkyParams.w) -> fully-lit white reads white
-        color = color * (1.0 + color / (W * W)) / (1.0 + color);  // extended Reinhard: REACHES 1.0 at color==W (plain Reinhard never did)
+        float W = (g_SkyParams.w > 1e-3) ? g_SkyParams.w : 1.0;   // tonemap white point
+        color = color * (1.0 + color / (W * W)) / (1.0 + color);  // extended Reinhard
         color = pow(max(color, 0.0), 1.0 / 2.2);                  // linear -> sRGB
     }
     return float4(color, base.a);

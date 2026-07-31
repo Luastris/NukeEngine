@@ -7,7 +7,6 @@
 namespace nuke {
 
 // No-op backend used when none is registered (edit mode, or NukeGUI not loaded).
-// The v2 virtuals already default to no-ops in iGUI itself.
 struct NullGUI : iGUI
 {
 	bool Begin(const char*) override { return false; }
@@ -45,7 +44,7 @@ double Gui::Slider(const std::string& label, double value, double lo, double hi)
 	return v;
 }
 
-// --- v2 widgets (2.5) -------------------------------------------------------------------
+// --- v2 widgets -------------------------------------------------------------------------
 std::string Gui::Input(const std::string& label, const std::string& value)
 {
 	char buf[1024];
@@ -56,8 +55,7 @@ std::string Gui::Input(const std::string& label, const std::string& value)
 	return std::string(buf);
 }
 
-// Split ';'-separated items into a c-string array the seam takes (kept simple: a combo
-// is a handful of entries, per-frame rebuild is nothing).
+// Split ';'-separated items into the c-string array the seam takes; `keep` owns the strings.
 static std::vector<const char*> SplitItems(const std::string& items, std::vector<std::string>& keep)
 {
 	keep.clear();

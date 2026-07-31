@@ -20,9 +20,8 @@ template<> struct NukeEnumInfo<SpriteMode>
 	static void Register() { Reflect_RegisterEnum("SpriteMode", { "Plane", "Billboard" }); }
 };
 
-// A textured quad in the world — a 2D sprite. Plane mode lies in the atom's transform (for 2D
-// games and a Canvas); Billboard mode always faces the camera (effects, particles). Drawn unlit
-// and alpha-blended after the opaque geometry (transparent, depth-tested). Sibling of a Transform.
+// A textured quad in the world. Plane mode lies in the atom's transform; Billboard mode always
+// faces the camera. Drawn unlit and alpha-blended after the opaque geometry (depth-tested).
 class NUKEENGINE_API Sprite : public Component
 {
 	NUKE_CLASS(Sprite, Component, "UI & 2D")
@@ -38,8 +37,8 @@ public:
 	[[nuke::prop(label="Flip Y")]] bool flipY = false;
 	// (nine-slice lives ON THE TEXTURE — Texture::nineSlice + slice borders, set in the slicer.)
 
-	// Runtime UV region [u0,v0,u1,v1] within the texture — full frame by default. Sprite animation
-	// (SpriteAnimator) drives this to show atlas cells. Not serialized (comes from the frame/anim).
+	// Runtime UV region within the texture (full frame by default), driven by SpriteAnimator.
+	// Not serialized.
 	float u0 = 0.0f, v0 = 0.0f, u1 = 1.0f, v1 = 1.0f;
 	Texture* tex = nullptr;   // resolved from textureGuid by World::Render (via ResDB)
 

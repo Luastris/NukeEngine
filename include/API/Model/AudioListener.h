@@ -7,10 +7,8 @@
 
 namespace nuke {
 
-// Marks the atom whose pose spatial audio is heard from. DATA ONLY — World::Render picks
-// the first enabled listener each frame and pushes its transform into the audio service;
-// without one, the active camera is the listener (the usual case — add this component
-// only when the ears must differ from the eyes, e.g. a third-person character).
+// Marks the atom whose pose spatial audio is heard from. DATA ONLY — World::Render picks the
+// first enabled listener each frame; without one the active camera is the listener.
 class NUKEENGINE_API AudioListener : public Component
 {
 	NUKE_CLASS(AudioListener, Component, "Audio")

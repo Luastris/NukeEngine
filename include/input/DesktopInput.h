@@ -6,11 +6,9 @@
 namespace nuke {
 class iRender;
 
-// Built-in keyboard + mouse input provider. Chains the renderer's neutral input callbacks
-// (iRender::_UIkey/_UImouse/_UImove/_UImouseWheel — GLFW event codes, no GLFW linkage needed here) and
-// feeds them into the Input system as string controls: "Key.W", "Key.LeftCtrl"/"Key.Ctrl", "Mouse.Left",
-// "Mouse.X/Y", "Mouse.DeltaX/Y", "Mouse.ScrollY". Call ONCE at host startup AFTER the UI is mounted (it
-// preserves whatever callbacks the UI installed). Gamepads/wheels/touch come from separate providers.
+// Install the built-in keyboard + mouse provider: chains the renderer's neutral input callbacks and
+// feeds them to Input as string controls ("Key.W", "Mouse.Left", "Mouse.DeltaX", "Mouse.ScrollY", ...).
+// Call ONCE at host startup AFTER the UI is mounted — it preserves the UI's existing callbacks.
 NUKEENGINE_API void InstallDesktopInput(iRender* render);
 
 }  // namespace nuke

@@ -1,11 +1,6 @@
-// NUPAK container + layered content resolver (roadmap 3.2). See Package.h for the design.
-//
-// On-disk layout (little-endian):
-//   header: char magic[6] = "NUPAK1"; uint16 flags = 0; uint64 tocOffset;
-//   ...entry payloads (raw or compressed)...
-//   TOC at tocOffset: uint32 count; per entry:
-//     uint16 pathLen; char path[pathLen] (utf8, '/');
-//     uint8 method; uint64 offset; uint64 rawSize; uint64 packSize; uint32 crc32(raw);
+// On-disk layout (little-endian): magic[6]="NUPAK1", uint16 flags, uint64 tocOffset, payloads, then
+// TOC = uint32 count + per entry uint16 pathLen, path (utf8 '/'), uint8 method,
+// uint64 offset/rawSize/packSize, uint32 crc32(raw).
 #include "API/Model/Package.h"
 #include <boost/filesystem.hpp>
 #include <boost/filesystem/fstream.hpp>
@@ -240,8 +235,6 @@ static boost::mutex gPakLock;
 
 bool Package::Mount(const std::string& pakPath, int priority)
 {
-	// Distinct diagnostics: a wrong PATH (the common config typo) must not read as a
-	// corrupt package.
 	boost::system::error_code fec;
 	if (!bfs::exists(bfs::path(pakPath), fec))
 	{
@@ -288,8 +281,7 @@ const std::string& Package::RawRoot() { return gRawRoot; }
 
 bool Package::Read(const std::string& rel, std::string& out)
 {
-	// The RAW layer wins over mounts: it is the developer/modder OVERLAY (their edits sit
-	// on top of the read-only base pak). A packed runtime simply has no raw root.
+	// The RAW layer wins over mounts: it is the dev/modder overlay (a packed runtime has no raw root).
 	if (!gRawRoot.empty())
 	{
 		boost::system::error_code ec;
@@ -304,16 +296,14 @@ bool Package::Read(const std::string& rel, std::string& out)
 			const MountLayer& m = gMounts[i];
 			auto it = m.byKey.find(k);
 			if (it == m.byKey.end()) continue;
-			// OVERRIDE visibility: a layer above the base serving a path a LOWER layer also
-			// carries = game data silently replaced by a mod. Say it ONCE per path — every
-			// "my world/components vanished" hunt starts at this line.
+			// Warn ONCE per path when a layer above the base shadows a path a lower layer also carries.
 			if (m.priority > 0)
 				for (size_t j = i + 1; j < gMounts.size(); ++j)
 					if (gMounts[j].byKey.count(k))
 					{
 						static std::set<std::string> warned;
 						if (warned.insert(k).second)
-							cout << "[Package]\t'" << rel << "' OVERRIDDEN by: "   // a mod OR a DLC layer
+							cout << "[Package]\t'" << rel << "' OVERRIDDEN by: "
 							     << bfs::path(m.pakPath).stem().string() << endl;
 						break;
 					}
@@ -362,7 +352,7 @@ const char* Package::CurrentPlatform()
 #endif
 }
 
-// Empty list = runs anywhere; otherwise the current platform tag must be listed.
+// Empty list = runs anywhere; otherwise the current platform must be listed.
 static bool PlatformListOk(const std::vector<std::string>& platforms)
 {
 	if (platforms.empty()) return true;
@@ -396,7 +386,7 @@ int Package::MountDlcs(const std::string& gameRoot, const std::string& baseName)
 	std::vector<std::string> paks;
 	for (bfs::directory_iterator it(dir, ec), end; it != end && !ec; it.increment(ec))
 		if (it->path().extension() == ".nupak") paks.push_back(it->path().string());
-	std::sort(paks.begin(), paks.end());   // deterministic load order: filename
+	std::sort(paks.begin(), paks.end());   // deterministic load order
 	auto lower = [](std::string s) { for (char& c : s) c = (char)tolower((unsigned char)c); return s; };
 	int prio = 1, mounted = 0;   // above the base (0), below the mods (1000+)
 	for (const std::string& p : paks)
@@ -408,8 +398,7 @@ int Package::MountDlcs(const std::string& gameRoot, const std::string& baseName)
 			cout << "[Package]\tdlc skipped (no dlc manifest): " << fn << endl;
 			continue;
 		}
-		// A DLC belongs to ONE game: its recorded base must match the mounted base pak's name.
-		// Legacy bases have no name — then the folder placement is the only binding we have.
+		// A DLC belongs to ONE game; legacy bases carry no name, so folder placement is the only binding.
 		if (!pi.base.empty() && !baseName.empty() && lower(pi.base) != lower(baseName))
 		{
 			cout << "[Package]\tdlc '" << pi.name << "' is for '" << pi.base
@@ -429,8 +418,6 @@ int Package::MountDlcs(const std::string& gameRoot, const std::string& baseName)
 
 int Package::MountMods(const std::string& gameRoot)
 {
-	// The PLAYER's list: config/mods.json. Editor sessions never call this — they mount
-	// their own explicit selection through MountModList below.
 	bfs::path root(gameRoot);
 	bfs::ifstream mf(root / "config" / "mods.json");
 	if (!mf) return 0;
@@ -452,8 +439,7 @@ int Package::MountModList(const std::string& gameRoot, const std::vector<std::st
 	for (const std::string& mp : entries)
 	{
 		boost::system::error_code ec;
-		// Tolerant resolution: as written (absolute or game-root-relative), then under
-		// mods/, then mods/<filename> — a bare name in the config is the common way.
+		// Tolerant resolution: as written, game-root-relative, mods/, then mods/<filename>.
 		bfs::path cand[] = { bfs::path(mp), root / mp, root / "mods" / mp,
 		                     root / "mods" / bfs::path(mp).filename() };
 		std::string resolved;
@@ -484,16 +470,14 @@ int Package::MountModList(const std::string& gameRoot, const std::vector<std::st
 						if (r.is_string()) mi.parts.push_back(r.get<std::string>());
 			}
 		}
-		// A split PART pak is mounted by its main mod — never as a mod of its own (a stray
-		// part in the config would double-mount its entries).
+		// A part pak is mounted by its main mod — never as a mod of its own.
 		if (!mi.partOf.empty())
 		{
 			cout << "[Package]\t'" << bfs::path(resolved).filename().string()
 			     << "' is a part of mod '" << mi.partOf << "' — mounted with it, not listed" << endl;
 			continue;
 		}
-		// Platform gate: content-only mods are cross-platform ("any"/missing); a mod carrying
-		// native code was tagged with its platform at packaging time.
+		// Content-only mods are cross-platform; native code was tagged at packaging time.
 		if (!mi.platform.empty() && mi.platform != "any" && mi.platform != CurrentPlatform())
 		{
 			cout << "[Package]\tmod '" << mi.name << "' is " << mi.platform << "-only (this is "
@@ -503,9 +487,8 @@ int Package::MountModList(const std::string& gameRoot, const std::vector<std::st
 		mods.push_back(std::move(mi));
 	}
 
-	// 2) Dependency-aware order: repeatedly take the first mod whose requirements are all
-	// already placed (keeps the config order among independents, pulls dependencies below
-	// dependents). A mod with a missing/cyclic dependency never becomes ready -> skipped.
+	// 2) Dependency-aware order: repeatedly take mods whose requirements are already placed (config
+	// order kept among independents). A missing/cyclic dependency never becomes ready -> skipped.
 	auto lower = [](std::string s) { for (char& c : s) c = (char)tolower((unsigned char)c); return s; };
 	std::vector<ModInfo> order;
 	std::set<std::string> placed;
@@ -535,14 +518,12 @@ int Package::MountModList(const std::string& gameRoot, const std::vector<std::st
 			     << "] which is not enabled — skipped" << endl;
 		}
 
-	// 3) Mount in that order above the base pak AND above the DLC layer: DLCs sit at 1..K,
-	// mods start at 1000 so mods always override DLC content the way they override the base.
+	// 3) Mount above the base AND the DLC layer: DLCs sit at 1..K, mods start at 1000.
 	int prio = 1000, mounted = 0;
 	for (ModInfo& mi : order)
 	{
 		if (!Package::Mount(mi.pakPath, prio)) { cout << "[Package]\tmod skipped (bad pak): " << mi.pakPath << endl; continue; }
-		// Split parts ride at the SAME priority, mounted after the main pak (stable sort keeps
-		// the main above its parts; a split never duplicates a path, so order inside is moot).
+		// Parts ride at the same priority as their main pak (a split never duplicates a path).
 		for (const std::string& part : mi.parts)
 		{
 			boost::system::error_code pec;
@@ -659,9 +640,7 @@ bool Package::Exists(const std::string& rel)
 
 std::string Package::ResolveRead(const std::string& rel)
 {
-	// RAW layers only. Pak entries deliberately resolve to NOTHING here: decompressing
-	// them onto disk would lay the packed project out in the open (the user was explicit
-	// that the pak is the protection) — packed content is served as BYTES via Read().
+	// RAW layers only: pak entries deliberately resolve to "" — packed content is bytes via Read().
 	if (gRawRoot.empty()) return std::string();
 	boost::system::error_code ec;
 	bfs::path p = bfs::path(gRawRoot) / rel;

@@ -1,7 +1,7 @@
 #pragma once
 #ifndef NUKEE_INTERFACE_H
 #define NUKEE_INTERFACE_H
-#include <boost/config.hpp>   // BOOST_SYMBOL_EXPORT (the loader side pulls boost/dll itself)
+#include <boost/config.hpp>   // BOOST_SYMBOL_EXPORT
 #include <cstdint>
 
 #include <string>
@@ -10,36 +10,27 @@
 #include "AppInstance.h"
 
 // ---- Module ABI level ---------------------------------------------------------------------
-// New NUKEModule virtuals append at the END of the vtable, which keeps the prefix stable —
-// but a module DLL built BEFORE an append has a SHORTER vtable, and calling the new slot on
-// it jumps into garbage (a stale project module must degrade, not crash the host). So the
-// header stamps every module DLL that compiles against it with its ABI level (an exported
-// int the loader reads at discovery — see ModuleAbi in Modular.h), and hosts guard calls to
-// appended virtuals with `ModuleAbi(m) >= <level of the virtual>`.
-// DLLs with no stamp (built before it existed) report level 1.
-// Bump this when appending a virtual, and tag the virtual with its level:
+// Stamps every module DLL with the NUKEModule vtable level it was compiled against; the loader
+// reads it at discovery (ModuleAbi in Modular.h) and hosts MUST guard calls to appended virtuals
+// with `ModuleAbi(m) >= <level of the virtual>` — an older DLL has a shorter vtable. Unstamped
+// DLLs report level 1. Bump when appending a virtual, and tag the virtual with its level:
 //   1 — provides/phase/queryService/cookContent/sharedService/shipExtras
 //   2 — editorTool
 #define NUKE_MODULE_ABI 2
 extern "C" { __declspec(dllexport) __declspec(selectany) int nuke_module_abi = NUKE_MODULE_ABI; }
 
 // ---- Engine BINARY-COMPATIBILITY generation -------------------------------------------------
-// nuke_module_abi (above) tracks ONLY the NUKEModule vtable tail. THIS stamp tracks the whole
-// engine ABI a module was compiled against: exported class layouts (Atom, NukeWindow, ...),
-// signatures — anything that makes an old DLL jump into garbage against a new engine. Bump it
-// on ANY such break; the loader REFUSES a module whose stamp differs (clear log at discovery,
-// the host keeps running, rebuild the module) instead of crashing inside its OnLoad. A DLL
-// without the export (built before the stamp) reports 1.
+// Tracks the whole engine ABI a module was compiled against (exported class layouts, signatures);
+// the loader REFUSES a module whose stamp differs. Bump on any break. Unstamped = 1.
 //   1 — pre-stamp builds
-//   2 — 2026-07-30: Atom gained `enabled` (tail field); NukeWindow.vsync moved to the tail
+//   2 — Atom gained `enabled`; NukeWindow.vsync moved to the tail
 #define NUKE_ENGINE_ABI 2
 extern "C" { __declspec(dllexport) __declspec(selectany) int nuke_engine_abi = NUKE_ENGINE_ABI; }
 
 namespace nuke {
 
-// When a plugin must be brought up. PHASE_BOOT providers (e.g. the renderer) are enabled
-// during engine bootstrap, BEFORE the window/UI exist; PHASE_RUNTIME plugins are enabled
-// after the host is up and can be toggled live.
+// When a plugin must be brought up: PHASE_BOOT during engine bootstrap (before the window/UI
+// exist), PHASE_RUNTIME after the host is up (toggleable live).
 enum PluginPhase { PHASE_BOOT = 0, PHASE_RUNTIME = 1 };
 
 class BOOST_SYMBOL_EXPORT NUKEModule {
@@ -62,8 +53,7 @@ public:
 	//Path to the plugin, filled by runtime
 	std::string modulePath;
 
-	//Plugin DLL file name (e.g. "NukeScript.dll"), filled by runtime. Stable id for the
-	//per-project load list — plugins live in a shared pool, projects pick which to load.
+	//Plugin DLL file name (e.g. "NukeScript.dll"), filled by runtime. Stable id for the per-project load list.
 	std::string moduleFile;
 
 	//Main process instance. Used by plugin from code.
@@ -72,18 +62,15 @@ public:
 	//When Shutdown() called turn this to true, please. Otherwise plugin will work incorrectly.
 	bool stopped;
 
-	//True while the plugin is activated (OnLoad + Run done). Discovered-but-not-loaded
-	//plugins still appear in the manager so they can be toggled on.
+	//True while the plugin is activated (OnLoad + Run done).
 	bool loaded = false;
 
-	//Synchronous activation hook, called by the loader BEFORE Run() when the plugin is
-	//enabled. Register component types here (NOT in a static initializer) so a disabled
-	//plugin leaves its types unregistered and its components stay inert placeholders.
+	//Synchronous activation hook, called by the loader BEFORE Run(). Register component types
+	//here, NOT in a static initializer, so a disabled plugin leaves its types unregistered.
 	virtual void OnLoad() {}
 
-	//Function for run plugin. Runs in the background thread — NOT the game/UI thread.
-	//Main-thread state (PushWindow/PopWindow, the world, ResDB) must NOT be touched here
-	//directly: defer through Jobs::RunOnMain (drained once per frame on the game thread).
+	//Function for run plugin. Runs on a BACKGROUND thread, not the game/UI thread: main-thread
+	//state (PushWindow/PopWindow, the world, ResDB) must be deferred through Jobs::RunOnMain.
 	virtual void Run(AppInstance* instance) = 0;
 
 	//Returns true if mod has settings
@@ -95,70 +82,51 @@ public:
 	//Function that calls before plugin unloading. E.g. when app closes.
 	virtual void Shutdown() = 0;
 
-	// ---- Service metadata (unified plugin model) ----------------------------------------
-	// New virtuals live at the END of the class so the vtable prefix stays stable for
-	// modules that haven't been rebuilt yet. (All in-tree plugins rebuild together anyway.)
+	// ---- Service metadata ----------------------------------------------------------------
+	// ABI: new virtuals live at the END of the class so the vtable prefix stays stable.
 
 	//Search/filter labels shown in the plugin window (e.g. {"lua", "scripting"}).
 	std::vector<std::string> tags;
 
-	//Which engine service this plugin provides: "render" | "physics" | "audio" | "scripting"
-	//| ... — or "" for an ordinary utility plugin. At most ONE provider per service is active;
-	//enabling a provider disables the current sibling (radio behavior in the plugin window).
+	//Engine service this plugin provides ("render"/"physics"/"audio"/"scripting"/...), or "" for
+	//a utility plugin. At most ONE provider per exclusive service is active at a time.
 	virtual const char* provides() { return ""; }
 
-	//When the plugin must come up. Service providers the host cannot run without (the
-	//renderer: window/device) return PHASE_BOOT and are enabled during bootstrap; they can
-	//NOT be hot-swapped — switching persists the choice and applies after restart.
+	//When the plugin must come up. PHASE_BOOT providers cannot be hot-swapped — switching
+	//persists the choice and applies after restart.
 	virtual int phase() { return PHASE_RUNTIME; }
 
-	//For service providers: the interface instance to register under provides() — e.g. a
-	//render plugin returns its iRender*. Called by the loader AFTER OnLoad() (registered via
-	//Services_Provide) and revoked BEFORE Shutdown(), so the lifecycle is loader-bound and a
-	//provider can't forget to revoke. Utility plugins keep the nullptr default.
+	//For service providers: the interface instance to register under provides(). Registered by
+	//the loader AFTER OnLoad() and revoked BEFORE Shutdown(). Utility plugins keep nullptr.
 	virtual void* queryService() { return nullptr; }
 
-	// ---- Shipping cooker hook (3.2) ------------------------------------------------------
-	// The editor's Package Project walks the dependency closure of the shipped worlds; the
-	// EDITOR itself only understands the engine's serialized data (worlds/prefabs/materials
-	// — reflected props, GUIDs, content paths). Everything else is a MODULE's domain: when
-	// the walk reaches a file, every loaded module is asked. Return TRUE if this module OWNS
-	// the file type (its scripts/data — the file ships), and append every content it uses —
-	// content-relative paths, hardcoded paths, or ResDB asset GUIDs — to `outUses` (each is
-	// resolved and walked recursively). A file no engine loader and no LOADED module claims
-	// never ships (e.g. .lua without the scripting module). PURE function: may be called
-	// from a worker thread, must not touch live module state.
-	// ABI: new virtuals append at the END of the class, never mid-vtable.
+	// Packaging hook: when the dependency walk reaches a file, every loaded module is asked.
+	// Return TRUE if this module OWNS the file type (the file then ships), and append every
+	// content it uses — content-relative paths or ResDB asset GUIDs — to `outUses` (each is
+	// resolved and walked recursively). A file no engine loader and no loaded module claims
+	// never ships. PURE: may be called from a worker thread, must not touch live module state.
+	// ABI: appended at the END of the vtable.
 	virtual bool cookContent(const char* contentRel, const char* bytes, uint64_t size,
 	                         std::vector<std::string>& outUses) { return false; }
 
-	// Whether this module's service is SHARED — several providers may be live at once
-	// (scripting: a game can run Lua and C# side by side; each backend brings its own
-	// component types and file formats). Exclusive services (render/physics/audio: they
-	// own a device/simulation) keep the default false — the loader displaces the previous
-	// provider. ABI: appended at the END of the vtable (rebuild ALL modules together).
+	// Whether this module's service is SHARED — several providers may be live at once (e.g.
+	// scripting). Exclusive services keep false and the loader displaces the previous provider.
+	// ABI: appended at the END of the vtable.
 	virtual bool sharedService() { return false; }
 
-	// Extra files this module needs SHIPPED with a packaged game beyond its own DLL —
-	// the editor's Package Project asks every loaded module and bundles what it names:
-	//   * `pakFiles`  — PROJECT-relative paths forced into the game pak (the cooker can't
-	//                   discover them: compiled script assemblies and the like);
-	//   * `distFiles` — (source -> dist-relative destination) copies into the dist tree
-	//                   (runtime companions: a managed bridge dir, a private language
-	//                   runtime). A RELATIVE source resolves against the runtime dir being
-	//                   shipped (x64/Release), an ABSOLUTE one against itself; a directory
-	//                   source copies recursively.
-	// ABI: appended at the END of the vtable (rebuild ALL modules together).
+	// Extra files to ship with a packaged game beyond this module's own DLL:
+	//   * `pakFiles`  — project-relative paths forced into the game pak;
+	//   * `distFiles` — (source -> dist-relative destination) copies into the dist tree. A
+	//                   relative source resolves against the runtime dir being shipped, an
+	//                   absolute one against itself; a directory source copies recursively.
+	// ABI: appended at the END of the vtable.
 	virtual void shipExtras(const char* projectDir,
 	                        std::vector<std::string>& pakFiles,
 	                        std::vector<std::pair<std::string, std::string>>& distFiles) {}
 
-	// EDITOR TOOLING module (an editor-only companion supplying asset editors/panels for a
-	// runtime module's file types — e.g. NukeTilemapEditor for NukeTilemap's .nutile).
-	// The editor host enables these UNCONDITIONALLY (not part of a project's plugin list —
-	// tooling availability must not depend on per-project toggles); they never ship with a
-	// game (they import NukeImGui, which packaging already excludes).
-	// ABI 2: callers must guard with ModuleAbi(m) >= 2 (see the ABI note at the top).
+	// Editor-only companion module supplying asset editors/panels for a runtime module's file
+	// types. Enabled unconditionally by the editor host and never shipped with a game.
+	// ABI level 2: callers must guard with ModuleAbi(m) >= 2.
 	virtual bool editorTool() { return false; }
 };
 

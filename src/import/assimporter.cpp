@@ -25,11 +25,8 @@
 
 namespace nuke {
 
-// --- live import progress (worker -> status bar) ----------------------------------------
-// Only an ASYNC import reports: ImportAnyAsync installs this thread-local sink with its
-// status-bar entry key; the conversion stages feed it. Work units = every texture
-// conversion + every material + every mesh + the prefab, so the fraction is honest for
-// any model. A synchronous game-thread import leaves it null — no bar entry, no cost.
+// Live import progress (worker -> status bar). Installed only by an ASYNC import;
+// a synchronous game-thread import leaves it null.
 struct ImportProgress
 {
 	std::string key;    // StatusBar entry id (unique per queued import)
@@ -101,10 +98,8 @@ static std::vector<unsigned char> PadTo4(const std::vector<unsigned char>& rgba0
 	return p;
 }
 
-// Compress an RGBA image into a BC texture + precomputed mip chain. BC1 (opaque) / BC3 (alpha). ANY size:
-// non-multiple-of-4 images are edge-padded to a multiple of 4 (BC needs it) instead of stored raw RGBA.
-// BC5 (2-channel R,G) block level — for normal maps. Each 4x4 block = a BC4 block of R then a BC4 block of G (16B).
-// The blue channel is dropped (z is reconstructed in the shader as sqrt(1-x^2-y^2)) — proper for tangent normals.
+// BC5 (RG) block level for normal maps: a BC4 block of R then one of G (16B per 4x4).
+// Blue is dropped; z is reconstructed in the shader as sqrt(1-x^2-y^2).
 static void BC5Level(std::vector<unsigned char>& out, const unsigned char* rgba, int w, int h)
 {
 	const int bx = (w + 3) / 4, by = (h + 3) / 4;
@@ -129,8 +124,8 @@ static void BC5Level(std::vector<unsigned char>& out, const unsigned char* rgba,
 		}
 }
 
-// `prog` (optional) gets the compression fraction [0..1], weighted by each mip's pixel
-// count — level 0 is ~3/4 of the real work, so the bar moves honestly, not per-level.
+// Compress an RGBA image to BC1/BC3/BC5 + mip chain; non-multiple-of-4 sizes are edge-padded.
+// `prog` (optional) receives the compression fraction [0..1].
 static void CompressToBC(Texture* tex, const std::vector<unsigned char>& rgba0, int w0, int h0,
                          int usage = Texture::UsageColor,
                          const boost::function<void(float)>& prog = boost::function<void(float)>())
@@ -176,8 +171,7 @@ static void CompressToBC(Texture* tex, const std::vector<unsigned char>& rgba0, 
 				unsigned char* d = &nx[((size_t)y * nw + x) * 4];
 				if (alpha)
 				{
-					// ALPHA-WEIGHTED rgb (see Texture.cpp encodeBC): plain averaging bleeds the
-					// black rgb of transparent texels into the mips — dark fringes on cutouts.
+					// alpha-weighted rgb: plain averaging bleeds transparent texels' black into the mips
 					const int aS = s0[3] + s1[3] + s2[3] + s3[3];
 					for (int c = 0; c < 3; ++c)
 						d[c] = aS ? (unsigned char)((s0[c] * s0[3] + s1[c] * s1[3] + s2[c] * s2[3] + s3[c] * s3[3]) / aS)
@@ -234,16 +228,12 @@ void AssImporter::Import(const char* path) {
 		return;
 	}
 
-	// ================================================================
-
 	std::cout << sc->HasAnimations() << " " << sc->mNumAnimations << std::endl;
 	std::cout << sc->HasCameras() << " " << sc->mNumCameras << std::endl;
 	std::cout << sc->HasLights() << " " << sc->mNumLights << std::endl;
 	std::cout << sc->HasMaterials() << " " << sc->mNumMaterials << std::endl;
 	std::cout << sc->HasMeshes() << " " << sc->mNumMeshes << std::endl;
 	std::cout << sc->HasTextures() << " " << sc->mNumTextures << std::endl;
-
-	// ================================================================
 
 	if (sc->HasTextures()) {
 		cout << "SCENE HAS TExtURES" << endl;
@@ -264,9 +254,8 @@ static std::string SafeStem(const char* in)
 	return s;
 }
 
-// Rebuild the assimp node tree as an Atom hierarchy, with each node's transform and a
-// MeshRenderer (referencing the converted mesh by GUID) per mesh on the node. Skinned
-// meshes also get an Animator wired to the model's first imported clip (3.1).
+// Rebuild the assimp node tree as an Atom hierarchy: per-node transform, a MeshRenderer per
+// mesh (mesh/material by GUID), and an Animator wired to `firstClipGuid` on skinned meshes.
 static Atom* BuildPrefabNode(aiNode* node, const aiScene* sc,
                              const std::vector<std::string>& meshGuids,
                              const std::vector<std::string>& matGuids,
@@ -311,8 +300,7 @@ static std::string ConvertTexture(const aiScene* sc, const std::string& texRef,
 {
 	if (texRef.empty()) return std::string();
 
-	// One progress unit per call, WHATEVER the exit path (cache hits and failures were
-	// counted into the total too — see the pre-scan in ImportToContent).
+	// One progress unit per call on every exit path — the pre-scan counts cache hits too.
 	struct UnitGuard { ~UnitGuard() { ProgUnitDone(); } } unitGuard;
 	const std::string texLabel = "texture " +
 		(texRef[0] == '*' ? std::string("(embedded)") : bfs::path(texRef).filename().string());
@@ -384,11 +372,8 @@ int AssImporter::ImportToContent(const char* srcPath, const char* destDir)
 {
 	ProgStage("parsing...");   // assimp is one opaque stage -> indeterminate bar
 	Assimp::Importer importer;
-	// COLLAPSE FBX transform pivots: without this assimp splits every FBX node into
-	// $AssimpFbx$_Translation/PreRotation/... pseudo-nodes — skeletons balloon (mixamo:
-	// 65 joints -> 700 nodes) and, worse, animation channels land on pseudo-node names
-	// that DIFFER between files, so a clip from one FBX never binds to a skeleton
-	// imported from another. Collapsed, channels and bones use the REAL joint names.
+	// Collapse FBX pivots: otherwise nodes split into $AssimpFbx$_* pseudo-nodes and animation
+	// channels bind to pseudo-node names that differ between files.
 	importer.SetPropertyBool(AI_CONFIG_IMPORT_FBX_PRESERVE_PIVOTS, false);
 	const aiScene* sc = importer.ReadFile(srcPath, aiProcessPreset_TargetRealtime_MaxQuality);
 	if (!sc)
@@ -397,8 +382,7 @@ int AssImporter::ImportToContent(const char* srcPath, const char* destDir)
 		return 0;
 	}
 
-	// Progress total: mirror the conversion loops below — one unit per texture slot that
-	// WILL be converted (non-empty ref), per material, per mesh, plus the prefab.
+	// The progress total must mirror the conversion loops below.
 	if (tlProg)
 	{
 		int texUnits = 0;
@@ -422,7 +406,6 @@ int AssImporter::ImportToContent(const char* srcPath, const char* destDir)
 	bfs::create_directories(destDir, ec);
 	ResDB* res = ResDB::getSingleton();
 
-	// 0) Every material -> a .numat asset (+ its textures -> .nutex); remember GUID per index.
 	bfs::path modelDir = bfs::path(srcPath).parent_path();
 	std::map<std::string, std::string> texCache;   // source ref -> texture GUID (dedupe)
 	std::vector<std::string> matGuids(sc->mNumMaterials);
@@ -443,7 +426,6 @@ int AssImporter::ImportToContent(const char* srcPath, const char* destDir)
 		tp.Clear();
 		if (am->GetTexture(aiTextureType_SPECULAR, 0, &tp) == AI_SUCCESS)
 			mt->specularGuid = ConvertTexture(sc, tp.C_Str(), modelDir, destDir, texCache, Texture::UsageColor);
-		// PBR maps (metallic-roughness, occlusion, emissive).
 		tp.Clear();
 		if (am->GetTexture(aiTextureType_METALNESS, 0, &tp) == AI_SUCCESS ||
 		    am->GetTexture(aiTextureType_DIFFUSE_ROUGHNESS, 0, &tp) == AI_SUCCESS ||
@@ -475,7 +457,6 @@ int AssImporter::ImportToContent(const char* srcPath, const char* destDir)
 		ProgUnitDone();
 	}
 
-	// 1) Every mesh -> a .numesh asset; remember its GUID per mesh index.
 	std::vector<std::string> meshGuids(sc->mNumMeshes);
 	int count = 0;
 	for (unsigned int i = 0; i < sc->mNumMeshes; ++i)
@@ -509,10 +490,8 @@ int AssImporter::ImportToContent(const char* srcPath, const char* destDir)
 		ProgUnitDone();
 	}
 
-	// 2) Animation clips -> .nuanim assets (channels by bone NAME, key times in seconds).
-	// Clip names come from the FILE stem, not the embedded take name: exporters stamp a
-	// generic name ("mixamo.com") into EVERY file, so a pack would collide on it, while
-	// the files are named by the actual animation ("idle.fbx", "run.fbx").
+	// Clip names come from the FILE stem, not the embedded take name: exporters stamp one
+	// generic take name into every file, so a whole pack would collide on it.
 	std::string firstClipGuid;
 	std::string base0 = SafeStem(bfs::path(srcPath).stem().string().c_str());
 	for (unsigned int a = 0; a < sc->mNumAnimations; ++a)
@@ -576,9 +555,8 @@ int AssImporter::ImportToContent(const char* srcPath, const char* destDir)
 		ProgUnitDone();
 	}
 
-	// 3) The node hierarchy -> one .nuprefab that references those meshes + materials by
-	// GUID — only when the file HAS meshes. An animation-only file (mixamo "without skin"
-	// packs) would otherwise produce a prefab of hundreds of EMPTY joint atoms.
+	// Prefab only when the file HAS meshes: an animation-only file would otherwise produce
+	// a prefab of hundreds of empty joint atoms.
 	ProgStage("prefab");
 	if (count > 0)
 	{
@@ -613,7 +591,7 @@ std::string AssImporter::ImportImage(const char* srcPath, const char* destDir)
 
 	Texture* tex = new Texture();
 	tex->guid = ResDB::NewGuid();
-	tex->usage = (Texture::Usage)Texture::GuessUsage(srcPath);   // bare image: guess role from filename suffix (overridable in inspector)
+	tex->usage = (Texture::Usage)Texture::GuessUsage(srcPath);   // bare image: role guessed from the filename suffix
 	int w = 0, h = 0;
 
 	if (ext == ".gif")
@@ -625,9 +603,7 @@ std::string AssImporter::ImportImage(const char* srcPath, const char* destDir)
 		int frames = 0, comp = 0; int* delays = nullptr;
 		unsigned char* px = stbi_load_gif_from_memory(buf.data(), (int)buf.size(), &delays, &w, &h, &frames, &comp, 4);
 		if (!px || frames < 1) { delete tex; cout << "[Import]\tgif decode failed: " << srcPath << endl; return std::string(); }
-		// stb returns DELTA frames (transparent where a frame didn't change). Composite forward so every
-		// frame is a full image (a transparent pixel inherits the previous composited frame), then make
-		// fully opaque — otherwise frames 1..N render mostly empty.
+		// stb returns DELTA frames (transparent where unchanged) — composite forward into full frames.
 		const size_t fb = (size_t)w * h * 4;
 		for (int k = 1; k < frames; ++k)
 		{
@@ -639,7 +615,6 @@ std::string AssImporter::ImportImage(const char* srcPath, const char* destDir)
 		tex->frameCount = frames;
 		tex->frameDelaysMs.resize(frames);
 		for (int k = 0; k < frames; ++k) tex->frameDelaysMs[k] = (delays && delays[k] > 0) ? delays[k] : 100;
-		// Keep real transparency: BC3 if ANY frame has alpha < 255 (animated sprites with holes), else BC1.
 		bool hasA = false;
 		for (size_t p = 0; p < (size_t)w * h * frames && !hasA; ++p) if (px[p * 4 + 3] < 255) hasA = true;
 		const int gbb = hasA ? 16 : 8, galpha = hasA ? 1 : 0;
@@ -684,9 +659,8 @@ std::string AssImporter::ImportImage(const char* srcPath, const char* destDir)
 	return tex->guid;
 }
 
-// Audio has NO custom asset format (the audio service decodes the file itself) — import
-// is a plain collision-safe COPY into content. Components reference the file by its
-// content-relative path, so nothing needs registering.
+// Import an audio file as a collision-safe COPY into content. No custom asset format and
+// nothing to register — components reference the file by its content-relative path.
 bool AssImporter::ImportAudio(const char* srcPath, const char* destDir)
 {
 	if (tlProg) { tlProg->done = 0; tlProg->total = 1; }
@@ -733,7 +707,7 @@ bool AssImporter::ImportAny(const char* srcPath, const char* destDir)
 	if (!srcPath || !*srcPath) return false;
 	std::string ext = bfs::path(srcPath).extension().string();
 	for (char& c : ext) c = (char)std::tolower((unsigned char)c);
-	// Plugin importers win — they fill format gaps (EPS/PSD/custom) OR deliberately override a built-in.
+	// Plugin importers win over built-ins (a plugin may deliberately override one).
 	if (const AssetImporter* imp = ImporterForExt(ext))
 		return imp->import ? imp->import(srcPath, destDir) : false;
 	static const char* kImg[] = { ".png", ".jpg", ".jpeg", ".tga", ".bmp", ".psd", ".gif", ".hdr", ".pic", ".ppm", ".pgm" };
@@ -745,10 +719,8 @@ bool AssImporter::ImportAny(const char* srcPath, const char* destDir)
 	return ImportToContent(srcPath, destDir) > 0;
 }
 
-// --- async import (2.4) --------------------------------------------------------------
-
 // Thread-local defer sink: non-null only inside a WORKER import; a synchronous import
-// running on the game thread applies mutations immediately.
+// on the game thread applies mutations immediately.
 static thread_local std::vector<boost::function<void()>>* tlDeferSink = nullptr;
 
 void AssImporter::Reg(const boost::function<void()>& f)
@@ -760,8 +732,7 @@ void AssImporter::Reg(const boost::function<void()>& f)
 void AssImporter::ImportAnyAsync(const std::string& srcPath, const std::string& destDir,
                                  boost::function<void(bool)> onDone)
 {
-	// Unique status-bar entry per queued import: several drops show up as several jobs
-	// (queued ones sit at "queued" until the serialize lock lets them run).
+	// Unique status-bar entry per queued import.
 	static boost::atomic<int> seq(0);
 	const std::string key  = "import#" + std::to_string(++seq);
 	const std::string name = bfs::path(srcPath).filename().string();

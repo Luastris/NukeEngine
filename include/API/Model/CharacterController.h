@@ -10,21 +10,10 @@ namespace nuke {
 
 class Atom;
 
-// Kinematic character controller (backed by the physics service's virtual character —
-// Jolt CharacterVirtual today). NOT a rigid body: it slides along walls, walks stairs
-// and slopes, sticks to the floor going down, pushes dynamic bodies and collides with
-// other characters — all driven by a desired velocity you set every frame.
-//
-// PIVOT AT THE FEET: the atom's position is where the character stands.
-//
-// Two driving styles (the flexibility knob):
-//  * autoGravity = true (default): you steer the HORIZONTAL motion (SetMove) and call
-//    Jump(); the controller integrates gravity, zeroes the fall on landing and carries
-//    you with moving platforms (inheritPlatform).
-//  * autoGravity = false: the controller applies YOUR velocity verbatim (SetVelocity) —
-//    write your own gravity, jumps, dashes, wall-runs; the capsule only resolves
-//    collisions. This is the "professionals write their own" mode: the movement logic
-//    is fully yours, the collision resolution is not your problem.
+// Kinematic character controller over the physics service's virtual character. NOT a rigid
+// body: it slides along walls, walks stairs and slopes, pushes dynamic bodies, all driven by
+// a desired velocity set every frame. Two driving styles: autoGravity = true steers only the
+// horizontal motion (SetMove + Jump), false applies your velocity verbatim (SetVelocity).
 class NUKEENGINE_API CharacterController : public Component
 {
 	NUKE_CLASS(CharacterController, Component, "Physics")
@@ -33,8 +22,7 @@ public:
 	[[nuke::prop(label="Radius",      min=0.05)]] float radius = 0.35f;
 	[[nuke::prop(label="Height",      min=0.2, tip="Total capsule height, feet to head.")]] float height = 1.8f;
 	// Where the capsule sits relative to the atom: Feet = the atom's position is where the
-	// character STANDS (feet-pivot rigs); Center = the capsule is centered on the atom
-	// (meshes with a centered pivot — otherwise the visual sinks in waist-deep).
+	// character stands; Center = the capsule is centered on the atom.
 	enum Pivot { P_Feet = 0, P_Center = 1 };
 	[[nuke::prop(label="Pivot", enum="Feet,Center")]] int pivot = P_Feet;
 	[[nuke::prop(label="Capsule Offset", tip="Extra offset of the capsule relative to the pivot (local units).")]] Vector3 capsuleOffset;
@@ -50,9 +38,8 @@ public:
 	[[nuke::prop(label="Gravity Scale", tip="Multiplier over the world gravity (Auto Gravity only).")]] float gravityScale = 1.0f;
 	[[nuke::prop(label="Inherit Platform", tip="Carried by moving ground (elevators, platforms). Auto Gravity only.")]] bool inheritPlatform = true;
 
-	// ---- gameplay API (scriptable via [[nuke::func]], Lua/C# for free) ----------------
-	// Desired HORIZONTAL velocity (world units/s). Vertical motion is the controller's
-	// (gravity/jump) under autoGravity; ignored vertical otherwise (use SetVelocity).
+	// ---- gameplay API ----
+	// Desired HORIZONTAL velocity (world units/s); the vertical component is ignored.
 	[[nuke::func]] void    SetMove(const Vector3& v);
 	// Full desired velocity, applied verbatim (the autoGravity=false driving style).
 	[[nuke::func]] void    SetVelocity(const Vector3& v);
@@ -64,9 +51,8 @@ public:
 	[[nuke::func]] Vector3 GroundVelocity();              // the ground's own velocity (platforms)
 	[[nuke::func]] Atom*   GroundAtom();                  // what the character stands on (null = none)
 	[[nuke::func]] void    Teleport(const Vector3& pos);  // instant move (atom position)
-	// Size + place the capsule from the sibling MeshRenderer's mesh bounds: pivot=Center,
-	// offset = the mesh's local center, height/radius from the AABB. One click/call —
-	// the capsule matches the visual, whatever the mesh's own pivot is.
+	// Size + place the capsule from the sibling MeshRenderer's mesh bounds (pivot=Center,
+	// offset = the mesh's local center, height/radius from the AABB).
 	[[nuke::func]] bool    FitToMesh();                   // false = no sibling mesh
 
 	CharacterController();
@@ -77,7 +63,7 @@ public:
 	void Pause() override;
 	void Reset() override;
 
-	// ---- driver state (World's fixed step owns these) ---------------------------------
+	// ---- driver state (World's fixed step owns these) ----
 	uint64_t charId = 0;          // backend handle (0 = not created yet)
 	float    bakedRadius = 0, bakedHalf = 0;   // scale-baked shape the handle was built with
 	float    liveSlope = 0, liveStep = 0, liveStick = 0;   // pushed params (change detection)

@@ -1,6 +1,5 @@
-// FINAL post stage: tonemap + encode only. Effects (exposure / grade / vignette / custom) run BEFORE this as
-// the post-effect chain (see *.post.hlsl). g_Post.y = mode: 0 passthrough (HDR off), 1 SDR (Reinhard+sRGB),
-// 2 HDR10 (nits -> Rec2020 -> PQ).
+// Final post stage: tonemap and encode only; the *.post.hlsl chain runs before it.
+// g_Post.y = mode: 0 passthrough, 1 SDR (Reinhard + sRGB), 2 HDR10 (nits -> Rec2020 -> PQ).
 Texture2D    g_HDR;
 SamplerState g_HDR_sampler;
 cbuffer PostCB { float4 g_Post; float4 g_Grade; };   // only g_Post.y (mode) used here
@@ -24,14 +23,12 @@ float4 main(in PSIn i) : SV_Target
     float4 hdr  = g_HDR.Sample(g_HDR_sampler, i.uv);
     float3 c    = hdr.rgb;
     float  mode = g_Post.y;
-    // Transparent window (g_Post.x): the scene alpha (0 on the empty background, 1 on opaque
-    // geometry) is carried to the DirectComposition backbuffer PREMULTIPLIED, so the desktop
-    // shows through where a < 1. Opaque windows keep alpha 1.
+    // g_Post.x = transparent window: alpha goes to the DirectComposition backbuffer PREMULTIPLIED.
     float  a    = (g_Post.x > 0.5) ? saturate(hdr.a) : 1.0;
 
     if (mode > 1.5)   // HDR10: linear HDR -> nits -> Rec2020 -> PQ
     {
-        float paperWhite = g_Post.z > 1.0 ? g_Post.z : 200.0;   // diffuse-white nits (project setting)
+        float paperWhite = g_Post.z > 1.0 ? g_Post.z : 200.0;   // diffuse-white nits
         float peak       = g_Post.w > paperWhite ? g_Post.w : 1000.0;
         float3 nits = min(c * paperWhite, peak);
         nits = mul(Rec709toRec2020, nits);
@@ -39,11 +36,11 @@ float4 main(in PSIn i) : SV_Target
     }
     if (mode > 0.5)   // SDR: exposure -> white-point Reinhard -> sRGB
     {
-        c *= max(g_Grade.x, 0.0);                                  // exposure (g_Grade.x)
-        float W = (g_Grade.y > 1e-3) ? g_Grade.y : 1.0;           // tonemap white point: linear value that maps to pure white
-        c = c * (1.0 + c / (W * W)) / (1.0 + c);                  // extended Reinhard — REACHES 1.0 at c==W (plain Reinhard never did -> washed grey)
+        c *= max(g_Grade.x, 0.0);                                  // exposure
+        float W = (g_Grade.y > 1e-3) ? g_Grade.y : 1.0;           // linear value that maps to pure white
+        c = c * (1.0 + c / (W * W)) / (1.0 + c);                  // extended Reinhard
         c = pow(max(c, 0.0), 1.0 / 2.2);
         return float4(c * a, a);
     }
-    return float4(c * a, a);   // passthrough (HDR off; scene already tonemapped in world.ps)
+    return float4(c * a, a);   // passthrough: the scene was already tonemapped in world.ps
 }

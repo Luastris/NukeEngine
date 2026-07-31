@@ -1,13 +1,10 @@
-// Shared RT reflection code — concatenated (NOT #included) ahead of rt_rgen / rt_rmiss / rt_rchit by the renderer.
-// Payload, bindless geometry/material, environment, and the standard material+lighting model reused by the
-// closest-hit shader. Phase 1: one hit group reproduces the engine material models (lit PBR + unlit + props).
+// Shared RT reflection code: payload, bindless geometry/material fetch, environment and the PBR model.
+// The renderer CONCATENATES this ahead of rt_rgen / rt_rmiss / rt_rchit (it is not #included).
 
 struct RTPayload { float3 color; uint depth; };   // color = reflected radiance; depth = current recursion depth
 
-// TLAS instance inclusion masks. Reflection rays — both COLOR and the SHADOW rays cast while shading a reflection —
-// use RT_REFLECT_MASK, so an object excluded from reflections (MeshRenderer.inReflections == false, instance Mask
-// bit cleared) is fully absent from reflections: no surface AND no shadow. It still casts shadows in the direct view
-// (world.ps RTShadow traces 0xFF). Default instance Mask = 0xFF; excluded = 0xFF & ~RT_REFLECT_BIT.
+// TLAS instance-mask bit for "visible in reflections". Default instance Mask = 0xFF;
+// excluded = 0xFF & ~RT_REFLECT_BIT. Both color and shadow rays inside a reflection use this mask.
 #define RT_REFLECT_BIT  0x01
 #define RT_REFLECT_MASK 0x01
 
@@ -19,10 +16,10 @@ Texture2D                      g_Source;          // current HDR chain colour (b
 TextureCube                    g_Probe;           SamplerState g_Probe_sampler;
 ByteAddressBuffer              g_AllNrm;          // concatenated mesh normals (float3/vertex)
 ByteAddressBuffer              g_AllUV;           // concatenated mesh uvs (float2/vertex)
-ByteAddressBuffer              g_AllPos;          // concatenated mesh positions (float3/vertex) — analytic TBN
+ByteAddressBuffer              g_AllPos;          // concatenated mesh positions (float3/vertex), for the analytic TBN
 Texture2D                      g_MatTex[256];     SamplerState g_MatTex_sampler;   // bindless material maps (all types)
-// Per-instance geometry offsets + bindless map indices (0xFFFFFFFF = no map) + PBR factors. Mirrors the C++
-// Impl::RTInstanceData byte-for-byte (StructuredBuffer; 16-byte aligned rows).
+// Mirrors the C++ Impl::RTInstanceData byte-for-byte (16-byte aligned rows).
+// Bindless map indices use 0xFFFFFFFF for "no map".
 struct RTInstanceData
 {
     uint  nrmOffset, uvOffset, posOffset, matByteOffset;   // byte offsets into g_AllNrm/g_AllUV/g_AllPos
@@ -30,22 +27,21 @@ struct RTInstanceData
     uint  emTexIndex, specTexIndex; float specularFactor; uint nrmFlipG;   // nrmFlipG: 1 = flip green (OpenGL)
     float4 albedoMetal;     // rgb albedo factor, a = metallic factor
     float4 emissiveRough;   // rgb emissive (pre-multiplied), a = roughness factor
-    // Dynamic sprite meshes (particles): byte offset into g_DynCol (0xFFFFFFFF = none),
-    // shadow-ray footprint (0 quad / 1 disc / 2 strip) + instance shadow alpha.
+    // colOffset = byte offset into g_DynCol (0xFFFFFFFF = none); shadowShape = 0 quad / 1 disc / 2 strip.
     uint  colOffset; uint shadowShape; float shadowAlpha; uint pad0;
 };
 StructuredBuffer<RTInstanceData> g_Instances;
-ByteAddressBuffer g_MatBytes;   // per-instance MatCB block (same packing as the raster MatCB); auto-gen chits load from here
-ByteAddressBuffer g_DynCol;     // PER-FRAME particle colors (float4/vertex): gradients + fade, rebuilt every frame
+ByteAddressBuffer g_MatBytes;   // per-instance MatCB block, same packing as the raster MatCB
+ByteAddressBuffer g_DynCol;     // per-frame particle colors (float4/vertex)
 
-// Surface contract — a shader's Surface(IN, O) fills O; the generated closest-hit lights/recurses it (or, if
-// O.unlit, outputs O.emissive). The raster path uses the same Surface() through its own harness.
+// Surface contract: a shader's Surface(IN, O) fills O; the generated closest-hit lights and recurses it,
+// or outputs O.emissive when O.unlit. The raster path calls the same Surface() from its own harness.
 struct SurfaceIn  { float3 worldPos; float3 worldNormal; float2 uv; float3 viewDir; };
 struct SurfaceOut { float3 albedo; float metallic; float roughness; float3 emissive; float alpha; bool unlit; };
 
-cbuffer RTRefCB { float4x4 g_InvProj; float4x4 g_InvView; float4 g_RTCam; float4 g_RTParams; float4 g_RTWater; float4 g_RTWaterCol; float4 g_RTWaterAbs; };  // camPos.xyz; (intensity, maxDist, maxDepth, roughCut); water (level, on, fade, _); scatter.rgb; absorb.rgb + 1/opacityDepth
+cbuffer RTRefCB { float4x4 g_InvProj; float4x4 g_InvView; float4 g_RTCam; float4 g_RTParams; float4 g_RTWater; float4 g_RTWaterCol; float4 g_RTWaterAbs; };  // g_RTParams = (intensity, maxDist, maxDepth, roughCut); g_RTWater = (level, on, fade, _); g_RTWaterAbs = (absorb.rgb, 1/opacityDepth)
 
-#define MAX_LIGHTS 256   // per-particle light sources (VFX) need a real budget; unattenuated lights early-out
+#define MAX_LIGHTS 256   // must match world.ps and the renderer's FrameCB
 #define MAX_SHADOWS 4
 struct Light { float4 posType; float4 dirRange; float4 colorIntensity; float4 spot; };
 cbuffer FrameCB   // identical layout to world.ps / worldFrameCB
@@ -71,39 +67,31 @@ float3 SkyColor(float3 d)
                            : lerp(g_SkyHorizon.rgb, g_SkyGround.rgb, saturate(-up));
     return c * g_SkyParams.x;
 }
-// --- WATER along a ray (the TLAS/G-buffer carry no water surface) -----------------------------
-// Radiance travelling a segment loses whatever water it crossed. g_RTWater = (level, on, fade).
-// Everything is a flat-level approximation: the rest plane, not the displaced wave — enough to
-// stop mirrors/metal from punching through the drawn surface, and stable under recursion
-// (every bounce attenuates its OWN segment).
+// --- Water along a ray. The TLAS carries no water surface, so it is approximated by the flat rest plane.
 // Submerged length of the segment [a -> b].
 float RTWaterUnder(float3 a, float3 b)
 {
     if (g_RTWater.y < 0.5) return 0.0;
     float da = g_RTWater.x - a.y, db = g_RTWater.x - b.y;   // > 0 = below the surface
     float len = length(b - a);
-    if (da > 0.0 && db > 0.0)      return len;                                   // fully submerged
+    if (da > 0.0 && db > 0.0)      return len;
     if (da > 0.0 || db > 0.0)      return len * max(da, db) / (abs(da) + abs(db) + 1e-6);
     return 0.0;
 }
-// Scalar transmittance (the reflection WEIGHT in ray-gen, where the base pixel already holds
-// the drawn water).
+// Scalar transmittance, used as the reflection weight in ray-gen.
 float RTWaterTrans(float3 a, float3 b)
 {
     float under = RTWaterUnder(a, b);
     return (under <= 0.0) ? 1.0 : exp(-g_RTWater.z * under);
 }
-// Per-channel transmittance for radiance CARRIED along a ray — the same Beer-Lambert the
-// raster surface uses, so a reflection of something submerged goes blue-green with depth
-// instead of neutral grey.
+// Per-channel Beer-Lambert transmittance for radiance carried along a ray (matches the raster surface).
 float3 RTWaterTrans3(float3 a, float3 b)
 {
     float under = RTWaterUnder(a, b);
     if (under <= 0.0) return float3(1.0, 1.0, 1.0);
     return exp(-g_RTWaterAbs.rgb * (under * 6.0 * g_RTWaterAbs.w));
 }
-// Same, for a ray that never hits anything (miss): the submerged run before it exits upward,
-// or the whole span when it heads away from the surface.
+// Same, for a miss ray: the submerged run before it exits upward, else the whole span.
 float3 RTWaterTransRay(float3 o, float3 d, float tMax)
 {
     if (g_RTWater.y < 0.5) return float3(1.0, 1.0, 1.0);
@@ -113,17 +101,15 @@ float3 RTWaterTransRay(float3 o, float3 d, float tMax)
     return exp(-g_RTWaterAbs.rgb * (max(t, 0.0) * 6.0 * g_RTWaterAbs.w));
 }
 
-float3 EnvSample(float3 dir, float rough)   // probe (parallax-free, infinite), analytic sky, or flat (sky off)
+float3 EnvSample(float3 dir, float rough)   // probe (parallax-free), analytic sky, or flat ambient when sky is off
 {
     if (g_ProbePos.w > 0.5) return g_Probe.SampleLevel(g_Probe_sampler, dir, saturate(rough) * g_ProbeParams.y).rgb * g_ProbeParams.x;
-    if (g_SkyParams.y > 0.5) return SkyColor(dir);   // procedural sky ON
-    return g_Ambient.rgb;                             // sky OFF -> flat environment (no gradient; matches the direct ambient)
+    if (g_SkyParams.y > 0.5) return SkyColor(dir);
+    return g_Ambient.rgb;
 }
 
-// What a ray SEES of the water surface it crossed. Attenuating alone is not enough: the water
-// is not in the TLAS, so swallowing the bottom left a BLACK HOLE where a mirror over the sea
-// should show the sea. Flat-surface approximation: sky mirrored about the horizontal plane,
-// Fresnel-mixed with the body's own scatter colour under the ambient.
+// What a ray sees of the water surface it crossed: sky mirrored about the horizontal plane,
+// Fresnel-mixed with the body's scatter colour.
 float3 RTWaterLook(float3 d)
 {
     float3 sky = EnvSample(float3(d.x, -d.y, d.z), 0.15);
@@ -131,8 +117,7 @@ float3 RTWaterLook(float3 d)
     float3 amb = (g_SkyParams.y > 0.5)
                ? (g_SkyTop.rgb + 2.0 * g_SkyHorizon.rgb + g_SkyGround.rgb) * 0.25 * g_SkyParams.x * g_Ambient.w
                : g_Ambient.rgb * g_Ambient.w;
-    // In-scatter lit like the raster surface does it (water.ps): ambient AND the sun, else a
-    // sunlit sea reflected in a mirror came back nearly black.
+    // In-scatter is lit by ambient AND the brightest directional, matching water.ps.
     float3 sunC = float3(0.0, 0.0, 0.0);
     float best = -1.0;
     [loop] for (int li = 0; li < (int)g_LightCount.x; ++li)
@@ -146,7 +131,7 @@ float3 RTWaterLook(float3 d)
     return lerp(g_RTWaterCol.rgb * volLight * 0.8, sky, f);
 }
 
-// --- Bindless geometry/material fetch at a triangle hit (instance + primitive + barycentrics) ----------------
+// --- Bindless geometry/material fetch at a triangle hit (instance + primitive + barycentrics)
 float3 FetchWorldNormal(uint nrmOffset, uint prim, float2 bc, float3x4 o2w)
 {
     float w0 = 1.0 - bc.x - bc.y; uint nb = nrmOffset + prim * 36u;   // 3 verts * 12 bytes (float3)
@@ -158,7 +143,7 @@ float2 FetchUV(uint uvOffset, uint prim, float2 bc)
     float w0 = 1.0 - bc.x - bc.y; uint ub = uvOffset + prim * 24u;    // 3 verts * 8 bytes (float2)
     return asfloat(g_AllUV.Load2(ub)) * w0 + asfloat(g_AllUV.Load2(ub + 8u)) * bc.x + asfloat(g_AllUV.Load2(ub + 16u)) * bc.y;
 }
-// Per-vertex particle color (dynamic sprite meshes; identity for everything else).
+// Per-vertex particle color for dynamic sprite meshes; white for everything else.
 float4 FetchDynColor(RTInstanceData inst, uint prim, float2 bc)
 {
     if (inst.colOffset == 0xFFFFFFFFu) return float4(1.0, 1.0, 1.0, 1.0);
@@ -171,13 +156,13 @@ float3 SampleAlbedo(RTInstanceData inst, float2 uv)
     if (inst.texIndex != 0xFFFFFFFFu) a *= g_MatTex[NonUniformResourceIndex(inst.texIndex)].SampleLevel(g_MatTex_sampler, uv, 0).rgb;
     return a;
 }
-// Generic bindless map fetch (returns `dflt` when the instance has no such map). LOD 0: no ray-cone yet.
+// Generic bindless map fetch; returns `dflt` when the instance has no such map. LOD 0 (no ray cones).
 float4 SampleMap(uint idx, float2 uv, float4 dflt)
 {
     if (idx == 0xFFFFFFFFu) return dflt;
     return g_MatTex[NonUniformResourceIndex(idx)].SampleLevel(g_MatTex_sampler, uv, 0);
 }
-// Metallic-roughness map (glTF: G=roughness, B=metalness). Overrides the scalar factors when present.
+// glTF metallic-roughness map (G = roughness, B = metalness); overrides the scalar factors when present.
 void SampleMR(RTInstanceData inst, float2 uv, inout float metal, inout float rough)
 {
     if (inst.mrTexIndex == 0xFFFFFFFFu) return;
@@ -186,11 +171,11 @@ void SampleMR(RTInstanceData inst, float2 uv, inout float metal, inout float rou
 }
 float  SampleAO(RTInstanceData inst, float2 uv)        { return SampleMap(inst.aoTexIndex,   uv, float4(1,1,1,1)).r; }
 float3 SampleEmissiveMap(RTInstanceData inst, float2 uv){ return SampleMap(inst.emTexIndex,   uv, float4(1,1,1,1)).rgb; }
-// Specular reflectance multiplier (KHR_materials_specular): factor × specular(color) map. Scales dielectric F0.
+// KHR_materials_specular multiplier that scales dielectric F0.
 float3 SampleSpec(RTInstanceData inst, float2 uv)      { return inst.specularFactor * SampleMap(inst.specTexIndex, uv, float4(1,1,1,1)).rgb; }
 
-// Analytic tangent-space → world normal for a normal-mapped hit. Builds the TBN from the hit triangle's object-space
-// positions + UVs (no per-vertex tangents needed; works for any imported mesh). `geomN` = interpolated world normal.
+// Tangent-space to world normal for a normal-mapped hit; builds the TBN from the hit triangle's
+// object-space positions + UVs, so no per-vertex tangents are needed. `geomN` = interpolated world normal.
 float3 ApplyNormalMap(RTInstanceData inst, uint prim, float2 uv, float3 geomN, float3x4 o2w)
 {
     if (inst.nrmTexIndex == 0xFFFFFFFFu) return geomN;
@@ -207,29 +192,27 @@ float3 ApplyNormalMap(RTInstanceData inst, uint prim, float2 uv, float3 geomN, f
     T = normalize(T - N * dot(N, T));                      // Gram-Schmidt orthonormalize
     float3 B = cross(N, T);
     float2 nxy = g_MatTex[NonUniformResourceIndex(inst.nrmTexIndex)].SampleLevel(g_MatTex_sampler, uv, 0).rg * 2.0 - 1.0;
-    if (inst.nrmFlipG != 0u) nxy.y = -nxy.y;   // green convention (OpenGL +Y). RG + reconstruct Z (BC5-agnostic).
+    if (inst.nrmFlipG != 0u) nxy.y = -nxy.y;   // OpenGL green convention; RG + reconstructed Z works for BC5
     float nz = sqrt(saturate(1.0 - dot(nxy, nxy)));
     return normalize(nxy.x * T + nxy.y * B + nz * N);
 }
 
-// Shadow ray: 1 = lit, 0 = occluded (inline query, cheap; no separate hit group needed for visibility).
+// Shadow ray inside a reflection: 1 = lit, 0 = occluded.
 float RTShadow(float3 origin, float3 L, float maxD)
 {
     RayDesc r; r.Origin = origin; r.Direction = L; r.TMin = 0.02; r.TMax = maxD;
     RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> q;
-    // Shadow rays DURING REFLECTION shading use the reflect mask too: an object excluded from reflections must not
-    // cast a shadow visible in the reflection either. Direct-view shadows (world.ps RTShadow) use the shadow-caster
-    // bit 0x02 instead (mask bits are OR-tested, so "reflect-visible AND casts" is not expressible here).
+    // Reflect mask, not the 0x02 caster bit world.ps uses: mask bits are OR-tested, so
+    // "reflect-visible AND casts" cannot be expressed in one trace.
     q.TraceRayInline(g_TLAS, RAY_FLAG_NONE, RT_REFLECT_MASK, r);
-    // Opaque hits commit through the fast path; NON-OPAQUE candidates (particle quads) get
-    // an honest albedo-alpha test — transparent texels don't shadow the reflection.
+    // Non-opaque candidates (particle quads) get an albedo-alpha test.
     while (q.Proceed())
         if (q.CandidateType() == CANDIDATE_NON_OPAQUE_TRIANGLE)
         {
             RTInstanceData inst = g_Instances[q.CandidateInstanceID()];
             uint   prim = q.CandidatePrimitiveIndex();
             float2 bc   = q.CandidateTriangleBarycentrics();
-            float  a    = FetchDynColor(inst, prim, bc).a;   // per-particle fade shadows honestly
+            float  a    = FetchDynColor(inst, prim, bc).a;
             if (inst.texIndex != 0xFFFFFFFFu)
                 a *= g_MatTex[NonUniformResourceIndex(inst.texIndex)].SampleLevel(g_MatTex_sampler,
                          FetchUV(inst.uvOffset, prim, bc), 0).a;
@@ -238,10 +221,8 @@ float RTShadow(float3 origin, float3 L, float maxD)
     return (q.CommittedStatus() == COMMITTED_TRIANGLE_HIT) ? 0.0 : 1.0;
 }
 
-// Honest metallic-roughness PBR — byte-for-byte the same math as the raster world.ps (Cook-Torrance direct + RT
-// shadows + image-based ambient INCLUDING the specular env). `albedo` must be LINEAR (caller does sRGB->linear,
-// like world.ps). The analytic env*Fr IS the specular reflection (exactly as the raster pass), so a surface seen
-// in a reflection looks the same as its direct view. No in-shader tonemap (chit output is linear HDR).
+// Metallic-roughness PBR, same math as the raster world.ps. `albedo` must be LINEAR (caller does sRGB->linear).
+// Output is linear HDR: no in-shader tonemap.
 static const float RTPI = 3.14159265359;
 float3 RT_Fresnel(float cosT, float3 F0) { return F0 + (1.0 - F0) * pow(saturate(1.0 - cosT), 5.0); }
 float RT_GGX(float3 N, float3 H, float rough)
@@ -253,7 +234,7 @@ float RT_GSm(float3 N, float3 V, float3 L, float rough)
 float3 ShadeSurface(float3 pos, float3 N, float3 V, float3 albedo, float metal, float rough, float3 emissive, float ao, float3 spec)
 {
     metal = saturate(metal); rough = clamp(rough, 0.04, 1.0);
-    float3 F0 = lerp(0.04 * spec, albedo, metal);   // dielectric F0 scaled by KHR specular; conductor uses albedo
+    float3 F0 = lerp(0.04 * spec, albedo, metal);
     float3 Lo = 0.0;
     int cnt = (int)g_LightCount.x;
     [loop] for (int li = 0; li < cnt; ++li)
@@ -271,8 +252,7 @@ float3 ShadeSurface(float3 pos, float3 N, float3 V, float3 albedo, float metal, 
         float ndl = max(dot(N, L), 0.0);
         if (ndl <= 0.0 || atten <= 0.0) continue;
         float3 H = normalize(V + L);
-        // Shadow rays only for lights that CAST (slot >= 0) — per-particle VFX lights are
-        // shadowless by design (UE-style), so hundreds of them add zero rays here.
+        // Only lights with a shadow slot (>= 0) trace a ray; per-particle VFX lights are shadowless.
         float sh = 1.0;
         bool casts = (type > 0.5 && type < 1.5) ? ((int)lt.spot.w >= 0) : ((int)lt.spot.z >= 0);
         if (casts) sh = RTShadow(pos + L * 0.05 + N * 0.02, L, lmax);
@@ -282,9 +262,7 @@ float3 ShadeSurface(float3 pos, float3 N, float3 V, float3 albedo, float metal, 
         float3 kd = (1.0 - F) * (1.0 - metal);
         Lo += (kd * albedo / RTPI + spec) * radiance * ndl;
     }
-    // DIFFUSE image-based ambient only. The SPECULAR reflection is added by the caller (chit) via a traced ray
-    // (recursion) for sharp reflections / blurred env for rough — because this is a REFLECTION, it must show the
-    // actual reflected scene, not just the analytic IBL the raster pass uses.
+    // Diffuse image-based ambient only: the specular term is added by the caller (chit) from a traced ray.
     float3 ambient;
     if (g_SkyParams.y > 0.5)
     {
@@ -296,17 +274,17 @@ float3 ShadeSurface(float3 pos, float3 N, float3 V, float3 albedo, float metal, 
     }
     else ambient = g_Ambient.rgb * g_Ambient.w * albedo;          // flat ambient (sky off)
 
-    return ambient * ao + Lo + emissive;                          // occlusion attenuates ambient only (like world.ps)
+    return ambient * ao + Lo + emissive;                          // occlusion attenuates ambient only, as in world.ps
 }
 
-// Fresnel-roughness reflectance for weighting a reflection (NO ambient scaling — a reflection is real radiance).
+// Fresnel-roughness reflectance used to weight a reflection (no ambient scaling).
 float3 SpecFr(float3 N, float3 V, float rough, float3 albedo, float metal, float3 spec)
 {
     float3 F0 = lerp(0.04 * spec, albedo, metal);
     float  ndv = max(dot(N, V), 0.0);
     return F0 + (max(float3(1.0 - rough, 1.0 - rough, 1.0 - rough), F0) - F0) * pow(1.0 - ndv, 5.0);
 }
-// Analytic reflection environment (blurred by roughness): probe, procedural sky, or flat (sky off).
+// Analytic reflection environment blurred by roughness: probe, procedural sky, or flat ambient.
 float3 ReflEnv(float3 R, float rough)
 {
     if (g_ProbePos.w > 0.5) return g_Probe.SampleLevel(g_Probe_sampler, R, saturate(rough) * g_ProbeParams.y).rgb * g_ProbeParams.x;

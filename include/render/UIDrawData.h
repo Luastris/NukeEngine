@@ -5,14 +5,9 @@
 
 namespace nuke {
 
-// Backend-neutral 2D draw data for immediate-mode UI.
-//
-// This is the ONLY thing that connects a UI module to a renderer module. It
-// deliberately contains no ImGui (or any UI library) types, and no graphics-API
-// types: a UI module fills it from its own draw lists, and a renderer module
-// turns it into GPU draw calls. Either side can be swapped without touching the
-// other. The layout mirrors the common ImGui-style vertex/index/command format
-// so a UI module can forward its buffers without copying.
+// Backend-neutral 2D draw data for immediate-mode UI — the only thing connecting a UI module to a
+// renderer module. The layout mirrors the ImGui-style vertex/index/command format so a UI module
+// can forward its buffers without copying.
 
 struct NukeUIVert
 {

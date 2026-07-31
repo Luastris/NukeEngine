@@ -8,13 +8,8 @@
 
 namespace nuke {
 
-// Debug/gizmo drawing facade (roadmap 2.1). Shapes decompose ENGINE-side into
-// iRender::drawDebugLine segments — backends only ever see lines. Everything is valid
-// for ONE frame (the renderer clears at the next frame's start); emit every frame you
-// want it visible (Update / fixedUpdate / editor gizmo pass — the seam is thread-safe).
-//
-// [[nuke::func]]-reflected: scripts get nuke.DebugDraw.* through the generic static
-// binder with zero hand-written glue.
+// Debug/gizmo drawing facade; shapes decompose engine-side into debug line segments.
+// Everything lasts ONE frame — re-emit every frame you want it visible. Seam is thread-safe.
 class NUKEENGINE_API DebugDraw
 {
 	NUKE_CLASS_NOCREATE(DebugDraw, Object)

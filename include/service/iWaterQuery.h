@@ -4,10 +4,8 @@
 
 namespace nuke {
 
-// Water query service (7.5, stage 3): the "where is the water, and poke it" contract for
-// modules that must react to water WITHOUT linking the water module — NukeVFX rain drops
-// splash rings where they land, gameplay code checks wetness. Provided by NukeWater while
-// it is loaded (Services registry rules: never cache the pointer across plugin toggles).
+// Water query contract for modules that react to water without linking the water module.
+// Provided by NukeWater while loaded — never cache the pointer across plugin toggles.
 struct iWaterQuery
 {
 	static constexpr const char* kServiceName = "waterquery";

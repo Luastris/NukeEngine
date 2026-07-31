@@ -23,51 +23,34 @@ namespace bc = boost::container;
 
 namespace nuke {
 
-// The loaded plugins live as a SINGLE instance inside the engine DLL. Access them via
-// GetModules() — a header-level `static` would give every TU (e.g. the editor) its own
-// empty copy, so the plugin manager would never see what InitModules loaded.
+// The loaded plugins live as a SINGLE instance inside the engine DLL — a header-level `static`
+// would give every TU its own empty copy.
 NUKEENGINE_API bc::vector<std::shared_ptr<NUKEModule>>& GetModules();
 
-// The ABI level a discovered module's DLL was built against (its exported nuke_module_abi;
-// 1 for DLLs that predate the stamp). GUARD every call to a vtable-appended NUKEModule
-// virtual with this — e.g. `ModuleAbi(m) >= 2 && m->editorTool()` — so a stale project
-// module degrades to the virtual's default instead of crashing the host (its shorter
-// vtable has no such slot). Levels are documented beside NUKE_MODULE_ABI.
+// The ABI level a discovered module's DLL was built against (1 for DLLs predating the stamp).
+// GUARD every call to a vtable-appended NUKEModule virtual with this — e.g.
+// `ModuleAbi(m) >= 2 && m->editorTool()` — since an older DLL has no such slot.
 NUKEENGINE_API int ModuleAbi(const NUKEModule* m);
 
-// InitModules now only DISCOVERS plugins (imports them for metadata) into the shared pool —
-// it does NOT activate them. Activate the project's chosen plugins with EnablePlugin().
+// Discover plugins (import for metadata) into the shared pool; does NOT activate them.
 NUKEENGINE_API void InitModules(AppInstance* instance);
 NUKEENGINE_API void UnloadModules();
 
-// Discover plugins from ONE extra directory into the shared pool (same import as
-// InitModules; a DLL whose file name is already in the pool is skipped — the host's own
-// modules/ wins). This is how PROJECT-LOCAL game modules (<project>/modules, Phase 6.0)
-// join the pool: the editor calls it at project open and after a game-module build.
+// Discover plugins from ONE extra directory into the shared pool. A DLL whose file name is
+// already in the pool is skipped, so the host's own modules/ wins.
 NUKEENGINE_API void DiscoverModulesIn(const std::string& dir);
 
-// C++ game-module rebuild cycle (Phase 6.0). A discovered DLL is file-LOCKED for the whole
-// session (the pool holds its boost::dll library), so a rebuild must first UNLOAD it:
-//   UnloadModuleDll(file)  — disable if loaded (components -> UnknownComponent placeholders)
-//                            and DROP it from the pool; the last reference frees the DLL and
-//                            the build can overwrite the file. Refuses PHASE_BOOT providers.
-//                            NOTE: the caller must not hold shared_ptr copies (plugin window
-//                            selection etc.) or the file stays locked.
-//   DiscoverModuleFile(p)  — import ONE dll path back into the pool (returns null on failure;
-//                            replaces nothing — call UnloadModuleDll first). Enable the
-//                            result with EnablePlugin: live UnknownComponent placeholders of
-//                            its types restore automatically.
+// A discovered DLL is file-LOCKED for the whole session, so a rebuild must unload it first.
+// Unload refuses PHASE_BOOT providers, and the caller must hold no shared_ptr copies or the file
+// stays locked. Discover imports ONE dll path back into the pool (null on failure) and replaces
+// nothing, so call UnloadModuleDll first.
 NUKEENGINE_API bool        UnloadModuleDll(const std::string& moduleFile);
 NUKEENGINE_API NUKEModule* DiscoverModuleFile(const std::string& absPath);
 
-// Activate / deactivate a discovered plugin at any time (the manager's checkboxes + the
-// per-project load list drive these). Enable = OnLoad() (sync, registers types) +
-// service registration (queryService -> Services_Provide) + Run() (background).
-// Disable = service revoke + Shutdown(). Idempotent.
-// Mutual exclusion: enabling a service provider first disables the current provider of
-// that service — EXCEPT when either side is PHASE_BOOT (the renderer): boot providers
-// can't be torn down mid-run, so EnablePlugin refuses and the UI persists the choice as
-// "applies after restart".
+// Activate / deactivate a discovered plugin. Enable = OnLoad() + service registration + Run();
+// disable = service revoke + Shutdown(). Idempotent. Enabling a service provider first disables
+// the current provider — except when either side is PHASE_BOOT, which EnablePlugin refuses
+// (boot providers can't be torn down mid-run; the choice applies after restart).
 NUKEENGINE_API void EnablePlugin(NUKEModule* m);
 NUKEENGINE_API void DisablePlugin(NUKEModule* m);
 
@@ -75,23 +58,19 @@ NUKEENGINE_API void DisablePlugin(NUKEModule* m);
 NUKEENGINE_API NUKEModule* ActiveServiceProvider(const char* service);
 
 // Pick a provider of `service` from the discovered pool: the one whose moduleFile equals
-// preferredFile if present, else the first provider found (fallback, logged). Null if the
-// pool has no provider of that service. Does NOT enable it.
+// preferredFile if present, else the first provider found. Null if none. Does NOT enable it.
 NUKEENGINE_API NUKEModule* FindServiceProvider(const char* service,
                                                const std::string& preferredFile = "");
 
-// Load the engine's built-in shader files from `dir` (e.g. "shaders") and push their source
-// into the renderer (render->setShaderSource) BEFORE render->init(). Each "<name>.hlsl" is
-// registered under "<name>" (so "world.vs.hlsl" -> "world.vs"). The ENGINE does the file IO;
-// the render module stays free of file/boost dependencies.
+// Load the engine's built-in shader files from `dir` and push their source into the renderer
+// BEFORE render->init(). Each "<name>.hlsl" registers under "<name>" ("world.vs.hlsl" ->
+// "world.vs"). The engine does the file IO so the render module stays free of file dependencies.
 class iRender;
 NUKEENGINE_API void LoadBuiltinShaders(iRender* render, const std::string& dir);
-// Packed variant (3.2): built-ins from the mounted game.nupak ("shaders/" entries) — the
-// dist ships no loose shaders/ dir; mods override entries through the Package layers.
+// Same, from the mounted game.nupak's "shaders/" entries (the dist ships no loose shaders/ dir).
 NUKEENGINE_API void LoadBuiltinShadersPackaged(iRender* render);
 
-// Which plugin (dll name) provides a component type, "" for engine built-ins. Learned by
-// diffing the reflection registry around each plugin's OnLoad().
+// Which plugin (dll name) provides a component type, "" for engine built-ins.
 NUKEENGINE_API const char* PluginForType(const std::string& type);
 
 // True if a type's components should be live (built-in, or its plugin is currently loaded);

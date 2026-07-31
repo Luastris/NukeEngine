@@ -5,19 +5,9 @@
 
 namespace nuke {
 
-// Foliage (7.4): a PERSISTENT instanced scatter layer over any mesh surface. Derives from
-// InstancedMesh, so the whole render integration comes inherited: chunked instance buffers,
-// per-chunk frustum culling in every pass (lit / shadow / gbuffer-velocity / RT), the
-// base64 instance blob, hot-applied mesh/material assets. On top it adds:
-//   - procedural scatter RULES: density + seed over AREA-WEIGHTED triangles of a surface
-//     subtree, masked by slope / world-height band / Perlin patch noise;
-//   - WIND bend (vertex shader): per-instance coefficient + the global nuke::Wind params,
-//     packed into instance custom.z (custom.w = interaction coefficient);
-//   - INTERACTION bend: characters/dynamic bodies become "pushers" the shader bends
-//     blades away from (visual, not physics);
-//   - editor paint/fill: Rebuild() = fill by rules, PaintAt/EraseAt = brush strokes.
-// One component = one layer (one mesh+material+rules); several layers = several
-// components. Instances live in component DATA — never thousands of atoms.
+// Persistent instanced scatter layer over any mesh surface; inherits InstancedMesh's render path
+// and adds procedural scatter rules (density/seed, slope/height/noise masks), wind + interaction
+// bend, and editor fill/paint. One component = one layer; instances live in component data.
 class NUKEENGINE_API Foliage : public InstancedMesh
 {
 	NUKE_CLASS(Foliage, InstancedMesh, "World")
@@ -41,17 +31,14 @@ public:
 	[[nuke::prop(label="Wind Bend", min=0, max=2, tip="How much the global wind bends this layer (top of the mesh sways, base stays).")]] float windBend = 1.0f;
 	[[nuke::prop(label="Interaction Bend", min=0, max=2, tip="How much characters and moving bodies part this layer.")]] float interactionBend = 1.0f;
 
-	// ---- reflected ops (the editor's Fill/Paint tools drive these; scripts can too) --------
+	// ---- reflected ops (editor Fill/Paint tools and scripts) ----
 	[[nuke::func]] void Rebuild();                                              // full re-scatter (Fill)
 	[[nuke::func]] void PaintAt(const Vector3& worldPos, double radius, double densityMul);
 	[[nuke::func]] void EraseAt(const Vector3& worldPos, double radius);
 
 	Foliage();
 	bool EnsureRenderReady(iRender* r) override;   // sync per-instance bend coefs, then base
-	// The layer follows the atom's position/rotation but NOT its scale: foliage often sits
-	// directly on a stretched ground atom (scale 40x1x40 city plane) — multiplying that into
-	// every blade turned each one into a sheet bigger than the map.
-	bool ScaleWithAtom() const override { return false; }
+	bool ScaleWithAtom() const override { return false; }   // follows atom position/rotation but never its scale
 
 	// runtime: bend coefs the instances were last written with (prop edits hot-apply)
 	float windBendRes = -1.0f, interBendRes = -1.0f, meshHeightRes = -1.0f;
