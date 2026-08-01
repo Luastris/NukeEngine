@@ -67,10 +67,12 @@ public:
 	// A DLC mounts only onto the base whose name matches its "base". No pak.json = a legacy base.
 	struct PakInfo
 	{
-		std::string kind;                     // "" (legacy base) / "base" / "dlc"
+		std::string kind;                     // "" (legacy base) / "base" / "dlc" / "part"
 		std::string name;                     // display name (the game's or the DLC's)
 		std::string base;                     // DLC: the base pak name it extends
 		std::vector<std::string> platforms;   // empty = any platform
+		std::vector<std::string> parts;       // split-part pak filenames, mounted with this pak
+		std::string partOf;                   // non-empty = this pak IS a part of that one
 	};
 	static bool ReadPakInfo(const std::string& pakPath, PakInfo& out);   // false = no/bad pak.json
 	// The platform tag this binary was built for ("win64"), matched against pak.json
@@ -78,7 +80,13 @@ public:
 	static const char* CurrentPlatform();
 	// Mount every DLC pak in <gameRoot>/content/dlc, filename order, priorities 1..K (above the
 	// base at 0, below the mods at 1000+). Returns how many mounted.
+	// Mount the split parts a pak declares in its own pak.json, at the SAME priority as it.
+	// Returns how many mounted. No parts = 0.
+	static int MountPakParts(const std::string& mainPak, int priority);
 	static int MountDlcs(const std::string& gameRoot, const std::string& baseName);
+	// Names of the DLCs mounted by the last MountDlcs (cleared by UnmountAll). A mod records
+	// these as its "dlc" requirement, and the loader skips a mod whose DLC is absent.
+	static const std::vector<std::string>& MountedDlcs();
 
 	// ---- mods with dependencies (mods-on-mods) ----
 	// Every .numod may carry a "mod.json" manifest:
@@ -91,6 +99,7 @@ public:
 		std::string pakPath;                 // mounted file
 		std::string name;                    // manifest name, else the file stem
 		std::vector<std::string> requires_;  // dependency names (load below this mod)
+		std::vector<std::string> dlc;        // DLC names the mod was authored against
 		std::string platform;                // "" / "any" = cross-platform, else a platform tag
 		std::vector<std::string> parts;      // split-part pak filenames (mounted with this mod)
 		std::string partOf;                  // non-empty = this pak IS a part (skip as a mod)

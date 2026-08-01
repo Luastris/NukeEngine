@@ -232,6 +232,7 @@ struct MountLayer
 static std::vector<MountLayer> gMounts;               // sorted by priority DESC
 static std::string gRawRoot;
 static boost::mutex gPakLock;
+static std::vector<std::string> gDlcNames;            // DLCs mounted by MountDlcs
 
 bool Package::Mount(const std::string& pakPath, int priority)
 {
@@ -264,7 +265,7 @@ bool Package::Mount(const std::string& pakPath, int priority)
 	return true;
 }
 
-void Package::UnmountAll() { boost::mutex::scoped_lock l(gPakLock); gMounts.clear(); }
+void Package::UnmountAll() { boost::mutex::scoped_lock l(gPakLock); gMounts.clear(); gDlcNames.clear(); }
 int  Package::MountedCount() { boost::mutex::scoped_lock l(gPakLock); return (int)gMounts.size(); }
 
 std::vector<std::string> Package::MountedPaks()
@@ -375,11 +376,34 @@ bool Package::ReadPakInfo(const std::string& pakPath, PakInfo& out)
 	if (j.contains("platforms") && j["platforms"].is_array())
 		for (auto& p : j["platforms"])
 			if (p.is_string()) out.platforms.push_back(p.get<std::string>());
+	if (j.contains("parts") && j["parts"].is_array())
+		for (auto& p : j["parts"])
+			if (p.is_string()) out.parts.push_back(p.get<std::string>());
+	out.partOf = j.value("part_of", std::string());
 	return true;
 }
 
+int Package::MountPakParts(const std::string& mainPak, int priority)
+{
+	PakInfo pi;
+	if (!ReadPakInfo(mainPak, pi) || pi.parts.empty()) return 0;
+	boost::system::error_code ec;
+	const bfs::path dir = bfs::path(mainPak).parent_path();
+	int mounted = 0;
+	for (const std::string& part : pi.parts)
+	{
+		bfs::path p = dir / bfs::path(part).filename();
+		if (!bfs::exists(p, ec)) { cout << "[Package]\tpart MISSING: " << part << endl; continue; }
+		if (Package::Mount(p.string(), priority)) ++mounted;
+	}
+	return mounted;
+}
+
+const std::vector<std::string>& Package::MountedDlcs() { return gDlcNames; }
+
 int Package::MountDlcs(const std::string& gameRoot, const std::string& baseName)
 {
+	gDlcNames.clear();
 	bfs::path dir = bfs::path(gameRoot) / "content" / "dlc";
 	boost::system::error_code ec;
 	if (!bfs::exists(dir, ec) || !bfs::is_directory(dir, ec)) return 0;
@@ -393,7 +417,9 @@ int Package::MountDlcs(const std::string& gameRoot, const std::string& baseName)
 	{
 		const std::string fn = bfs::path(p).filename().string();
 		PakInfo pi;
-		if (!ReadPakInfo(p, pi) || pi.kind != "dlc")
+		if (!ReadPakInfo(p, pi)) { cout << "[Package]\tdlc skipped (no dlc manifest): " << fn << endl; continue; }
+		if (!pi.partOf.empty()) continue;   // a split part: its main pak mounts it
+		if (pi.kind != "dlc")
 		{
 			cout << "[Package]\tdlc skipped (no dlc manifest): " << fn << endl;
 			continue;
@@ -411,7 +437,12 @@ int Package::MountDlcs(const std::string& gameRoot, const std::string& baseName)
 			     << CurrentPlatform() << " — skipped" << endl;
 			continue;
 		}
-		if (Package::Mount(p, prio)) { ++prio; ++mounted; }
+		if (Package::Mount(p, prio))
+		{
+			MountPakParts(p, prio);   // the DLC's own split parts ride at its priority
+			gDlcNames.push_back(pi.name.empty() ? bfs::path(p).stem().string() : pi.name);
+			++prio; ++mounted;
+		}
 	}
 	return mounted;
 }
@@ -465,6 +496,9 @@ int Package::MountModList(const std::string& gameRoot, const std::vector<std::st
 				if (j.contains("requires") && j["requires"].is_array())
 					for (auto& r : j["requires"])
 						if (r.is_string()) mi.requires_.push_back(r.get<std::string>());
+				if (j.contains("dlc") && j["dlc"].is_array())
+					for (auto& r : j["dlc"])
+						if (r.is_string()) mi.dlc.push_back(r.get<std::string>());
 				if (j.contains("parts") && j["parts"].is_array())
 					for (auto& r : j["parts"])
 						if (r.is_string()) mi.parts.push_back(r.get<std::string>());
@@ -476,6 +510,29 @@ int Package::MountModList(const std::string& gameRoot, const std::vector<std::st
 			cout << "[Package]\t'" << bfs::path(resolved).filename().string()
 			     << "' is a part of mod '" << mi.partOf << "' — mounted with it, not listed" << endl;
 			continue;
+		}
+		// A mod authored on top of a DLC patches content that only that DLC brings.
+		{
+			auto eqCI = [](const std::string& a, const std::string& b)
+			{
+				if (a.size() != b.size()) return false;
+				for (size_t k = 0; k < a.size(); ++k)
+					if (tolower((unsigned char)a[k]) != tolower((unsigned char)b[k])) return false;
+				return true;
+			};
+			std::string missing;
+			for (const std::string& d : mi.dlc)
+			{
+				bool have = false;
+				for (const std::string& h : gDlcNames) if (eqCI(h, d)) { have = true; break; }
+				if (!have) missing += (missing.empty() ? "" : ", ") + d;
+			}
+			if (!missing.empty())
+			{
+				cout << "[Package]\tmod '" << mi.name << "' needs DLC [" << missing
+				     << "] which is not installed — skipped" << endl;
+				continue;
+			}
 		}
 		// Content-only mods are cross-platform; native code was tagged at packaging time.
 		if (!mi.platform.empty() && mi.platform != "any" && mi.platform != CurrentPlatform())
