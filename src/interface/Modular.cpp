@@ -11,6 +11,7 @@
 #include <set>
 #ifdef _WIN32
 #include <windows.h>   // SetDllDirectoryW: module deps resolve from the exe dir, not the CWD
+#include <tlhelp32.h>  // thread enumeration at unload (see KillModuleThreads)
 #endif
 
 namespace nuke {
@@ -20,8 +21,19 @@ static bc::vector<std::shared_ptr<NUKEModule>> g_modules;
 static AppInstance* g_instance = nullptr;   // host, captured at discovery (for EnablePlugin)
 static std::map<std::string, std::string> g_typePlugin;   // component type -> owning dll name
 static std::map<const NUKEModule*, int> g_moduleAbi;      // per-DLL ABI stamp (see NUKEEInteface.h)
-static std::map<const NUKEModule*, boost::thread> g_runThreads;   // joined before the DLL is freed
-static std::set<const NUKEModule*> g_runawayModules;      // Run() ignored stop: DLL must stay mapped
+// Worker threads the loader started for modules, tagged with the owning DLL and the OS thread
+// id so a stuck one can be named and killed before its code is unmapped.
+struct ModThread
+{
+	std::string   dll;
+	unsigned long id = 0;
+	boost::thread th;
+};
+static std::map<const NUKEModule*, ModThread> g_runThreads;
+
+#ifdef _WIN32
+static void KillThreadsOfModule(const std::string& dllFile);
+#endif
 
 bc::vector<std::shared_ptr<NUKEModule>>& GetModules() { return g_modules; }
 
@@ -311,6 +323,9 @@ bool UnloadModuleDll(const std::string& moduleFile)
 			return false;
 		}
 		if (m->loaded) DisablePlugin(m.get());   // live components -> UnknownComponent placeholders
+#ifdef _WIN32
+		KillThreadsOfModule(moduleFile);   // this path really unmaps: nothing of its may still run
+#endif
 		const long uses = m.use_count();
 		if (uses > 1)
 			cout << "[Modular]\tWARNING: '" << moduleFile << "' has " << (uses - 1)
@@ -399,8 +414,15 @@ void EnablePlugin(NUKEModule* m)
 			Services_Provide(service.c_str(), iface);
 
 	cout << "[Modular]\tenabled '" << m->title << "'" << endl;
-	// Kept, not detached: DisablePlugin joins it before the DLL can be freed.
-	g_runThreads[m] = boost::thread(boost::bind(&SehRunGuard, m, g_instance));
+	// Kept, not detached: DisablePlugin stops it before the DLL can be freed.
+	g_runThreads.erase(m);
+	ModThread mt;
+	mt.dll = m->moduleFile;
+	mt.th  = boost::thread(boost::bind(&SehRunGuard, m, g_instance));
+#ifdef _WIN32
+	mt.id = ::GetThreadId(mt.th.native_handle());
+#endif
+	g_runThreads[m] = std::move(mt);
 }
 
 void DisablePlugin(NUKEModule* m)
@@ -419,17 +441,24 @@ void DisablePlugin(NUKEModule* m)
 
 	if (!SehShutdown(m))   // shielded like OnLoad
 		cout << "[Modular]\t" << m->moduleFile << ": Shutdown crashed (module dropped anyway)" << endl;
-	// Reap Run() BEFORE anyone can free this DLL — a live thread in unmapped code is an AV.
+	// The module's worker must be GONE before anything frees this DLL — a live thread in
+	// unmapped code faults. Cooperative stop first (Shutdown set `stopped`), then a hard kill.
 	{
 		auto rt = g_runThreads.find(m);
 		if (rt != g_runThreads.end())
 		{
-			if (!rt->second.try_join_for(boost::chrono::seconds(2)))
+			ModThread& t = rt->second;
+			if (!t.th.try_join_for(boost::chrono::seconds(2)))
 			{
-				rt->second.detach();
-				g_runawayModules.insert(m);
-				cout << "[Modular]\t" << m->moduleFile << ": Run() ignored stop for 2 s — its DLL "
-				     << "stays mapped until process exit (unloading under a live thread = crash)" << endl;
+#ifdef _WIN32
+				cout << "[Modular]\t" << t.dll << ": worker thread " << t.id
+				     << " ignored stop for 2 s — terminating it" << endl;
+				::TerminateThread(t.th.native_handle(), 0);
+#else
+				cout << "[Modular]\t" << t.dll << ": worker thread " << t.id
+				     << " ignored stop for 2 s — detached (no portable kill)" << endl;
+#endif
+				t.th.detach();   // the boost::thread must not outlive this scope joinable
 			}
 			g_runThreads.erase(rt);
 		}
@@ -437,6 +466,50 @@ void DisablePlugin(NUKEModule* m)
 	m->loaded = false;
 	cout << "[Modular]\tdisabled '" << m->title << "'" << endl;
 }
+
+#ifdef _WIN32
+// Kill every live thread whose Win32 start address lies inside `dllFile`, by (dll, thread id).
+// Called before that DLL is actually unmapped (hot-reload) — a thread left running there wakes
+// up in unmapped code. Threads owned by the exe, the engine or system DLLs are never touched.
+static void KillThreadsOfModule(const std::string& dllFile)
+{
+	typedef LONG(WINAPI * PFN_NtQIT)(HANDLE, int, PVOID, ULONG, PULONG);
+	static PFN_NtQIT NtQIT = (PFN_NtQIT)GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtQueryInformationThread");
+	HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+	if (snap == INVALID_HANDLE_VALUE) return;
+	THREADENTRY32 te = { sizeof(te) };
+	const DWORD selfPid = GetCurrentProcessId(), selfTid = GetCurrentThreadId();
+	for (BOOL ok = Thread32First(snap, &te); ok; ok = Thread32Next(snap, &te))
+	{
+		if (te.th32OwnerProcessID != selfPid || te.th32ThreadID == selfTid) continue;
+		HANDLE h = OpenThread(THREAD_QUERY_INFORMATION | THREAD_TERMINATE, FALSE, te.th32ThreadID);
+		if (!h) continue;
+		void* start = nullptr;
+		char file[MAX_PATH] = "?";
+		if (NtQIT && NtQIT(h, 9 /*ThreadQuerySetWin32StartAddress*/, &start, sizeof(start), nullptr) == 0 && start)
+		{
+			HMODULE hm = nullptr;
+			char path[MAX_PATH] = "";
+			if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+			                       GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCSTR)start, &hm) && hm
+			    && GetModuleFileNameA(hm, path, MAX_PATH))
+			{
+				const char* slash = strrchr(path, '\\');
+				strncpy(file, slash ? slash + 1 : path, MAX_PATH - 1);
+				file[MAX_PATH - 1] = 0;
+			}
+		}
+		if (_stricmp(file, dllFile.c_str()) == 0)
+		{
+			cout << "[Modular]\t" << dllFile << ": killing leftover thread " << te.th32ThreadID
+			     << " before the unmap" << endl;
+			TerminateThread(h, 0);
+		}
+		CloseHandle(h);
+	}
+	CloseHandle(snap);
+}
+#endif
 
 void UnloadModules()
 {
@@ -450,20 +523,16 @@ void UnloadModules()
 			fprintf(stderr, "[Unload]\tdisabling %s\n", i->moduleFile.c_str()); fflush(stderr);
 			DisablePlugin(i.get());
 		}
+	// PROCESS EXIT: everything is shut down, but the DLLs stay MAPPED on purpose. Foreign worker
+	// threads (the OS pool, GPU drivers, the CLR, injected overlays) can still call back into a
+	// module after this point, and that call would land in unmapped code. The OS reclaims the
+	// mappings at exit anyway. Live hot-reload is unaffected — UnloadModuleDll still unmaps.
 	while (!g_modules.empty())
 	{
 		auto m = g_modules.back();
 		g_modules.pop_back();
-		if (m && g_runawayModules.count(m.get()))
-		{
-			// Deliberate leak: a runaway Run() thread still executes this DLL's code, so the
-			// mapping must outlive it (the OS reclaims it at process exit).
-			fprintf(stderr, "[Unload]\tkeeping %s mapped (runaway Run thread)\n", m->moduleFile.c_str()); fflush(stderr);
-			new std::shared_ptr<NUKEModule>(m);
-			continue;
-		}
-		fprintf(stderr, "[Unload]\tfreeing %s\n", m ? m->moduleFile.c_str() : "?"); fflush(stderr);
-		m.reset();   // last ref -> boost::dll unmaps the DLL here
+		fprintf(stderr, "[Unload]\tkeeping %s mapped\n", m ? m->moduleFile.c_str() : "?"); fflush(stderr);
+		if (m) new std::shared_ptr<NUKEModule>(m);   // deliberate: outlives us by design
 	}
 	fprintf(stderr, "[Unload]\tdone\n"); fflush(stderr);
 }
