@@ -65,7 +65,7 @@ Color Color::operator/=(Color other)
 
 Color Color::operator*(double other)
 {
-	Color tmp = Color(r - other, g - other, b - other, a - other);
+	Color tmp = Color(r * other, g * other, b * other, a * other);
 	return tmp;
 }
 
