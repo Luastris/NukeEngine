@@ -5,10 +5,16 @@
 #include "API/Model/Texture.h"
 #include "API/Model/AnimClip.h"
 #include "API/Model/Animator.h"
+#include "API/Model/SkinnedMeshRenderer.h"
+#include "API/Model/Skeleton.h"
+#include "API/Model/Ragdoll.h"
 #include <boost/filesystem.hpp>
 #include <vector>
 #include <string>
 #include <map>
+#include <set>
+#include <functional>
+#include <algorithm>
 #include <cctype>
 #include <cstdlib>
 #include <boost/filesystem/fstream.hpp>
@@ -194,22 +200,34 @@ AssImporter::~AssImporter() {}
 Atom* AssImporter::ImportObject(aiNode* node, const aiScene* scene) {
 	ResDB* res = ResDB::getSingleton();
 	auto atom = new Atom(node->mName.C_Str());
-	for (int i = 0; i < node->mNumMeshes; i++) {
-		auto cmesh = node->mMeshes[i];
-		Atom* ngo = new Atom(scene->mMeshes[cmesh]->mName.C_Str());
-		Mesh* m = new Mesh();
-		m->ImportAIMesh(scene->mMeshes[cmesh]);
+	if (node->mNumMeshes > 0)
+	{
+		// All of the node's meshes merge into ONE sectioned mesh; material slots dedup per node.
+		std::vector<aiMesh*> nodeMeshes;
+		bool skinned = false;
+		for (unsigned int i = 0; i < node->mNumMeshes; ++i)
+		{
+			nodeMeshes.push_back(scene->mMeshes[node->mMeshes[i]]);
+			skinned = skinned || nodeMeshes.back()->HasBones();
+		}
+		std::vector<unsigned int> slotMats;
+		Mesh* m = Mesh::ImportAIMeshes(nodeMeshes, scene, &slotMats);
 		res->meshes.push_back(m);
 
-		Material* mat = new Material();
-		mat->ImportAiMaterial(scene->mMaterials[scene->mMeshes[cmesh]->mMaterialIndex]);
-		ResDB::getSingleton()->materials.push_back(mat);
-
+		// Live path keeps the classic MeshRenderer: its meshes embed their skeleton (no
+		// .nuskel asset exists here), which is exactly the Animator's legacy contract.
+		(void)skinned;
 		MeshRenderer* mr = new MeshRenderer();
+		atom->AddComponent(mr);   // Init (ResolveMaterials) runs here — fill the slots AFTER it
 		mr->mesh = m;
-		mr->mat = mat->Clone();   // owned instance; the asset `mat` stays the shared template in ResDB
-		ngo->AddComponent(mr);
-		atom->AddChild(ngo);
+		for (size_t s = 0; s < slotMats.size(); ++s)
+		{
+			Material* mat = new Material();
+			mat->ImportAiMaterial(scene->mMaterials[slotMats[s]]);
+			res->materials.push_back(mat);
+			if (s == 0) mr->mat = mat->Clone();   // owned instance; the asset stays the shared template
+			mr->mats.push_back(mat->Clone());
+		}
 	}
 	for (int i = 0; i < node->mNumChildren; i++) {
 		atom->AddChild(ImportObject(node->mChildren[i], scene));
@@ -221,7 +239,9 @@ void AssImporter::Import(const char* path) {
 
 	Assimp::Importer importer;
 	ResDB* res = ResDB::getSingleton();
-	const aiScene* sc = importer.ReadFile(path, aiProcessPreset_TargetRealtime_MaxQuality);
+	importer.SetPropertyFloat(AI_CONFIG_GLOBAL_SCALE_FACTOR_KEY, 1.0f);   // metres, see ImportToContent
+	const aiScene* sc = importer.ReadFile(path,
+	                                      aiProcessPreset_TargetRealtime_MaxQuality | aiProcess_GlobalScale);
 	if (!sc)
 	{
 		cout << importer.GetErrorString() << endl;
@@ -254,11 +274,43 @@ static std::string SafeStem(const char* in)
 	return s;
 }
 
-// Rebuild the assimp node tree as an Atom hierarchy: per-node transform, a MeshRenderer per
-// mesh (mesh/material by GUID), and an Animator wired to `firstClipGuid` on skinned meshes.
+// One written .numesh per NODE (its meshes merged into material sections); nodes sharing the
+// same mesh set (file-level instancing) share one asset. Key = sorted source-mesh indices.
+struct NodeMeshOut
+{
+	std::string guid;                    // written .numesh asset
+	std::vector<unsigned int> slotMats;  // material SLOT -> aiScene material index
+	bool skinned = false;
+	std::string skelGuid;                // the file's shared .nuskel (skinned nodes)
+};
+
+static std::string NodeKey(const aiNode* n)
+{
+	std::vector<unsigned int> ids(n->mMeshes, n->mMeshes + n->mNumMeshes);
+	std::sort(ids.begin(), ids.end());
+	std::string k;
+	for (unsigned int i : ids) { k += std::to_string(i); k += '_'; }
+	return k;
+}
+
+static bool SubtreeHasMesh(const aiNode* n)
+{
+	if (n->mNumMeshes > 0) return true;
+	for (unsigned int i = 0; i < n->mNumChildren; ++i)
+		if (SubtreeHasMesh(n->mChildren[i])) return true;
+	return false;
+}
+
+// Rebuild the assimp node tree as an Atom hierarchy: per-node transform, ONE MeshRenderer on
+// the node itself (sectioned mesh + per-slot materials by GUID), and an Animator wired to
+// `firstClipGuid` on skinned nodes. NO bone atoms: joint-only subtrees live in the .nuskel
+// (the pose palette is in the SkinnedMeshRenderer), so a `boneNames` child that carries no
+// mesh anywhere below is skipped entirely. Joints with real geometry underneath (weapon
+// bones, skinned attachments) are kept so the child's accumulated transform stays honest.
 static Atom* BuildPrefabNode(aiNode* node, const aiScene* sc,
-                             const std::vector<std::string>& meshGuids,
+                             const std::map<std::string, NodeMeshOut>& nodeMeshes,
                              const std::vector<std::string>& matGuids,
+                             const std::set<std::string>& boneNames,
                              const std::string& firstClipGuid = std::string())
 {
 	Atom* atom = new Atom(node->mName.C_Str());
@@ -270,25 +322,35 @@ static Atom* BuildPrefabNode(aiNode* node, const aiScene* sc,
 	t.rotation.x = rot.x; t.rotation.y = rot.y; t.rotation.z = rot.z; t.rotation.w = rot.w;
 	t.scale.x    = scl.x; t.scale.y    = scl.y; t.scale.z    = scl.z;
 
-	for (unsigned int i = 0; i < node->mNumMeshes; ++i)
+	if (node->mNumMeshes > 0)
 	{
-		unsigned int mi = node->mMeshes[i];
-		Atom* child = new Atom(sc->mMeshes[mi]->mName.C_Str());
-		MeshRenderer* mr = new MeshRenderer();
-		mr->meshGuid = (mi < meshGuids.size()) ? meshGuids[mi] : std::string();
-		unsigned int matIdx = sc->mMeshes[mi]->mMaterialIndex;
-		if (matIdx < matGuids.size()) mr->matGuid = matGuids[matIdx];
-		child->AddComponent(mr);
-		if (sc->mMeshes[mi]->HasBones())   // skinned: ready-to-use Animator (clip may be picked later)
+		auto it = nodeMeshes.find(NodeKey(node));
+		if (it != nodeMeshes.end())
 		{
-			Animator* an = new Animator();
-			an->clipGuid = firstClipGuid;   // "" when the file carries no clips
-			child->AddComponent(an);
+			MeshRenderer* mr;
+			if (it->second.skinned)
+			{
+				SkinnedMeshRenderer* sm = new SkinnedMeshRenderer();
+				sm->skelGuid = it->second.skelGuid;   // the file's shared .nuskel
+				mr = sm;
+			}
+			else mr = new MeshRenderer();
+			mr->meshGuid = it->second.guid;
+			for (unsigned int mi : it->second.slotMats)
+				mr->matGuids.push_back(mi < matGuids.size() ? matGuids[mi] : std::string());
+			if (!mr->matGuids.empty()) mr->matGuid = mr->matGuids[0];   // slot 0 doubles as the classic single ref
+			atom->AddComponent(mr);
+			// NO per-node Animator: ONE Animator on the prefab ROOT drives every skinned
+			// mesh of the shared skeleton (added by the caller after the tree is built).
 		}
-		atom->AddChild(child);
 	}
 	for (unsigned int i = 0; i < node->mNumChildren; ++i)
-		atom->AddChild(BuildPrefabNode(node->mChildren[i], sc, meshGuids, matGuids, firstClipGuid));
+	{
+		aiNode* ch = node->mChildren[i];
+		if (boneNames.count(ch->mName.C_Str()) && !SubtreeHasMesh(ch))
+			continue;   // joint-only subtree: it lives in the .nuskel, not the prefab
+		atom->AddChild(BuildPrefabNode(ch, sc, nodeMeshes, matGuids, boneNames, firstClipGuid));
+	}
 	return atom;
 }
 
@@ -375,11 +437,25 @@ int AssImporter::ImportToContent(const char* srcPath, const char* destDir)
 	// Collapse FBX pivots: otherwise nodes split into $AssimpFbx$_* pseudo-nodes and animation
 	// channels bind to pseudo-node names that differ between files.
 	importer.SetPropertyBool(AI_CONFIG_IMPORT_FBX_PRESERVE_PIVOTS, false);
-	const aiScene* sc = importer.ReadFile(srcPath, aiProcessPreset_TargetRealtime_MaxQuality);
+	// UNITS. The engine works in metres. An FBX authored in centimetres (Mixamo, Max, Maya's
+	// default) carries UnitScaleFactor = 100 in its metadata: imported raw, a character is a
+	// 180-METRE giant that fills the screen and drowns the rasterizer in overdraw. GlobalScale
+	// applies that metadata once, at import, to meshes, bones, node transforms and animation
+	// keys alike; formats that carry no unit metadata (OBJ, glTF) come in unchanged.
+	importer.SetPropertyFloat(AI_CONFIG_GLOBAL_SCALE_FACTOR_KEY, 1.0f);
+	const aiScene* sc = importer.ReadFile(srcPath,
+	                                      aiProcessPreset_TargetRealtime_MaxQuality | aiProcess_GlobalScale);
 	if (!sc)
 	{
 		cout << "[Import]\t" << importer.GetErrorString() << endl;
 		return 0;
+	}
+	{
+		// What the file declared, so an odd-looking size is traceable to its units.
+		double unit = 1.0;
+		if (sc->mMetaData) { double u = 0.0; if (sc->mMetaData->Get("UnitScaleFactor", u) && u > 0.0) unit = u; }
+		if (unit != 1.0)
+			cout << "[Import]\tsource units: 1 unit = " << (1.0 / unit) << " m — scaled to metres" << endl;
 	}
 
 	// The progress total must mirror the conversion loops below.
@@ -397,8 +473,16 @@ int AssImporter::ImportToContent(const char* srcPath, const char* destDir)
 			if (has(aiTextureType_AMBIENT_OCCLUSION) || has(aiTextureType_LIGHTMAP)) ++texUnits;
 			if (has(aiTextureType_EMISSIVE)) ++texUnits;
 		}
+		// Mesh units = unique NODE mesh-sets (one .numesh per node; shared sets = one asset).
+		std::set<std::string> nodeKeys;
+		std::function<void(aiNode*)> countNodes = [&](aiNode* n)
+		{
+			if (n->mNumMeshes > 0) nodeKeys.insert(NodeKey(n));
+			for (unsigned int c = 0; c < n->mNumChildren; ++c) countNodes(n->mChildren[c]);
+		};
+		countNodes(sc->mRootNode);
 		tlProg->done  = 0;
-		tlProg->total = texUnits + (int)sc->mNumMaterials + (int)sc->mNumMeshes
+		tlProg->total = texUnits + (int)sc->mNumMaterials + (int)nodeKeys.size()
 		              + (int)sc->mNumAnimations + 1;
 	}
 
@@ -457,37 +541,133 @@ int AssImporter::ImportToContent(const char* srcPath, const char* destDir)
 		ProgUnitDone();
 	}
 
-	std::vector<std::string> meshGuids(sc->mNumMeshes);
-	int count = 0;
-	for (unsigned int i = 0; i < sc->mNumMeshes; ++i)
+	// ONE skeleton per FILE (.nuskel): the merged palette every skinned node-mesh indexes
+	// into. Modular characters from several files each carry their own skeleton asset.
+	std::vector<MeshBone> sceneBones;
+	Mesh::ImportAISkeleton(sc, sceneBones);
+	std::set<std::string> boneNames;   // prefab builder skips joint-only subtrees by these
+	for (const MeshBone& b : sceneBones) boneNames.insert(b.name);
+	std::string skelGuid;
+	Skeleton* skAsset = nullptr;   // survives for the auto-.nurag below
+	if (!sceneBones.empty())
 	{
-		ProgStage("mesh " + std::to_string(i + 1) + "/" + std::to_string(sc->mNumMeshes));
-		Mesh* m = new Mesh();
-		m->ImportAIMesh(sc->mMeshes[i], sc);   // scene enables skin import (bones + skeleton)
-		m->guid = ResDB::NewGuid();
-
-		std::string stem = SafeStem(sc->mMeshes[i]->mName.C_Str());
-		bfs::path out = bfs::path(destDir) / (stem + ".numesh");
-		for (int n = 1; bfs::exists(out, ec); ++n)
-			out = bfs::path(destDir) / (stem + "_" + std::to_string(n) + ".numesh");
-
-		if (!m->SaveToFile(out.string()))
+		ProgStage("skeleton");
+		Skeleton* sk = new Skeleton();
+		sk->guid  = ResDB::NewGuid();
+		sk->name  = SafeStem(bfs::path(srcPath).stem().string().c_str());
+		sk->bones = sceneBones;
+		bfs::path sout = bfs::path(destDir) / (sk->name + ".nuskel");
+		for (int n = 1; bfs::exists(sout, ec); ++n)
+			sout = bfs::path(destDir) / (sk->name + "_" + std::to_string(n) + ".nuskel");
+		if (sk->SaveToFile(sout.string()))
 		{
-			cout << "[Import]\tfailed to write " << out.filename().string() << endl;
-			delete m;
-			ProgUnitDone();
-			continue;
+			const std::string spath = sout.string();
+			AssImporter::Reg([sk, spath]
+			{
+				ResDB::getSingleton()->RegisterSkeleton(sk);
+				ResDB::getSingleton()->SetAssetPath(sk->guid, spath);
+			});
+			skelGuid = sk->guid;
+			skAsset = sk;
+			cout << "[Import]	wrote " << sout.filename().string() << " (" << sk->bones.size()
+			     << " bones)" << endl;
 		}
-		const std::string mpath = out.string();
-		AssImporter::Reg([m, mpath]
+		else { cout << "[Import]	failed to write " << sout.filename().string() << endl; delete sk; }
+	}
+
+	// One .numesh per NODE: the node's meshes merge into a sectioned, indexed, auto-LOD'd v4
+	// mesh; nodes sharing a mesh set share the asset.
+	std::map<std::string, NodeMeshOut> nodeMeshes;
+	Mesh* ragMesh = nullptr;   // biggest skinned mesh: the auto-.nurag fit source
+	int count = 0, meshOrd = 0;
+	std::function<void(aiNode*)> writeNodeMeshes = [&](aiNode* node)
+	{
+		if (node->mNumMeshes > 0)
 		{
-			ResDB::getSingleton()->RegisterMesh(m);
-			ResDB::getSingleton()->SetAssetPath(m->guid, mpath);
-		});   // main-thread when async
-		meshGuids[i] = m->guid;
-		cout << "[Import]\twrote " << out.filename().string() << " (" << m->guid << ")" << endl;
-		++count;
-		ProgUnitDone();
+			const std::string key = NodeKey(node);
+			if (!nodeMeshes.count(key))
+			{
+				ProgStage("mesh " + std::to_string(++meshOrd));
+				std::vector<aiMesh*> src;
+				NodeMeshOut rec;
+				for (unsigned int i = 0; i < node->mNumMeshes; ++i)
+				{
+					src.push_back(sc->mMeshes[node->mMeshes[i]]);
+					rec.skinned = rec.skinned || src.back()->HasBones();
+				}
+				const bool useShared = rec.skinned && !skelGuid.empty();
+				Mesh* m = Mesh::ImportAIMeshes(src, sc, &rec.slotMats, useShared ? &sceneBones : nullptr);
+				m->guid = ResDB::NewGuid();
+				if (useShared) { m->skelGuid = skelGuid; rec.skelGuid = skelGuid; }
+				// the mesh remembers the materials it came with (v7) — every "show this mesh"
+				// path (previews, editor rigs, bare drops) then looks right without a prefab
+				for (unsigned int mi : rec.slotMats)
+					m->defaultMats.push_back(mi < matGuids.size() ? matGuids[mi] : std::string());
+				strncpy(m->name, node->mName.C_Str(), sizeof(m->name) - 1);
+				m->name[sizeof(m->name) - 1] = 0;
+
+				std::string stem = SafeStem(node->mName.C_Str());
+				bfs::path out = bfs::path(destDir) / (stem + ".numesh");
+				for (int n = 1; bfs::exists(out, ec); ++n)
+					out = bfs::path(destDir) / (stem + "_" + std::to_string(n) + ".numesh");
+
+				if (!m->SaveToFile(out.string()))
+				{
+					cout << "[Import]\tfailed to write " << out.filename().string() << endl;
+					delete m;
+				}
+				else
+				{
+					const std::string mpath = out.string();
+					AssImporter::Reg([m, mpath]
+					{
+						ResDB::getSingleton()->RegisterMesh(m);
+						ResDB::getSingleton()->SetAssetPath(m->guid, mpath);
+					});   // main-thread when async
+					rec.guid = m->guid;
+					nodeMeshes[key] = rec;
+					if (useShared && m->boneWeight && (!ragMesh || m->numVerts > ragMesh->numVerts))
+						ragMesh = m;
+					int lod0Tris = 0;
+					{
+						MeshLOD L0 = m->Lod(0);
+						for (int s2 = 0; s2 < L0.sectionCount; ++s2)
+							lod0Tris += (int)m->Section(L0.firstSection + s2).indexCount / 3;
+					}
+					cout << "[Import]\twrote " << out.filename().string() << " (" << m->guid
+					     << ", " << m->SectionCount() << " section(s), " << m->LodCount() << " LOD(s), "
+					     << m->numVerts << " verts / " << lod0Tris << " tris)" << endl;
+					++count;
+				}
+				ProgUnitDone();
+			}
+		}
+		for (unsigned int i = 0; i < node->mNumChildren; ++i) writeNodeMeshes(node->mChildren[i]);
+	};
+	writeNodeMeshes(sc->mRootNode);
+
+	// The Unity checkbox: auto-fit a .nurag next to the skeleton (hand-tune later if needed).
+	if (skAsset && ragMesh)
+	{
+		ProgStage("ragdoll");
+		if (RagdollDef* rd = RagdollDef::Build(skAsset, ragMesh))
+		{
+			bfs::path rout = bfs::path(destDir) / (skAsset->name + ".nurag");
+			for (int n = 1; bfs::exists(rout, ec); ++n)
+				rout = bfs::path(destDir) / (skAsset->name + "_" + std::to_string(n) + ".nurag");
+			if (rd->SaveToFile(rout.string()))
+			{
+				const std::string rpath = rout.string();
+				AssImporter::Reg([rd, rpath]
+				{
+					ResDB::getSingleton()->RegisterRagdoll(rd);
+					ResDB::getSingleton()->SetAssetPath(rd->guid, rpath);
+				});
+				cout << "[Import]	wrote " << rout.filename().string() << " (" << rd->bodies.size()
+				     << " bodies, " << rd->joints.size() << " joints)" << endl;
+			}
+			else { cout << "[Import]	failed to write " << rout.filename().string() << endl; delete rd; }
+		}
 	}
 
 	// Clip names come from the FILE stem, not the embedded take name: exporters stamp one
@@ -507,6 +687,7 @@ int AssImporter::ImportToContent(const char* srcPath, const char* destDir)
 			clip->name = base0 + "_" + ((an->mName.length > 0) ? SafeStem(an->mName.C_Str())
 			                                                   : std::to_string(a));
 		clip->duration = an->mDuration / tps;
+		clip->skelGuid = skelGuid;   // the file's shared skeleton ("" = unrigged) — retarget key
 		clip->channels.resize(an->mNumChannels);
 		for (unsigned int c = 0; c < an->mNumChannels; ++c)
 		{
@@ -535,6 +716,46 @@ int AssImporter::ImportToContent(const char* srcPath, const char* destDir)
 				ch.scl[k].v[0] = v.x; ch.scl[k].v[1] = v.y; ch.scl[k].v[2] = v.z; ch.scl[k].v[3] = 0;
 			}
 		}
+		// Keyframe reduction: drop interior keys the neighbours reconstruct within tolerance
+		// (exporters bake every frame). Rotations compare all 4 quat components.
+		{
+			auto reduce = [](std::vector<AnimClip::Key>& keys, int comps, float tol)
+			{
+				if (keys.size() < 3) return (size_t)0;
+				std::vector<AnimClip::Key> out;
+				out.reserve(keys.size());
+				out.push_back(keys.front());
+				for (size_t i = 1; i + 1 < keys.size(); ++i)
+				{
+					const AnimClip::Key& a = out.back();
+					const AnimClip::Key& b = keys[i];
+					const AnimClip::Key& c = keys[i + 1];
+					const float f = (c.t > a.t) ? (b.t - a.t) / (c.t - a.t) : 0.0f;
+					bool keep = false;
+					for (int k = 0; k < comps && !keep; ++k)
+					{
+						const float lerped = a.v[k] + (c.v[k] - a.v[k]) * f;
+						if (fabsf(lerped - b.v[k]) > tol) keep = true;
+					}
+					if (keep) out.push_back(b);
+				}
+				out.push_back(keys.back());
+				const size_t dropped = keys.size() - out.size();
+				keys.swap(out);
+				return dropped;
+			};
+			size_t before = 0, dropped = 0;
+			for (AnimClip::Channel& ch : clip->channels)
+			{
+				before += ch.pos.size() + ch.rot.size() + ch.scl.size();
+				dropped += reduce(ch.pos, 3, 0.0005f);
+				dropped += reduce(ch.rot, 4, 0.0005f);
+				dropped += reduce(ch.scl, 3, 0.0005f);
+			}
+			if (dropped)
+				cout << "[Import]\tclip '" << clip->name << "': compressed " << before << " -> "
+				     << (before - dropped) << " keys" << endl;
+		}
 		bfs::path aout = bfs::path(destDir) / (clip->name + ".nuanim");
 		for (int nn = 1; bfs::exists(aout, ec); ++nn)
 			aout = bfs::path(destDir) / (clip->name + "_" + std::to_string(nn) + ".nuanim");
@@ -560,7 +781,15 @@ int AssImporter::ImportToContent(const char* srcPath, const char* destDir)
 	ProgStage("prefab");
 	if (count > 0)
 	{
-		Atom* root = BuildPrefabNode(sc->mRootNode, sc, meshGuids, matGuids, firstClipGuid);
+		Atom* root = BuildPrefabNode(sc->mRootNode, sc, nodeMeshes, matGuids, boneNames, firstClipGuid);
+		// Skinned file: ONE Animator on the ROOT — it drives every subtree
+		// SkinnedMeshRenderer through the shared skeleton.
+		if (!skelGuid.empty())
+		{
+			Animator* an = new Animator();
+			an->clipGuid = firstClipGuid;   // "" when the file carries no clips
+			root->AddComponent(an);
+		}
 		std::string base = SafeStem(bfs::path(srcPath).stem().string().c_str());
 		bfs::path pf = bfs::path(destDir) / (base + ".nuprefab");
 		for (int n = 1; bfs::exists(pf, ec); ++n)

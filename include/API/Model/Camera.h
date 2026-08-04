@@ -3,6 +3,7 @@
 #define NUKEE_CAMERA_H
 #include "NukeAPI.h"
 #include <string>
+#include <vector>
 #include <boost/thread.hpp>
 #include "render/irender.h"
 #include <boost/bind.hpp>
@@ -102,6 +103,17 @@ public:
 	[[nuke::func]] Vector3 ScreenRayDir(double px, double py);
 	// The world point `depth` units along that ray.
 	[[nuke::func]] Vector3 ScreenToWorldPoint(double px, double py, double depth);
+
+	// Procedural view shake (anim Shake notifies, hits, explosions): an impulse of `amplitude`
+	// world units wobbling at `frequency` Hz fades out over `duration` seconds. Impulses stack;
+	// the offset perturbs only the rendered view, never the transform.
+	[[nuke::func]] void AddShake(double amplitude, double frequency, double duration);
+	// Current summed view offset in camera-local axes (x right, y up, z forward); advances the
+	// impulses by the frame delta — the world render pass calls it once per frame.
+	void ShakeOffset(float out[3]);
+
+	struct ShakeImp { float amp, freq, dur, t, seed; };
+	std::vector<ShakeImp> shakes;   // live impulses (runtime only, never serialized)
 
 	void Init(Atom* parent);
 	void FixedUpdate();

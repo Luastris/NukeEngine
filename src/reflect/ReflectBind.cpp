@@ -373,6 +373,7 @@ void Reflect_ComponentFieldChanged(Component* c, const Field& f)
 				if (mr->mat) { Reflect_DropObject(mr->mat); delete mr->mat; }   // kill wrapped handles first
 				mr->mat = asset->Clone();   // instance semantics, same as world load
 			}
+		if (f.name == "matGuids") mr->ResolveMaterials();   // per-slot instances follow the list
 	}
 }
 
@@ -437,6 +438,12 @@ bool Reflect_SetMeshGeometry(unsigned long id, int numVerts,
 	m->normalArray = n;
 	m->uvArray     = u;
 	m->numVerts    = numVerts;
+	// The channel writes an unindexed soup: any v4 indexed state on this mesh is now stale.
+	delete[] m->indexArray;   m->indexArray = nullptr;   m->numIndices = 0;
+	delete[] m->tangentArray; m->tangentArray = nullptr;
+	delete[] m->uv2Array;     m->uv2Array = nullptr;
+	delete[] m->colorArray;   m->colorArray = nullptr;
+	m->sections.clear(); m->lods.clear(); m->numSlots = 1; m->slotNames.clear();
 	m->boundsValid = false;
 	m->version++;   // renderer re-uploads its cached GPU buffers on mismatch
 	return true;

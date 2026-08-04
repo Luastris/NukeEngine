@@ -43,6 +43,10 @@ public:
 	// The driver recreates the body when the desired type changes live — a stale static
 	// body would silently ignore kinematic moves.
 	int bodyMotion = -1;
+	// The world scale baked into the live body. Physics engines do not scale bodies, so the
+	// shape carries the atom's scale — and a scale edit has to rebuild it, or the collider keeps
+	// the size it had when it was created while the object visibly grows or shrinks.
+	float bodyScale[3] = { 0, 0, 0 };
 
 	// Fixed steps since the transform last changed (runtime). Kinematic drive spreads a
 	// transform jump over the REAL elapsed steps, so a low-fps script write is not

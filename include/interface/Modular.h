@@ -14,7 +14,8 @@ namespace bc = boost::container;
 
 
 #include <boost/dll.hpp>
-#include <memory>                 // boost.dll (1.91+) returns std::shared_ptr from import_symbol
+#include <memory>
+#include <string>                 // boost.dll (1.91+) returns std::shared_ptr from import_symbol
 #include <boost/thread.hpp>
 
 #ifdef USE_WINAPI
@@ -32,6 +33,15 @@ NUKEENGINE_API bc::vector<std::shared_ptr<NUKEModule>>& GetModules();
 // `ModuleAbi(m) >= 2 && m->editorTool()` — since an older DLL has no such slot.
 NUKEENGINE_API int ModuleAbi(const NUKEModule* m);
 
+// SHIELDED queries into a module's vtable. A plugin is foreign code compiled at another time:
+// a stale DLL, a shorter vtable or a fault inside the call must degrade to a default, never
+// take the editor down. Each checks the ABI level the slot needs and runs behind the same SEH
+// guard as OnLoad. Prefer these over calling the virtuals directly from the host.
+NUKEENGINE_API bool        ModuleIsEditorTool(NUKEModule* m);   // editorTool(), ABI >= 2
+NUKEENGINE_API std::string ModuleCompanionOf(NUKEModule* m);    // companionOf(), ABI >= 3
+NUKEENGINE_API bool        ModuleHasSettings(NUKEModule* m);    // HasSettings()
+NUKEENGINE_API bool        ModuleDrawSettings(NUKEModule* m);   // Settings(); false = it faulted
+
 // Discover plugins (import for metadata) into the shared pool; does NOT activate them.
 NUKEENGINE_API void InitModules(AppInstance* instance);
 NUKEENGINE_API void UnloadModules();
@@ -39,6 +49,10 @@ NUKEENGINE_API void UnloadModules();
 // Discover plugins from ONE extra directory into the shared pool. A DLL whose file name is
 // already in the pool is skipped, so the host's own modules/ wins.
 NUKEENGINE_API void DiscoverModulesIn(const std::string& dir);
+
+// Absolute paths of module DLLs the ABI gate refused during discovery (stale builds). They are
+// not in the pool and their types are not registered — rebuild them to get them back.
+NUKEENGINE_API std::vector<std::string> RefusedModules();
 
 // A discovered DLL is file-LOCKED for the whole session, so a rebuild must unload it first.
 // Unload refuses PHASE_BOOT providers, and the caller must hold no shared_ptr copies or the file

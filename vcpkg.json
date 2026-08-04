@@ -19,6 +19,7 @@
     "glfw3",
     "glm",
     "lua",
+    "meshoptimizer",
     "nlohmann-json",
     "stb",
     "zstd"

@@ -1,6 +1,7 @@
 // Must precede any boost include: the lib flavor double-defines steady_clock::now in the engine DLL.
 #define BOOST_CHRONO_HEADER_ONLY
 #include "interface/AppInstance.h"
+#include "interface/AssetCreators.h"
 #include "API/Model/World.h"
 #include "API/Model/Time.h"      // fixed-thread cadence scales with Game.SetTimeScale
 #include "API/Model/Package.h"   // packed-content resolve (3.2)
@@ -375,6 +376,7 @@ AppInstance::AppInstance()
 	//render = iRender::getSingleton();
 	config = Config::getSingleton();
 	
+	RegisterBuiltinFileIcons();   // the engine declares the icons of its own file types
 	if (!menuStrip)
 		menuStrip = new MenuStrip();
 	if (!editorWindows)

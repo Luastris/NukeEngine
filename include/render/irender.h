@@ -195,6 +195,13 @@ public:
     // Draw a selection outline around one mesh (same transform as renderObject), inside the camera pass.
     virtual void renderSelectionOutline(Mesh* mesh, const float pos[3], const float quat[4], const float scale[3]) {}
 
+    // Outline over a WHOLE selection: begin the mask, add every mesh of the selected subtree,
+    // then close it once — a composite model is one silhouette, not one outline per part.
+    // Backends that don't implement these fall back to the single-mesh call above.
+    virtual void selectionOutlineBegin() {}
+    virtual void selectionOutlineAdd(Mesh* mesh, const float pos[3], const float quat[4], const float scale[3]) {}
+    virtual void selectionOutlineEnd() {}
+
     // Set the OS window title.
     virtual void setWindowTitle(const char* title) {}
 
@@ -450,7 +457,8 @@ public:
         int ripplesOn = 1;      // local ripple sim (rings/wakes/imprints/splashes)
         int wakeFoamOn = 1;     // wake-foam trail
         int tessOn = 1;         // tessellated near-camera grid
-        int underwaterOn = 1;   // submerged-camera treatment (split/fog/wetness)
+        int underwaterOn = 1;   // submerged-camera treatment (waterline split, fog, god rays, caustics)
+        int wetnessOn    = 1;   // lens run-off film after surfacing; independent of the above
     };
     struct NukeWaterSurface
     {
@@ -490,7 +498,10 @@ public:
     // that shapes shore waves. Submit opaque meshes with renderShadowObject between begin/end;
     // fetchWaterBottom polls the async readback and fills out[n*n] (row-major, -half..+half,
     // meters below pos.y; misses = deep). One capture in flight; fetch returns true once per capture.
-    virtual void beginWaterBottomPass(const float pos[3], const float quat[4], float sizeX, float sizeZ) {}
+    // aboveY = how many meters ABOVE pos.y take part: 0 sees only the water column (nothing in
+    // the air can pose as a shoal), positive keeps terrain that rises out of the water.
+    virtual void beginWaterBottomPass(const float pos[3], const float quat[4], float sizeX, float sizeZ,
+                                      float aboveY) {}
     virtual void endWaterBottomPass() {}
     virtual bool fetchWaterBottom(float* out, int n) { return false; }
     // Continuous contact-contour wave sources (the waterline cells of bodies crossing the surface),
@@ -535,6 +546,40 @@ public:
     // Async CPU mirror for physics/queries: out = 16x16x16 float4 (fluid fraction 0..1,
     // local velocity xyz) over the box, x-major rows, y slices outermost. n must be 16.
     virtual bool fetchWaterFlip(const void* key, float* out, int n) { return false; }
+
+    // --- Mesh v2 (Anim/Mesh rework, stage 1): sectioned multi-material draws --------------
+    // Draw a v4 mesh with per-SLOT materials: the renderer loops the active LOD's sections and
+    // binds mats[section.slot] (out-of-range/null slots fall back to mats[0]). matCount >= 1.
+    // blendPass filters sections by their material's blend mode so mixed meshes land in the
+    // right pass: -1 = all, 0 = opaque sections only, 1 = transparent/additive sections only.
+    // The single-material renderObject/renderShadowObject/renderGBufferObject stay valid for
+    // sectioned meshes too — every section then draws with the one material.
+    virtual void renderObjectMulti(Mesh* mesh, Material* const* mats, int matCount,
+                                   const float pos[3], const float quat[4], const float scale[3],
+                                   int blendPass = -1) {}
+    virtual void renderShadowObjectMulti(Mesh* mesh, Material* const* mats, int matCount,
+                                         const float pos[3], const float quat[4], const float scale[3]) {}
+    virtual void renderGBufferObjectMulti(Mesh* mesh, Material* const* mats, int matCount,
+                                          const float pos[3], const float quat[4], const float scale[3],
+                                          const float prevPos[3], const float prevQuat[4], const float prevScale[3],
+                                          int blendPass = 0) {}
+    // RT: one TLAS entry PER SECTION of the active mesh (per-section BLAS), each with its
+    // slot's material. Equivalent to addRTInstance for slot-less meshes.
+    virtual void addRTInstanceMulti(Mesh* mesh, Material* const* mats, int matCount,
+                                    const float pos[3], const float quat[4], const float scale[3],
+                                    bool inReflections, bool castShadows) {}
+
+    // --- GPU skinning (Anim/Mesh v2 stage 3) ----------------------------------------------
+    // True when the renderer skins on the GPU (compute pre-pass): the engine then feeds
+    // per-frame palettes instead of CPU-skinned vertices.
+    virtual bool gpuSkin() { return false; }
+    // Per-frame skin state for a skinned mesh INSTANCE: palette16 = boneCount column-major
+    // 4x4 matrices (boneGlobal * invBind, model space). morphWeights follows source->morphs
+    // order. The renderer dispatches the skin compute IMMEDIATELY (call before submitting
+    // draws that consume `instance`), keeps the previous frame's positions for TAA motion
+    // vectors, and refits the instance's BLAS over the animated positions.
+    virtual void setSkinPalette(Mesh* instance, Mesh* source, const float* palette16, int boneCount,
+                                const float* morphWeights = nullptr, int morphCount = 0) {}
 
     // ABI: new virtuals are appended at the END of the class, NEVER inserted mid-vtable —
     // plugins are separate DLLs built at different times, and an inserted slot shifts every later one.

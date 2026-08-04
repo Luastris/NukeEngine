@@ -233,6 +233,30 @@ struct TypeInfo {
     bool baseMerged = false;
 };
 
+// ---- SCRIPT classes in the shared registry --------------------------------------------------
+// A scripting module publishes the classes it can run (one Lua file, one C# behaviour class...)
+// and their editable props HERE, so every reflection-driven UI — the animation/sequencer prop
+// pickers above all — sees script props exactly like native reflected ones. The class is not a
+// C++ type: it is REACHED through a host component (ScriptComponent / CSharpScript) whose
+// `selector` field (script path / class name) names it, and its props are read and written
+// through Component::DynamicProps / SetDynamicProp.
+struct ScriptProp
+{
+	std::string name;
+	FT type = FT::Unknown;   // Bool / Double / String (what a script prop can be)
+};
+struct ScriptClass
+{
+	std::string name;        // display name ("player.lua", "PlayerController")
+	std::string component;   // host component TYPE name ("ScriptComponent", "CSharpScript")
+	std::string selector;    // value of the host's script/class field that selects this class
+	std::vector<ScriptProp> props;
+};
+// Register (replacing by component+selector) / drop one module's classes on reload / list all.
+NUKEENGINE_API void Reflect_RegisterScriptClass(const ScriptClass& c);
+NUKEENGINE_API void Reflect_ClearScriptClasses(const std::string& component);
+NUKEENGINE_API std::vector<ScriptClass> Reflect_ScriptClasses();
+
 // Registry (defined in Reflect.cpp).
 NUKEENGINE_API TypeInfo& Registry_GetOrCreate(const std::string& name);
 NUKEENGINE_API TypeInfo* Registry_Find(const std::string& name);

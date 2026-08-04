@@ -34,6 +34,19 @@ NUKEENGINE_API const std::vector<AssetCreator>& AssetCreators();
 // The registered descriptor for a file extension (case-insensitive), or null.
 NUKEENGINE_API const AssetCreator* AssetCreatorForExt(const std::string& ext);
 
+// ---- file-type icons -----------------------------------------------------------------------
+// A type's icon is declared by whoever OWNS the type: the engine for its own assets, a module
+// for its formats. The browser never maps an extension to a glyph itself. `glyph` is UTF-8 from
+// interface/IconsFileTypes.h. Registering an AssetCreator with a non-empty `icon` does this too.
+NUKEENGINE_API void RegisterFileIcon(const std::string& ext, const std::string& glyph);
+
+// The glyph registered for an extension (case-insensitive), or "" when the type is unknown —
+// e.g. its module is not loaded, in which case the browser falls back to a generic file icon.
+NUKEENGINE_API const char* FileIconForExt(const std::string& ext);
+
+// The engine declaring the icons of ITS own formats; called once at startup.
+NUKEENGINE_API void RegisterBuiltinFileIcons();
+
 // Module-supplied asset editors: the module owning a file type registers its editor here, and
 // double-click / "Open in Editor" route through this registry first. The callback opens or
 // focuses the module's own editor window. Order-independent with the type registration.

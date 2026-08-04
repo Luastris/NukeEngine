@@ -1,4 +1,6 @@
 #include "interface/AssetCreators.h"
+#include "interface/IconsFileTypes.h"
+#include <map>
 #include <algorithm>
 #include <cctype>
 
@@ -15,6 +17,7 @@ static std::string LowerExt(const std::string& e)
 
 void RegisterAssetCreator(const AssetCreator& desc)
 {
+	if (!desc.icon.empty()) RegisterFileIcon(desc.ext, desc.icon);   // the descriptor carries it
 	for (const AssetCreator& c : reg())            // dedup (re-enabling a plugin re-registers)
 		if (c.label == desc.label && c.ext == desc.ext) return;
 	reg().push_back(desc);
@@ -36,6 +39,46 @@ const AssetCreator* AssetCreatorForExt(const std::string& ext)
 	for (const AssetCreator& c : reg())
 		if (LowerExt(c.ext) == want) return &c;
 	return nullptr;
+}
+
+// ---- file-type icons (the type's owner declares its glyph) -----------------------------
+
+static std::map<std::string, std::string>& iconReg() { static std::map<std::string, std::string> m; return m; }
+
+void RegisterFileIcon(const std::string& ext, const std::string& glyph)
+{
+	if (ext.empty() || glyph.empty()) return;
+	iconReg()[LowerExt(ext)] = glyph;
+}
+
+const char* FileIconForExt(const std::string& ext)
+{
+	auto it = iconReg().find(LowerExt(ext));
+	return it == iconReg().end() ? "" : it->second.c_str();
+}
+
+// The engine's OWN formats. Everything else — scripts, tile sets, effect graphs — is declared
+// by the module that owns it, so an unloaded module simply leaves its files generic.
+void RegisterBuiltinFileIcons()
+{
+	static const struct { const char* ext; const char* icon; } kBuiltin[] = {
+		{ ".numesh",    ICON_FT_MESH },        { ".numat",     ICON_FT_MATERIAL },
+		{ ".nutex",     ICON_FT_IMAGE },       { ".nuprefab",  ICON_FT_PREFAB },
+		{ ".nuanim",    ICON_FT_ANIM },        { ".nuskel",    ICON_FT_SKELETON },
+		{ ".nubonemap", ICON_FT_BONEMAP },     { ".nusm",      ICON_FT_STATEMACHINE },
+		{ ".nublend",   ICON_FT_BLENDSPACE },  { ".nuseq",     ICON_FT_SEQUENCE },
+		{ ".nurag",     ICON_FT_RAGDOLL },     { ".nuworld",   ICON_FT_WORLD },
+		{ ".nushader",  ICON_FT_SHADER },      { ".hlsl",      ICON_FT_SHADER },
+		{ ".nuinput",   ICON_FT_INPUT },       { ".nupak",     ICON_FT_PACKAGE },
+		{ ".numod",     ICON_FT_MOD },         { ".nusave",    ICON_FT_SAVE },
+		{ ".nuproj",    ICON_FT_PROJECT },
+		// media the engine imports natively
+		{ ".png", ICON_FT_IMAGE }, { ".jpg", ICON_FT_IMAGE }, { ".jpeg", ICON_FT_IMAGE },
+		{ ".tga", ICON_FT_IMAGE }, { ".bmp", ICON_FT_IMAGE },  { ".ico",  ICON_FT_IMAGE },
+		{ ".ogg", ICON_FT_AUDIO }, { ".wav", ICON_FT_AUDIO },  { ".mp3",  ICON_FT_AUDIO },
+		{ ".flac", ICON_FT_AUDIO },
+	};
+	for (const auto& b : kBuiltin) RegisterFileIcon(b.ext, b.icon);
 }
 
 // ---- module-supplied asset editors (the type's owner brings the tooling) ---------------

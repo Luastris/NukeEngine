@@ -1,4 +1,6 @@
 #include "API/Model/Mesh.h"
+#include <meshoptimizer.h>
+#include <iostream>
 #include <sstream>
 #include <assimp/scene.h>
 #include <algorithm>
@@ -48,17 +50,18 @@ static void AiToCol16(const aiMatrix4x4& m, float out[16])
 			out[c * 4 + r] = s[r * 4 + c];
 }
 
-// Build the skeleton for `mesh`: its bone nodes + every node on the root->bone paths
-// (clips animate intermediates too), in DFS pre-order so parent index < child index.
-static void BuildSkeleton(aiMesh* mesh, const aiScene* sc, std::vector<MeshBone>& outBones,
-                          std::map<std::string, int>& outIndex)
+// Build the merged skeleton for a set of meshes: every bone node + every node on the
+// root->bone paths (clips animate intermediates too), in DFS pre-order so parent < child.
+static void BuildSkeleton(const std::vector<aiMesh*>& meshes, const aiScene* sc,
+                          std::vector<MeshBone>& outBones, std::map<std::string, int>& outIndex)
 {
 	std::set<const aiNode*> needed;
-	for (unsigned int b = 0; b < mesh->mNumBones; ++b)
-	{
-		const aiNode* n = sc->mRootNode->FindNode(mesh->mBones[b]->mName);
-		for (; n; n = n->mParent) needed.insert(n);   // the bone + all ancestors
-	}
+	for (aiMesh* mesh : meshes)
+		for (unsigned int b = 0; b < mesh->mNumBones; ++b)
+		{
+			const aiNode* n = sc->mRootNode->FindNode(mesh->mBones[b]->mName);
+			for (; n; n = n->mParent) needed.insert(n);   // the bone + all ancestors
+		}
 	if (needed.empty()) return;
 
 	struct Walker
@@ -89,92 +92,319 @@ static void BuildSkeleton(aiMesh* mesh, const aiScene* sc, std::vector<MeshBone>
 	} w{ needed, outBones, outIndex };
 	w.Walk(sc->mRootNode, -1);
 
-	for (unsigned int b = 0; b < mesh->mNumBones; ++b)
-	{
-		auto it = outIndex.find(mesh->mBones[b]->mName.C_Str());
-		if (it != outIndex.end()) AiToCol16(mesh->mBones[b]->mOffsetMatrix, outBones[it->second].invBind);
-	}
+	for (aiMesh* mesh : meshes)
+		for (unsigned int b = 0; b < mesh->mNumBones; ++b)
+		{
+			auto it = outIndex.find(mesh->mBones[b]->mName.C_Str());
+			if (it != outIndex.end()) AiToCol16(mesh->mBones[b]->mOffsetMatrix, outBones[it->second].invBind);
+		}
 }
 
-void Mesh::ImportAIMesh(aiMesh* mesh, const aiScene* scene) {
-	numVerts = mesh->mNumFaces * 3;
+void Mesh::ImportAISkeleton(const aiScene* scene, std::vector<MeshBone>& outBones)
+{
+	outBones.clear();
+	if (!scene) return;
+	std::vector<aiMesh*> all;
+	for (unsigned int i = 0; i < scene->mNumMeshes; ++i)
+		if (scene->mMeshes[i]->HasBones()) all.push_back(scene->mMeshes[i]);
+	if (all.empty()) return;
+	std::map<std::string, int> index;
+	BuildSkeleton(all, scene, outBones, index);
+}
 
-	// --- skin: per-ORIGINAL-vertex weights first (expanded to the soup with the faces) ---
+// The shared indexed builder behind ImportAIMesh/ImportAIMeshes (see Mesh.h for the contract).
+static void BuildMeshInto(Mesh* m, const std::vector<aiMesh*>& meshes, const aiScene* sc,
+                          std::vector<unsigned int>* outSlotMats,
+                          const std::vector<MeshBone>* sharedSkeleton)
+{
+	// Material SLOTS: dedup aiMaterial indices in first-seen order.
+	std::vector<unsigned int> slotMat;
+	auto slotOf = [&slotMat](unsigned int mi) -> int
+	{
+		for (size_t s = 0; s < slotMat.size(); ++s) if (slotMat[s] == mi) return (int)s;
+		slotMat.push_back(mi);
+		return (int)slotMat.size() - 1;
+	};
+
+	// Skeleton: the SHARED scene palette (skin indices point into the .nuskel; the mesh
+	// embeds nothing), else a per-call merged skeleton embedded into the mesh (legacy API).
 	std::map<std::string, int> boneIdx;
-	std::vector<std::array<std::pair<int, float>, 4>> vw;   // per original vertex: up to 4 (bone, weight)
-	if (scene && mesh->HasBones())
+	bool anyBones = false;
+	for (aiMesh* am : meshes) anyBones = anyBones || am->HasBones();
+	bool skin = false;
+	if (sharedSkeleton && anyBones)
 	{
-		BuildSkeleton(mesh, scene, bones, boneIdx);
-		if (!bones.empty())
+		for (size_t i = 0; i < sharedSkeleton->size(); ++i) boneIdx[(*sharedSkeleton)[i].name] = (int)i;
+		skin = !sharedSkeleton->empty();
+	}
+	else if (sc && anyBones)
+	{
+		BuildSkeleton(meshes, sc, m->bones, boneIdx);
+		skin = !m->bones.empty();
+	}
+
+	size_t totalV = 0;
+	bool anyUV = false, anyTan = false, anyUV2 = false, anyCol = false;
+	for (aiMesh* am : meshes)
+	{
+		totalV += am->mNumVertices;
+		anyUV  = anyUV  || am->HasTextureCoords(0);
+		anyTan = anyTan || (am->mTangents && am->mBitangents && am->HasNormals());
+		anyUV2 = anyUV2 || am->HasTextureCoords(1);
+		anyCol = anyCol || am->HasVertexColors(0);
+	}
+	if (totalV == 0) return;
+
+	std::vector<float> pos(totalV * 3, 0.f), nrm(totalV * 3, 0.f);
+	std::vector<float> uv (anyUV  ? totalV * 2 : 0, 0.f);
+	std::vector<float> tan(anyTan ? totalV * 4 : 0, 0.f);
+	std::vector<float> uv2(anyUV2 ? totalV * 2 : 0, 0.f);
+	std::vector<float> col(anyCol ? totalV * 4 : 0, 1.f);
+	std::vector<unsigned short> bIdx(skin ? totalV * 4 : 0, 0);
+	std::vector<float>          bWgt(skin ? totalV * 4 : 0, 0.f);
+	std::vector<uint32_t> idx;
+
+	// Morph targets, merged by NAME across the node's meshes: dense deltas over the whole
+	// vertex range (a mesh without that target contributes zeros).
+	std::vector<std::string> morphNames;
+	std::vector<std::vector<float>> morphPos, morphNrm;
+	auto morphOf = [&](const char* nm) -> int
+	{
+		std::string n2 = (nm && nm[0]) ? nm : ("morph" + std::to_string(morphNames.size()));
+		for (size_t i = 0; i < morphNames.size(); ++i) if (morphNames[i] == n2) return (int)i;
+		morphNames.push_back(n2);
+		morphPos.emplace_back(totalV * 3, 0.f);
+		morphNrm.emplace_back(totalV * 3, 0.f);
+		return (int)morphNames.size() - 1;
+	};
+
+	uint32_t vbase = 0;
+	for (aiMesh* am : meshes)
+	{
+		const uint32_t nv = am->mNumVertices;
+		for (uint32_t v = 0; v < nv; ++v)
 		{
-			vw.assign(mesh->mNumVertices, { { { 0, 0.f }, { 0, 0.f }, { 0, 0.f }, { 0, 0.f } } });
-			for (unsigned int b = 0; b < mesh->mNumBones; ++b)
+			const size_t d = (size_t)(vbase + v);
+			pos[d * 3 + 0] = am->mVertices[v].x; pos[d * 3 + 1] = am->mVertices[v].y; pos[d * 3 + 2] = am->mVertices[v].z;
+			if (am->HasNormals())
+			{ nrm[d * 3 + 0] = am->mNormals[v].x; nrm[d * 3 + 1] = am->mNormals[v].y; nrm[d * 3 + 2] = am->mNormals[v].z; }
+			if (anyUV && am->HasTextureCoords(0))
+			{ uv[d * 2 + 0] = am->mTextureCoords[0][v].x; uv[d * 2 + 1] = am->mTextureCoords[0][v].y; }
+			if (anyTan && am->mTangents && am->mBitangents && am->HasNormals())
 			{
-				auto bi = boneIdx.find(mesh->mBones[b]->mName.C_Str());
+				const aiVector3D& T = am->mTangents[v];
+				const aiVector3D& B = am->mBitangents[v];
+				const aiVector3D& N = am->mNormals[v];
+				const aiVector3D  c = N ^ T;   // cross
+				tan[d * 4 + 0] = T.x; tan[d * 4 + 1] = T.y; tan[d * 4 + 2] = T.z;
+				tan[d * 4 + 3] = (c * B < 0.0f) ? -1.0f : 1.0f;   // MikkTSpace handedness
+			}
+			if (anyUV2 && am->HasTextureCoords(1))
+			{ uv2[d * 2 + 0] = am->mTextureCoords[1][v].x; uv2[d * 2 + 1] = am->mTextureCoords[1][v].y; }
+			if (anyCol && am->HasVertexColors(0))
+			{
+				const aiColor4D& c4 = am->mColors[0][v];
+				col[d * 4 + 0] = c4.r; col[d * 4 + 1] = c4.g; col[d * 4 + 2] = c4.b; col[d * 4 + 3] = c4.a;
+			}
+		}
+		if (skin && am->HasBones())   // 4 strongest weights per vertex, normalized below
+		{
+			for (unsigned int b = 0; b < am->mNumBones; ++b)
+			{
+				auto bi = boneIdx.find(am->mBones[b]->mName.C_Str());
 				if (bi == boneIdx.end()) continue;
-				for (unsigned int wi = 0; wi < mesh->mBones[b]->mNumWeights; ++wi)
+				for (unsigned int wi = 0; wi < am->mBones[b]->mNumWeights; ++wi)
 				{
-					const aiVertexWeight& aw = mesh->mBones[b]->mWeights[wi];
-					if (aw.mVertexId >= vw.size() || aw.mWeight <= 0.0f) continue;
-					auto& slots = vw[aw.mVertexId];
+					const aiVertexWeight& aw = am->mBones[b]->mWeights[wi];
+					if (aw.mVertexId >= am->mNumVertices || aw.mWeight <= 0.0f) continue;
+					const size_t d = ((size_t)vbase + aw.mVertexId) * 4;
 					int weakest = 0;
-					for (int k = 1; k < 4; ++k) if (slots[k].second < slots[weakest].second) weakest = k;
-					if (aw.mWeight > slots[weakest].second) slots[weakest] = { bi->second, aw.mWeight };
+					for (int k = 1; k < 4; ++k) if (bWgt[d + k] < bWgt[d + weakest]) weakest = k;
+					if (aw.mWeight > bWgt[d + weakest])
+					{ bIdx[d + weakest] = (unsigned short)std::min(bi->second, 65535); bWgt[d + weakest] = aw.mWeight; }
 				}
 			}
-			boneIndex  = new unsigned short[(size_t)numVerts * 4];
-			boneWeight = new float[(size_t)numVerts * 4];
 		}
-	}
 
-	vertexArray = new float[mesh->mNumFaces * 3 * 3];
-	normalArray = new float[mesh->mNumFaces * 3 * 3];
-	uvArray = new float[mesh->mNumFaces * 3 * 2];
-
-	const bool hasUV   = mesh->HasTextureCoords(0);   // models may lack UVs / normals
-	const bool hasNorm = mesh->HasNormals();
-
-	for (unsigned int i = 0; i < mesh->mNumFaces; i++)
-	{
-		const aiFace& face = mesh->mFaces[i];
-
-		for (int j = 0; j < 3; j++)
+		for (unsigned int mk = 0; mk < am->mNumAnimMeshes; ++mk)   // blend shapes
 		{
-			unsigned int idx = face.mIndices[j];
-
-			if (hasUV) { aiVector3D uv = mesh->mTextureCoords[0][idx]; memcpy(uvArray, &uv, sizeof(float) * 2); }
-			else       { uvArray[0] = 0.0f; uvArray[1] = 0.0f; }
-			uvArray += 2;
-
-			if (hasNorm) { aiVector3D normal = mesh->mNormals[idx]; memcpy(normalArray, &normal, sizeof(float) * 3); }
-			else         { normalArray[0] = 0.0f; normalArray[1] = 0.0f; normalArray[2] = 0.0f; }
-			normalArray += 3;
-
-			aiVector3D pos = mesh->mVertices[idx];
-			memcpy(vertexArray, &pos, sizeof(float) * 3);
-			vertexArray += 3;
-
-			if (boneIndex)   // expand this original vertex's (normalized) bindings into the soup slot
+			const aiAnimMesh* an = am->mAnimMeshes[mk];
+			if (!an || !an->mVertices) continue;
+			const int mi2 = morphOf(an->mName.C_Str());
+			for (uint32_t v = 0; v < nv && v < an->mNumVertices; ++v)
 			{
-				const size_t slot = ((size_t)i * 3 + j) * 4;
-				const auto& sw = vw[idx];
-				float sum = sw[0].second + sw[1].second + sw[2].second + sw[3].second;
-				if (sum <= 0.0f) sum = 1.0f;
-				for (int k = 0; k < 4; ++k)
+				const size_t d = (size_t)(vbase + v) * 3;
+				morphPos[mi2][d + 0] = an->mVertices[v].x - am->mVertices[v].x;
+				morphPos[mi2][d + 1] = an->mVertices[v].y - am->mVertices[v].y;
+				morphPos[mi2][d + 2] = an->mVertices[v].z - am->mVertices[v].z;
+				if (an->mNormals && am->HasNormals())
 				{
-					boneIndex[slot + k]  = (unsigned short)std::min(sw[k].first, 65535);
-					boneWeight[slot + k] = sw[k].second / sum;
+					morphNrm[mi2][d + 0] = an->mNormals[v].x - am->mNormals[v].x;
+					morphNrm[mi2][d + 1] = an->mNormals[v].y - am->mNormals[v].y;
+					morphNrm[mi2][d + 2] = an->mNormals[v].z - am->mNormals[v].z;
 				}
 			}
 		}
+
+		MeshSection sec;
+		sec.firstIndex = (uint32_t)idx.size();
+		sec.slot = slotOf(am->mMaterialIndex);
+		for (unsigned int f = 0; f < am->mNumFaces; ++f)
+		{
+			const aiFace& face = am->mFaces[f];
+			if (face.mNumIndices != 3) continue;   // lines/points survive some importers
+			idx.push_back(vbase + face.mIndices[0]);
+			idx.push_back(vbase + face.mIndices[1]);
+			idx.push_back(vbase + face.mIndices[2]);
+		}
+		sec.indexCount = (uint32_t)idx.size() - sec.firstIndex;
+		if (sec.indexCount > 0) m->sections.push_back(sec);
+		vbase += nv;
+	}
+	if (idx.empty()) { m->sections.clear(); return; }
+
+	if (skin)   // normalize the weight quads
+		for (size_t d = 0; d < totalV; ++d)
+		{
+			float sum = bWgt[d * 4] + bWgt[d * 4 + 1] + bWgt[d * 4 + 2] + bWgt[d * 4 + 3];
+			if (sum <= 0.0f) continue;   // unweighted vertex (mesh without bones in the merge): stays at bind
+			for (int k = 0; k < 4; ++k) bWgt[d * 4 + k] /= sum;
+		}
+
+	// --- meshoptimizer: vertex-cache order per section, then the auto-LOD chain ------------
+	for (const MeshSection& s : m->sections)
+		meshopt_optimizeVertexCache(idx.data() + s.firstIndex, idx.data() + s.firstIndex, s.indexCount, totalV);
+
+	const int lod0Count = (int)m->sections.size();
+	{
+		MeshLOD l0; l0.firstSection = 0; l0.sectionCount = lod0Count; l0.screenSize = 0.0f;
+		m->lods.push_back(l0);
+	}
+	// Per-level target tri ratios (of LOD0) and the screen coverage below which the level kicks in.
+	const float kRatio[]  = { 0.45f, 0.20f, 0.08f };
+	const float kScreen[] = { 0.35f, 0.15f, 0.06f };
+	size_t prevTris = idx.size() / 3;
+	for (int l = 0; l < 3; ++l)
+	{
+		std::vector<MeshSection> secs;
+		std::vector<uint32_t> lidx;
+		for (int s0 = 0; s0 < lod0Count; ++s0)
+		{
+			const MeshSection& s = m->sections[s0];
+			size_t target = (size_t)(s.indexCount * kRatio[l]);
+			target -= target % 3;
+			if (target < 3 * 4) target = 3 * 4;   // never simplify below 4 tris per section
+			if (target >= s.indexCount) target = s.indexCount;
+			std::vector<uint32_t> dst(s.indexCount);
+			float err = 0.0f;
+			size_t got = meshopt_simplify(dst.data(), idx.data() + s.firstIndex, s.indexCount,
+			                              pos.data(), totalV, sizeof(float) * 3,
+			                              target, 0.05f, 0, &err);
+			dst.resize(got);
+			if (got >= 3)
+			{
+				meshopt_optimizeVertexCache(dst.data(), dst.data(), got, totalV);
+				MeshSection ns; ns.firstIndex = (uint32_t)lidx.size(); ns.indexCount = (uint32_t)got; ns.slot = s.slot;
+				secs.push_back(ns);
+				lidx.insert(lidx.end(), dst.begin(), dst.end());
+			}
+		}
+		const size_t levelTris = lidx.size() / 3;
+		// The chain stops paying: barely smaller than the previous level, or already tiny.
+		if (secs.empty() || levelTris >= prevTris * 85 / 100 || levelTris < 16) break;
+		const uint32_t base = (uint32_t)idx.size();
+		for (MeshSection& ns : secs) ns.firstIndex += base;
+		MeshLOD ml; ml.firstSection = (int)m->sections.size(); ml.sectionCount = (int)secs.size(); ml.screenSize = kScreen[l];
+		m->lods.push_back(ml);
+		m->sections.insert(m->sections.end(), secs.begin(), secs.end());
+		idx.insert(idx.end(), lidx.begin(), lidx.end());
+		prevTris = levelTris;
 	}
 
-	uvArray -= mesh->mNumFaces * 3 * 2;
-	normalArray -= mesh->mNumFaces * 3 * 3;
-	vertexArray -= mesh->mNumFaces * 3 * 3;
-	const char* __name = mesh->mName.C_Str();
-	strcpy(name, __name);
-	//name = __name;
+	// Vertex-FETCH optimization over the final index buffer; remap every stream (drops unused verts).
+	std::vector<unsigned int> remap(totalV);
+	const size_t unique = meshopt_optimizeVertexFetchRemap(remap.data(), idx.data(), idx.size(), totalV);
+	meshopt_remapIndexBuffer(idx.data(), idx.data(), idx.size(), remap.data());
+	auto remapStream = [&](std::vector<float>& v, size_t comps)
+	{
+		if (v.empty()) return;
+		std::vector<float> out(unique * comps);
+		meshopt_remapVertexBuffer(out.data(), v.data(), totalV, sizeof(float) * comps, remap.data());
+		v.swap(out);
+	};
+	remapStream(pos, 3); remapStream(nrm, 3); remapStream(uv, 2);
+	remapStream(tan, 4); remapStream(uv2, 2); remapStream(col, 4);
+	remapStream(bWgt, 4);
+	for (size_t mi2 = 0; mi2 < morphNames.size(); ++mi2)
+	{ remapStream(morphPos[mi2], 3); remapStream(morphNrm[mi2], 3); }
+	if (!bIdx.empty())
+	{
+		std::vector<unsigned short> out(unique * 4);
+		meshopt_remapVertexBuffer(out.data(), bIdx.data(), totalV, sizeof(unsigned short) * 4, remap.data());
+		bIdx.swap(out);
+	}
+
+	// --- commit ----------------------------------------------------------------------------
+	m->numVerts   = (int)unique;
+	m->numIndices = (int)idx.size();
+	m->indexArray = new uint32_t[idx.size()];
+	memcpy(m->indexArray, idx.data(), idx.size() * sizeof(uint32_t));
+	auto commit = [&](const std::vector<float>& v) -> float*
+	{
+		if (v.empty()) return nullptr;
+		float* p = new float[v.size()];
+		memcpy(p, v.data(), v.size() * sizeof(float));
+		return p;
+	};
+	m->vertexArray  = commit(pos);
+	m->normalArray  = commit(nrm);
+	m->uvArray      = anyUV ? commit(uv) : nullptr;
+	m->tangentArray = anyTan ? commit(tan) : nullptr;
+	m->uv2Array     = anyUV2 ? commit(uv2) : nullptr;
+	m->colorArray   = anyCol ? commit(col) : nullptr;
+	if (skin)
+	{
+		m->boneIndex = new unsigned short[unique * 4];
+		memcpy(m->boneIndex, bIdx.data(), unique * 4 * sizeof(unsigned short));
+		m->boneWeight = new float[unique * 4];
+		memcpy(m->boneWeight, bWgt.data(), unique * 4 * sizeof(float));
+	}
+	for (size_t mi2 = 0; mi2 < morphNames.size(); ++mi2)
+	{
+		Mesh::MorphTarget mt;
+		mt.name = morphNames[mi2];
+		mt.posDelta = std::move(morphPos[mi2]);
+		bool anyN = false;
+		for (float f2 : morphNrm[mi2]) if (f2 != 0.0f) { anyN = true; break; }
+		if (anyN) mt.nrmDelta = std::move(morphNrm[mi2]);
+		m->morphs.push_back(std::move(mt));
+	}
+	m->numSlots = slotMat.empty() ? 1 : (int)slotMat.size();
+	if (sc)
+		for (unsigned int mi : slotMat)
+			m->slotNames.push_back(mi < sc->mNumMaterials ? sc->mMaterials[mi]->GetName().C_Str() : "");
+	if (outSlotMats) *outSlotMats = slotMat;
+}
+
+void Mesh::ImportAIMesh(aiMesh* mesh, const aiScene* scene)
+{
+	BuildMeshInto(this, { mesh }, scene, nullptr, nullptr);
+	strncpy(name, mesh->mName.C_Str(), sizeof(name) - 1);
+	name[sizeof(name) - 1] = 0;
+}
+
+Mesh* Mesh::ImportAIMeshes(const std::vector<aiMesh*>& meshes, const aiScene* scene,
+                           std::vector<unsigned int>* outSlotMats,
+                           const std::vector<MeshBone>* sharedSkeleton)
+{
+	Mesh* m = new Mesh();
+	BuildMeshInto(m, meshes, scene, outSlotMats, sharedSkeleton);
+	if (!meshes.empty())
+	{
+		strncpy(m->name, meshes[0]->mName.C_Str(), sizeof(m->name) - 1);
+		m->name[sizeof(m->name) - 1] = 0;
+	}
+	return m;
 }
 
 Mesh* Mesh::CreateCube() {
@@ -363,9 +593,11 @@ Mesh* Mesh::CreateCapsule() {
 // Layout: magic "NUMESH\0\0" | u32 version | str name | str guid | i32 numVerts | f32 pos[3N] |
 //         u8 hasNormals (+ f32 nrm[3N]) | u8 hasUV (+ f32 uv[2N]).
 // v2 appends the SKIN block (bones + boneIndex[4N] + boneWeight[4N]); v3 widened boneIndex u8 -> u16.
+// v4 appends the INDEXED block: u32 numIndices (+ u32 idx[]), optional tangent/uv2/color streams,
+//    sections + LODs + material slots.
 namespace {
 	const char  kMagic[8] = { 'N','U','M','E','S','H','\0','\0' };
-	const uint32_t kVersion = 3;
+	const uint32_t kVersion = 7;   // v5 skelGuid; v6 morph targets; v7 import-time materials
 	template <class T> void wr(bfs::ofstream& o, const T& v) { o.write((const char*)&v, sizeof(T)); }
 	template <class T> void rd(std::istream& i, T& v)       { i.read((char*)&v, sizeof(T)); }
 	void wrStr(bfs::ofstream& o, const std::string& s) { uint32_t n = (uint32_t)s.size(); wr(o, n); if (n) o.write(s.data(), n); }
@@ -403,6 +635,37 @@ bool Mesh::SaveToFile(const std::string& path) const
 		o.write((const char*)boneIndex,  sizeof(unsigned short) * 4 * n);
 		o.write((const char*)boneWeight, sizeof(float) * 4 * n);
 	}
+	// --- v4: indexed block -----------------------------------------------------------------
+	uint32_t ni = (uint32_t)(indexArray ? numIndices : 0); wr(o, ni);
+	if (ni) o.write((const char*)indexArray, sizeof(uint32_t) * ni);
+	uint8_t hasTan = (tangentArray != nullptr) ? 1 : 0; wr(o, hasTan);
+	if (hasTan) o.write((const char*)tangentArray, sizeof(float) * 4 * n);
+	uint8_t hasUV2 = (uv2Array != nullptr) ? 1 : 0; wr(o, hasUV2);
+	if (hasUV2) o.write((const char*)uv2Array, sizeof(float) * 2 * n);
+	uint8_t hasCol = (colorArray != nullptr) ? 1 : 0; wr(o, hasCol);
+	if (hasCol) o.write((const char*)colorArray, sizeof(float) * 4 * n);
+	uint32_t sc = (uint32_t)sections.size(); wr(o, sc);
+	for (const MeshSection& s : sections) { wr(o, s.firstIndex); wr(o, s.indexCount); int32_t sl = s.slot; wr(o, sl); }
+	uint32_t lc = (uint32_t)lods.size(); wr(o, lc);
+	for (const MeshLOD& l : lods) { int32_t fs = l.firstSection, scn = l.sectionCount; wr(o, fs); wr(o, scn); wr(o, l.screenSize); }
+	int32_t slots = numSlots; wr(o, slots);
+	uint32_t nn2 = (uint32_t)slotNames.size(); wr(o, nn2);
+	for (const std::string& s : slotNames) wrStr(o, s);
+	// --- v5: skeleton-asset reference ------------------------------------------------------
+	wrStr(o, skelGuid);
+	// --- v6: morph targets -------------------------------------------------------------------
+	uint32_t mc = (uint32_t)morphs.size(); wr(o, mc);
+	for (const MorphTarget& mt : morphs)
+	{
+		wrStr(o, mt.name);
+		uint8_t hasP = mt.posDelta.size() == (size_t)n * 3 ? 1 : 0; wr(o, hasP);
+		if (hasP) o.write((const char*)mt.posDelta.data(), sizeof(float) * 3 * n);
+		uint8_t hasN = mt.nrmDelta.size() == (size_t)n * 3 ? 1 : 0; wr(o, hasN);
+		if (hasN) o.write((const char*)mt.nrmDelta.data(), sizeof(float) * 3 * n);
+	}
+	// --- v7: import-time material per SLOT ----------------------------------------------------
+	uint32_t dm = (uint32_t)defaultMats.size(); wr(o, dm);
+	for (const std::string& g : defaultMats) wrStr(o, g);
 	return (bool)o;
 }
 
@@ -469,6 +732,81 @@ Mesh* Mesh::LoadFromStream(std::istream& i)
 			}
 			i.read((char*)m->boneWeight, sizeof(float) * 4 * n);
 		}
+	}
+	if (version >= 4)   // indexed block (older files simply have none)
+	{
+		uint32_t ni = 0; rd(i, ni);
+		if (ni)
+		{
+			m->numIndices = (int)ni;
+			m->indexArray = new uint32_t[ni];
+			i.read((char*)m->indexArray, sizeof(uint32_t) * ni);
+		}
+		uint8_t hasTan = 0; rd(i, hasTan);
+		if (hasTan && n > 0) { m->tangentArray = new float[(size_t)n * 4]; i.read((char*)m->tangentArray, sizeof(float) * 4 * n); }
+		uint8_t hasUV2 = 0; rd(i, hasUV2);
+		if (hasUV2 && n > 0) { m->uv2Array = new float[(size_t)n * 2]; i.read((char*)m->uv2Array, sizeof(float) * 2 * n); }
+		uint8_t hasCol = 0; rd(i, hasCol);
+		if (hasCol && n > 0) { m->colorArray = new float[(size_t)n * 4]; i.read((char*)m->colorArray, sizeof(float) * 4 * n); }
+		uint32_t sc = 0; rd(i, sc);
+		m->sections.resize(sc);
+		for (uint32_t k = 0; k < sc; ++k)
+		{
+			rd(i, m->sections[k].firstIndex); rd(i, m->sections[k].indexCount);
+			int32_t sl = 0; rd(i, sl); m->sections[k].slot = sl;
+		}
+		uint32_t lc = 0; rd(i, lc);
+		m->lods.resize(lc);
+		for (uint32_t k = 0; k < lc; ++k)
+		{
+			int32_t fs = 0, scn = 0; rd(i, fs); rd(i, scn);
+			m->lods[k].firstSection = fs; m->lods[k].sectionCount = scn;
+			rd(i, m->lods[k].screenSize);
+		}
+		int32_t slots = 1; rd(i, slots); m->numSlots = slots < 1 ? 1 : slots;
+		uint32_t nn2 = 0; rd(i, nn2);
+		m->slotNames.resize(nn2);
+		for (uint32_t k = 0; k < nn2; ++k) m->slotNames[k] = rdStr(i);
+
+		// Sanitize: a corrupt/hand-edited v4 block must never reach the GPU/RT paths with
+		// out-of-range indices or ranges. Bad data degrades to the plain vertex soup.
+		bool bad = false;
+		for (int k = 0; k < m->numIndices && !bad; ++k)
+			if (m->indexArray[k] >= (uint32_t)m->numVerts) bad = true;
+		for (const MeshSection& s : m->sections)
+			if ((uint64_t)s.firstIndex + s.indexCount > (uint64_t)(m->numIndices > 0 ? m->numIndices : m->numVerts)
+			    || s.indexCount % 3 != 0) { bad = true; break; }
+		for (const MeshLOD& l : m->lods)
+			if (l.firstSection < 0 || l.sectionCount < 0
+			    || l.firstSection + l.sectionCount > (int)m->sections.size()) { bad = true; break; }
+		if (bad)
+		{
+			std::cout << "[Mesh]\t\t'" << m->name << "' has a corrupt v4 block — indexed data dropped" << std::endl;
+			delete[] m->indexArray; m->indexArray = nullptr; m->numIndices = 0;
+			m->sections.clear(); m->lods.clear(); m->numSlots = 1; m->slotNames.clear();
+		}
+	}
+	if (version >= 5) m->skelGuid = rdStr(i);
+	if (version >= 6)
+	{
+		uint32_t mc = 0; rd(i, mc);
+		if (mc <= 4096)   // sanity — a corrupt count must not allocate the moon
+			for (uint32_t k = 0; k < mc && i; ++k)
+			{
+				Mesh::MorphTarget mt;
+				mt.name = rdStr(i);
+				uint8_t hasP = 0; rd(i, hasP);
+				if (hasP && n > 0) { mt.posDelta.resize((size_t)n * 3); i.read((char*)mt.posDelta.data(), sizeof(float) * 3 * n); }
+				uint8_t hasN = 0; rd(i, hasN);
+				if (hasN && n > 0) { mt.nrmDelta.resize((size_t)n * 3); i.read((char*)mt.nrmDelta.data(), sizeof(float) * 3 * n); }
+				m->morphs.push_back(std::move(mt));
+			}
+	}
+	if (version >= 7)
+	{
+		uint32_t dm = 0; rd(i, dm);
+		if (dm <= 4096)
+			for (uint32_t k = 0; k < dm && i; ++k) m->defaultMats.push_back(rdStr(i));
 	}
 	if (!i && !i.eof()) { delete m; return nullptr; }
 	return m;

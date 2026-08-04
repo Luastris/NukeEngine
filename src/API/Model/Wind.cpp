@@ -1,4 +1,5 @@
 #include "API/Model/Wind.h"
+#include "API/Model/Math.h"   // ScaleExtents / ScaleRadius: volumes follow the atom scale
 #include "API/Model/Noise.h"
 #include "API/Model/Atom.h"
 #include "API/Model/BendVolumes.h"   // zones export as shader bend volumes
@@ -121,9 +122,11 @@ Vector3 Wind::Sample(const Vector3& worldPos)
 		glm::vec3 center((float)cP.x, (float)cP.y, (float)cP.z);
 		glm::vec3 p((float)worldPos.x, (float)worldPos.y, (float)worldPos.z);
 		float edge01;   // 0 at the center, 1 at the shape edge; outside -> skip
+		// The zone's extents are LOCAL: scaling the atom scales the zone (ScaleExtents/ScaleRadius).
+		const Vector3 zscl = tr.globalScale();
 		if (zn->shape == 0)
 		{
-			const float r = zn->radius > 0.01f ? zn->radius : 0.01f;
+			const float r = std::max(ScaleRadius(zn->radius, zscl), 0.01f);
 			const float d = glm::length(p - center);
 			if (d > r) continue;
 			edge01 = d / r;
@@ -133,7 +136,8 @@ Vector3 Wind::Sample(const Vector3& worldPos)
 			Quaternion q = tr.globalRotation();
 			glm::quat rot((float)q.w, (float)q.x, (float)q.y, (float)q.z);
 			glm::vec3 lp = glm::inverse(rot) * (p - center);   // box is atom-oriented
-			glm::vec3 he((float)zn->halfExtents.x, (float)zn->halfExtents.y, (float)zn->halfExtents.z);
+			const Vector3 hw = ScaleExtents(zn->halfExtents, zscl);
+			glm::vec3 he((float)hw.x, (float)hw.y, (float)hw.z);
 			he = glm::max(glm::abs(he), glm::vec3(0.01f));
 			glm::vec3 a = glm::abs(lp) / he;
 			edge01 = std::max({ a.x, a.y, a.z });
@@ -186,10 +190,12 @@ void Wind::CollectZones(std::vector<BendVolume>& out)
 		Vector3 c = tr.globalPosition();
 		BendVolume v;
 		v.pos[0] = (float)c.x; v.pos[1] = (float)c.y; v.pos[2] = (float)c.z;
-		if (zn->shape == 0) v.radius = zn->radius > 0.01f ? zn->radius : 0.01f;
+		const Vector3 zscl2 = tr.globalScale();
+		if (zn->shape == 0) v.radius = std::max(ScaleRadius(zn->radius, zscl2), 0.01f);
 		else
 		{
-			const float hx = (float)fabs(zn->halfExtents.x), hy = (float)fabs(zn->halfExtents.y), hz = (float)fabs(zn->halfExtents.z);
+			const Vector3 hw = ScaleExtents(zn->halfExtents, zscl2);
+			const float hx = (float)fabs(hw.x), hy = (float)fabs(hw.y), hz = (float)fabs(hw.z);
 			v.radius = std::max(0.01f, sqrtf(hx * hx + hy * hy + hz * hz));   // bounding sphere
 		}
 		float zs = zn->strength;

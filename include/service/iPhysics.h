@@ -46,6 +46,17 @@ struct NukeShapeDesc
 	float halfHeight = 0.5f;                        // Capsule: half of the cylinder part
 };
 
+// A SwingTwist ragdoll joint between two bodies (see createSwingTwistJoint).
+struct NukeJointDesc
+{
+	uint64_t bodyA = 0, bodyB = 0;       // parent, child
+	float pivot[3]     = { 0, 0, 0 };    // WORLD anchor (the joint the bodies hinge about)
+	float twistAxis[3] = { 0, 1, 0 };    // WORLD bone direction at creation
+	float planeAxis[3] = { 1, 0, 0 };    // WORLD swing reference, perpendicular to twistAxis
+	float twistMin = -0.5f, twistMax = 0.5f;   // radians about twistAxis
+	float swing1 = 0.7f, swing2 = 0.7f;        // half-cone angles (radians): plane / normal
+};
+
 // One contact transition, reported by fetchContacts after a step. Trigger-vs-collision
 // classification happens engine-side.
 struct NukeContactEvent
@@ -180,6 +191,18 @@ public:
 	virtual void addForceAtPoint(uint64_t body, const float force[3], const float point[3]) = 0;
 	// The body's velocity AT a world point (linear + omega x r).
 	virtual void getPointVelocity(uint64_t body, const float point[3], float outVel[3]) = 0;
+
+	// ---- ragdoll joints (stage 9) — ABI: appended at the END ------------------------------
+	// SwingTwist between two bodies: a shoulder/hip-style cone (swing1/swing2 half-angles
+	// around the plane/normal axes) + a twist range about twistAxis. All axes/pivot in WORLD
+	// space at creation time. The optional motor drives bodyB toward a target orientation
+	// relative to bodyA (powered ragdolls / hit reactions).
+	virtual uint64_t createSwingTwistJoint(const NukeJointDesc& d) = 0;   // 0 on failure
+	virtual void     destroyJoint(uint64_t joint) = 0;
+	// frequency Hz / damping ratio of the position motor; enabled=false = free joint.
+	virtual void setJointMotor(uint64_t joint, bool enabled, float frequency, float damping) = 0;
+	// Target rotation of bodyB in bodyA's local frame (x,y,z,w).
+	virtual void setJointTarget(uint64_t joint, const float localQuat[4]) = 0;
 };
 
 }  // namespace nuke

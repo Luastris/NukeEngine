@@ -262,7 +262,11 @@ bool InstancedMesh::EnsureRenderReady(iRender* r)
 		if (rtWanted)
 		{
 			Mesh* rm = rtChunkMeshes[rtCi++];
-			const int mv = mesh->numVerts, nv = (int)kv.second.size() * mv;
+			// The merged chunk is an unindexed SOUP: indexed (v4) source meshes expand via
+			// their index buffer so triangle order survives the merge — LOD0 range only
+			// (the appended LOD ranges are coincident simplified shells).
+			const int mv = mesh->numIndices > 0 ? mesh->Lod0IndexCount() : mesh->numVerts;
+			const int nv = (int)kv.second.size() * mv;
 			if (rm->numVerts != nv)
 			{
 				delete[] rm->vertexArray; delete[] rm->normalArray; delete[] rm->uvArray;
@@ -281,8 +285,9 @@ bool InstancedMesh::EnsureRenderReady(iRender* r)
 				const Inst& in = instances[i];
 				glm::quat q(in.quat[3], in.quat[0], in.quat[1], in.quat[2]);
 				glm::vec3 tr(in.pos[0], in.pos[1], in.pos[2]), sc(in.scale[0], in.scale[1], in.scale[2]);
-				for (int v = 0; v < mv; ++v)
+				for (int e = 0; e < mv; ++e)
 				{
+					const uint32_t v = mesh->numIndices > 0 ? mesh->indexArray[e] : (uint32_t)e;
 					glm::vec3 p(mesh->vertexArray[v * 3], mesh->vertexArray[v * 3 + 1], mesh->vertexArray[v * 3 + 2]);
 					const float localY = p.y;   // blade-local height BEFORE the transform (bend gate)
 					p = tr + q * (p * sc);

@@ -123,13 +123,15 @@ void Foliage::Scatter(const Vector3& brushPos, float brushR, float densMul)
 		if (!mr || !mr->enabled || !mr->mesh || !mr->mesh->vertexArray || mr->mesh->numVerts < 3) continue;
 		const glm::mat4 w = AtomWorldM(a);
 		const Mesh* m = mr->mesh;
-		const int tris = m->numVerts / 3;
+		const int tris = m->TriCount();
 		for (int t = 0; t < tris; ++t)
 		{
-			const float* vp = m->vertexArray + (size_t)t * 9;
-			glm::vec3 A = glm::vec3(w * glm::vec4(vp[0], vp[1], vp[2], 1));
-			glm::vec3 B = glm::vec3(w * glm::vec4(vp[3], vp[4], vp[5], 1));
-			glm::vec3 C = glm::vec3(w * glm::vec4(vp[6], vp[7], vp[8], 1));
+			const float* v0 = m->vertexArray + (size_t)m->TriIndex(t, 0) * 3;
+			const float* v1 = m->vertexArray + (size_t)m->TriIndex(t, 1) * 3;
+			const float* v2 = m->vertexArray + (size_t)m->TriIndex(t, 2) * 3;
+			glm::vec3 A = glm::vec3(w * glm::vec4(v0[0], v0[1], v0[2], 1));
+			glm::vec3 B = glm::vec3(w * glm::vec4(v1[0], v1[1], v1[2], 1));
+			glm::vec3 C = glm::vec3(w * glm::vec4(v2[0], v2[1], v2[2], 1));
 			glm::vec3 n = glm::cross(B - A, C - A);
 			const float n2 = glm::length(n);
 			if (n2 < 1e-9f) continue;

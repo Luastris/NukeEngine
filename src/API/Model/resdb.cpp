@@ -105,6 +105,19 @@ AnimClip* ResDB::GetClip(const std::string& guid)
 	return (it != clipByGuid.end()) ? it->second : nullptr;
 }
 
+void ResDB::RegisterSkeleton(Skeleton* sk)
+{
+	if (!sk) return;
+	skeletons.push_back(sk);
+	if (!sk->guid.empty()) skelByGuid[sk->guid] = sk;
+}
+
+Skeleton* ResDB::GetSkeleton(const std::string& guid)
+{
+	auto it = skelByGuid.find(guid);
+	return (it != skelByGuid.end()) ? it->second : nullptr;
+}
+
 AnimClip* ResDB::GetClipByName(const std::string& name)
 {
 	for (AnimClip* c : clips)
@@ -117,6 +130,58 @@ void ResDB::RegisterBoneMap(BoneMap* b)
 	if (!b) return;
 	boneMaps.push_back(b);
 	if (!b->guid.empty()) boneMapByGuid[b->guid] = b;
+}
+
+void ResDB::RegisterAnimSM(AnimSM* m)
+{
+	if (!m) return;
+	animSMs.push_back(m);
+	if (!m->guid.empty()) smByGuid[m->guid] = m;
+}
+
+AnimSM* ResDB::GetAnimSM(const std::string& guid)
+{
+	auto it = smByGuid.find(guid);
+	return (it != smByGuid.end()) ? it->second : nullptr;
+}
+
+void ResDB::RegisterBlendSpace(BlendSpace* b)
+{
+	if (!b) return;
+	blendSpaces.push_back(b);
+	if (!b->guid.empty()) blendByGuid[b->guid] = b;
+}
+
+BlendSpace* ResDB::GetBlendSpace(const std::string& guid)
+{
+	auto it = blendByGuid.find(guid);
+	return (it != blendByGuid.end()) ? it->second : nullptr;
+}
+
+void ResDB::RegisterSequence(Sequence* s)
+{
+	if (!s) return;
+	sequences.push_back(s);
+	if (!s->guid.empty()) seqByGuid[s->guid] = s;
+}
+
+Sequence* ResDB::GetSequence(const std::string& guid)
+{
+	auto it = seqByGuid.find(guid);
+	return (it != seqByGuid.end()) ? it->second : nullptr;
+}
+
+void ResDB::RegisterRagdoll(RagdollDef* r)
+{
+	if (!r) return;
+	ragdolls.push_back(r);
+	if (!r->guid.empty()) ragByGuid[r->guid] = r;
+}
+
+RagdollDef* ResDB::GetRagdoll(const std::string& guid)
+{
+	auto it = ragByGuid.find(guid);
+	return (it != ragByGuid.end()) ? it->second : nullptr;
 }
 
 BoneMap* ResDB::GetBoneMap(const std::string& guid)
@@ -203,7 +268,8 @@ static bool RendererInternalShader(const std::string& name)
 {
 	return name == "ui" || name == "shadow" || name == "sky" || name == "post" || name == "debug"
 	    || name == "sprite" || name == "sprite_lit" || name == "decal"
-	    || name.rfind("outline", 0) == 0 || name.rfind("water", 0) == 0;   // water* = 7.5 surface/sim/FFT passes
+	    || name.rfind("outline", 0) == 0 || name.rfind("water", 0) == 0    // water* = 7.5 surface/sim/FFT passes
+	    || name == "skin";                                                 // GPU skinning compute (stage 3)
 }
 
 void ResDB::LoadShadersDir(const std::string& dir)
@@ -370,7 +436,12 @@ void ResDB::RemoveByGuid(const std::string& guid)
 	if (auto it = texByGuid.find(guid);    it != texByGuid.end())    { textures.remove(it->second);   texByGuid.erase(it); }
 	if (auto it = shaderByGuid.find(guid); it != shaderByGuid.end()) { shaders.remove(it->second);    shaderByGuid.erase(it); }
 	if (auto it = clipByGuid.find(guid);   it != clipByGuid.end())   { clips.remove(it->second);      clipByGuid.erase(it); }
+	if (auto it = skelByGuid.find(guid);   it != skelByGuid.end())   { skeletons.remove(it->second);  skelByGuid.erase(it); }
 	if (auto it = boneMapByGuid.find(guid); it != boneMapByGuid.end()) { boneMaps.remove(it->second); boneMapByGuid.erase(it); }
+	if (auto it = smByGuid.find(guid);     it != smByGuid.end())     { animSMs.remove(it->second);    smByGuid.erase(it); }
+	if (auto it = blendByGuid.find(guid);  it != blendByGuid.end())  { blendSpaces.remove(it->second); blendByGuid.erase(it); }
+	if (auto it = seqByGuid.find(guid);    it != seqByGuid.end())    { sequences.remove(it->second);  seqByGuid.erase(it); }
+	if (auto it = ragByGuid.find(guid);    it != ragByGuid.end())    { ragdolls.remove(it->second);   ragByGuid.erase(it); }
 	if (auto it = pathByGuid.find(guid);   it != pathByGuid.end())   { guidByPath.erase(it->second);  pathByGuid.erase(it); }
 }
 
@@ -464,12 +535,52 @@ void ResDB::LoadContentEntry(const std::string& rel, const std::string& bytes)
 		RegisterClip(c);
 		std::cout << "[ResDB]	loaded clip '" << c->name << "' (pak)" << std::endl;
 	}
+	else if (ext == ".nuskel")
+	{
+		Skeleton* sk = Skeleton::LoadFromMemory(bytes);
+		if (!sk) { std::cout << "[ResDB]	failed to load (pak) " << rel << std::endl; return; }
+		if (sk->guid.empty() || skelByGuid.count(sk->guid)) { delete sk; return; }
+		RegisterSkeleton(sk);
+		std::cout << "[ResDB]	loaded skeleton '" << sk->name << "' (pak)" << std::endl;
+	}
 	else if (ext == ".nubonemap")
 	{
 		BoneMap* b = BoneMap::LoadFromString(bytes, stem);
 		if (!b) { std::cout << "[ResDB]	failed to load (pak) " << rel << std::endl; return; }
 		if (b->guid.empty() || boneMapByGuid.count(b->guid)) { delete b; return; }
 		RegisterBoneMap(b);
+	}
+	else if (ext == ".nusm")
+	{
+		AnimSM* m = AnimSM::LoadFromMemory(bytes);
+		if (!m) { std::cout << "[ResDB]	failed to load (pak) " << rel << std::endl; return; }
+		if (m->guid.empty() || smByGuid.count(m->guid)) { delete m; return; }
+		RegisterAnimSM(m);
+		std::cout << "[ResDB]	loaded anim SM '" << m->name << "' (pak)" << std::endl;
+	}
+	else if (ext == ".nublend")
+	{
+		BlendSpace* b = BlendSpace::LoadFromMemory(bytes);
+		if (!b) { std::cout << "[ResDB]	failed to load (pak) " << rel << std::endl; return; }
+		if (b->guid.empty() || blendByGuid.count(b->guid)) { delete b; return; }
+		RegisterBlendSpace(b);
+		std::cout << "[ResDB]	loaded blend space '" << b->name << "' (pak)" << std::endl;
+	}
+	else if (ext == ".nuseq")
+	{
+		Sequence* q = Sequence::LoadFromMemory(bytes);
+		if (!q) { std::cout << "[ResDB]	failed to load (pak) " << rel << std::endl; return; }
+		if (q->guid.empty() || seqByGuid.count(q->guid)) { delete q; return; }
+		RegisterSequence(q);
+		std::cout << "[ResDB]	loaded sequence '" << q->name << "' (pak)" << std::endl;
+	}
+	else if (ext == ".nurag")
+	{
+		RagdollDef* r = RagdollDef::LoadFromMemory(bytes);
+		if (!r) { std::cout << "[ResDB]	failed to load (pak) " << rel << std::endl; return; }
+		if (r->guid.empty() || ragByGuid.count(r->guid)) { delete r; return; }
+		RegisterRagdoll(r);
+		std::cout << "[ResDB]	loaded ragdoll '" << r->name << "' (pak)" << std::endl;
 	}
 	else if (ext == ".nuprefab")
 	{
@@ -577,6 +688,15 @@ void ResDB::LoadContentFile(const std::string& path)
 		SetAssetPath(c->guid, path);
 		std::cout << "[ResDB]	loaded clip '" << c->name << "' (" << c->duration << " s)" << std::endl;
 	}
+	else if (ext == ".nuskel")
+	{
+		Skeleton* sk = Skeleton::LoadFromFile(path);
+		if (!sk) { std::cout << "[ResDB]	failed to load " << p.filename().string() << std::endl; return; }
+		if (sk->guid.empty() || skelByGuid.count(sk->guid)) { delete sk; return; }
+		RegisterSkeleton(sk);
+		SetAssetPath(sk->guid, path);
+		std::cout << "[ResDB]	loaded skeleton '" << sk->name << "' (" << sk->bones.size() << " bones)" << std::endl;
+	}
 	else if (ext == ".nubonemap")
 	{
 		BoneMap* b = BoneMap::LoadFromFile(path);
@@ -585,6 +705,42 @@ void ResDB::LoadContentFile(const std::string& path)
 		RegisterBoneMap(b);
 		SetAssetPath(b->guid, path);
 		std::cout << "[ResDB]	loaded bone map '" << b->name << "' (" << b->map.size() << " entries)" << std::endl;
+	}
+	else if (ext == ".nusm")
+	{
+		AnimSM* m = AnimSM::LoadFromFile(path);
+		if (!m) { std::cout << "[ResDB]	failed to load " << p.filename().string() << std::endl; return; }
+		if (m->guid.empty() || smByGuid.count(m->guid)) { delete m; return; }
+		RegisterAnimSM(m);
+		SetAssetPath(m->guid, path);
+		std::cout << "[ResDB]	loaded anim SM '" << m->name << "' (" << m->layers.size() << " layers)" << std::endl;
+	}
+	else if (ext == ".nublend")
+	{
+		BlendSpace* b = BlendSpace::LoadFromFile(path);
+		if (!b) { std::cout << "[ResDB]	failed to load " << p.filename().string() << std::endl; return; }
+		if (b->guid.empty() || blendByGuid.count(b->guid)) { delete b; return; }
+		RegisterBlendSpace(b);
+		SetAssetPath(b->guid, path);
+		std::cout << "[ResDB]	loaded blend space '" << b->name << "' (" << b->points.size() << " points)" << std::endl;
+	}
+	else if (ext == ".nuseq")
+	{
+		Sequence* q = Sequence::LoadFromFile(path);
+		if (!q) { std::cout << "[ResDB]	failed to load " << p.filename().string() << std::endl; return; }
+		if (q->guid.empty() || seqByGuid.count(q->guid)) { delete q; return; }
+		RegisterSequence(q);
+		SetAssetPath(q->guid, path);
+		std::cout << "[ResDB]	loaded sequence '" << q->name << "' (" << q->duration << " s)" << std::endl;
+	}
+	else if (ext == ".nurag")
+	{
+		RagdollDef* r = RagdollDef::LoadFromFile(path);
+		if (!r) { std::cout << "[ResDB]	failed to load " << p.filename().string() << std::endl; return; }
+		if (r->guid.empty() || ragByGuid.count(r->guid)) { delete r; return; }
+		RegisterRagdoll(r);
+		SetAssetPath(r->guid, path);
+		std::cout << "[ResDB]	loaded ragdoll '" << r->name << "' (" << r->bodies.size() << " bodies)" << std::endl;
 	}
 	else if (ext == ".nuprefab")
 	{

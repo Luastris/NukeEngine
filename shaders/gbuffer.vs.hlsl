@@ -26,6 +26,24 @@ void main(in VSIn i, out PSIn o)
     float3 pivot = float3(i.iRow0.w, i.iRow1.w, i.iRow2.w);
     o.objId = frac(sin(dot(pivot, float3(127.1, 311.7, 74.7))) * 43758.5453);
 }
+#elif NUKE_SKINNED
+// GPU-skinned meshes: stream 3 carries the PREVIOUS frame's skinned position (written by
+// skin.cs) — velocity is the true pose delta, not the rigid-transform approximation.
+struct VSIn { float3 pos : ATTRIB0; float3 nrm : ATTRIB1; float2 uv : ATTRIB2; float3 prevPos : ATTRIB3; };
+struct PSIn { float4 pos : SV_POSITION; float3 wpos : TEXCOORD0; float3 nrm : TEXCOORD1; float2 uv : TEXCOORD2;
+              float4 curClip : TEXCOORD3; float4 prevClip : TEXCOORD4;
+              nointerpolation float objId : TEXCOORD5; };
+void main(in VSIn i, out PSIn o)
+{
+    o.wpos     = mul(g_World, float4(i.pos, 1.0)).xyz;
+    o.pos      = mul(g_WVP,     float4(i.pos, 1.0));
+    o.nrm      = mul((float3x3)g_World, i.nrm);
+    o.uv       = i.uv;
+    o.curClip  = o.pos;
+    o.prevClip = mul(g_PrevWVP, float4(i.prevPos, 1.0));
+    float3 pivot = mul(g_World, float4(0.0, 0.0, 0.0, 1.0)).xyz;
+    o.objId = frac(sin(dot(pivot, float3(127.1, 311.7, 74.7))) * 43758.5453);
+}
 #else
 struct VSIn { float3 pos : ATTRIB0; float3 nrm : ATTRIB1; float2 uv : ATTRIB2; };
 struct PSIn { float4 pos : SV_POSITION; float3 wpos : TEXCOORD0; float3 nrm : TEXCOORD1; float2 uv : TEXCOORD2;

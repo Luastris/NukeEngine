@@ -16,6 +16,16 @@
 
 namespace nuke {
 
+// Modules the ABI gate turned away, by absolute path. A refused module is INVISIBLE — its
+// components never reach the registry — so the editor needs to know it happened to rebuild it
+// instead of leaving the user with silently missing classes.
+static std::set<std::string> g_refused;
+
+std::vector<std::string> RefusedModules()
+{
+	return std::vector<std::string>(g_refused.begin(), g_refused.end());
+}
+
 // Single instance, owned by the engine DLL.
 static bc::vector<std::shared_ptr<NUKEModule>> g_modules;
 static AppInstance* g_instance = nullptr;   // host, captured at discovery (for EnablePlugin)
@@ -161,6 +171,68 @@ static bool SehOnLoad(NUKEModule* m)
 	__except (EXCEPTION_EXECUTE_HANDLER) { return false; }
 }
 
+// ---- shielded vtable queries (see Modular.h) ------------------------------------------------
+// Separate one-liners: a __try frame cannot hold objects with destructors, so each wrapper does
+// exactly one call and nothing else.
+static bool SehEditorTool(NUKEModule* m, bool& out)
+{
+	__try { out = m->editorTool(); return true; }
+	__except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+static bool SehCompanionOf(NUKEModule* m, const char*& out)
+{
+	__try { out = m->companionOf(); return true; }
+	__except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+static bool SehHasSettings(NUKEModule* m, bool& out)
+{
+	__try { out = m->HasSettings(); return true; }
+	__except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+static bool SehSettings(NUKEModule* m)
+{
+	__try { m->Settings(); return true; }
+	__except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+
+static void ModuleFaulted(NUKEModule* m, const char* what)
+{
+	cout << "[Modular]	" << (m && m->moduleFile[0] ? m->moduleFile : "<module>")
+	     << ": " << what << " faulted — the module is stale or built for another engine build; "
+	     << "the call was ignored" << endl;
+}
+
+bool ModuleIsEditorTool(NUKEModule* m)
+{
+	if (!m || ModuleAbi(m) < 2) return false;   // slot does not exist in this DLL
+	bool v = false;
+	if (!SehEditorTool(m, v)) { ModuleFaulted(m, "editorTool()"); return false; }
+	return v;
+}
+
+std::string ModuleCompanionOf(NUKEModule* m)
+{
+	if (!m || ModuleAbi(m) < 3) return std::string();
+	const char* v = nullptr;
+	if (!SehCompanionOf(m, v)) { ModuleFaulted(m, "companionOf()"); return std::string(); }
+	return v ? std::string(v) : std::string();
+}
+
+bool ModuleHasSettings(NUKEModule* m)
+{
+	if (!m) return false;
+	bool v = false;
+	if (!SehHasSettings(m, v)) { ModuleFaulted(m, "HasSettings()"); return false; }
+	return v;
+}
+
+bool ModuleDrawSettings(NUKEModule* m)
+{
+	if (!m) return false;
+	if (!SehSettings(m)) { ModuleFaulted(m, "Settings()"); return false; }
+	return true;
+}
+
 static void* SehQueryService(NUKEModule* m)
 {
 	__try { return m->queryService(); }
@@ -207,6 +279,7 @@ static NUKEModule* DiscoverModuleFileBody(const std::string& absPath)
 	const std::string file = p.filename().string();
 	for (auto& m : g_modules)
 		if (m && m->moduleFile == file) return nullptr;   // already in the pool
+	g_refused.erase(p.generic_string());   // re-discovery re-judges this file
 	try
 	{
 #ifdef _WIN32

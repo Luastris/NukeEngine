@@ -3,9 +3,12 @@
 #define BOOST_CHRONO_HEADER_ONLY
 #include <boost/chrono.hpp>
 #include "API/Model/World.h"
+#include <memory>
+#include <functional>
 #include "render/irender.h"
 #include "API/Model/Camera.h"
 #include "API/Model/MeshRenderer.h"
+#include "API/Model/SkinnedMeshRenderer.h"
 #include "API/Model/Material.h"
 #include "API/Model/Light.h"
 #include "API/Model/Environment.h"
@@ -59,6 +62,7 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
+#include <glm/gtc/type_ptr.hpp>
 #include <glm/gtx/quaternion.hpp>
 
 namespace nuke {
@@ -414,6 +418,21 @@ static void SyncBodies(bc::list<Atom*>& gos, iPhysics* p, std::map<uint64_t, Col
 				col->bodyId = 0;
 				col->hasSync = false;
 			}
+			// Scale edited (or a parent scaled): the shape is scale-baked, so it must be rebuilt
+			// at the new size. Relative epsilon — a jitter of the last float bit is not an edit.
+			if (col->bodyId)
+			{
+				const Vector3 sNow = t.globalScale();
+				const double se = 1e-4;
+				if (std::fabs(std::fabs(sNow.x) - col->bodyScale[0]) > se * std::max(1.0, std::fabs(sNow.x)) ||
+				    std::fabs(std::fabs(sNow.y) - col->bodyScale[1]) > se * std::max(1.0, std::fabs(sNow.y)) ||
+				    std::fabs(std::fabs(sNow.z) - col->bodyScale[2]) > se * std::max(1.0, std::fabs(sNow.z)))
+				{
+					p->destroyBody(col->bodyId);
+					col->bodyId = 0;
+					col->hasSync = false;
+				}
+			}
 
 			if (col->enabled && !col->bodyId)
 			{
@@ -456,18 +475,26 @@ static void SyncBodies(bc::list<Atom*>& gos, iPhysics* p, std::map<uint64_t, Col
 						          << "' has no sibling MeshRenderer mesh - skipped" << std::endl;
 						continue;
 					}
-					scaledVerts.resize((size_t)mesh->numVerts * 3);
-					for (int i = 0; i < mesh->numVerts; ++i)
+					// The physics seam takes an unindexed soup: expand v4 indices while baking
+					// the world scale (soup meshes copy through 1:1, as before).
+					// LOD0 ONLY: the appended LOD ranges are coincident simplified shells.
+					const int soupVerts = mesh->numIndices > 0 ? mesh->Lod0IndexCount() : mesh->numVerts;
+					scaledVerts.resize((size_t)soupVerts * 3);
+					for (int i = 0; i < soupVerts; ++i)
 					{
-						scaledVerts[(size_t)i * 3 + 0] = mesh->vertexArray[i * 3 + 0] * (float)scl.x;
-						scaledVerts[(size_t)i * 3 + 1] = mesh->vertexArray[i * 3 + 1] * (float)scl.y;
-						scaledVerts[(size_t)i * 3 + 2] = mesh->vertexArray[i * 3 + 2] * (float)scl.z;
+						const uint32_t src = mesh->numIndices > 0 ? mesh->indexArray[i] : (uint32_t)i;
+						scaledVerts[(size_t)i * 3 + 0] = mesh->vertexArray[src * 3 + 0] * (float)scl.x;
+						scaledVerts[(size_t)i * 3 + 1] = mesh->vertexArray[src * 3 + 1] * (float)scl.y;
+						scaledVerts[(size_t)i * 3 + 2] = mesh->vertexArray[src * 3 + 2] * (float)scl.z;
 					}
 					d.meshVerts     = scaledVerts.data();
-					d.meshVertCount = mesh->numVerts;
+					d.meshVertCount = soupVerts;
 				}
 				col->bodyId = p->createBody(d);
 				col->bodyMotion = desiredMotion;
+				col->bodyScale[0] = (float)fabs(scl.x);   // what the shape was baked with
+				col->bodyScale[1] = (float)fabs(scl.y);
+				col->bodyScale[2] = (float)fabs(scl.z);
 				col->lastSyncPos = pos; col->lastSyncRot = rot; col->hasSync = true;
 			}
 			else if (col->bodyId)
@@ -927,8 +954,13 @@ static Environment* FindEnvironment(bc::list<Atom*>& gos)
 }
 
 // One queued draw (gathered before drawing so transparent objects can be sorted back-to-front).
+// Sectioned v4 meshes carry the EFFECTIVE per-slot materials (fallbacks already applied);
+// matCount <= 1 = the classic single-material path.
+static const int kMaxDrawSlots = 16;
 struct DrawItem { Mesh* mesh; Material* mat; float pos[3], quat[4], scale[3]; Vector3 wpos; int blend; bool inReflections;
-                  float prevPos[3], prevQuat[4], prevScale[3]; bool hasPrev; };   // prev transform for TAA velocity
+                  float prevPos[3], prevQuat[4], prevScale[3]; bool hasPrev;   // prev transform for TAA velocity
+                  Material* mats[kMaxDrawSlots]; int matCount = 0;             // per-slot materials (v4 sections)
+                  bool anyOpaque = true, anyBlend = false; };                  // pass membership across slots
 
 // Render-layer filter: bit i of `mask` = render atoms with Atom::layer == i.
 static inline bool LayerVisible(Atom* atom, unsigned int mask) { return (mask >> (atom->layer & 31)) & 1u; }
@@ -953,6 +985,27 @@ static void CollectMeshes(bc::list<Atom*>& gos, std::vector<DrawItem>& out, unsi
 				it.scale[0]=(float)s.x; it.scale[1]=(float)s.y; it.scale[2]=(float)s.z;
 				it.wpos = p;
 				it.blend = mr->mat ? mr->mat->blendMode : 0;   // 0 = opaque, 1/2 = transparent/additive
+				// Sectioned mesh / per-slot materials: snapshot the EFFECTIVE slot list.
+				it.matCount = 0; it.anyOpaque = it.blend == 0; it.anyBlend = it.blend != 0;
+				if (!mr->mats.empty() || mr->mesh->numSlots > 1)
+				{
+					int slots = (int)mr->mats.size() > mr->mesh->numSlots ? (int)mr->mats.size() : mr->mesh->numSlots;
+					if (slots > kMaxDrawSlots) slots = kMaxDrawSlots;
+					it.anyOpaque = false; it.anyBlend = false;
+					for (int sl = 0; sl < slots; ++sl)
+					{
+						Material* m = mr->MaterialForSlot(sl);
+						it.mats[sl] = m;
+						const int bm = m ? m->blendMode : 0;
+						it.anyOpaque = it.anyOpaque || bm == 0;
+						it.anyBlend  = it.anyBlend  || bm != 0;
+					}
+					it.matCount = slots;
+					if (slots > 0 && !it.mats[0]) it.mats[0] = mr->mat;   // slot-0 fallback for the renderer
+					// Single-slot meshes with a matGuids[0] override must reach the LEGACY
+					// draw paths (matCount <= 1 falls back to it.mat) with the EFFECTIVE material.
+					if (slots > 0 && it.mats[0]) { it.mat = it.mats[0]; it.blend = it.mats[0]->blendMode; }
+				}
 				it.inReflections = mr->inReflections;
 				it.hasPrev = mr->hasPrev;   // false on the first frame -> zero motion
 				for (int k = 0; k < 3; ++k) it.prevPos[k] = mr->prevPos[k];
@@ -1101,9 +1154,15 @@ static void DrawGBuffer(std::vector<DrawItem>& items, iRender* r, bool cull)
 {
 	float vp[16]; if (cull) CameraVP(r, vp);
 	for (auto& it : items)
-		if (it.blend == 0 && !(cull && FrustumCull(it, vp)))
-			r->renderGBufferObject(it.mesh, it.mat, it.pos, it.quat, it.scale,
-			                       it.hasPrev ? it.prevPos : nullptr, it.hasPrev ? it.prevQuat : nullptr, it.hasPrev ? it.prevScale : nullptr);
+		if (it.anyOpaque && !(cull && FrustumCull(it, vp)))
+		{
+			if (it.matCount > 1)
+				r->renderGBufferObjectMulti(it.mesh, it.mats, it.matCount, it.pos, it.quat, it.scale,
+				                            it.hasPrev ? it.prevPos : nullptr, it.hasPrev ? it.prevQuat : nullptr, it.hasPrev ? it.prevScale : nullptr, 0);
+			else if (it.blend == 0)
+				r->renderGBufferObject(it.mesh, it.mat, it.pos, it.quat, it.scale,
+				                       it.hasPrev ? it.prevPos : nullptr, it.hasPrev ? it.prevQuat : nullptr, it.hasPrev ? it.prevScale : nullptr);
+		}
 }
 
 // Draws a gathered scene for one camera: opaque first, then transparent/additive sorted
@@ -1114,11 +1173,14 @@ static void DrawCollected(std::vector<DrawItem>& items, const Vector3& camPos, i
 	auto culled = [&](const DrawItem& it) { return cull && FrustumCull(it, vp); };
 
 	for (auto& it : items)
-		if (it.blend == 0 && !culled(it))
-			r->renderObject(it.mesh, it.mat, it.pos, it.quat, it.scale);
+		if (it.anyOpaque && !culled(it))
+		{
+			if (it.matCount > 1) r->renderObjectMulti(it.mesh, it.mats, it.matCount, it.pos, it.quat, it.scale, 0);
+			else if (it.blend == 0) r->renderObject(it.mesh, it.mat, it.pos, it.quat, it.scale);
+		}
 
 	std::vector<DrawItem*> tr;
-	for (auto& it : items) if (it.blend != 0 && !culled(it)) tr.push_back(&it);
+	for (auto& it : items) if (it.anyBlend && !culled(it)) tr.push_back(&it);
 	if (!tr.empty())
 	{
 		auto dist2 = [&](const DrawItem* it) {
@@ -1126,7 +1188,11 @@ static void DrawCollected(std::vector<DrawItem>& items, const Vector3& camPos, i
 			return dx*dx + dy*dy + dz*dz;
 		};
 		std::sort(tr.begin(), tr.end(), [&](const DrawItem* a, const DrawItem* b) { return dist2(a) > dist2(b); });
-		for (auto* it : tr) r->renderObject(it->mesh, it->mat, it->pos, it->quat, it->scale);
+		for (auto* it : tr)
+		{
+			if (it->matCount > 1) r->renderObjectMulti(it->mesh, it->mats, it->matCount, it->pos, it->quat, it->scale, 1);
+			else r->renderObject(it->mesh, it->mat, it->pos, it->quat, it->scale);
+		}
 	}
 }
 
@@ -1535,7 +1601,21 @@ static void DrawComponentHooks(bc::list<Atom*>& gos, iRender* r, RenderPhase pha
 		if (!atom || !atom->enabled) continue;
 		if (LayerVisible(atom, mask))
 			for (Component* c : atom->components)
-				if (c && c->enabled) c->OnRender(r, phase);
+			{
+				if (!c || !c->enabled) continue;
+				// Timed per COMPONENT TYPE: a module drawing itself into a render phase is the
+				// one place the engine hands the frame to foreign code, so the profiler must be
+				// able to name which component ate it ("rnd.hook.<Type>").
+				// Phase names are interned per type: Profiler::Scope keeps the pointer, so a
+				// temporary string would dangle. Render is single-threaded, hence the plain map.
+				static std::map<const TypeInfo*, std::string> hookPhase;
+				const TypeInfo* ti = c->GetType();
+				auto hit = hookPhase.find(ti);
+				if (hit == hookPhase.end())
+					hit = hookPhase.emplace(ti, "rnd.hook." + (ti ? ti->name : std::string("?"))).first;
+				Profiler::Scope ps(hit->second.c_str());
+				c->OnRender(r, phase);
+			}
 		DrawComponentHooks(atom->children, r, phase, mask);
 	}
 }
@@ -1549,7 +1629,12 @@ static void RenderShadowMeshes(bc::list<Atom*>& gos, iRender* r)
 		if (!atom || !atom->enabled) continue;
 		if (auto* mr = atom->GetComponent<MeshRenderer>())
 		{
-			if (mr->enabled && mr->mesh && (!mr->mat || mr->mat->castShadows))
+			// Multi-slot: casts when ANY effective slot material casts.
+			bool casts = !mr->mat || mr->mat->castShadows;
+			if (mr->mesh && mr->mesh->numSlots > 1)
+				for (int sl = 0; sl < mr->mesh->numSlots && !casts; ++sl)
+					if (Material* m = mr->MaterialForSlot(sl)) casts = m->castShadows;
+			if (mr->enabled && mr->mesh && casts)
 			{
 				Transform& t = atom->GetTransform();
 				Vector3    p = t.globalPosition();
@@ -1558,7 +1643,16 @@ static void RenderShadowMeshes(bc::list<Atom*>& gos, iRender* r)
 				float pos[3]   = { (float)p.x, (float)p.y, (float)p.z };
 				float quat[4]  = { (float)q.x, (float)q.y, (float)q.z, (float)q.w };
 				float scale[3] = { (float)s.x, (float)s.y, (float)s.z };
-				r->renderShadowObject(mr->mesh, pos, quat, scale, mr->mat);
+				if (!mr->mats.empty() || mr->mesh->numSlots > 1)
+				{
+					Material* slotMats[kMaxDrawSlots]; int slots = mr->mesh->numSlots;
+					if ((int)mr->mats.size() > slots) slots = (int)mr->mats.size();
+					if (slots > kMaxDrawSlots) slots = kMaxDrawSlots;
+					for (int sl = 0; sl < slots; ++sl) slotMats[sl] = mr->MaterialForSlot(sl);
+					r->renderShadowObjectMulti(mr->mesh, slotMats, slots, pos, quat, scale);
+				}
+				else
+					r->renderShadowObject(mr->mesh, pos, quat, scale, mr->mat);
 			}
 		}
 		if (atom->children.size() > 0)
@@ -1573,6 +1667,51 @@ static void EmitSelectionGizmos(Atom* a)
 	Vector3 pos = t.globalPosition();
 	Quaternion rot = t.globalRotation();
 	Vector3 scl = t.globalScale();
+
+	// Skeleton overlay (SkinnedMeshRenderer): parent->child bone lines + joint dots, orange.
+	// Uses the LAST applied pose; before any ApplyPose the bind pose is shown.
+	if (SkinnedMeshRenderer* smr = a->GetComponent<SkinnedMeshRenderer>())
+		if (Skeleton* sk = smr->EnsureSkeleton())
+		{
+			const size_t nb = sk->bones.size();
+			const bool posed = smr->Globals().size() == nb * 16;
+			glm::mat4 atomW = glm::translate(glm::mat4(1.0f), glm::vec3((float)pos.x, (float)pos.y, (float)pos.z))
+			                * glm::mat4_cast(glm::quat((float)rot.w, (float)rot.x, (float)rot.y, (float)rot.z))
+			                * glm::scale(glm::mat4(1.0f), glm::vec3((float)scl.x, (float)scl.y, (float)scl.z));
+			std::vector<glm::vec3> joints(nb);
+			std::vector<glm::mat4> bind;   // filled only when unposed
+			if (!posed) bind.resize(nb);
+			for (size_t i = 0; i < nb; ++i)
+			{
+				glm::mat4 g;
+				if (posed) g = glm::make_mat4(smr->Globals().data() + i * 16);
+				else
+				{
+					const MeshBone& b = sk->bones[i];
+					glm::mat4 local = glm::translate(glm::mat4(1.0f), glm::vec3(b.localPos[0], b.localPos[1], b.localPos[2]))
+					                * glm::mat4_cast(glm::quat(b.localRot[3], b.localRot[0], b.localRot[1], b.localRot[2]))
+					                * glm::scale(glm::mat4(1.0f), glm::vec3(b.localScale[0], b.localScale[1], b.localScale[2]));
+					g = bind[i] = (b.parent >= 0) ? bind[b.parent] * local : local;
+				}
+				joints[i] = glm::vec3(atomW * glm::vec4(glm::vec3(g[3]), 1.0f));
+			}
+			const Color bc(1.0, 0.6, 0.15, 1.0);
+			for (size_t i = 0; i < nb; ++i)
+			{
+				const int par = sk->bones[i].parent;
+				if (par >= 0)
+					DebugDraw::Line(Vector3(joints[par].x, joints[par].y, joints[par].z),
+					                Vector3(joints[i].x, joints[i].y, joints[i].z), bc);
+				DebugDraw::WireSphere(Vector3(joints[i].x, joints[i].y, joints[i].z), 0.015, bc);
+			}
+			// Sockets: small cyan markers at their world poses.
+			for (const SkeletonSocket& sock : sk->sockets)
+			{
+				Vector3 sp; Quaternion sr;
+				if (smr->SocketWorld(sock.name, sp, sr))
+					DebugDraw::WireSphere(sp, 0.025, Color(0.2, 0.9, 1.0, 1.0));
+			}
+		}
 
 	if (Light* l = a->GetComponent<Light>())
 	{
@@ -1678,7 +1817,8 @@ static void EmitSelectionGizmos(Atom* a)
 	{
 		const Color c(0.8, 0.4, 1.0, 1.0);   // probes: purple
 		if (rp->boxProjection)
-			DebugDraw::WireBox(pos, Vector3(rp->boxSize.x * 0.5, rp->boxSize.y * 0.5, rp->boxSize.z * 0.5), rot, c);
+			DebugDraw::WireBox(pos, ScaleExtents(Vector3(rp->boxSize.x * 0.5, rp->boxSize.y * 0.5,
+			                                            rp->boxSize.z * 0.5), scl), rot, c);
 		else
 			DebugDraw::WireSphere(pos, 1.0, c);   // infinite probe: a small marker sphere
 	}
@@ -1723,13 +1863,48 @@ void World::Render(iRender* r)
 		if (Time::getSingleton()->elapsed - lastPush > 0.5)
 		{
 			lastPush = Time::getSingleton()->elapsed;
-			char buf[128];
-			snprintf(buf, sizeof(buf), "upd %.2f | fix %.2f | rnd %.2f ms",
-			         Profiler::Ms("update"), Profiler::Ms("fixed"), Profiler::Ms("render"));
+			char buf[256];
+			// GPU passes are reported by the renderer a few frames late; 0 = the backend has no
+			// duration queries, and then only the CPU phases are shown.
+			const double gShadow = Profiler::Ms("gpu.shadow"), gScene = Profiler::Ms("gpu.scene");
+			const double gPost = Profiler::Ms("gpu.post"), gTone = Profiler::Ms("gpu.tonemap");
+			const double gUI = Profiler::Ms("gpu.ui");
+			if (gShadow + gScene + gPost + gTone + gUI > 0.0)
+				snprintf(buf, sizeof(buf),
+				         "upd %.2f | fix %.2f | rnd %.2f ms   GPU: shadow %.2f | scene %.2f | post %.2f | tone %.2f | ui %.2f ms",
+				         Profiler::Ms("update"), Profiler::Ms("fixed"), Profiler::Ms("render"),
+				         gShadow, gScene, gPost, gTone, gUI);
+			else
+				snprintf(buf, sizeof(buf), "upd %.2f | fix %.2f | rnd %.2f ms",
+				         Profiler::Ms("update"), Profiler::Ms("fixed"), Profiler::Ms("render"));
 			StatusBar::Set("profiler", buf);
+			// A frame this slow is a bug, not a workload: print WHERE it went, at most twice a
+			// second, so the breakdown is in the log without anyone hunting for a profiler.
+			if (Profiler::Ms("render") > 33.0)
+			{
+				std::string line;
+				std::string phases = Profiler::Phases();
+				size_t st = 0;
+				while (st < phases.size())
+				{
+					size_t nl = phases.find('\n', st);
+					if (nl == std::string::npos) nl = phases.size();
+					const std::string ph = phases.substr(st, nl - st);
+					st = nl + 1;
+					if (ph.rfind("rnd.", 0) != 0 && ph.rfind("gpu.", 0) != 0) continue;
+					if (ph == "rnd.cameras") continue;   // its own sub-phases carry the detail
+					const double ms = Profiler::Ms(ph);
+					if (ms < 0.05) continue;
+					char one[64];
+					snprintf(one, sizeof(one), "%s %.2f  ", ph.c_str(), ms);
+					line += one;
+				}
+				std::cout << "[Profiler]		render " << Profiler::Ms("render") << " ms — " << line << std::endl;
+			}
 		}
 	}
 
+	std::unique_ptr<Profiler::Scope> prePhase(new Profiler::Scope("rnd.pre"));
 	// Layout must run before anything gathers transforms this frame.
 	ApplyCanvasLayouts(*hierarchy, nullptr);
 
@@ -1851,8 +2026,11 @@ void World::Render(iRender* r)
 		fl.clear();
 	}
 	// Must precede setLights: the directional ortho extent uses shadowDistance.
-	r->setShadowSettings(settings.shadowRes, settings.shadowDistance, settings.shadowDepthBias,
-	                     settings.shadowNormalBias, settings.shadowSoftness);
+	// AUXILIARY worlds (asset previews) inherit the live world's global shadow settings —
+	// their default 2048 must not fight the main world's res every frame (map rebuild thrash).
+	if (!auxiliary)
+		r->setShadowSettings(settings.shadowRes, settings.shadowDistance, settings.shadowDepthBias,
+		                     settings.shadowNormalBias, settings.shadowSoftness);
 	r->setLights(gpuLights.empty() ? nullptr : gpuLights.data(), (int)gpuLights.size());
 
 	// Environment (sky + ambient): first Environment component, default sky if none.
@@ -2024,20 +2202,27 @@ void World::Render(iRender* r)
 	// The scene TLAS must be built before the probe capture and camera passes, which ray-query
 	// g_TLAS. Auxiliary worlds skip it: the TLAS is global and the live scene owns it.
 	// Instanced sets are drawn in every pass below, so gather them once per frame.
+	prePhase.reset();   // end "rnd.pre": lights, audio, environment, wind and gizmos are done
+
 	std::vector<InstancedMesh*> instSets;
 	CollectInstancedMeshes(*hierarchy, instSets);
 
 	if (r->rtAvailable() && !auxiliary)
 	{
+		Profiler::Scope pr("rnd.tlas");
 		r->beginRTScene();
 		std::vector<DrawItem> rtItems; CollectMeshes(*hierarchy, rtItems);
 		// Skinned meshes enter via rtProxy, their static bind-pose stand-in.
-		for (auto& it : rtItems) if (it.blend == 0)
+		for (auto& it : rtItems) if (it.anyOpaque)
 		{
-			const bool cs = !it.mat || it.mat->castShadows;   // same gate as the raster shadow pass
-			if (!it.inReflections && !cs) continue;           // invisible to every ray kind
-			r->addRTInstance(it.mesh->rtProxy ? it.mesh->rtProxy : it.mesh,
-			                 it.mat, it.pos, it.quat, it.scale, it.inReflections, cs);
+			bool cs = !it.mat || it.mat->castShadows;   // same gate as the raster shadow pass
+			for (int sl = 0; sl < it.matCount && !cs; ++sl) if (it.mats[sl]) cs = it.mats[sl]->castShadows;
+			if (!it.inReflections && !cs) continue;     // invisible to every ray kind
+			Mesh* rm = it.mesh->rtProxy ? it.mesh->rtProxy : it.mesh;
+			if (it.matCount > 1)
+				r->addRTInstanceMulti(rm, it.mats, it.matCount, it.pos, it.quat, it.scale, it.inReflections, cs);
+			else
+				r->addRTInstance(rm, it.mat, it.pos, it.quat, it.scale, it.inReflections, cs);
 		}
 		// Instanced sets enter merged: each spatial chunk is one baked Mesh and one TLAS entry.
 		// The renderer runs NukeBend over these and refits their BLAS every frame, so RT
@@ -2067,19 +2252,26 @@ void World::Render(iRender* r)
 	// opaque mesh through the shadow path into whatever depth target the hook has bound.
 	if (!auxiliary)
 		for (WorldRenderHook* hk : WorldRenderHooks())
+		{
+			Profiler::Scope pr("rnd.hooks");
 			hk->preRender(r, [&]()
 			{
 				std::vector<DrawItem> bitems; CollectMeshes(*hierarchy, bitems);
 				for (DrawItem& di : bitems)
-					if (di.blend == 0)   // opaque only: glass/particles are not a ground
-						r->renderShadowObject(di.mesh, di.pos, di.quat, di.scale, di.mat);
+					if (di.anyOpaque)   // opaque only: glass/particles are not a ground
+					{
+						if (di.matCount > 1) r->renderShadowObjectMulti(di.mesh, di.mats, di.matCount, di.pos, di.quat, di.scale);
+						else if (di.blend == 0) r->renderShadowObject(di.mesh, di.pos, di.quat, di.scale, di.mat);
+					}
 			});
+		}
 
 	// Shadow depth passes, one per shadow-casting dir/spot light, before any camera pass.
 	// Skipped under ray tracing: everything shadows via TLAS rays and nothing samples the maps.
 	if (!r->rtAvailable())
 		for (int sp = 0, spc = r->shadowPassCount(); sp < spc; ++sp)
 		{
+			Profiler::Scope pr("rnd.shadow");
 			r->beginShadowPass(sp);
 			RenderShadowMeshes(*hierarchy, r);
 			DrawInstancedShadows(instSets, r);
@@ -2098,6 +2290,7 @@ void World::Render(iRender* r)
 		float pos[3] = { (float)pp.x, (float)pp.y, (float)pp.z };
 		if (probe->cubeId && (!probe->captured || probe->realtime || probe->bake))
 		{
+			Profiler::Scope pr("rnd.probe");
 			// Bracket non-realtime captures in the log so a GPU fault is attributable.
 			if (!probe->realtime)
 				cout << "[World]\t\t\tprobe capture begin (res " << probe->Res() << ")" << endl;
@@ -2111,7 +2304,11 @@ void World::Render(iRender* r)
 			{
 				const int f = slice ? (probe->sliceFace + k) % 6 : k;
 				r->beginCubeFace(probe->cubeId, f, pos, probe->nearZ, probe->farZ);
-				for (auto& it : items) if (it.blend == 0) r->renderObject(it.mesh, it.mat, it.pos, it.quat, it.scale);
+				for (auto& it : items) if (it.anyOpaque)
+				{
+					if (it.matCount > 1) r->renderObjectMulti(it.mesh, it.mats, it.matCount, it.pos, it.quat, it.scale, 0);
+					else if (it.blend == 0) r->renderObject(it.mesh, it.mat, it.pos, it.quat, it.scale);
+				}
 				DrawInstancedMeshes(instSets, r, false);   // no cull for capture
 				r->endCubeFace(probe->cubeId, f);
 			}
@@ -2122,7 +2319,13 @@ void World::Render(iRender* r)
 		}
 		float boxHalf[3] = { 0, 0, 0 };
 		if (probe->boxProjection)
-		{ boxHalf[0] = (float)probe->boxSize.x * 0.5f; boxHalf[1] = (float)probe->boxSize.y * 0.5f; boxHalf[2] = (float)probe->boxSize.z * 0.5f; }
+		{
+			// Box projection is a VOLUME: it follows the atom's scale like every other one.
+			const Vector3 ph = ScaleExtents(Vector3(probe->boxSize.x * 0.5, probe->boxSize.y * 0.5,
+			                                        probe->boxSize.z * 0.5),
+			                                probe->transform->globalScale());
+			boxHalf[0] = (float)ph.x; boxHalf[1] = (float)ph.y; boxHalf[2] = (float)ph.z;
+		}
 		r->setReflectionProbe(probe->cubeId, pos, probe->intensity, probe->farZ, boxHalf);
 	}
 	else { float z[3] = { 0, 0, 0 }; r->setReflectionProbe(0, z, 0.0f, 0.0f, z); }
@@ -2130,6 +2333,7 @@ void World::Render(iRender* r)
 	const bool editor = AppInstance::GetSingleton()->isEditor();
 	for (Camera* cam : cams)
 	{
+		Profiler::Scope pr("rnd.cameras");
 		if (!cam->transform) continue;
 		// A camera with a RenderTexture target renders into that texture's RT.
 		if (!cam->targetTexGuid.empty())
@@ -2148,6 +2352,18 @@ void World::Render(iRender* r)
 		Vector3 cp = cam->transform->globalPosition();
 		Vector3 cf = cam->transform->direction();
 		Vector3 cu = cam->transform->up();
+		{
+			// View shake: compose the camera-local impulse offset into the eye position.
+			float sh[3];
+			cam->ShakeOffset(sh);
+			if (sh[0] != 0.0f || sh[1] != 0.0f || sh[2] != 0.0f)
+			{
+				Vector3 cr(cf.y * cu.z - cf.z * cu.y, cf.z * cu.x - cf.x * cu.z, cf.x * cu.y - cf.y * cu.x);
+				cp.x += cr.x * sh[0] + cu.x * sh[1] + cf.x * sh[2];
+				cp.y += cr.y * sh[0] + cu.y * sh[1] + cf.y * sh[2];
+				cp.z += cr.z * sh[0] + cu.z * sh[1] + cf.z * sh[2];
+			}
+		}
 		d.camPos[0] = (float)cp.x; d.camPos[1] = (float)cp.y; d.camPos[2] = (float)cp.z;
 		d.camFwd[0] = (float)cf.x; d.camFwd[1] = (float)cf.y; d.camFwd[2] = (float)cf.z;
 		d.camUp[0]  = (float)cu.x; d.camUp[1]  = (float)cu.y; d.camUp[2]  = (float)cu.z;
@@ -2216,9 +2432,13 @@ void World::Render(iRender* r)
 		const unsigned int camMask = (unsigned int)cam->layerMask;
 
 		// Decals reconstruct surfaces from the depth prepass, so their presence also forces it.
-		std::vector<Decal*> decals; CollectDecals(*hierarchy, decals, camMask);
+		std::vector<Decal*> decals;
 		std::vector<InstancedMesh*> camInstSets;
-		CollectInstancedMeshes(*hierarchy, camInstSets, camMask);
+		{
+			Profiler::Scope ps("rnd.cam.collect");
+			CollectDecals(*hierarchy, decals, camMask);
+			CollectInstancedMeshes(*hierarchy, camInstSets, camMask);
+		}
 
 		// Module hooks may demand scene depth too.
 		bool hookPrepass = false;
@@ -2226,6 +2446,7 @@ void World::Render(iRender* r)
 			if (hk->wantsScenePrepass()) { hookPrepass = true; break; }
 		if (hasSSR || hasTAA || !decals.empty() || hookPrepass)
 		{
+			Profiler::Scope ps("rnd.cam.gbuf");
 			r->beginGBufferPass(d);
 			std::vector<DrawItem> gitems; CollectMeshes(*hierarchy, gitems, camMask);
 			DrawGBuffer(gitems, r, settings.frustumCull);
@@ -2233,39 +2454,59 @@ void World::Render(iRender* r)
 			r->endGBufferPass();
 		}
 
-		r->beginCamera(d);
+		{ Profiler::Scope ps("rnd.cam.begin"); r->beginCamera(d); }
 		{
 			std::vector<DrawItem> items;
-			CollectMeshes(*hierarchy, items, camMask);
-			DrawCollected(items, cp, r, settings.frustumCull);
-			DrawInstancedMeshes(camInstSets, r, settings.frustumCull);
-			DrawComponentHooks(*hierarchy, r, RenderPhase::Opaque, camMask);
-			DrawDecals(decals, r);
-			DrawSprites(*hierarchy, d, cp, r, cam, camMask);   // after opaque, back-to-front
-			DrawComponentHooks(*hierarchy, r, RenderPhase::Transparent, camMask);
-			if (editor && cam->editorCamera) DrawCanvasGizmos(*hierarchy, r, AppInstance::GetSingleton()->selectedInHieararchy);
-			if (editor) DrawDecalGizmos(*hierarchy, r, AppInstance::GetSingleton()->selectedInHieararchy);
-			DrawComponentHooks(*hierarchy, r, RenderPhase::Overlay, camMask);
+			{ Profiler::Scope ps("rnd.cam.collect"); CollectMeshes(*hierarchy, items, camMask); }
+			{ Profiler::Scope ps("rnd.cam.opaque"); DrawCollected(items, cp, r, settings.frustumCull); }
+			{ Profiler::Scope ps("rnd.cam.inst");   DrawInstancedMeshes(camInstSets, r, settings.frustumCull); }
+			{ Profiler::Scope ps("rnd.cam.hooks");  DrawComponentHooks(*hierarchy, r, RenderPhase::Opaque, camMask); }
+			{ Profiler::Scope ps("rnd.cam.decals"); DrawDecals(decals, r); }
+			{ Profiler::Scope ps("rnd.cam.sprites"); DrawSprites(*hierarchy, d, cp, r, cam, camMask); }   // after opaque, back-to-front
+			{
+				Profiler::Scope ps("rnd.cam.trans");
+				DrawComponentHooks(*hierarchy, r, RenderPhase::Transparent, camMask);
+				if (editor && cam->editorCamera) DrawCanvasGizmos(*hierarchy, r, AppInstance::GetSingleton()->selectedInHieararchy);
+				if (editor) DrawDecalGizmos(*hierarchy, r, AppInstance::GetSingleton()->selectedInHieararchy);
+				DrawComponentHooks(*hierarchy, r, RenderPhase::Overlay, camMask);
+			}
 		}
-		// Editor only: outline the selected object after the scene.
+		// Editor only: outline the selection after the scene. A model is a SUBTREE — the root
+		// usually carries no mesh of its own, so every mesh below it goes into ONE mask and the
+		// edge pass closes it once: a composite object gets a single silhouette.
 		if (editor)
 			if (Atom* sel = AppInstance::GetSingleton()->selectedInHieararchy)
-				if (auto* mr = sel->GetComponent<MeshRenderer>())
-					if (mr->mesh)
-					{
-						Transform& t = sel->GetTransform();
-						Vector3    p = t.globalPosition();
-						Quaternion q = t.globalRotation();
-						Vector3    s = t.globalScale();
-						float pos[3]   = { (float)p.x, (float)p.y, (float)p.z };
-						float quat[4]  = { (float)q.x, (float)q.y, (float)q.z, (float)q.w };
-						float scale[3] = { (float)s.x, (float)s.y, (float)s.z };
-						r->renderSelectionOutline(mr->mesh, pos, quat, scale);
-					}
-		r->endCamera();
+			{
+				Profiler::Scope ps("rnd.cam.outline");
+				bool opened = false;
+				std::function<void(Atom*)> outline = [&](Atom* a)
+				{
+					if (!a || !a->enabled) return;
+					if (MeshRenderer* mr = a->GetComponent<MeshRenderer>())
+						if (mr->enabled && mr->mesh)
+						{
+							if (!opened) { r->selectionOutlineBegin(); opened = true; }
+							Transform& t = a->GetTransform();
+							Vector3    p = t.globalPosition();
+							Quaternion q = t.globalRotation();
+							Vector3    s = t.globalScale();
+							float pos[3]   = { (float)p.x, (float)p.y, (float)p.z };
+							float quat[4]  = { (float)q.x, (float)q.y, (float)q.z, (float)q.w };
+							float scale[3] = { (float)s.x, (float)s.y, (float)s.z };
+							r->selectionOutlineAdd(mr->mesh, pos, quat, scale);
+						}
+					for (Atom* c : a->children) outline(c);
+				};
+				outline(sel);
+				if (opened) r->selectionOutlineEnd();
+			}
+		{ Profiler::Scope ps("rnd.cam.end"); r->endCamera(); }
 	}
-	UpdatePrevTransforms(*hierarchy);   // snapshot transforms for next frame's TAA motion vectors
-	Game::FlushScreenshot();            // queued Game.Screenshot: the frame is complete here
+	{
+		Profiler::Scope ps("rnd.postframe");
+		UpdatePrevTransforms(*hierarchy);   // snapshot transforms for next frame's TAA motion vectors
+		Game::FlushScreenshot();            // queued Game.Screenshot: the frame is complete here
+	}
 }
 
 // --- world serialization (.nuworld JSON via reflection) ---

@@ -1,3 +1,4 @@
+#include <mutex>
 #include "reflect/ReflectJson.h"
 #include "API/Model/Atom.h"          // AtomRef resolution (stable id <-> live atom)
 #include "API/Model/World.h"
@@ -78,6 +79,44 @@ TypeInfo* Registry_Find(const std::string& name)
     if (it == r.end()) return nullptr;
     MergeBaseInto(it->second);
     return it->second;
+}
+
+// ---- script classes (published by the scripting modules) ------------------------------------
+
+static std::vector<ScriptClass>& scriptClasses()
+{
+    static std::vector<ScriptClass> v;
+    return v;
+}
+// Scripting backends re-publish from their own file watchers (background threads), while the
+// UI reads on the frame thread — every entry point takes this lock.
+static std::mutex& scriptClassMutex()
+{
+    static std::mutex m;
+    return m;
+}
+
+void Reflect_RegisterScriptClass(const ScriptClass& c)
+{
+    if (c.component.empty() || c.selector.empty()) return;
+    std::lock_guard<std::mutex> lk(scriptClassMutex());
+    for (ScriptClass& e : scriptClasses())
+        if (e.component == c.component && e.selector == c.selector) { e = c; return; }
+    scriptClasses().push_back(c);
+}
+
+void Reflect_ClearScriptClasses(const std::string& component)
+{
+    std::lock_guard<std::mutex> lk(scriptClassMutex());
+    std::vector<ScriptClass>& v = scriptClasses();
+    for (int i = (int)v.size() - 1; i >= 0; --i)
+        if (v[i].component == component) v.erase(v.begin() + i);
+}
+
+std::vector<ScriptClass> Reflect_ScriptClasses()
+{
+    std::lock_guard<std::mutex> lk(scriptClassMutex());
+    return scriptClasses();
 }
 
 std::vector<TypeInfo*> Registry_All()

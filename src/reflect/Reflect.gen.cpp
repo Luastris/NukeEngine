@@ -3,10 +3,13 @@
 #include "API/iGUI.h"
 #include "API/Model/Animator.h"
 #include "API/Model/AnimClip.h"
+#include "API/Model/AnimIK.h"
+#include "API/Model/AnimSM.h"
 #include "API/Model/Atom.h"
 #include "API/Model/Audio.h"
 #include "API/Model/AudioListener.h"
 #include "API/Model/AudioSource.h"
+#include "API/Model/BlendSpace.h"
 #include "API/Model/Camera.h"
 #include "API/Model/Canvas.h"
 #include "API/Model/CharacterController.h"
@@ -25,17 +28,24 @@
 #include "API/Model/Material.h"
 #include "API/Model/Mesh.h"
 #include "API/Model/MeshRenderer.h"
+#include "API/Model/MotionMatcher.h"
 #include "API/Model/Noise.h"
 #include "API/Model/Physics.h"
 #include "API/Model/PostProcess.h"
 #include "API/Model/Prefab.h"
 #include "API/Model/Profiler.h"
+#include "API/Model/Ragdoll.h"
 #include "API/Model/Rand.h"
 #include "API/Model/RectAnchor.h"
 #include "API/Model/ReflectionProbe.h"
+#include "API/Model/Retarget.h"
 #include "API/Model/Rigidbody.h"
 #include "API/Model/Screen.h"
+#include "API/Model/Sequence.h"
+#include "API/Model/SequencePlayer.h"
 #include "API/Model/Shader.h"
+#include "API/Model/Skeleton.h"
+#include "API/Model/SkinnedMeshRenderer.h"
 #include "API/Model/Sprite.h"
 #include "API/Model/SpriteAnimator.h"
 #include "API/Model/Texture.h"
@@ -84,11 +94,15 @@ bool NukeReflectInit() {
 		TypeInfo& t = TypeOf<Animator>();
 		t.base = "Component";
 		t.category = "Animation";
+		t.fields.push_back(MakeField("smGuid", &Animator::smGuid, "animsm", "Controller"));
+		t.fields.back().tip = "State-machine asset (.nusm). Set = the full pose pipeline drives; empty = the embedded Play/state API.";
 		t.fields.push_back(MakeField("clipGuid", &Animator::clipGuid, "anim", "Clip"));
 		t.fields.push_back(MakeField("boneMapGuid", &Animator::boneMapGuid, "bonemap", "Bone Map"));
 		t.fields.push_back(MakeField("playOnStart", &Animator::playOnStart, "", "Play On Start"));
 		t.fields.push_back(MakeField("loop", &Animator::loop, "", "Loop"));
 		t.fields.push_back(MakeField("speed", &Animator::speed, "", "Speed", 0.0f, 10.0f));
+		t.fields.push_back(MakeField("rootMotion", &Animator::rootMotion, "", "Root Motion"));
+		t.fields.back().tip = "Extract the root bone's horizontal travel + yaw from the pose and move the atom by it.";
 		t.fields.push_back(MakeField("smJson", &Animator::smJson));
 		t.fields.back().hidden = true;
 		t.methods.push_back(MakeMethod("Play", &Animator::Play));
@@ -113,6 +127,25 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("SetIKPole", &Animator::SetIKPole));
 		t.methods.push_back(MakeMethod("SetIKChain", &Animator::SetIKChain));
 		t.methods.push_back(MakeMethod("ClearIK", &Animator::ClearIK));
+		t.methods.push_back(MakeMethod("SetChainIK", &Animator::SetChainIK));
+		t.methods.push_back(MakeMethod("SetChainIKPole", &Animator::SetChainIKPole));
+		t.methods.push_back(MakeMethod("SetChainIKNormal", &Animator::SetChainIKNormal));
+		t.methods.push_back(MakeMethod("ClearChainIK", &Animator::ClearChainIK));
+		t.methods.push_back(MakeMethod("SetLookAt", &Animator::SetLookAt));
+		t.methods.push_back(MakeMethod("ClearLookAt", &Animator::ClearLookAt));
+		t.methods.push_back(MakeMethod("SetPelvisOffset", &Animator::SetPelvisOffset));
+		t.methods.push_back(MakeMethod("SetFloat", &Animator::SetFloat));
+		t.methods.push_back(MakeMethod("GetFloat", &Animator::GetFloat));
+		t.methods.push_back(MakeMethod("SetBool", &Animator::SetBool));
+		t.methods.push_back(MakeMethod("GetBool", &Animator::GetBool));
+		t.methods.push_back(MakeMethod("SetTrigger", &Animator::SetTrigger));
+		t.methods.push_back(MakeMethod("ResetTrigger", &Animator::ResetTrigger));
+		t.methods.push_back(MakeMethod("CurveValue", &Animator::CurveValue));
+		t.methods.push_back(MakeMethod("LayerState", &Animator::LayerState));
+		t.methods.push_back(MakeMethod("SetLayerWeight", &Animator::SetLayerWeight));
+		t.methods.push_back(MakeMethod("RootDelta", &Animator::RootDelta));
+		t.methods.push_back(MakeMethod("SetMirror", &Animator::SetMirror));
+		t.methods.push_back(MakeMethod("MatchTo", &Animator::MatchTo));
 		t.create = []() -> void* { return new Animator(); };
 	}
 	{
@@ -121,7 +154,52 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("name", &AnimClip::name, "", "Name"));
 		t.fields.push_back(MakeField("duration", &AnimClip::duration, "", "Duration"));
 		t.methods.push_back(MakeMethod("AddEvent", &AnimClip::AddEvent));
+		t.methods.push_back(MakeMethod("AddNotify", &AnimClip::AddNotify));
+		t.methods.push_back(MakeMethod("AddCurveKey", &AnimClip::AddCurveKey));
+		t.methods.push_back(MakeMethod("AddPropKey", &AnimClip::AddPropKey));
 		t.create = []() -> void* { return new AnimClip(); };
+	}
+	{
+		TypeInfo& t = TypeOf<FootIK>();
+		t.base = "Component";
+		t.category = "Animation";
+		t.fields.push_back(MakeField("leftChain", &FootIK::leftChain, "", "Left Chain"));
+		t.fields.push_back(MakeField("rightChain", &FootIK::rightChain, "", "Right Chain"));
+		t.fields.push_back(MakeField("rayUp", &FootIK::rayUp, "", "Ray Up", 0.0f, 2.0f));
+		t.fields.back().tip = "Raycast start height above the animated foot.";
+		t.fields.push_back(MakeField("rayDown", &FootIK::rayDown, "", "Ray Down", 0.0f, 5.0f));
+		t.fields.back().tip = "Raycast length below the animated foot.";
+		t.fields.push_back(MakeField("footHeight", &FootIK::footHeight, "", "Foot Height", 0.0f, 0.5f));
+		t.fields.back().tip = "Sole thickness: the foot rests this far above the hit surface.";
+		t.fields.push_back(MakeField("maxDrop", &FootIK::maxDrop, "", "Max Pelvis Drop", 0.0f, 2.0f));
+		t.fields.back().tip = "How far the hips may sink so a low foot can reach.";
+		t.fields.push_back(MakeField("stepIgnore", &FootIK::stepIgnore, "", "Step Ignore", 0.0f, 1.0f));
+		t.fields.back().tip = "A foot this far above its ground is mid-step: it neither drops the pelvis nor gets pulled down.";
+		t.fields.push_back(MakeField("weight", &FootIK::weight, "", "Weight", 0.0f, 1.0f));
+		t.fields.push_back(MakeField("pelvisSmooth", &FootIK::pelvisSmooth, "", "Pelvis Smoothing", 0.0f, 30.0f));
+		t.fields.back().tip = "Exponential smoothing rate of the pelvis offset (0 = instant).";
+		t.fields.push_back(MakeField("alignToNormal", &FootIK::alignToNormal, "", "Align To Normal"));
+		t.fields.back().tip = "Roll each planted foot onto the surface normal.";
+		t.create = []() -> void* { return new FootIK(); };
+	}
+	{
+		TypeInfo& t = TypeOf<LookAtIK>();
+		t.base = "Component";
+		t.category = "Animation";
+		t.fields.push_back(MakeField("chain", &LookAtIK::chain, "", "Chain"));
+		t.fields.back().tip = "IK-rig chain (spine -> head) or a single bone name.";
+		t.fields.push_back(MakeField("target", &LookAtIK::target, "", "Target"));
+		t.fields.back().tip = "Atom to look at; none = look-at off.";
+		t.fields.push_back(MakeField("weight", &LookAtIK::weight, "", "Weight", 0.0f, 1.0f));
+		t.fields.push_back(MakeField("maxAngle", &LookAtIK::maxAngle, "", "Max Angle", 0.0f, 180.0f));
+		t.fields.back().tip = "Total turn cap across the chain, degrees.";
+		t.create = []() -> void* { return new LookAtIK(); };
+	}
+	{
+		TypeInfo& t = TypeOf<AnimSM>();
+		t.base = "Object";
+		t.fields.push_back(MakeField("name", &AnimSM::name, "", "Name"));
+		t.create = []() -> void* { return new AnimSM(); };
 	}
 	{
 		TypeInfo& t = TypeOf<Atom>();
@@ -196,6 +274,12 @@ bool NukeReflectInit() {
 		t.create = []() -> void* { return new AudioSource(); };
 	}
 	{
+		TypeInfo& t = TypeOf<BlendSpace>();
+		t.base = "Object";
+		t.fields.push_back(MakeField("name", &BlendSpace::name, "", "Name"));
+		t.create = []() -> void* { return new BlendSpace(); };
+	}
+	{
 		TypeInfo& t = TypeOf<Camera>();
 		t.base = "Component";
 		t.category = "Rendering";
@@ -237,6 +321,7 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("ScreenRayOrigin", &Camera::ScreenRayOrigin));
 		t.methods.push_back(MakeMethod("ScreenRayDir", &Camera::ScreenRayDir));
 		t.methods.push_back(MakeMethod("ScreenToWorldPoint", &Camera::ScreenToWorldPoint));
+		t.methods.push_back(MakeMethod("AddShake", &Camera::AddShake));
 		t.create = []() -> void* { return new Camera(); };
 	}
 	{
@@ -535,8 +620,31 @@ bool NukeReflectInit() {
 		t.category = "Rendering";
 		t.fields.push_back(MakeField("meshGuid", &MeshRenderer::meshGuid, "mesh", "Mesh"));
 		t.fields.push_back(MakeField("matGuid", &MeshRenderer::matGuid, "material", "Material"));
+		t.fields.push_back(MakeField("matGuids", &MeshRenderer::matGuids, "material", "Materials"));
 		t.fields.push_back(MakeField("inReflections", &MeshRenderer::inReflections, "", "In Reflections"));
 		t.create = []() -> void* { return new MeshRenderer(); };
+	}
+	{
+		TypeInfo& t = TypeOf<MotionMatcher>();
+		t.base = "Component";
+		t.category = "Animation";
+		t.fields.push_back(MakeField("clips", &MotionMatcher::clips, "anim", "Clips"));
+		t.fields.back().tip = "Locomotion set (idle/walk/run...); clips need a moving root for trajectories.";
+		t.fields.push_back(MakeField("sampleRate", &MotionMatcher::sampleRate, "", "Sample Rate", 2.0f, 60.0f));
+		t.fields.back().tip = "DB samples per clip second.";
+		t.fields.push_back(MakeField("searchInterval", &MotionMatcher::searchInterval, "", "Search Interval", 0.02f, 1.0f));
+		t.fields.back().tip = "Seconds between DB queries.";
+		t.fields.push_back(MakeField("blendTime", &MotionMatcher::blendTime, "", "Blend", 0.0f, 1.0f));
+		t.fields.back().tip = "Inertialized blend seconds per jump.";
+		t.fields.push_back(MakeField("poseWeight", &MotionMatcher::poseWeight, "", "Pose Weight", 0.0f, 5.0f));
+		t.fields.push_back(MakeField("velocityWeight", &MotionMatcher::velocityWeight, "", "Velocity Weight", 0.0f, 5.0f));
+		t.fields.push_back(MakeField("trajectoryWeight", &MotionMatcher::trajectoryWeight, "", "Trajectory Weight", 0.0f, 5.0f));
+		t.fields.push_back(MakeField("keepWindow", &MotionMatcher::keepWindow, "", "Keep Window", 0.0f, 1.0f));
+		t.fields.back().tip = "Seconds around the current playhead that count as 'already there'.";
+		t.methods.push_back(MakeMethod("SetDesiredVelocity", &MotionMatcher::SetDesiredVelocity));
+		t.methods.push_back(MakeMethod("MatchedClip", &MotionMatcher::MatchedClip));
+		t.methods.push_back(MakeMethod("SampleCount", &MotionMatcher::SampleCount));
+		t.create = []() -> void* { return new MotionMatcher(); };
 	}
 	{
 		TypeInfo& t = TypeOf<Noise>();
@@ -588,6 +696,32 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("Phases", &Profiler::Phases));
 	}
 	{
+		TypeInfo& t = TypeOf<RagdollDef>();
+		t.base = "Object";
+		t.fields.push_back(MakeField("name", &RagdollDef::name, "", "Name"));
+		t.create = []() -> void* { return new RagdollDef(); };
+	}
+	{
+		TypeInfo& t = TypeOf<Ragdoll>();
+		t.base = "Component";
+		t.category = "Animation";
+		t.fields.push_back(MakeField("ragGuid", &Ragdoll::ragGuid, "ragdoll", "Ragdoll"));
+		t.fields.back().tip = "Empty = auto-resolve the .nurag matching the skeleton.";
+		t.fields.push_back(MakeField("mode", &Ragdoll::mode, "", "Mode", 0.0f, 0.0f, "Off,Full,Powered,Partial"));
+		t.fields.push_back(MakeField("blend", &Ragdoll::blend, "", "Blend", 0.0f, 1.0f));
+		t.fields.back().tip = "Physics pose weight while active.";
+		t.fields.push_back(MakeField("motorFrequency", &Ragdoll::motorFrequency, "", "Motor Frequency", 0.0f, 60.0f));
+		t.fields.back().tip = "Powered: joint spring frequency, Hz.";
+		t.fields.push_back(MakeField("motorDamping", &Ragdoll::motorDamping, "", "Motor Damping", 0.0f, 5.0f));
+		t.fields.push_back(MakeField("partialRoot", &Ragdoll::partialRoot, "", "Partial Root"));
+		t.fields.back().tip = "Partial mode: physics owns this bone's subtree.";
+		t.fields.push_back(MakeField("totalMass", &Ragdoll::totalMass, "", "Total Mass", 1.0f, 500.0f));
+		t.methods.push_back(MakeMethod("SetMode", &Ragdoll::SetMode));
+		t.methods.push_back(MakeMethod("GetMode", &Ragdoll::GetMode));
+		t.methods.push_back(MakeMethod("Impulse", &Ragdoll::Impulse));
+		t.create = []() -> void* { return new Ragdoll(); };
+	}
+	{
 		TypeInfo& t = TypeOf<Rand>();
 		t.base = "Object";
 		t.methods.push_back(MakeMethod("Seed", &Rand::Seed));
@@ -630,6 +764,11 @@ bool NukeReflectInit() {
 		t.create = []() -> void* { return new ReflectionProbe(); };
 	}
 	{
+		TypeInfo& t = TypeOf<Retargeter>();
+		t.base = "Object";
+		t.methods.push_back(MakeMethod("Bake", &Retargeter::Bake));
+	}
+	{
 		TypeInfo& t = TypeOf<Rigidbody>();
 		t.base = "Component";
 		t.category = "Physics";
@@ -654,11 +793,68 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("Aspect", &Screen::Aspect));
 	}
 	{
+		TypeInfo& t = TypeOf<Sequence>();
+		t.base = "Object";
+		t.fields.push_back(MakeField("name", &Sequence::name, "", "Name"));
+		t.fields.push_back(MakeField("duration", &Sequence::duration, "", "Duration"));
+		t.create = []() -> void* { return new Sequence(); };
+	}
+	{
+		TypeInfo& t = TypeOf<SequencePlayer>();
+		t.base = "Component";
+		t.category = "Animation";
+		t.fields.push_back(MakeField("seqGuid", &SequencePlayer::seqGuid, "sequence", "Sequence"));
+		t.fields.push_back(MakeField("playOnStart", &SequencePlayer::playOnStart, "", "Play On Start"));
+		t.fields.push_back(MakeField("loop", &SequencePlayer::loop, "", "Loop"));
+		t.fields.push_back(MakeField("speed", &SequencePlayer::speed, "", "Speed", 0.0f, 10.0f));
+		t.methods.push_back(MakeMethod("Play", &SequencePlayer::Play));
+		t.methods.push_back(MakeMethod("Stop", &SequencePlayer::Stop));
+		t.methods.push_back(MakeMethod("SetPaused", &SequencePlayer::SetPaused));
+		t.methods.push_back(MakeMethod("IsPlaying", &SequencePlayer::IsPlaying));
+		t.methods.push_back(MakeMethod("Time", &SequencePlayer::Time));
+		t.methods.push_back(MakeMethod("SetTime", &SequencePlayer::SetTime));
+		t.methods.push_back(MakeMethod("BakeSkeletal", &SequencePlayer::BakeSkeletal));
+		t.create = []() -> void* { return new SequencePlayer(); };
+	}
+	{
 		TypeInfo& t = TypeOf<Shader>();
 		t.base = "Object";
 		t.fields.push_back(MakeField("name", &Shader::name, "", "Name"));
 		t.fields.push_back(MakeField("isPost", &Shader::isPost, "", "Post Effect"));
 		t.create = []() -> void* { return new Shader(); };
+	}
+	{
+		TypeInfo& t = TypeOf<Skeleton>();
+		t.base = "Object";
+		t.fields.push_back(MakeField("name", &Skeleton::name, "", "Name"));
+		t.create = []() -> void* { return new Skeleton(); };
+	}
+	{
+		TypeInfo& t = TypeOf<SkinnedMeshRenderer>();
+		t.base = "MeshRenderer";
+		t.category = "Rendering";
+		t.fields.push_back(MakeField("skelGuid", &SkinnedMeshRenderer::skelGuid, "skeleton", "Skeleton"));
+		t.fields.push_back(MakeField("morphWeights", &SkinnedMeshRenderer::morphWeights, "", "Morph Weights"));
+		t.fields.back().tip = "Blend-shape weights, one per target (mesh order).";
+		t.methods.push_back(MakeMethod("ResetPose", &SkinnedMeshRenderer::ResetPose));
+		t.methods.push_back(MakeMethod("SetMorphWeight", &SkinnedMeshRenderer::SetMorphWeight));
+		t.methods.push_back(MakeMethod("MorphWeight", &SkinnedMeshRenderer::MorphWeight));
+		t.methods.push_back(MakeMethod("MorphNames", &SkinnedMeshRenderer::MorphNames));
+		t.methods.push_back(MakeMethod("SetBonePosition", &SkinnedMeshRenderer::SetBonePosition));
+		t.methods.push_back(MakeMethod("SetBoneRotation", &SkinnedMeshRenderer::SetBoneRotation));
+		t.methods.push_back(MakeMethod("Apply", &SkinnedMeshRenderer::Apply));
+		t.methods.push_back(MakeMethod("BonePosition", &SkinnedMeshRenderer::BonePosition));
+		t.methods.push_back(MakeMethod("SocketPosition", &SkinnedMeshRenderer::SocketPosition));
+		t.methods.push_back(MakeMethod("SocketRotation", &SkinnedMeshRenderer::SocketRotation));
+		t.create = []() -> void* { return new SkinnedMeshRenderer(); };
+	}
+	{
+		TypeInfo& t = TypeOf<SocketAttachment>();
+		t.base = "Component";
+		t.category = "Animation";
+		t.fields.push_back(MakeField("socket", &SocketAttachment::socket, "", "Socket"));
+		t.fields.back().tip = "Socket (or bare bone) name on the ancestor SkinnedMeshRenderer's skeleton.";
+		t.create = []() -> void* { return new SocketAttachment(); };
 	}
 	{
 		TypeInfo& t = TypeOf<Sprite>();

@@ -16,7 +16,7 @@
 // DLLs report level 1. Bump when appending a virtual, and tag the virtual with its level:
 //   1 — provides/phase/queryService/cookContent/sharedService/shipExtras
 //   2 — editorTool
-#define NUKE_MODULE_ABI 2
+#define NUKE_MODULE_ABI 3
 extern "C" { __declspec(dllexport) __declspec(selectany) int nuke_module_abi = NUKE_MODULE_ABI; }
 
 // ---- Engine BINARY-COMPATIBILITY generation -------------------------------------------------
@@ -24,7 +24,19 @@ extern "C" { __declspec(dllexport) __declspec(selectany) int nuke_module_abi = N
 // the loader REFUSES a module whose stamp differs. Bump on any break. Unstamped = 1.
 //   1 — pre-stamp builds
 //   2 — Atom gained `enabled`; NukeWindow.vsync moved to the tail
-#define NUKE_ENGINE_ABI 2
+//   3 — Mesh v4 layout (indexArray/streams/sections/LODs); MeshRenderer gained matGuids/mats
+//   4 — Mesh gained skelGuid (v5); SkinnedMeshRenderer/Skeleton/SocketAttachment added
+//   5 — Mesh gained morph targets (v6); iRender gained gpuSkin/setSkinPalette
+//   6 — Anim runtime v2: AnimClip v3 (notifies/curves/prop tracks), Animator controller mode
+//       (smGuid/rootMotion/graph), Camera shake, ResDB AnimSM/BlendSpace registries
+//   7 — Animator drives every subtree SkinnedMeshRenderer (smrs vector; modular characters)
+//   8 — AnimClip gained skelGuid (v4; chain retargeting across skeletons)
+//   9 — iPhysics gained SwingTwist ragdoll joints (vtable append); Ragdoll/.nurag added
+//  10 — AnimSM::State gained node coords (nx/ny); Animator gained the editor preview seam
+//       (previewSm/previewBlend/muteNotifies)
+//  11 — Mesh gained import-time materials (defaultMats, .numesh v7); reflection gained the
+//       script-class registry (Reflect_RegisterScriptClass / Reflect_ScriptClasses)
+#define NUKE_ENGINE_ABI 11
 extern "C" { __declspec(dllexport) __declspec(selectany) int nuke_engine_abi = NUKE_ENGINE_ABI; }
 
 namespace nuke {
@@ -125,9 +137,15 @@ public:
 	                        std::vector<std::pair<std::string, std::string>>& distFiles) {}
 
 	// Editor-only companion module supplying asset editors/panels for a runtime module's file
-	// types. Enabled unconditionally by the editor host and never shipped with a game.
+	// types. The editor offers it by default, and never ships it with a game.
 	// ABI level 2: callers must guard with ModuleAbi(m) >= 2.
 	virtual bool editorTool() { return false; }
+
+	// The RUNTIME module this one is a companion to, by file name ("NukeTilemap.dll"); "" = none.
+	// A companion has nothing to edit while its runtime module is off, so the editor keeps it
+	// off too. ABI level 3: callers MUST guard with ModuleAbi(m) >= 3 — a module built against
+	// an older header has no such slot, and the call would land on whatever follows the vtable.
+	virtual const char* companionOf() { return ""; }
 };
 
 }  // namespace nuke

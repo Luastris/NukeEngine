@@ -6,6 +6,11 @@
 #include "Material.h"
 #include "Shader.h"
 #include "AnimClip.h"
+#include "AnimSM.h"
+#include "BlendSpace.h"
+#include "Sequence.h"
+#include "Ragdoll.h"
+#include "Skeleton.h"
 #include "BoneMap.h"
 #include "Atom.h"
 #include <boost/container/list.hpp>
@@ -36,7 +41,12 @@ public:
     bc::list<Material*> materials;
     bc::list<Shader*> shaders;
     bc::list<AnimClip*> clips;                     // animation clips (.nuanim)
+    bc::list<Skeleton*> skeletons;                 // skeleton assets (.nuskel)
     bc::list<BoneMap*>  boneMaps;                  // retarget maps (.nubonemap)
+    bc::list<AnimSM*>     animSMs;                 // state machines (.nusm)
+    bc::list<BlendSpace*> blendSpaces;             // blend spaces (.nublend)
+    bc::list<Sequence*>   sequences;               // sequences (.nuseq)
+    bc::list<RagdollDef*> ragdolls;                // ragdoll rigs (.nurag)
     bc::list<Atom*> prefabs;
 
     std::map<std::string, Mesh*>     meshByGuid;   // GUID -> mesh asset
@@ -44,7 +54,12 @@ public:
     std::map<std::string, Texture*>  texByGuid;    // GUID -> texture asset
     std::map<std::string, Shader*>   shaderByGuid; // GUID -> shader asset
     std::map<std::string, AnimClip*> clipByGuid;   // GUID -> animation clip
+    std::map<std::string, Skeleton*> skelByGuid;   // GUID -> skeleton
     std::map<std::string, BoneMap*>  boneMapByGuid;// GUID -> retarget map
+    std::map<std::string, AnimSM*>     smByGuid;   // GUID -> state machine
+    std::map<std::string, BlendSpace*> blendByGuid;// GUID -> blend space
+    std::map<std::string, Sequence*>   seqByGuid;  // GUID -> sequence
+    std::map<std::string, RagdollDef*> ragByGuid;  // GUID -> ragdoll rig
     std::map<std::string, std::string> pathByGuid; // GUID -> source file path (for "locate"/DnD)
     std::map<std::string, std::string> guidByPath; // source file path -> GUID
     std::map<std::string, long long>   assetMtime; // asset path -> last-seen mtime (hot-reload)
@@ -66,9 +81,20 @@ public:
     AnimClip* GetClip(const std::string& guid);       // nullptr if unknown
     AnimClip* GetClipByName(const std::string& name); // first clip with this name (Animator states)
     void      RegisterClip(AnimClip* c);              // add to clips + index by c->guid
+    Skeleton* GetSkeleton(const std::string& guid);   // nullptr if unknown
+    void      RegisterSkeleton(Skeleton* s);          // add to skeletons + index by s->guid
 
     BoneMap* GetBoneMap(const std::string& guid);     // nullptr if unknown
     void     RegisterBoneMap(BoneMap* b);             // add to boneMaps + index by b->guid
+
+    AnimSM*     GetAnimSM(const std::string& guid);   // nullptr if unknown
+    void        RegisterAnimSM(AnimSM* m);            // add to animSMs + index by m->guid
+    BlendSpace* GetBlendSpace(const std::string& guid);   // nullptr if unknown
+    void        RegisterBlendSpace(BlendSpace* b);    // add to blendSpaces + index by b->guid
+    Sequence*   GetSequence(const std::string& guid); // nullptr if unknown
+    void        RegisterSequence(Sequence* s);        // add to sequences + index by s->guid
+    RagdollDef* GetRagdoll(const std::string& guid);  // nullptr if unknown
+    void        RegisterRagdoll(RagdollDef* r);       // add to ragdolls + index by r->guid
     // Scan a dir recursively for "<name>.vs.hlsl" + "<name>.ps.hlsl" pairs -> Shader assets.
     void     LoadShadersDir(const std::string& dir);
     // Build a renderer pipeline for each loaded shader (sets Shader::rendererHandle); call once

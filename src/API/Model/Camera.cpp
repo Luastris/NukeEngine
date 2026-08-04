@@ -4,6 +4,7 @@
 #include "API/Model/Transform.h"
 #include "API/Model/Texture.h"
 #include "API/Model/Screen.h"   // screen->world rays use game-screen pixel space
+#include "API/Model/Time.h"     // shake impulses advance on game time
 #include "interface/AppInstance.h"
 #include <cmath>
 #include <algorithm>
@@ -300,6 +301,37 @@ Vector3 Camera::ScreenToWorldPoint(double px, double py, double depth)
 {
 	Vector3 o = ScreenRayOrigin(px, py), d = ScreenRayDir(px, py);
 	return Vector3(o.x + d.x * depth, o.y + d.y * depth, o.z + d.z * depth);
+}
+
+void Camera::AddShake(double amplitude, double frequency, double duration)
+{
+	if (amplitude <= 0.0 || duration <= 0.0) return;
+	ShakeImp s;
+	s.amp  = (float)amplitude;
+	s.freq = (frequency > 0.0) ? (float)frequency : 12.0f;
+	s.dur  = (float)duration;
+	s.t    = 0.0f;
+	s.seed = (float)((shakes.size() * 37 + 11) % 97);   // decorrelate stacked impulses
+	shakes.push_back(s);
+}
+
+void Camera::ShakeOffset(float out[3])
+{
+	out[0] = out[1] = out[2] = 0.0f;
+	if (shakes.empty()) return;
+	const float dt = (float)Time::getSingleton()->gameDelta;   // pauses with the game
+	for (size_t i = 0; i < shakes.size(); )
+	{
+		ShakeImp& s = shakes[i];
+		s.t += dt;
+		if (s.t >= s.dur) { shakes.erase(shakes.begin() + i); continue; }
+		const float fade = 1.0f - s.t / s.dur;                 // linear decay to zero
+		const float w = s.t * s.freq * 6.2831853f;
+		out[0] += s.amp * fade * sinf(w + s.seed);
+		out[1] += s.amp * fade * sinf(w * 1.31f + s.seed * 2.17f);
+		out[2] += s.amp * fade * 0.25f * sinf(w * 0.77f + s.seed * 3.03f);
+		++i;
+	}
 }
 
 void Camera::Reset() {}
