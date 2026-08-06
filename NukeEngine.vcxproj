@@ -106,8 +106,8 @@
       <LanguageStandard>stdcpp20</LanguageStandard>
     </ClCompile>
     <PreBuildEvent>
-      <Command>where python &gt;nul 2&gt;nul &amp;&amp; python "$(ProjectDir)..\NukeUtils\nukegen.py"</Command>
-      <Message>NukeEngine reflection codegen (nukegen.py)</Message>
+      <Command>if exist "$(ProjectDir)..\NukeUtils\bin\NukeGen.exe" ("$(ProjectDir)..\NukeUtils\bin\NukeGen.exe" --root "$(ProjectDir).." --doc "$(ProjectDir)..\NukeUtils\sdkdocs\NukeEngine.md") else (where python &gt;nul 2&gt;nul &amp;&amp; python "$(ProjectDir)..\NukeUtils\nukegen.py")</Command>
+      <Message>NukeEngine reflection codegen (NukeGen, python fallback)</Message>
     </PreBuildEvent>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -169,8 +169,8 @@
       <LanguageStandard>stdcpp20</LanguageStandard>
     </ClCompile>
     <PreBuildEvent>
-      <Command>where python &gt;nul 2&gt;nul &amp;&amp; python "$(ProjectDir)..\NukeUtils\nukegen.py"</Command>
-      <Message>NukeEngine reflection codegen (nukegen.py)</Message>
+      <Command>if exist "$(ProjectDir)..\NukeUtils\bin\NukeGen.exe" ("$(ProjectDir)..\NukeUtils\bin\NukeGen.exe" --root "$(ProjectDir).." --doc "$(ProjectDir)..\NukeUtils\sdkdocs\NukeEngine.md") else (where python &gt;nul 2&gt;nul &amp;&amp; python "$(ProjectDir)..\NukeUtils\nukegen.py")</Command>
+      <Message>NukeEngine reflection codegen (NukeGen, python fallback)</Message>
     </PreBuildEvent>
     <Link>
       <SubSystem>Windows</SubSystem>
