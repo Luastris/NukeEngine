@@ -79,6 +79,34 @@ bool IsTypeActive(const std::string& type)
 	return IsPluginLoaded(it->second);
 }
 
+// Is a plugin INSTALLED? `name` matches the DLL file name (with or without the extension) or
+// the module title, case-insensitively. The pool answers once discovery has run; before that —
+// mods mount before InitModules — the modules directory on disk does. `outLoaded`, when given,
+// reports whether that plugin is currently ACTIVE, which is a separate question: a mod whose
+// module is installed but switched off still mounts, its components just load inert.
+bool ModuleInstalled(const std::string& name, bool* outLoaded)
+{
+	if (outLoaded) *outLoaded = false;
+	if (name.empty()) return true;
+	auto low = [](std::string s) { for (char& c : s) c = (char)tolower((unsigned char)c); return s; };
+	const std::string want = low(bfs::path(name).stem().string());
+	for (auto& m : g_modules)
+	{
+		if (!m) continue;
+		if (low(bfs::path(m->moduleFile).stem().string()) == want || low(m->title) == want)
+		{
+			if (outLoaded) *outLoaded = m->loaded;
+			return true;
+		}
+	}
+	boost::system::error_code ec;
+	const bfs::path dir = boost::dll::program_location(ec).parent_path() / "modules";
+	if (ec) return false;
+	for (bfs::directory_iterator it(dir, ec), end; it != end && !ec; it.increment(ec))
+		if (low(it->path().stem().string()) == want) return true;
+	return false;
+}
+
 #ifdef _WIN32
 // Read two exports out of a DLL's PE export table by parsing the file — no LoadLibrary.
 // `hasPlugin` = an exported "plugin" symbol exists; `engineAbi` = the exported
@@ -147,7 +175,99 @@ static bool PreflightPeExports(const std::string& path, bool& hasPlugin, int& en
 	}
 	return true;
 }
+
 #endif
+
+// The libraries a native image links against. This is FILE-FORMAT work, not OS work: the layout
+// is the same bytes whatever machine reads them, so it is parsed by offset — a Windows build can
+// answer about a .so and the other way round, and nothing here is compiled out per platform.
+// Only the headers are touched, never the whole file.
+static std::vector<std::string> ImageImportNames(const std::string& path)
+{
+	std::vector<std::string> out;
+	bfs::ifstream f(bfs::path(path), std::ios::binary);
+	if (!f) return out;
+	// Header window: everything the import walk needs to locate lives in the first pages.
+	std::vector<char> h(0x1000);
+	f.read(h.data(), (std::streamsize)h.size());
+	const size_t got = (size_t)(f.gcount() > 0 ? f.gcount() : 0);
+	h.resize(got);
+	auto u16 = [&](size_t o) -> uint32_t
+	{ return o + 2 <= h.size() ? (uint32_t)((uint8_t)h[o] | ((uint8_t)h[o + 1] << 8)) : 0u; };
+	auto u32 = [&](size_t o) -> uint32_t
+	{
+		if (o + 4 > h.size()) return 0u;
+		return (uint32_t)((uint8_t)h[o] | ((uint8_t)h[o + 1] << 8) | ((uint8_t)h[o + 2] << 16)
+		                | ((uint32_t)(uint8_t)h[o + 3] << 24));
+	};
+	if (h.size() < 0x40 || u16(0) != 0x5A4D) return out;                 // "MZ"
+	const uint32_t pe = u32(0x3C);
+	if (pe + 24 > h.size() || u32(pe) != 0x00004550) return out;         // "PE\0\0"
+	const uint32_t nSec = u16(pe + 6), optSize = u16(pe + 20);
+	const size_t opt = pe + 24;
+	const uint32_t magic = u16(opt);
+	if (magic != 0x10B && magic != 0x20B) return out;                    // PE32 / PE32+
+	const size_t dirs = opt + (magic == 0x20B ? 112 : 96);
+	const uint32_t impRva = u32(dirs + 8);                               // import directory
+	if (!impRva) return out;
+	const size_t secs = opt + optSize;
+	auto toOff = [&](uint32_t rva) -> long long
+	{
+		for (uint32_t i = 0; i < nSec; ++i)
+		{
+			const size_t s = secs + (size_t)i * 40;
+			const uint32_t va = u32(s + 12);
+			uint32_t size = u32(s + 8);                                  // VirtualSize
+			const uint32_t rawSz = u32(s + 16), raw = u32(s + 20);
+			if (size < rawSz) size = rawSz;
+			if (rva >= va && rva < va + size) return (long long)raw + (rva - va);
+		}
+		return -1LL;
+	};
+	long long cur = toOff(impRva);
+	if (cur < 0) return out;
+	for (int guard = 0; guard < 4096; ++guard, cur += 20)               // IMAGE_IMPORT_DESCRIPTOR
+	{
+		char rec[20] = {};
+		f.clear(); f.seekg((std::streamoff)cur);
+		f.read(rec, sizeof(rec));
+		if (f.gcount() < (std::streamsize)sizeof(rec)) break;
+		const uint32_t nameRva = (uint32_t)((uint8_t)rec[12] | ((uint8_t)rec[13] << 8)
+		                                  | ((uint8_t)rec[14] << 16) | ((uint32_t)(uint8_t)rec[15] << 24));
+		if (!nameRva) break;                                             // null terminator record
+		const long long no = toOff(nameRva);
+		if (no < 0) continue;
+		char nm[256] = {};
+		f.clear(); f.seekg((std::streamoff)no);
+		f.read(nm, sizeof(nm) - 1);
+		nm[f.gcount() > 0 ? (size_t)f.gcount() : 0] = 0;
+		std::string s = bfs::path(nm).stem().string();
+		for (char& c : s) c = (char)tolower((unsigned char)c);
+		if (!s.empty()) out.push_back(s);
+	}
+	return out;
+}
+
+// The engine plugins a native binary links against, filtered to plugins this installation has.
+std::vector<std::string> ModuleImportsOf(const std::string& binaryPath)
+{
+	std::vector<std::string> out;
+	for (const std::string& imp : ImageImportNames(binaryPath))
+		if (ModuleInstalled(imp)) out.push_back(imp);
+	return out;
+}
+
+// Every reflected type a plugin owns, as name -> plugin file stem. The packager matches these
+// names inside script sources and managed assemblies: a class a module brought is the only
+// honest trace a script leaves of needing that module.
+std::vector<std::pair<std::string, std::string>> PluginOwnedTypes()
+{
+	std::vector<std::pair<std::string, std::string>> out;
+	for (const auto& kv : g_typePlugin)
+		if (!kv.second.empty())
+			out.push_back({ kv.first, bfs::path(kv.second).stem().string() });
+	return out;
+}
 
 // Shields around foreign module code: a fault inside a module refuses that module instead of
 // taking the host down. Separate wrappers because __try frames cannot hold C++ destructors.
@@ -380,6 +500,9 @@ void InitModules(AppInstance* instance)
 	}
 
 	DiscoverModulesIn(modulesDir.string());
+	// Native plugins the mounted mods brought. The host's own modules/ was walked first, so a
+	// mod cannot shadow an engine plugin by reusing its file name.
+	for (const std::string& d : Package::ModuleCacheDirs()) DiscoverModulesIn(d);
 }
 
 // Unload a module's DLL so a rebuild can overwrite the file; the pool's shared_ptr is the

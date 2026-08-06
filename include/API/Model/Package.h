@@ -73,6 +73,9 @@ public:
 		std::vector<std::string> platforms;   // empty = any platform
 		std::vector<std::string> parts;       // split-part pak filenames, mounted with this pak
 		std::string partOf;                   // non-empty = this pak IS a part of that one
+		// Engine plugins the content needs (DLL names). A DLC whose module is not installed is
+		// skipped for the same reason a mod is: its components would load as dead placeholders.
+		std::vector<std::string> modules;
 	};
 	static bool ReadPakInfo(const std::string& pakPath, PakInfo& out);   // false = no/bad pak.json
 	// The platform tag this binary was built for ("win64"), matched against pak.json
@@ -100,6 +103,14 @@ public:
 		std::string name;                    // manifest name, else the file stem
 		std::vector<std::string> requires_;  // dependency names (load below this mod)
 		std::vector<std::string> dlc;        // DLC names the mod was authored against
+		// Engine plugins the content needs (DLL names, e.g. "NukeWater"). A mod whose module is
+		// not installed is skipped: its components would load as inert placeholders anyway.
+		std::vector<std::string> modules;
+		// Component-type substitutions ("replaces" object in mod.json): content that saved the
+		// FIRST type loads the SECOND instead. How a fix mod patches another mod's broken
+		// compiled component without its sources — props load by NAME through reflection, so a
+		// prop-compatible replacement picks up all saved data. Mount order decides conflicts.
+		std::vector<std::pair<std::string, std::string>> replaces;
 		std::string platform;                // "" / "any" = cross-platform, else a platform tag
 		std::vector<std::string> parts;      // split-part pak filenames (mounted with this mod)
 		std::string partOf;                  // non-empty = this pak IS a part (skip as a mod)
@@ -112,6 +123,16 @@ public:
 	static int MountModList(const std::string& gameRoot, const std::vector<std::string>& entries);
 	// Metadata of the mounted mods (mount order, bottom-up). The base pak is not a mod.
 	static const std::vector<ModInfo>& Mods();
+	// Native plugins a mod ships live under "modules/" in its pak. Machine code cannot be run
+	// out of an archive — the OS loader needs a real file for relocations, imports, TLS, unwind
+	// tables and symbols — so mounting writes them to <gameRoot>/config/modcache/<mod>/, byte-
+	// identical files reused, and the module system discovers that directory alongside its own.
+	// These are the directories the last mount produced (cleared by UnmountAll).
+	static const std::vector<std::string>& ModuleCacheDirs();
+	// The active component-type substitution for `type`, "" when none. Merged from the mounted
+	// mods' `replaces` in mount order (a later mod wins). The world loader consults this when
+	// creating components; the caller validates that the replacement actually exists.
+	static std::string TypeReplacement(const std::string& type);
 
 	// The base (lowest) layer: the raw project directory (dev / extracted-pak editing).
 	// "" = no raw layer (pure packed runtime).

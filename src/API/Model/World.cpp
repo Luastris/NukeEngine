@@ -48,6 +48,7 @@
 #include "API/Model/Texture.h"
 #include "API/Model/resdb.h"
 #include "API/Model/UnknownComponent.h"
+#include "API/Model/Package.h"   // mod component-type substitutions ("replaces")
 #include "API/Model/Prefab.h"
 #include "interface/AppInstance.h"
 #include "input/Input.h"
@@ -2589,6 +2590,25 @@ static void SaveAtom(Atom* atom, json& j)
 	}
 }
 
+// A fix mod may substitute a component TYPE at load ("replaces" in its mod.json): the saved
+// name is only the LOOKUP KEY, props load by name through reflection, so a prop-compatible
+// replacement picks up all saved data and its extras default. The hop loop lets fix mods
+// stack (A->B, B->C); a replacement that is not itself creatable and active is ignored, so a
+// disabled fix mod can never break loading.
+static std::string ResolveComponentType(const std::string& saved)
+{
+	std::string type = saved;
+	for (int hop = 0; hop < 4; ++hop)
+	{
+		const std::string rep = Package::TypeReplacement(type);
+		if (rep.empty() || rep == type) break;
+		TypeInfo* ti = Registry_Find(rep);
+		if (!ti || !ti->create || !IsTypeActive(rep)) break;
+		type = rep;
+	}
+	return type;
+}
+
 static Atom* LoadAtom(const json& j)
 {
 	Atom* atom = new Atom(j.value("name", std::string("Atom")).c_str());
@@ -2607,7 +2627,7 @@ static Atom* LoadAtom(const json& j)
 	if (j.contains("components"))
 		for (const json& cj : j["components"])
 		{
-			std::string type = cj.value("type", std::string());
+			std::string type = ResolveComponentType(cj.value("type", std::string()));
 			TypeInfo* ti = Registry_Find(type);
 			if (ti && ti->create && IsTypeActive(type))
 			{
@@ -2711,12 +2731,14 @@ static void UpgradeAtom(Atom* a, const std::string& dll)
 	{
 		UnknownComponent* uc = dynamic_cast<UnknownComponent*>(c);
 		if (!uc || uc->requiredPlugin != dll) continue;
-		TypeInfo* ti = Registry_Find(uc->typeName);
+		// Same substitution as the load path: a placeholder upgrading late must not resurrect
+		// the type a fix mod replaced.
+		TypeInfo* ti = Registry_Find(ResolveComponentType(uc->typeName));
 		if (ti && ti->create) todo.push_back(uc);
 	}
 	for (UnknownComponent* uc : todo)
 	{
-		TypeInfo* ti = Registry_Find(uc->typeName);
+		TypeInfo* ti = Registry_Find(ResolveComponentType(uc->typeName));
 		json props = uc->rawProps.empty() ? json::object()
 		                                  : json::parse(uc->rawProps, nullptr, false);
 		a->components.remove(uc);

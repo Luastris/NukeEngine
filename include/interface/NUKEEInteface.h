@@ -16,7 +16,10 @@
 // DLLs report level 1. Bump when appending a virtual, and tag the virtual with its level:
 //   1 — provides/phase/queryService/cookContent/sharedService/shipExtras
 //   2 — editorTool
-#define NUKE_MODULE_ABI 3
+//   3 — companionOf
+//   4 — (reserved; the iScript::ModuleDeps/PlatformOf growth is gated by nuke_engine_abi 12 —
+//        service vtables have no per-call guard, so the discovery gate is the one that counts)
+#define NUKE_MODULE_ABI 4
 extern "C" { __declspec(dllexport) __declspec(selectany) int nuke_module_abi = NUKE_MODULE_ABI; }
 
 // ---- Engine BINARY-COMPATIBILITY generation -------------------------------------------------
@@ -36,7 +39,9 @@ extern "C" { __declspec(dllexport) __declspec(selectany) int nuke_module_abi = N
 //       (previewSm/previewBlend/muteNotifies)
 //  11 — Mesh gained import-time materials (defaultMats, .numesh v7); reflection gained the
 //       script-class registry (Reflect_RegisterScriptClass / Reflect_ScriptClasses)
-#define NUKE_ENGINE_ABI 11
+//  12 — iScript gained ModuleDeps/PlatformOf (mod dependency + platform queries). Service
+//       vtables have NO per-call guard, so growing one is a layout break like any other.
+#define NUKE_ENGINE_ABI 12
 extern "C" { __declspec(dllexport) __declspec(selectany) int nuke_engine_abi = NUKE_ENGINE_ABI; }
 
 namespace nuke {

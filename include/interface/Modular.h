@@ -91,6 +91,21 @@ NUKEENGINE_API const char* PluginForType(const std::string& type);
 // false means load them as inert UnknownComponent placeholders.
 NUKEENGINE_API bool IsTypeActive(const std::string& type);
 
+// Is a plugin INSTALLED? `name` matches the DLL file name (with or without extension) or the
+// module title, case-insensitively. Answers from the discovered pool, falling back to the
+// modules directory on disk — mods mount before discovery runs. `outLoaded`, when given, also
+// reports whether the plugin is currently ACTIVE (installed but disabled is a different case).
+NUKEENGINE_API bool ModuleInstalled(const std::string& name, bool* outLoaded = nullptr);
+
+// The engine plugins a native binary links against, read from its import table and filtered to
+// plugins this installation has. A mod shipping its own C++ module declares its dependencies
+// this way without anyone writing them down. Empty for a non-PE file.
+NUKEENGINE_API std::vector<std::string> ModuleImportsOf(const std::string& binaryPath);
+
+// Every reflected type a plugin owns: (type name, plugin file stem). The packager looks for
+// these names inside scripts and managed assemblies to learn what a mod's CODE needs.
+NUKEENGINE_API std::vector<std::pair<std::string, std::string>> PluginOwnedTypes();
+
 }  // namespace nuke
 
 #endif // !NUKE_MODULAR_H

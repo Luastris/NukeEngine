@@ -2,6 +2,7 @@
 // TOC = uint32 count + per entry uint16 pathLen, path (utf8 '/'), uint8 method,
 // uint64 offset/rawSize/packSize, uint32 crc32(raw).
 #include "API/Model/Package.h"
+#include "interface/Modular.h"   // module dependency check on mount
 #include <boost/filesystem.hpp>
 #include <boost/filesystem/fstream.hpp>
 #include <boost/thread/mutex.hpp>
@@ -233,6 +234,10 @@ static std::vector<MountLayer> gMounts;               // sorted by priority DESC
 static std::string gRawRoot;
 static boost::mutex gPakLock;
 static std::vector<std::string> gDlcNames;            // DLCs mounted by MountDlcs
+static std::vector<std::string> gModuleCacheDirs;     // native mod/DLC plugins unpacked for the loader
+static std::map<std::string, std::string> gTypeReplaces;   // merged mod "replaces" (mount order wins)
+static void ExtractPakModules(const std::string& gameRoot, const std::string& pakPath,
+                              const std::string& name);   // defined with MountModList below
 
 bool Package::Mount(const std::string& pakPath, int priority)
 {
@@ -265,7 +270,18 @@ bool Package::Mount(const std::string& pakPath, int priority)
 	return true;
 }
 
-void Package::UnmountAll() { boost::mutex::scoped_lock l(gPakLock); gMounts.clear(); gDlcNames.clear(); }
+void Package::UnmountAll()
+{
+	boost::mutex::scoped_lock l(gPakLock);
+	gMounts.clear(); gDlcNames.clear(); gModuleCacheDirs.clear(); gTypeReplaces.clear();
+}
+
+std::string Package::TypeReplacement(const std::string& type)
+{
+	boost::mutex::scoped_lock l(gPakLock);
+	auto it = gTypeReplaces.find(type);
+	return it != gTypeReplaces.end() ? it->second : std::string();
+}
 int  Package::MountedCount() { boost::mutex::scoped_lock l(gPakLock); return (int)gMounts.size(); }
 
 std::vector<std::string> Package::MountedPaks()
@@ -379,6 +395,9 @@ bool Package::ReadPakInfo(const std::string& pakPath, PakInfo& out)
 	if (j.contains("parts") && j["parts"].is_array())
 		for (auto& p : j["parts"])
 			if (p.is_string()) out.parts.push_back(p.get<std::string>());
+	if (j.contains("modules") && j["modules"].is_array())
+		for (auto& p : j["modules"])
+			if (p.is_string()) out.modules.push_back(p.get<std::string>());
 	out.partOf = j.value("part_of", std::string());
 	return true;
 }
@@ -437,10 +456,40 @@ int Package::MountDlcs(const std::string& gameRoot, const std::string& baseName)
 			     << CurrentPlatform() << " — skipped" << endl;
 			continue;
 		}
+		// Engine plugins its content is built on — same rule as a mod, including the exemption:
+		// a plugin the DLC itself ships (modules/ inside its pak) satisfies its own requirement.
+		{
+			Package::File dpf;
+			const bool dOpen = dpf.Open(p);
+			auto shipsIt = [&](const std::string& name)
+			{
+				if (!dOpen) return false;
+				std::string want = bfs::path(name).stem().string();
+				for (char& c : want) c = (char)tolower((unsigned char)c);
+				for (const Entry& e : dpf.Entries())
+				{
+					if (LowerKey(e.path).compare(0, 8, "modules/") != 0) continue;
+					std::string st = bfs::path(e.path).stem().string();
+					for (char& c : st) c = (char)tolower((unsigned char)c);
+					if (st == want) return true;
+				}
+				return false;
+			};
+			std::string missing;
+			for (const std::string& mod : pi.modules)
+				if (!shipsIt(mod) && !ModuleInstalled(mod)) missing += (missing.empty() ? "" : ", ") + mod;
+			if (!missing.empty())
+			{
+				cout << "[Package]\tdlc '" << pi.name << "' needs module(s) [" << missing
+				     << "] which are not installed — skipped" << endl;
+				continue;
+			}
+		}
 		if (Package::Mount(p, prio))
 		{
 			MountPakParts(p, prio);   // the DLC's own split parts ride at its priority
 			gDlcNames.push_back(pi.name.empty() ? bfs::path(p).stem().string() : pi.name);
+			ExtractPakModules(gameRoot, p, gDlcNames.back());
 			++prio; ++mounted;
 		}
 	}
@@ -460,9 +509,62 @@ int Package::MountMods(const std::string& gameRoot)
 	return MountModList(gameRoot, entries);
 }
 
+const std::vector<std::string>& Package::ModuleCacheDirs() { return gModuleCacheDirs; }
+
+// Native plugins a mounted pak (mod or DLC) ships ride in it under "modules/". Machine code
+// cannot run out of an archive — relocations, imports, TLS blocks, x64 unwind tables and
+// symbols are all the OS loader's job and it needs a real file — so they land in
+// <gameRoot>/config/modcache/<name>/, where the module system picks them up with the same ABI
+// gate as any other plugin. A file whose bytes already match is left alone, so this costs
+// nothing after the first run.
+static void ExtractPakModules(const std::string& gameRoot, const std::string& pakPath,
+                              const std::string& name)
+{
+	Package::File pf;
+	if (!pf.Open(pakPath)) return;
+	std::string safe = name.empty() ? bfs::path(pakPath).stem().string() : name;
+	for (char& c : safe) if (strchr("\\/:*?\"<>|", c)) c = '_';
+	const bfs::path dir = bfs::path(gameRoot) / "config" / "modcache" / safe;
+	int wrote = 0, kept = 0;
+	boost::system::error_code ec;
+	for (const Package::Entry& e : pf.Entries())
+	{
+		const std::string key = LowerKey(e.path);
+		if (key.compare(0, 8, "modules/") != 0) continue;
+		std::string raw;
+		if (!pf.Read(e.path, raw) || raw.empty()) continue;
+		const bfs::path dst = dir / bfs::path(e.path).filename();
+		// Same bytes already there: leave the file alone so a running session keeps its lock.
+		bool same = false;
+		if (bfs::exists(dst, ec) && (uintmax_t)bfs::file_size(dst, ec) == (uintmax_t)raw.size())
+		{
+			bfs::ifstream in(dst, std::ios::binary);
+			std::string cur((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+			same = (cur == raw);
+		}
+		if (same) { ++kept; continue; }
+		bfs::create_directories(dir, ec);
+		bfs::ofstream o(dst, std::ios::binary | std::ios::trunc);
+		if (!o) { cout << "[Package]\t'" << safe << "': cannot cache module " << e.path << endl; continue; }
+		o.write(raw.data(), (std::streamsize)raw.size());
+		++wrote;
+	}
+	if (wrote + kept > 0)
+	{
+		// DLCs extract before the mod pass, and the editor remounts stacks repeatedly: the list
+		// survives both, so entries de-dup here and only UnmountAll clears it.
+		if (std::find(gModuleCacheDirs.begin(), gModuleCacheDirs.end(), dir.string()) == gModuleCacheDirs.end())
+			gModuleCacheDirs.push_back(dir.string());
+		cout << "[Package]\t'" << safe << "': " << (wrote + kept) << " native module(s) ready ("
+		     << wrote << " written, " << kept << " unchanged) in " << dir.string() << endl;
+	}
+}
+
 int Package::MountModList(const std::string& gameRoot, const std::vector<std::string>& entries)
 {
-	{ boost::mutex::scoped_lock l(gPakLock); gMods.clear(); }
+	// Substitutions reset with the mod metadata: only mods contribute them, so unlike the
+	// module cache dirs (DLCs extract before this) there is nothing here to preserve.
+	{ boost::mutex::scoped_lock l(gPakLock); gMods.clear(); gTypeReplaces.clear(); }
 	bfs::path root(gameRoot);
 
 	// 1) Resolve every entry to a file + read its manifest (name + requires).
@@ -499,6 +601,12 @@ int Package::MountModList(const std::string& gameRoot, const std::vector<std::st
 				if (j.contains("dlc") && j["dlc"].is_array())
 					for (auto& r : j["dlc"])
 						if (r.is_string()) mi.dlc.push_back(r.get<std::string>());
+				if (j.contains("modules") && j["modules"].is_array())
+					for (auto& r : j["modules"])
+						if (r.is_string()) mi.modules.push_back(r.get<std::string>());
+				if (j.contains("replaces") && j["replaces"].is_object())
+					for (auto it = j["replaces"].begin(); it != j["replaces"].end(); ++it)
+						if (it.value().is_string()) mi.replaces.push_back({ it.key(), it.value().get<std::string>() });
 				if (j.contains("parts") && j["parts"].is_array())
 					for (auto& r : j["parts"])
 						if (r.is_string()) mi.parts.push_back(r.get<std::string>());
@@ -533,6 +641,43 @@ int Package::MountModList(const std::string& gameRoot, const std::vector<std::st
 				     << "] which is not installed — skipped" << endl;
 				continue;
 			}
+		}
+		// Engine plugins the content is built on. Without them its components would load as
+		// inert placeholders — a half-applied mod is worse than an absent one. A plugin the mod
+		// ITSELF ships (modules/ inside its pak) satisfies its own requirement: it is extracted
+		// and discovered right after mounting, so demanding it be pre-installed would deadlock
+		// the exact mod that brings it.
+		{
+			auto shipsIt = [&](const std::string& name)
+			{
+				std::string want = bfs::path(name).stem().string();
+				for (char& c : want) c = (char)tolower((unsigned char)c);
+				for (const Entry& e : pf.Entries())
+				{
+					if (LowerKey(e.path).compare(0, 8, "modules/") != 0) continue;
+					std::string st = bfs::path(e.path).stem().string();
+					for (char& c : st) c = (char)tolower((unsigned char)c);
+					if (st == want) return true;
+				}
+				return false;
+			};
+			std::string missing, off;
+			for (const std::string& mod : mi.modules)
+			{
+				if (shipsIt(mod)) continue;
+				bool loaded = false;
+				if (!ModuleInstalled(mod, &loaded)) missing += (missing.empty() ? "" : ", ") + mod;
+				else if (!loaded && !GetModules().empty()) off += (off.empty() ? "" : ", ") + mod;
+			}
+			if (!missing.empty())
+			{
+				cout << "[Package]\tmod '" << mi.name << "' needs module(s) [" << missing
+				     << "] which are not installed — skipped" << endl;
+				continue;
+			}
+			if (!off.empty())
+				cout << "[Package]\tmod '" << mi.name << "' needs module(s) [" << off
+				     << "] which are installed but disabled — its content stays inert" << endl;
 		}
 		// Content-only mods are cross-platform; native code was tagged at packaging time.
 		if (!mi.platform.empty() && mi.platform != "any" && mi.platform != CurrentPlatform())
@@ -598,9 +743,19 @@ int Package::MountModList(const std::string& gameRoot, const std::vector<std::st
 			for (const std::string& r : mi.requires_) deps += (deps.empty() ? "" : ", ") + r;
 			cout << "[Package]\tmod '" << mi.name << "' depends on [" << deps << "]" << endl;
 		}
+		ExtractPakModules(root.string(), mi.pakPath, mi.name);
 		++prio; ++mounted;
-		boost::mutex::scoped_lock l(gPakLock);
-		gMods.push_back(mi);
+		{
+			boost::mutex::scoped_lock l(gPakLock);
+			gMods.push_back(mi);
+			// Mount order is authority: a later mod's substitution overwrites an earlier one's.
+			for (const auto& rp : mi.replaces)
+			{
+				gTypeReplaces[rp.first] = rp.second;
+				cout << "[Package]\tmod '" << mi.name << "' replaces component '" << rp.first
+				     << "' with '" << rp.second << "'" << endl;
+			}
+		}
 	}
 	return mounted;
 }

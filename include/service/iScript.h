@@ -44,6 +44,22 @@ public:
 	virtual int ListClassProps(const char* cls, char* buf, int cap)
 	{ (void)cls; (void)buf; (void)cap; return 0; }
 
+	// The engine plugins a piece of this backend's code needs, newline-joined utf8, same sizing
+	// protocol as ListClasses. `path` is a file on disk; the backend decides whether it is one of
+	// its own and reads only what it needs — the host must not slurp files to ask a question that
+	// concerns code. Only the backend can read its own language, so the host never parses script
+	// code: it asks every scripting service and keeps what they answer.
+	// 0 = nothing needed, or the file is not this backend's. ABI: appended at the END of the vtable.
+	virtual int ModuleDeps(const char* path, char* buf, int cap)
+	{ (void)path; (void)buf; (void)cap; return 0; }
+
+	// Is a piece of this backend's code tied to one platform? Same contract as ModuleDeps.
+	// 0 = not this backend's file, and the host judges it by its own means; else "any" for
+	// portable code, or the platform tag it is bound to. The host has no idea what a managed
+	// assembly or a script dialect is — only the backend can tell whether a particular piece of
+	// its code stays portable. ABI: appended at the END of the vtable.
+	virtual int PlatformOf(const char* path, char* buf, int cap)
+	{ (void)path; (void)buf; (void)cap; return 0; }
 };
 
 }  // namespace nuke
