@@ -25,6 +25,19 @@ TypeInfo& Registry_GetOrCreate(const std::string& name)
     return *ti;
 }
 
+void Registry_ResetType(TypeInfo* ti)
+{
+    if (!ti) return;
+    // In place, name kept: the address stays valid and a reloaded module re-registers under
+    // the same key. Caller's contract: the owning image is still mapped (functor dtors run).
+    ti->base.clear();
+    ti->fields.clear();
+    ti->methods.clear();
+    ti->create = nullptr;
+    ti->category.clear();
+    ti->baseMerged = false;
+}
+
 // --- base-class field/method inheritance ---------------------------------------------------
 // Merge a reflected base's fields/methods into the derived TypeInfo, lazily and idempotently
 // (registration order doesn't matter). Base addr functors stay valid on a derived instance:

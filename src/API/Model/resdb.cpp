@@ -345,7 +345,11 @@ static std::string NormForContent(const std::string& p, const std::string& conte
 	{
 		std::string cr = bfs::path(contentRoot).generic_string();
 		if (!cr.empty() && cr.back() != '/') cr += '/';
+#ifdef _WIN32
 		if (g.size() > cr.size() && _strnicmp(g.c_str(), cr.c_str(), cr.size()) == 0)
+#else
+		if (g.size() > cr.size() && strncasecmp(g.c_str(), cr.c_str(), cr.size()) == 0)
+#endif
 			g = g.substr(cr.size());
 	}
 	for (char& c : g) c = (char)std::tolower((unsigned char)c);

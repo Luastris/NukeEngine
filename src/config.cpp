@@ -1,4 +1,5 @@
 #include "config.h"
+#include "interface/Modular.h"   // RunRoot(): config/ lives in the run root
 
 #include <nlohmann/json.hpp>
 #include <boost/filesystem.hpp>
@@ -112,22 +113,77 @@ Config* Config::getSingleton()
 
 // config/ lives NEXT TO THE EXECUTABLE, never in the working directory (a game launched from
 // a shortcut has an arbitrary CWD). Falls back to the CWD only if the exe path is unavailable.
+bfs::path Config::userDataDir()
+{
+#ifdef _WIN32
+    if (const char* e = std::getenv("APPDATA"))
+        if (*e) return bfs::path(e);
+#elif defined(__APPLE__)
+    if (const char* e = std::getenv("HOME"))
+        if (*e) return bfs::path(e) / "Library" / "Application Support";
+#else
+    if (const char* e = std::getenv("XDG_CONFIG_HOME"))
+        if (*e) return bfs::path(e);
+    if (const char* e = std::getenv("HOME"))
+        if (*e) return bfs::path(e) / ".config";
+#endif
+    return bfs::path(".");   // last resort: portable-install style, next to the exe/CWD
+}
+
+bfs::path Config::writableDir()
+{
+    static bfs::path cached = []() -> bfs::path
+    {
+#ifndef _WIN32
+        const bfs::path root = RunRoot();
+        bool redirect = false;
+        // An INSTALLED app must not write beside (or inside) its bundle: /Applications is
+        // shared between every engine app, and bundle contents are signed. A run root
+        // nested in a .app means exactly that layout.
+        for (bfs::path p = root; !p.empty() && p != p.parent_path(); p = p.parent_path())
+            if (p.extension() == ".app") { redirect = true; break; }
+        if (!redirect)
+        {
+            // Not bundle-nested (dev tree / portable dir): probe writability — a system
+            // install (/usr/share, /opt) is read-only and redirects too.
+            boost::system::error_code ec;
+            const bfs::path probe = root / ".nuke_write_probe";
+            bfs::ofstream pf(probe, std::ios::trunc);
+            if (pf) { pf.close(); bfs::remove(probe, ec); }
+            else redirect = true;
+        }
+        if (redirect)
+        {
+            boost::system::error_code ec;
+            bfs::path exe = boost::dll::program_location(ec);
+            const std::string app = ec ? std::string("NukeEngine") : exe.stem().string();
+            return userDataDir() / app;
+        }
+#endif
+        return baseDir();   // Windows + dev trees: the run root, exactly as before
+    }();
+    return cached;
+}
+
 bfs::path Config::baseDir()
 {
-    boost::system::error_code ec;
-    bfs::path exeDir = boost::dll::program_location(ec).parent_path();
-    if (ec || exeDir.empty()) return bfs::path(".");
-    return exeDir;
+    // Run root = exe dir, except a macOS thin bundle resolves to the dir holding the .app
+    // (config/ sits in the run dir next to it) — see RunRoot() in Modular.cpp.
+    bfs::path root = RunRoot();
+    if (root.empty()) return bfs::path(".");
+    return root;
 }
 
 void Config::reload(Config* instance)
 {
-    bfs::path configDir = baseDir() / "config";
     boost::system::error_code ec;
-    if (!bfs::exists(configDir, ec))
-        bfs::create_directory(configDir, ec);
+    bfs::create_directories(writableDir() / "config", ec);
 
-    bfs::path cfg = configDir / "main.json";
+    // Saved (per-machine) config wins; the SHIPPED config beside the binaries is the
+    // fallback — an installed bundle carries defaults it can never write to.
+    bfs::path cfg = writableDir() / "config" / "main.json";
+    if (!bfs::exists(cfg, ec))
+        cfg = baseDir() / "config" / "main.json";
     bfs::ifstream f(cfg);
     if (!f)
     {
@@ -204,7 +260,16 @@ void Config::reload(Config* instance)
     }
 }
 
-void Config::saveWindow() { saveWindowTo((baseDir() / "config" / "main.json").string()); }
+void Config::saveWindow()
+{
+    boost::system::error_code ec;
+    bfs::create_directories(writableDir() / "config", ec);
+    // Saving from shipped defaults: carry the full file over so unrelated sections survive.
+    const bfs::path dst = writableDir() / "config" / "main.json";
+    if (!bfs::exists(dst, ec) && bfs::exists(baseDir() / "config" / "main.json", ec))
+        bfs::copy_file(baseDir() / "config" / "main.json", dst, ec);
+    saveWindowTo(dst.string());
+}
 
 // Persist the window block into an arbitrary json file (read-modify-write). In the EDITOR
 // Game.Set* persists nothing — the shipped config is formed by the Package Project dialog.
@@ -266,6 +331,22 @@ void Config::SetConsoleWindowVisible(bool visible)
 
 Config::Config()
 {
+    // The build's architecture set (stamped at compile time) + the slice actually running —
+    // printed every boot so nobody ever guesses what binary this is.
+    {
+#if defined(__arm64__) || defined(_M_ARM64)
+        const char* running = "arm64";
+#elif defined(__x86_64__) || defined(_M_X64)
+        const char* running = "x86_64";
+#else
+        const char* running = "unknown";
+#endif
+#ifdef NUKE_BUILD_ARCHS
+        cout << PREFIX_CONF << "build: " << NUKE_BUILD_ARCHS << " (running " << running << ")" << endl;
+#else
+        cout << PREFIX_CONF << "build: running " << running << endl;
+#endif
+    }
     cout << PREFIX_CONF << "CWD: " << bfs::current_path() << endl;
 }
 

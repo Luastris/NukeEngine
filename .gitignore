@@ -85,3 +85,5 @@ Thumbs.db
 # NUKE additions (2026-07-11): the whole build tree (any config) + IDE dirs.
 x64/
 .vscode/
+macos/
+linux/

@@ -8,25 +8,41 @@ cbuffer SkinCSParams
     uint g_MorphCount;
     uint g_Pad0;
 };
+// One-member wrapper structs (identical memory layout to the bare element). NOT cosmetic:
+// glslang collapses StructuredBuffers with the same element type into ONE SPIR-V block type
+// named after a single resource; MoltenVK's MSL then declares `device g_X* g_X`, the struct
+// is hidden by the variable and every OTHER buffer of that type fails to compile. A unique
+// element struct per buffer keeps every block type unique — each declaration only hides its
+// own type, which is legal.
+struct SkinPalCol  { float4 v; };
+struct SkinBindPos { float  v; };
+struct SkinBindNrm { float  v; };
+struct SkinBoneWgt { float4 v; };
+struct SkinMorphD  { float  v; };
+struct SkinMorphW  { float  v; };
+struct SkinPosOut  { float  v; };
+struct SkinNrmOut  { float  v; };
+struct SkinPosPrev { float  v; };
+
 // Palette: 4 float4 COLUMNS per bone (column-major model-space global * invBind).
-StructuredBuffer<float4> g_Palette;
-StructuredBuffer<float>  g_BindPos;     // 3 floats / vert
-StructuredBuffer<float>  g_BindNrm;     // 3 floats / vert
-StructuredBuffer<uint2>  g_BoneIdx;     // 4 x u16 packed (x = i0|i1<<16, y = i2|i3<<16)
-StructuredBuffer<float4> g_BoneWgt;     // 4 weights / vert
+StructuredBuffer<SkinPalCol>  g_Palette;
+StructuredBuffer<SkinBindPos> g_BindPos;     // 3 floats / vert
+StructuredBuffer<SkinBindNrm> g_BindNrm;     // 3 floats / vert
+StructuredBuffer<uint2>       g_BoneIdx;     // 4 x u16 packed (x = i0|i1<<16, y = i2|i3<<16)
+StructuredBuffer<SkinBoneWgt> g_BoneWgt;     // 4 weights / vert
 // Morph deltas: per target, g_VertCount*3 position floats then g_VertCount*3 normal floats.
-StructuredBuffer<float>  g_MorphDelta;
-StructuredBuffer<float>  g_MorphWeight;
-RWStructuredBuffer<float> g_PosOut;
-RWStructuredBuffer<float> g_NrmOut;
-RWStructuredBuffer<float> g_PosPrev;    // last frame's skinned positions (TAA velocity)
+StructuredBuffer<SkinMorphD>  g_MorphDelta;
+StructuredBuffer<SkinMorphW>  g_MorphWeight;
+RWStructuredBuffer<SkinPosOut>  g_PosOut;
+RWStructuredBuffer<SkinNrmOut>  g_NrmOut;
+RWStructuredBuffer<SkinPosPrev> g_PosPrev;   // last frame's skinned positions (TAA velocity)
 
 float3 MulPal(uint b, float3 v, float w)
 {
-    float4 c0 = g_Palette[b * 4 + 0];
-    float4 c1 = g_Palette[b * 4 + 1];
-    float4 c2 = g_Palette[b * 4 + 2];
-    float4 c3 = g_Palette[b * 4 + 3];
+    float4 c0 = g_Palette[b * 4 + 0].v;
+    float4 c1 = g_Palette[b * 4 + 1].v;
+    float4 c2 = g_Palette[b * 4 + 2].v;
+    float4 c3 = g_Palette[b * 4 + 3].v;
     return (c0.xyz * v.x + c1.xyz * v.y + c2.xyz * v.z + c3.xyz * w);
 }
 
@@ -37,31 +53,31 @@ void main(uint3 id : SV_DispatchThreadID)
     if (v >= g_VertCount) return;
 
     // Previous positions FIRST (read the last frame's output before overwriting).
-    g_PosPrev[v * 3]     = g_PosOut[v * 3];
-    g_PosPrev[v * 3 + 1] = g_PosOut[v * 3 + 1];
-    g_PosPrev[v * 3 + 2] = g_PosOut[v * 3 + 2];
+    g_PosPrev[v * 3].v     = g_PosOut[v * 3].v;
+    g_PosPrev[v * 3 + 1].v = g_PosOut[v * 3 + 1].v;
+    g_PosPrev[v * 3 + 2].v = g_PosOut[v * 3 + 2].v;
 
-    float3 p = float3(g_BindPos[v * 3], g_BindPos[v * 3 + 1], g_BindPos[v * 3 + 2]);
-    float3 n = float3(g_BindNrm[v * 3], g_BindNrm[v * 3 + 1], g_BindNrm[v * 3 + 2]);
+    float3 p = float3(g_BindPos[v * 3].v, g_BindPos[v * 3 + 1].v, g_BindPos[v * 3 + 2].v);
+    float3 n = float3(g_BindNrm[v * 3].v, g_BindNrm[v * 3 + 1].v, g_BindNrm[v * 3 + 2].v);
 
     // Blend shapes before skinning.
     for (uint t = 0; t < g_MorphCount; ++t)
     {
-        float w = g_MorphWeight[t];
+        float w = g_MorphWeight[t].v;
         if (w == 0.0) continue;
         uint base = t * g_VertCount * 6;
-        p += w * float3(g_MorphDelta[base + v * 3],
-                        g_MorphDelta[base + v * 3 + 1],
-                        g_MorphDelta[base + v * 3 + 2]);
+        p += w * float3(g_MorphDelta[base + v * 3].v,
+                        g_MorphDelta[base + v * 3 + 1].v,
+                        g_MorphDelta[base + v * 3 + 2].v);
         uint nbase = base + g_VertCount * 3;
-        n += w * float3(g_MorphDelta[nbase + v * 3],
-                        g_MorphDelta[nbase + v * 3 + 1],
-                        g_MorphDelta[nbase + v * 3 + 2]);
+        n += w * float3(g_MorphDelta[nbase + v * 3].v,
+                        g_MorphDelta[nbase + v * 3 + 1].v,
+                        g_MorphDelta[nbase + v * 3 + 2].v);
     }
 
     uint2 bi = g_BoneIdx[v];
     uint  b0 = bi.x & 0xFFFFu, b1 = bi.x >> 16, b2 = bi.y & 0xFFFFu, b3 = bi.y >> 16;
-    float4 bw = g_BoneWgt[v];
+    float4 bw = g_BoneWgt[v].v;
 
     float3 sp = float3(0.0, 0.0, 0.0);
     float3 sn = float3(0.0, 0.0, 0.0);
@@ -81,10 +97,10 @@ void main(uint3 id : SV_DispatchThreadID)
         if (len > 1e-6) sn /= len;
     }
 
-    g_PosOut[v * 3]     = sp.x;
-    g_PosOut[v * 3 + 1] = sp.y;
-    g_PosOut[v * 3 + 2] = sp.z;
-    g_NrmOut[v * 3]     = sn.x;
-    g_NrmOut[v * 3 + 1] = sn.y;
-    g_NrmOut[v * 3 + 2] = sn.z;
+    g_PosOut[v * 3].v     = sp.x;
+    g_PosOut[v * 3 + 1].v = sp.y;
+    g_PosOut[v * 3 + 2].v = sp.z;
+    g_NrmOut[v * 3].v     = sn.x;
+    g_NrmOut[v * 3 + 1].v = sn.y;
+    g_NrmOut[v * 3 + 2].v = sn.z;
 }

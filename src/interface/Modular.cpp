@@ -2,6 +2,7 @@
 #define BOOST_CHRONO_HEADER_ONLY
 #include "interface/Modular.h"
 #include "interface/Services.h"
+#include "config.h"              // writableDir/baseDir: no dir creation beside installed bundles
 #include "reflect/Reflect.h"
 #include "API/Model/World.h"
 #include "API/Model/Package.h"   // packed built-in shaders (3.2)
@@ -46,6 +47,31 @@ static void KillThreadsOfModule(const std::string& dllFile);
 #endif
 
 bc::vector<std::shared_ptr<NUKEModule>>& GetModules() { return g_modules; }
+
+// The directory the run-dir layout (modules/, shaders/, config/) resolves against. Normally
+// the exe's own dir; on macOS an exe inside Foo.app/Contents/MacOS that carries no modules/
+// of its own resolves to the dir HOLDING the .app — a thin editor bundle sits in the run dir
+// (association/odoc plumbing) while a self-contained game bundle keeps everything inside
+// Contents/MacOS and never takes this branch.
+bfs::path RunRoot()
+{
+	boost::system::error_code ec;
+	bfs::path p = boost::dll::program_location(ec).parent_path();
+	if (ec || p.empty()) p = bfs::current_path();
+#ifdef __APPLE__
+	if (p.filename() == "MacOS" && p.parent_path().filename() == "Contents"
+	    && p.parent_path().parent_path().extension() == ".app")
+	{
+		// A loose runtime layout beside the .app wins (dev tree / staged folder); only a
+		// bundle standing alone is its own root — the superbuild mirrors the runtime inside.
+		const bfs::path outside = p.parent_path().parent_path().parent_path();
+		boost::system::error_code pec;
+		if (bfs::exists(outside / "modules", pec))
+			return outside;
+	}
+#endif
+	return p;
+}
 
 // The ABI level a module's DLL was built against (exported nuke_module_abi; 1 when absent).
 // Guard calls to vtable-appended virtuals with this — a stale DLL lacks the slot.
@@ -100,8 +126,7 @@ bool ModuleInstalled(const std::string& name, bool* outLoaded)
 		}
 	}
 	boost::system::error_code ec;
-	const bfs::path dir = boost::dll::program_location(ec).parent_path() / "modules";
-	if (ec) return false;
+	const bfs::path dir = RunRoot() / "modules";
 	for (bfs::directory_iterator it(dir, ec), end; it != end && !ec; it.increment(ec))
 		if (low(it->path().stem().string()) == want) return true;
 	return false;
@@ -200,6 +225,42 @@ static std::vector<std::string> ImageImportNames(const std::string& path)
 		return (uint32_t)((uint8_t)h[o] | ((uint8_t)h[o + 1] << 8) | ((uint8_t)h[o + 2] << 16)
 		                | ((uint32_t)(uint8_t)h[o + 3] << 24));
 	};
+	// Mach-O 64 LE ("MH_MAGIC_64"): dependent dylibs live in LC_LOAD_DYLIB load commands.
+	if (h.size() >= 32 && u32(0) == 0xFEEDFACFu)
+	{
+		const uint32_t ncmds = u32(16), sizeofcmds = u32(20);
+		if (!ncmds || !sizeofcmds || sizeofcmds > (64u << 20)) return out;
+		std::vector<char> cmds(sizeofcmds);
+		f.clear(); f.seekg(32);
+		f.read(cmds.data(), (std::streamsize)cmds.size());
+		if ((size_t)f.gcount() < cmds.size()) return out;
+		auto c32 = [&](size_t o) -> uint32_t
+		{
+			if (o + 4 > cmds.size()) return 0u;
+			return (uint32_t)((uint8_t)cmds[o] | ((uint8_t)cmds[o + 1] << 8)
+			                | ((uint8_t)cmds[o + 2] << 16) | ((uint32_t)(uint8_t)cmds[o + 3] << 24));
+		};
+		size_t off = 0;
+		for (uint32_t i = 0; i < ncmds && off + 8 <= cmds.size(); ++i)
+		{
+			const uint32_t cmd = c32(off), csize = c32(off + 4);
+			if (csize < 8 || off + csize > cmds.size()) break;
+			if (cmd == 0xCu /*LC_LOAD_DYLIB*/ || cmd == 0x80000018u /*LC_LOAD_WEAK_DYLIB*/)
+			{
+				const uint32_t nameOff = c32(off + 8);   // dylib_command.dylib.name offset
+				if (nameOff >= 8 && nameOff < csize)
+				{
+					const char* sp = cmds.data() + off + nameOff;
+					std::string full(sp, strnlen(sp, csize - nameOff));
+					std::string s = bfs::path(full).stem().string();
+					for (char& c : s) c = (char)tolower((unsigned char)c);
+					if (!s.empty()) out.push_back(s);
+				}
+			}
+			off += csize;
+		}
+		return out;
+	}
 	if (h.size() < 0x40 || u16(0) != 0x5A4D) return out;                 // "MZ"
 	const uint32_t pe = u32(0x3C);
 	if (pe + 24 > h.size() || u32(pe) != 0x00004550) return out;         // "PE\0\0"
@@ -274,6 +335,7 @@ std::vector<std::pair<std::string, std::string>> PluginOwnedTypes()
 static NUKEModule* DiscoverModuleFileBody(const std::string& absPath);
 NUKEModule* DiscoverModuleFile(const std::string& absPath)
 {
+#ifdef _WIN32
 	__try { return DiscoverModuleFileBody(absPath); }
 	__except (EXCEPTION_EXECUTE_HANDLER)
 	{
@@ -281,6 +343,16 @@ NUKEModule* DiscoverModuleFile(const std::string& absPath)
 		     << " — broken or stale binary; rebuild or remove it" << endl;
 		return nullptr;
 	}
+#else
+	// C++ exceptions only — a hard fault is the crash reporter's business (see SehOnLoad).
+	try { return DiscoverModuleFileBody(absPath); }
+	catch (...)
+	{
+		cout << "[Modular]\tREFUSED (threw during discovery): " << absPath
+		     << " — broken or stale binary; rebuild or remove it" << endl;
+		return nullptr;
+	}
+#endif
 }
 
 #ifdef _WIN32
@@ -314,6 +386,28 @@ static bool SehSettings(NUKEModule* m)
 	__try { m->Settings(); return true; }
 	__except (EXCEPTION_EXECUTE_HANDLER) { return false; }
 }
+
+static void* SehQueryService(NUKEModule* m)
+{
+	__try { return m->queryService(); }
+	__except (EXCEPTION_EXECUTE_HANDLER) { return nullptr; }
+}
+
+static bool SehShutdown(NUKEModule* m)
+{
+	__try { m->Shutdown(); return true; }
+	__except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+#else
+// Portable fallback: C++ exceptions only — a hard fault is the crash reporter's business.
+static bool SehOnLoad(NUKEModule* m)       { try { m->OnLoad(); return true; } catch (...) { return false; } }
+static void* SehQueryService(NUKEModule* m){ try { return m->queryService(); } catch (...) { return nullptr; } }
+static bool SehShutdown(NUKEModule* m)     { try { m->Shutdown(); return true; } catch (...) { return false; } }
+static bool SehEditorTool(NUKEModule* m, bool& out)         { try { out = m->editorTool(); return true; } catch (...) { return false; } }
+static bool SehCompanionOf(NUKEModule* m, const char*& out) { try { out = m->companionOf(); return true; } catch (...) { return false; } }
+static bool SehHasSettings(NUKEModule* m, bool& out)        { try { out = m->HasSettings(); return true; } catch (...) { return false; } }
+static bool SehSettings(NUKEModule* m)                      { try { m->Settings(); return true; } catch (...) { return false; } }
+#endif
 
 static void ModuleFaulted(NUKEModule* m, const char* what)
 {
@@ -353,24 +447,6 @@ bool ModuleDrawSettings(NUKEModule* m)
 	return true;
 }
 
-static void* SehQueryService(NUKEModule* m)
-{
-	__try { return m->queryService(); }
-	__except (EXCEPTION_EXECUTE_HANDLER) { return nullptr; }
-}
-
-static bool SehShutdown(NUKEModule* m)
-{
-	__try { m->Shutdown(); return true; }
-	__except (EXCEPTION_EXECUTE_HANDLER) { return false; }
-}
-#else
-// Portable fallback: C++ exceptions only — a hard fault is the crash reporter's business.
-static bool SehOnLoad(NUKEModule* m)       { try { m->OnLoad(); return true; } catch (...) { return false; } }
-static void* SehQueryService(NUKEModule* m){ try { return m->queryService(); } catch (...) { return nullptr; } }
-static bool SehShutdown(NUKEModule* m)     { try { m->Shutdown(); return true; } catch (...) { return false; } }
-#endif
-
 // Run() executes on its own thread: an unshielded crash there kills the whole process.
 static void SehRunGuard(NUKEModule* m, AppInstance* inst)
 {
@@ -395,7 +471,7 @@ static NUKEModule* DiscoverModuleFileBody(const std::string& absPath)
 {
 	bfs::path p(absPath);
 	auto ext = p.extension().string();
-	if (ext != ".dll" && ext != ".so") return nullptr;
+	if (ext != ".dll" && ext != ".so" && ext != ".dylib") return nullptr;
 	const std::string file = p.filename().string();
 	for (auto& m : g_modules)
 		if (m && m->moduleFile == file) return nullptr;   // already in the pool
@@ -482,11 +558,10 @@ void InitModules(AppInstance* instance)
 {
 	g_instance = instance;
 
-	// modules/ sits NEXT TO THE EXECUTABLE — resolve against the exe dir, never the CWD
-	// (a shortcut-launched game has an arbitrary working dir).
+	// modules/ sits in the RUN ROOT (exe dir; a macOS thin bundle resolves to the dir
+	// holding the .app) — never the CWD: a shortcut-launched game has an arbitrary one.
 	boost::system::error_code ec;
-	bfs::path exeDir = boost::dll::program_location(ec).parent_path();
-	if (ec || exeDir.empty()) exeDir = bfs::current_path();
+	bfs::path exeDir = RunRoot();
 #ifdef _WIN32
 	// LOAD_WITH_ALTERED_SEARCH_PATH replaces the application dir in the dependency search, so
 	// pin the exe dir: module deps (glfw3, boost, ...) live there and must resolve from any CWD.
@@ -495,8 +570,13 @@ void InitModules(AppInstance* instance)
 	const bfs::path modulesDir = exeDir / "modules";
 	if (!bfs::exists(modulesDir, ec))
 	{
-		bfs::create_directory(modulesDir, ec);
-		cout << "directory created!" << endl;
+		// Convenience for dev trees only: an INSTALLED app (writable root redirected away
+		// from the run root) must not grow directories beside or inside its bundle.
+		if (Config::writableDir() == Config::baseDir())
+		{
+			bfs::create_directory(modulesDir, ec);
+			cout << "directory created!" << endl;
+		}
 	}
 
 	DiscoverModulesIn(modulesDir.string());
@@ -659,6 +739,13 @@ void DisablePlugin(NUKEModule* m)
 			g_runThreads.erase(rt);
 		}
 	}
+	// The plugin's reflection schemas hold functors living in THIS image — destroy them while
+	// it is still mapped, or a rebuilt module re-registers on top of stale ones (relocating
+	// dead std::functions: SIGSEGV under ASLR). Reset in place; the name keys re-registration.
+	for (const auto& tp : g_typePlugin)
+		if (tp.second == m->moduleFile)
+			Registry_ResetType(Registry_Find(tp.first));
+
 	m->loaded = false;
 	cout << "[Modular]\tdisabled '" << m->title << "'" << endl;
 }
@@ -739,8 +826,8 @@ void LoadBuiltinShaders(iRender* render, const std::string& dir)
 	boost::system::error_code ec;
 
 	// Resolve relative to the EXE, not the cwd (the VS debugger's working dir may differ).
-	bfs::path shaderDir = boost::dll::program_location(ec).parent_path() / dir;
-	if (ec || !bfs::exists(shaderDir, ec)) shaderDir = bfs::path(dir);   // fallback: cwd-relative
+	bfs::path shaderDir = RunRoot() / dir;
+	if (!bfs::exists(shaderDir, ec)) shaderDir = bfs::path(dir);   // fallback: cwd-relative
 	if (!bfs::exists(shaderDir, ec))
 	{
 		cout << "[Modular]\tbuilt-in shaders dir not found: " << shaderDir.string() << endl;

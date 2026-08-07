@@ -3,6 +3,7 @@
 // uint64 offset/rawSize/packSize, uint32 crc32(raw).
 #include "API/Model/Package.h"
 #include "interface/Modular.h"   // module dependency check on mount
+#include "config.h"              // writableDir: mod cache + user mods.json live there
 #include <boost/filesystem.hpp>
 #include <boost/filesystem/fstream.hpp>
 #include <boost/thread/mutex.hpp>
@@ -499,7 +500,13 @@ int Package::MountDlcs(const std::string& gameRoot, const std::string& baseName)
 int Package::MountMods(const std::string& gameRoot)
 {
 	bfs::path root(gameRoot);
-	bfs::ifstream mf(root / "config" / "mods.json");
+	// The USER'S mod list (writable root) wins; the shipped one beside the pak is the
+	// fallback — an installed bundle's config is read-only defaults.
+	bfs::path listPath = Config::writableDir() / "config" / "mods.json";
+	boost::system::error_code lec;
+	if (!bfs::exists(listPath, lec))
+		listPath = root / "config" / "mods.json";
+	bfs::ifstream mf(listPath);
 	if (!mf) return 0;
 	nlohmann::json mj = nlohmann::json::parse(mf, nullptr, false);
 	if (mj.is_discarded() || !mj.contains("mods") || !mj["mods"].is_array()) return 0;
@@ -524,7 +531,10 @@ static void ExtractPakModules(const std::string& gameRoot, const std::string& pa
 	if (!pf.Open(pakPath)) return;
 	std::string safe = name.empty() ? bfs::path(pakPath).stem().string() : name;
 	for (char& c : safe) if (strchr("\\/:*?\"<>|", c)) c = '_';
-	const bfs::path dir = bfs::path(gameRoot) / "config" / "modcache" / safe;
+	// Cached module binaries must land in the WRITABLE root: an installed game bundle is
+	// read-only territory (and signed) — see Config::writableDir().
+	const bfs::path dir = Config::writableDir() / "config" / "modcache" / safe;
+	(void)gameRoot;
 	int wrote = 0, kept = 0;
 	boost::system::error_code ec;
 	for (const Package::Entry& e : pf.Entries())

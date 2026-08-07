@@ -28,6 +28,11 @@ namespace nuke {
 // would give every TU its own empty copy.
 NUKEENGINE_API bc::vector<std::shared_ptr<NUKEModule>>& GetModules();
 
+// The dir the run-dir layout (modules/, shaders/, config/) resolves against: the exe's dir,
+// except a macOS thin bundle (Foo.app in the run dir, no modules/ of its own) resolves to
+// the dir holding the .app. Hosts also chdir here at boot (config is CWD-relative).
+NUKEENGINE_API bfs::path RunRoot();
+
 // The ABI level a discovered module's DLL was built against (1 for DLLs predating the stamp).
 // GUARD every call to a vtable-appended NUKEModule virtual with this — e.g.
 // `ModuleAbi(m) >= 2 && m->editorTool()` — since an older DLL has no such slot.

@@ -261,6 +261,9 @@ NUKEENGINE_API std::vector<ScriptClass> Reflect_ScriptClasses();
 NUKEENGINE_API TypeInfo& Registry_GetOrCreate(const std::string& name);
 NUKEENGINE_API TypeInfo* Registry_Find(const std::string& name);
 NUKEENGINE_API std::vector<TypeInfo*> Registry_All();   // every registered type
+// Empty a type IN PLACE (name kept, address stays valid): a plugin's schema must die with the
+// plugin — its functors point into the module image. Call while that image is still mapped.
+NUKEENGINE_API void Registry_ResetType(TypeInfo* ti);
 // True when the type is a component through the whole reflected base chain.
 NUKEENGINE_API bool Registry_IsComponentType(const TypeInfo* ti);
 

@@ -147,6 +147,15 @@ public:
 	// Show/hide the process's OWN OS console window. No-op if the console is SHARED with a
 	// launching terminal (>1 attached process), and no-op off Windows.
 	static void SetConsoleWindowVisible(bool visible);
+	// The per-user data root for machine-wide state (preferences, packaged-game saves):
+	// %APPDATA% on Windows, ~/Library/Application Support on macOS, $XDG_CONFIG_HOME
+	// (else ~/.config) on Linux. Callers append their own app subdir.
+	static boost::filesystem::path userDataDir();
+	// The per-machine WRITABLE state root (saved window config, imgui layout, shader and
+	// mod caches). Windows and dev trees: the run root, unchanged. An INSTALLED app off
+	// Windows (run root inside a .app, or read-only) redirects to userDataDir()/<exe stem>
+	// — nothing may write beside or inside a deployed bundle.
+	static boost::filesystem::path writableDir();
 	// Persist config/main.json, updating ONLY the "window" object and leaving every other
 	// section exactly as on disk.
 	void saveWindow();

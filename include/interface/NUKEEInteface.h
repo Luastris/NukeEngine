@@ -19,8 +19,16 @@
 //   3 — companionOf
 //   4 — (reserved; the iScript::ModuleDeps/PlatformOf growth is gated by nuke_engine_abi 12 —
 //        service vtables have no per-call guard, so the discovery gate is the one that counts)
+// One-definition-per-image data export: dllexport+selectany on MSVC, default-visibility weak
+// everywhere else (Mach-O/ELF) — every module stamps its own copy, the loader reads it per image.
+#ifdef _WIN32
+  #define NUKE_ABI_STAMP __declspec(dllexport) __declspec(selectany)
+#else
+  #define NUKE_ABI_STAMP __attribute__((visibility("default"), weak))
+#endif
+
 #define NUKE_MODULE_ABI 4
-extern "C" { __declspec(dllexport) __declspec(selectany) int nuke_module_abi = NUKE_MODULE_ABI; }
+extern "C" { NUKE_ABI_STAMP int nuke_module_abi = NUKE_MODULE_ABI; }
 
 // ---- Engine BINARY-COMPATIBILITY generation -------------------------------------------------
 // Tracks the whole engine ABI a module was compiled against (exported class layouts, signatures);
@@ -42,7 +50,7 @@ extern "C" { __declspec(dllexport) __declspec(selectany) int nuke_module_abi = N
 //  12 — iScript gained ModuleDeps/PlatformOf (mod dependency + platform queries). Service
 //       vtables have NO per-call guard, so growing one is a layout break like any other.
 #define NUKE_ENGINE_ABI 12
-extern "C" { __declspec(dllexport) __declspec(selectany) int nuke_engine_abi = NUKE_ENGINE_ABI; }
+extern "C" { NUKE_ABI_STAMP int nuke_engine_abi = NUKE_ENGINE_ABI; }
 
 namespace nuke {
 

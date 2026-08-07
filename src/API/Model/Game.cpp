@@ -2,6 +2,7 @@
 #include "API/Model/World.h"
 #include "API/Model/Time.h"
 #include "API/Model/Package.h"       // packed vs raw decides the save dir
+#include "config.h"                  // userDataDir: per-user save root for packaged games
 #include "interface/AppInstance.h"
 #include <boost/dll.hpp>             // program_location (the dist exe carries the game name)
 #include <boost/filesystem/fstream.hpp>
@@ -59,11 +60,10 @@ static boost::filesystem::path SaveDir()
 		bfs::path content = app->contentRoot.empty() ? bfs::path("project/content") : bfs::path(app->contentRoot);
 		return content.parent_path() / "saves";
 	}
-	const char* appdata = std::getenv("APPDATA");
 	boost::system::error_code ec;
 	bfs::path exe = boost::dll::program_location(ec);
 	std::string game = ec ? std::string("NukeGame") : exe.stem().string();
-	return bfs::path(appdata ? appdata : ".") / game / "saves";
+	return Config::userDataDir() / game / "saves";
 }
 
 bool Game::SaveGame(const std::string& slot)
