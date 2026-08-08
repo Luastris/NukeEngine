@@ -76,8 +76,13 @@ NUKEENGINE_API void DisablePlugin(NUKEModule* m);
 // The currently LOADED provider of a service, or null if the service is off.
 NUKEENGINE_API NUKEModule* ActiveServiceProvider(const char* service);
 
+// Same module file across platforms? Compares by lowercase stem ("NukeRenderDiligent.dll" ==
+// "NukeRenderDiligent.so") — project files written on one OS keep working on another.
+NUKEENGINE_API bool ModuleFileMatches(const std::string& a, const std::string& b);
+
 // Pick a provider of `service` from the discovered pool: the one whose moduleFile equals
-// preferredFile if present, else the first provider found. Null if none. Does NOT enable it.
+// preferredFile if present (cross-platform stem match), else the first provider found.
+// Null if none. Does NOT enable it.
 NUKEENGINE_API NUKEModule* FindServiceProvider(const char* service,
                                                const std::string& preferredFile = "");
 

@@ -16,6 +16,9 @@
 #include <boost/filesystem/fstream.hpp>
 #ifdef _WIN32
 #include <Windows.h>   // SetThreadAffinityMask / SetThreadPriority (fixed-thread core pinning)
+#elif defined(__linux__)
+#include <pthread.h>   // pthread_setaffinity_np (fixed-thread core pinning)
+#include <sched.h>     // cpu_set_t
 #endif
 
 namespace nuke {
@@ -441,6 +444,22 @@ void AppInstance::FixedThread()
 		SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
 		if (core >= 0)
 			cout << "[AppInstance]\tfixed-update thread pinned to core " << core << endl;
+	}
+#elif defined(__linux__)
+	// Same contract with POSIX plumbing. Priority: plain nice() — SCHED_FIFO/RR needs
+	// CAP_SYS_NICE and games shouldn't ask for privileges.
+	{
+		int core = config ? config->physicsCore : -1;
+		if (core == -1)
+			core = (int)boost::thread::hardware_concurrency() - 1;
+		if (core >= 0 && core < CPU_SETSIZE)
+		{
+			cpu_set_t set;
+			CPU_ZERO(&set);
+			CPU_SET(core, &set);
+			if (pthread_setaffinity_np(pthread_self(), sizeof(set), &set) == 0)
+				cout << "[AppInstance]\tfixed-update thread pinned to core " << core << endl;
+		}
 	}
 #endif
 

@@ -142,6 +142,9 @@ bfs::path Config::writableDir()
         // nested in a .app means exactly that layout.
         for (bfs::path p = root; !p.empty() && p != p.parent_path(); p = p.parent_path())
             if (p.extension() == ".app") { redirect = true; break; }
+        // Linux AppImage: the image mounts read-only (the write probe below would catch it,
+        // but the runtime says so outright — APPIMAGE points at the image file).
+        if (!redirect && std::getenv("APPIMAGE")) redirect = true;
         if (!redirect)
         {
             // Not bundle-nested (dev tree / portable dir): probe writability — a system

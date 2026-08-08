@@ -13,6 +13,15 @@
 #ifdef _WIN32
 #include <windows.h>   // SetDllDirectoryW: module deps resolve from the exe dir, not the CWD
 #include <tlhelp32.h>  // thread enumeration at unload (see KillModuleThreads)
+#elif defined(__linux__)
+#include <atomic>
+#include <elf.h>          // Elf64_* structs (PreflightElfExports: ABI gate before dlopen)
+#include <signal.h>       // sigaction + SIGRTMIN (thread sweep at unload)
+#include <pthread.h>      // pthread_kill/pthread_exit (see KillThreadsOfModule)
+#include <execinfo.h>     // backtrace: "is this thread inside the module right now"
+#include <link.h>         // dl_iterate_phdr: the module's mapped range
+#include <unistd.h>
+#include <sys/syscall.h>  // SYS_gettid / SYS_tgkill
 #endif
 
 namespace nuke {
@@ -42,8 +51,11 @@ struct ModThread
 };
 static std::map<const NUKEModule*, ModThread> g_runThreads;
 
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__linux__)
 static void KillThreadsOfModule(const std::string& dllFile);
+#endif
+#ifdef __linux__
+static bool KillThreadHard(pthread_t th);   // signal-unwind one specific thread
 #endif
 
 bc::vector<std::shared_ptr<NUKEModule>>& GetModules() { return g_modules; }
@@ -132,6 +144,17 @@ bool ModuleInstalled(const std::string& name, bool* outLoaded)
 	return false;
 }
 
+// Same module file across platforms? Project files record the AUTHORING platform's file name
+// ("NukeRenderDiligent.dll"); the pool on this machine holds the native one (".so"/".dylib").
+// The stem is the identity, the extension is an implementation detail — compare accordingly.
+bool ModuleFileMatches(const std::string& a, const std::string& b)
+{
+	if (a == b) return true;
+	if (a.empty() || b.empty()) return false;
+	auto low = [](std::string s) { for (char& c : s) c = (char)tolower((unsigned char)c); return s; };
+	return low(bfs::path(a).stem().string()) == low(bfs::path(b).stem().string());
+}
+
 #ifdef _WIN32
 // Read two exports out of a DLL's PE export table by parsing the file — no LoadLibrary.
 // `hasPlugin` = an exported "plugin" symbol exists; `engineAbi` = the exported
@@ -201,6 +224,66 @@ static bool PreflightPeExports(const std::string& path, bool& hasPlugin, int& en
 	return true;
 }
 
+#elif defined(__linux__)
+// The ELF mirror of PreflightPeExports: read `plugin` + `nuke_engine_abi` out of a .so's
+// .dynsym by parsing the FILE — a stale module is refused before dlopen can run its static
+// initializers. Returns false when the file isn't parseable ELF64 (or is section-stripped):
+// the post-dlopen check in DiscoverModuleFileBody then stays the judge, exactly as before.
+static bool PreflightElfExports(const std::string& path, bool& hasPlugin, int& engineAbi)
+{
+	hasPlugin = false; engineAbi = 1;
+	bfs::ifstream f(bfs::path(path), std::ios::binary);
+	if (!f) return false;
+	auto rd = [&](long long off, void* dst, size_t n) -> bool
+	{
+		f.clear(); f.seekg((std::streamoff)off);
+		f.read((char*)dst, (std::streamsize)n);
+		return (bool)f;
+	};
+	Elf64_Ehdr eh;
+	if (!rd(0, &eh, sizeof(eh))) return false;
+	if (memcmp(eh.e_ident, ELFMAG, SELFMAG) != 0
+	    || eh.e_ident[EI_CLASS] != ELFCLASS64 || eh.e_ident[EI_DATA] != ELFDATA2LSB) return false;
+	if (!eh.e_shoff || !eh.e_shnum || eh.e_shnum > 4096) return false;
+	std::vector<Elf64_Shdr> shs(eh.e_shnum);
+	if (!rd(eh.e_shoff, shs.data(), shs.size() * sizeof(Elf64_Shdr))) return false;
+	const Elf64_Shdr* dynsym = nullptr;
+	for (const Elf64_Shdr& s : shs)
+		if (s.sh_type == SHT_DYNSYM) { dynsym = &s; break; }
+	if (!dynsym || dynsym->sh_link >= shs.size()
+	    || dynsym->sh_entsize < sizeof(Elf64_Sym) || dynsym->sh_size > (256u << 20)) return false;
+	const Elf64_Shdr& strsh = shs[dynsym->sh_link];
+	if (!strsh.sh_size || strsh.sh_size > (256u << 20)) return false;
+	std::vector<char> strtab((size_t)strsh.sh_size);
+	if (!rd(strsh.sh_offset, strtab.data(), strtab.size())) return false;
+	std::vector<char> syms((size_t)dynsym->sh_size);
+	if (!rd(dynsym->sh_offset, syms.data(), syms.size())) return false;
+	// vaddr -> file offset for the stamp read.
+	std::vector<Elf64_Phdr> phs(eh.e_phnum);
+	if (eh.e_phnum && !rd(eh.e_phoff, phs.data(), phs.size() * sizeof(Elf64_Phdr))) return false;
+	auto voff = [&](uint64_t va) -> long long
+	{
+		for (const Elf64_Phdr& p : phs)
+			if (p.p_type == PT_LOAD && va >= p.p_vaddr && va < p.p_vaddr + p.p_filesz)
+				return (long long)(p.p_offset + (va - p.p_vaddr));
+		return -1;
+	};
+	const size_t n = (size_t)(dynsym->sh_size / dynsym->sh_entsize);
+	for (size_t i = 0; i < n; ++i)
+	{
+		const Elf64_Sym& sym = *(const Elf64_Sym*)(syms.data() + i * dynsym->sh_entsize);
+		if (sym.st_shndx == SHN_UNDEF || sym.st_name >= strtab.size()) continue;
+		const char* nm = strtab.data() + sym.st_name;
+		if (strcmp(nm, "plugin") == 0) hasPlugin = true;
+		else if (strcmp(nm, "nuke_engine_abi") == 0)
+		{
+			const long long vo = voff(sym.st_value);
+			int v = 0;
+			if (vo >= 0 && rd(vo, &v, sizeof(v))) engineAbi = v;
+		}
+	}
+	return true;
+}
 #endif
 
 // The libraries a native image links against. This is FILE-FORMAT work, not OS work: the layout
@@ -258,6 +341,85 @@ static std::vector<std::string> ImageImportNames(const std::string& path)
 				}
 			}
 			off += csize;
+		}
+		return out;
+	}
+	// ELF 64 LE ("\x7FELF"): dependent libraries live in DT_NEEDED entries of the PT_DYNAMIC
+	// segment; their names sit in the DT_STRTAB table, whose address is VIRTUAL — mapped back
+	// to a file offset through the PT_LOAD segments (works on stripped .so's, no sections).
+	if (h.size() >= 0x40 && u32(0) == 0x464C457Fu && (uint8_t)h[4] == 2 && (uint8_t)h[5] == 1)
+	{
+		auto u64 = [&](size_t o) -> uint64_t
+		{ return o + 8 <= h.size() ? ((uint64_t)u32(o) | ((uint64_t)u32(o + 4) << 32)) : 0ull; };
+		const uint64_t phoff = u64(0x20);
+		const uint32_t phentsize = u16(0x36), phnum = u16(0x38);
+		if (!phoff || phentsize < 56 || !phnum || phnum > 4096) return out;
+		std::vector<char> ph((size_t)phentsize * phnum);
+		f.clear(); f.seekg((std::streamoff)phoff);
+		f.read(ph.data(), (std::streamsize)ph.size());
+		if ((size_t)f.gcount() < ph.size()) return out;
+		auto p32 = [&](size_t o) -> uint32_t
+		{
+			if (o + 4 > ph.size()) return 0u;
+			return (uint32_t)((uint8_t)ph[o] | ((uint8_t)ph[o + 1] << 8)
+			                | ((uint8_t)ph[o + 2] << 16) | ((uint32_t)(uint8_t)ph[o + 3] << 24));
+		};
+		auto p64 = [&](size_t o) -> uint64_t
+		{ return (uint64_t)p32(o) | ((uint64_t)p32(o + 4) << 32); };
+		struct Seg { uint64_t vaddr, off, filesz; };
+		std::vector<Seg> loads;
+		uint64_t dynOff = 0, dynSz = 0;
+		for (uint32_t i = 0; i < phnum; ++i)
+		{
+			const size_t b = (size_t)i * phentsize;
+			const uint32_t type = p32(b);
+			if (type == 1u /*PT_LOAD*/)    loads.push_back({ p64(b + 0x10), p64(b + 0x08), p64(b + 0x20) });
+			if (type == 2u /*PT_DYNAMIC*/) { dynOff = p64(b + 0x08); dynSz = p64(b + 0x20); }
+		}
+		if (!dynOff || !dynSz || dynSz > (16u << 20)) return out;
+		std::vector<char> dyn((size_t)dynSz);
+		f.clear(); f.seekg((std::streamoff)dynOff);
+		f.read(dyn.data(), (std::streamsize)dyn.size());
+		if ((size_t)f.gcount() < dyn.size()) return out;
+		auto d64 = [&](size_t o) -> uint64_t
+		{
+			if (o + 8 > dyn.size()) return 0ull;
+			uint64_t v = 0;
+			for (int k = 7; k >= 0; --k) v = (v << 8) | (uint8_t)dyn[o + k];
+			return v;
+		};
+		std::vector<uint64_t> needed;
+		uint64_t strtabVa = 0, strsz = 0;
+		for (size_t o = 0; o + 16 <= dyn.size(); o += 16)
+		{
+			const uint64_t tag = d64(o), val = d64(o + 8);
+			if (tag == 0) break;                                          // DT_NULL
+			else if (tag == 1)  needed.push_back(val);                    // DT_NEEDED
+			else if (tag == 5)  strtabVa = val;                           // DT_STRTAB
+			else if (tag == 10) strsz = val;                              // DT_STRSZ
+		}
+		if (needed.empty() || !strtabVa || !strsz || strsz > (16u << 20)) return out;
+		uint64_t strtabOff = 0;
+		for (const Seg& l : loads)
+			if (strtabVa >= l.vaddr && strtabVa < l.vaddr + l.filesz)
+			{ strtabOff = l.off + (strtabVa - l.vaddr); break; }
+		if (!strtabOff) return out;
+		std::vector<char> strtab((size_t)strsz);
+		f.clear(); f.seekg((std::streamoff)strtabOff);
+		f.read(strtab.data(), (std::streamsize)strtab.size());
+		if ((size_t)f.gcount() < strtab.size()) return out;
+		for (uint64_t no : needed)
+		{
+			if (no >= strsz) continue;
+			const char* sp = strtab.data() + no;
+			std::string full(sp, strnlen(sp, (size_t)(strsz - no)));
+			// stem() only strips the LAST extension — "libglfw.so.3" needs the whole ".so.*"
+			// versioned tail gone before it matches anything by stem.
+			const size_t soPos = full.rfind(".so");
+			if (soPos != std::string::npos) full.resize(soPos);
+			std::string s = bfs::path(full).stem().string();
+			for (char& c : s) c = (char)tolower((unsigned char)c);
+			if (!s.empty()) out.push_back(s);
 		}
 		return out;
 	}
@@ -478,12 +640,19 @@ static NUKEModule* DiscoverModuleFileBody(const std::string& absPath)
 	g_refused.erase(p.generic_string());   // re-discovery re-judges this file
 	try
 	{
-#ifdef _WIN32
-		// ABI gate BEFORE the DLL's code can run. Not LoadLibraryEx(DONT_RESOLVE_DLL_REFERENCES):
-		// that plants an uninitialized image the later real LoadLibrary can be handed back.
+#if defined(_WIN32) || defined(__linux__)
+		// ABI gate BEFORE the DLL's code can run. Windows: not LoadLibraryEx(DONT_RESOLVE_
+		// DLL_REFERENCES) — that plants an uninitialized image the later real LoadLibrary can
+		// be handed back. Linux: the same read-the-file gate keeps a stale .so's static
+		// initializers from ever running (macOS still relies on the post-dlopen check).
 		{
 			bool hasPlugin = false; int engineAbi = 1;
-			if (PreflightPeExports(p.string(), hasPlugin, engineAbi))
+#ifdef _WIN32
+			const bool preflighted = PreflightPeExports(p.string(), hasPlugin, engineAbi);
+#else
+			const bool preflighted = PreflightElfExports(p.string(), hasPlugin, engineAbi);
+#endif
+			if (preflighted)
 			{
 				if (!hasPlugin)
 					return nullptr;   // not a NUKE module
@@ -599,7 +768,7 @@ bool UnloadModuleDll(const std::string& moduleFile)
 			return false;
 		}
 		if (m->loaded) DisablePlugin(m.get());   // live components -> UnknownComponent placeholders
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__linux__)
 		KillThreadsOfModule(moduleFile);   // this path really unmaps: nothing of its may still run
 #endif
 		const long uses = m.use_count();
@@ -629,7 +798,7 @@ NUKEModule* FindServiceProvider(const char* service, const std::string& preferre
 	for (auto& m : g_modules)
 	{
 		if (!m || std::string(m->provides()) != service) continue;
-		if (m->moduleFile == preferredFile) return m.get();
+		if (ModuleFileMatches(m->moduleFile, preferredFile)) return m.get();
 		if (!first) first = m.get();
 	}
 	if (first && !preferredFile.empty())
@@ -730,11 +899,21 @@ void DisablePlugin(NUKEModule* m)
 				cout << "[Modular]\t" << t.dll << ": worker thread " << t.id
 				     << " ignored stop for 2 s — terminating it" << endl;
 				::TerminateThread(t.th.native_handle(), 0);
+				t.th.detach();   // the boost::thread must not outlive this scope joinable
+#elif defined(__linux__)
+				cout << "[Modular]\t" << t.dll << ": worker thread ignored stop for 2 s"
+				     << " — unwinding it (signal kill)" << endl;
+				KillThreadHard((pthread_t)t.th.native_handle());
+				if (!t.th.try_join_for(boost::chrono::milliseconds(500)))
+				{
+					cout << "[Modular]\t" << t.dll << ": worker refused to die — detached" << endl;
+					t.th.detach();
+				}
 #else
 				cout << "[Modular]\t" << t.dll << ": worker thread " << t.id
 				     << " ignored stop for 2 s — detached (no portable kill)" << endl;
-#endif
 				t.th.detach();   // the boost::thread must not outlive this scope joinable
+#endif
 			}
 			g_runThreads.erase(rt);
 		}
@@ -791,6 +970,108 @@ static void KillThreadsOfModule(const std::string& dllFile)
 		CloseHandle(h);
 	}
 	CloseHandle(snap);
+}
+#elif defined(__linux__)
+// Linux counterpart of the Toolhelp sweep. There is no public "thread start address" here,
+// so the test is the honest one: any thread with a stack frame INSIDE the module right
+// before the unmap would fault the moment it runs there. Every sibling thread gets a
+// realtime signal; the handler walks its own stack and a hit unwinds the thread away via
+// pthread_exit — TLS/dtor cleanup actually runs, which is gentler than TerminateThread
+// with the same intent. Innocent threads return from the handler untouched (SA_RESTART).
+// Modules SHOULD stop their own workers in Shutdown; this is the safety net behind them.
+static struct
+{
+	std::atomic<uintptr_t>     lo{0}, hi{0};    // module mapping range (0 = sweep inactive)
+	std::atomic<unsigned long> forceThread{0};  // pthread_t of the unconditional target
+	std::atomic<int>           killed{0};
+} g_tkill;
+
+static void ThreadKillHandler(int)
+{
+	if (g_tkill.forceThread.load(std::memory_order_acquire) == (unsigned long)pthread_self())
+	{
+		g_tkill.killed.fetch_add(1, std::memory_order_acq_rel);
+		pthread_exit(nullptr);
+	}
+	const uintptr_t lo = g_tkill.lo.load(std::memory_order_acquire);
+	const uintptr_t hi = g_tkill.hi.load(std::memory_order_acquire);
+	if (!lo) return;
+	void* frames[64];
+	const int n = backtrace(frames, 64);
+	for (int i = 0; i < n; ++i)
+		if ((uintptr_t)frames[i] >= lo && (uintptr_t)frames[i] < hi)
+		{
+			g_tkill.killed.fetch_add(1, std::memory_order_acq_rel);
+			pthread_exit(nullptr);   // unwinds through the signal frame; dtors run
+		}
+}
+
+static void InstallThreadKillHandler()
+{
+	static bool installed = []
+	{
+		struct sigaction sa = {};
+		sa.sa_handler = &ThreadKillHandler;
+		sa.sa_flags = SA_RESTART;   // innocent threads resume their syscalls untouched
+		sigemptyset(&sa.sa_mask);
+		sigaction(SIGRTMIN + 6, &sa, nullptr);
+		return true;
+	}();
+	(void)installed;
+}
+
+// The unconditional kill for one specific thread (DisablePlugin's Run-thread timeout).
+static bool KillThreadHard(pthread_t th)
+{
+	InstallThreadKillHandler();
+	g_tkill.forceThread.store((unsigned long)th, std::memory_order_release);
+	const bool ok = pthread_kill(th, SIGRTMIN + 6) == 0;
+	if (ok) usleep(50 * 1000);
+	g_tkill.forceThread.store(0, std::memory_order_release);
+	return ok;
+}
+
+static void KillThreadsOfModule(const std::string& dllFile)
+{
+	// The module's mapped range, straight from the loader's list (path suffix match).
+	struct Ctx { const std::string* name; uintptr_t lo = 0, hi = 0; } ctx{ &dllFile };
+	dl_iterate_phdr([](struct dl_phdr_info* info, size_t, void* p) -> int
+	{
+		Ctx& c = *(Ctx*)p;
+		const std::string n = info->dlpi_name ? info->dlpi_name : "";
+		if (n.size() < c.name->size()
+		    || n.compare(n.size() - c.name->size(), c.name->size(), *c.name) != 0)
+			return 0;
+		for (int i = 0; i < info->dlpi_phnum; ++i)
+		{
+			if (info->dlpi_phdr[i].p_type != PT_LOAD) continue;
+			const uintptr_t s = (uintptr_t)info->dlpi_addr + info->dlpi_phdr[i].p_vaddr;
+			const uintptr_t e = s + info->dlpi_phdr[i].p_memsz;
+			if (!c.lo || s < c.lo) c.lo = s;
+			if (e > c.hi) c.hi = e;
+		}
+		return 1;
+	}, &ctx);
+	if (!ctx.lo) return;
+
+	InstallThreadKillHandler();
+	g_tkill.lo.store(ctx.lo, std::memory_order_release);
+	g_tkill.hi.store(ctx.hi, std::memory_order_release);
+	g_tkill.killed.store(0, std::memory_order_release);
+	const pid_t self = (pid_t)syscall(SYS_gettid);
+	boost::system::error_code tec;
+	for (bfs::directory_iterator it("/proc/self/task", tec), end; it != end && !tec; it.increment(tec))
+	{
+		const pid_t tid = (pid_t)atoi(it->path().filename().string().c_str());
+		if (tid <= 0 || tid == self) continue;
+		syscall(SYS_tgkill, getpid(), tid, SIGRTMIN + 6);
+	}
+	usleep(100 * 1000);   // let the handlers run before the caller unmaps
+	g_tkill.lo.store(0, std::memory_order_release);
+	g_tkill.hi.store(0, std::memory_order_release);
+	if (const int k = g_tkill.killed.load(std::memory_order_acquire))
+		cout << "[Modular]\t" << dllFile << ": unwound " << k
+		     << " leftover thread(s) before the unmap" << endl;
 }
 #endif
 
