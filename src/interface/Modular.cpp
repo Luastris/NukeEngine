@@ -1,6 +1,7 @@
 // Must precede any boost header: the lib flavor of chrono double-defines steady_clock::now (LNK2005).
 #define BOOST_CHRONO_HEADER_ONLY
 #include "interface/Modular.h"
+#include "interface/NukeVersion.h"
 #include "interface/Services.h"
 #include "config.h"              // writableDir/baseDir: no dir creation beside installed bundles
 #include "reflect/Reflect.h"
@@ -143,6 +144,8 @@ bool ModuleInstalled(const std::string& name, bool* outLoaded)
 		if (low(it->path().stem().string()) == want) return true;
 	return false;
 }
+
+const char* EngineVersion() { return NUKE_ENGINE_VERSION; }
 
 // Same module file across platforms? Project files record the AUTHORING platform's file name
 // ("NukeRenderDiligent.dll"); the pool on this machine holds the native one (".so"/".dylib").

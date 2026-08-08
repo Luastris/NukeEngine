@@ -76,6 +76,11 @@ NUKEENGINE_API void DisablePlugin(NUKEModule* m);
 // The currently LOADED provider of a service, or null if the service is off.
 NUKEENGINE_API NUKEModule* ActiveServiceProvider(const char* service);
 
+// The RUNNING engine's release name (NukeVersion.h of the build that produced this binary).
+// A plugin compares it with its own compiled-against NUKE_ENGINE_VERSION for feature-gating;
+// load compatibility stays the ABI stamp's job.
+NUKEENGINE_API const char* EngineVersion();
+
 // Same module file across platforms? Compares by lowercase stem ("NukeRenderDiligent.dll" ==
 // "NukeRenderDiligent.so") — project files written on one OS keep working on another.
 NUKEENGINE_API bool ModuleFileMatches(const std::string& a, const std::string& b);
