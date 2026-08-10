@@ -68,6 +68,19 @@ public:
 	virtual void ResetStyle() {}
 	// Window placement for the NEXT Begin() (retained layer / scripted layouts).
 	virtual void SetNextWindowRect(float x, float y, float w, float h) {}
+
+	// ABI: appended for the dev console (engine DevConsole.h draws through these).
+	// Colored text that does NOT touch the persistent style (log lines).
+	virtual void TextColored(float r, float g, float b, float a, const char* s) { Text(s); }
+	// Full-width input line: true on Enter (buffer holds the line). Up/Down cycle `history`
+	// (the backend owns the nav position; ` and ~ are filtered out — they toggle the console).
+	virtual bool InputTextHistory(const char* label, char* buf, int bufCap,
+	                              const char* const* history, int histCount) { return false; }
+	virtual void FocusNextWidget() {}                       // keyboard focus for the next widget
+	// Scrolling sub-region; height <= 0 = fill the window minus one input row.
+	virtual void BeginScrollRegion(const char* id, float height) {}
+	virtual void EndScrollRegion() {}
+	virtual void ScrollToBottom() {}                        // stick to the end while inside
 };
 
 // The active backend. GUI() NEVER returns null — a no-op stub stands in when none is registered.

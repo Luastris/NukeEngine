@@ -138,14 +138,19 @@ void Input::Unsubscribe(int subId)
 { g_cbs.erase(std::remove_if(g_cbs.begin(), g_cbs.end(), [subId](const CB& c) { return c.id == subId; }), g_cbs.end()); }
 
 // ---- query -------------------------------------------------------------------------------------------
-bool Input::Pressed(const std::string& a)       { auto it = g_state.find(a); return it != g_state.end() && it->second.pressed; }
-bool Input::Held(const std::string& a)          { auto it = g_state.find(a); return it != g_state.end() && it->second.held; }
-bool Input::Released(const std::string& a)      { auto it = g_state.find(a); return it != g_state.end() && it->second.released; }
-bool Input::Tapped(const std::string& a)        { auto it = g_state.find(a); return it != g_state.end() && it->second.tapped; }
-bool Input::LongPressed(const std::string& a)   { auto it = g_state.find(a); return it != g_state.end() && it->second.longPressed; }
-bool Input::DoublePressed(const std::string& a) { auto it = g_state.find(a); return it != g_state.end() && it->second.doublePressed; }
-float Input::Value(const std::string& a)        { auto it = g_state.find(a); return it == g_state.end() ? 0.0f : it->second.value; }
-Vector2 Input::Axis2(const std::string& a)      { auto it = g_state.find(a); return it == g_state.end() ? Vector2(0, 0) : Vector2(it->second.x, it->second.y); }
+// Overlay suppression (dev console open): every ACTION query reads neutral; raw controls stay live.
+static bool g_suppressed = false;
+void Input::SetSuppressed(bool on) { g_suppressed = on; }
+bool Input::Suppressed()           { return g_suppressed; }
+
+bool Input::Pressed(const std::string& a)       { if (g_suppressed) return false; auto it = g_state.find(a); return it != g_state.end() && it->second.pressed; }
+bool Input::Held(const std::string& a)          { if (g_suppressed) return false; auto it = g_state.find(a); return it != g_state.end() && it->second.held; }
+bool Input::Released(const std::string& a)      { if (g_suppressed) return false; auto it = g_state.find(a); return it != g_state.end() && it->second.released; }
+bool Input::Tapped(const std::string& a)        { if (g_suppressed) return false; auto it = g_state.find(a); return it != g_state.end() && it->second.tapped; }
+bool Input::LongPressed(const std::string& a)   { if (g_suppressed) return false; auto it = g_state.find(a); return it != g_state.end() && it->second.longPressed; }
+bool Input::DoublePressed(const std::string& a) { if (g_suppressed) return false; auto it = g_state.find(a); return it != g_state.end() && it->second.doublePressed; }
+float Input::Value(const std::string& a)        { if (g_suppressed) return 0.0f; auto it = g_state.find(a); return it == g_state.end() ? 0.0f : it->second.value; }
+Vector2 Input::Axis2(const std::string& a)      { if (g_suppressed) return Vector2(0, 0); auto it = g_state.find(a); return it == g_state.end() ? Vector2(0, 0) : Vector2(it->second.x, it->second.y); }
 
 // ---- evaluation --------------------------------------------------------------------------------------
 // "Down" by MAGNITUDE: axis controls swing negative and must actuate like the positive direction.

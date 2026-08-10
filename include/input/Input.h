@@ -63,6 +63,11 @@ public:
 	[[nuke::func]] static void        LoadUserBindings(const std::string& json); // re-apply over the defaults
 
 	// ===== engine / plugin API (NOT reflected) =======================================================
+	// Suppress ACTION queries (all return false/0) while a system overlay eats the keyboard —
+	// the dev console typing "w" must not also walk the player. Raw Control() stays live.
+	static void SetSuppressed(bool on);
+	static bool Suppressed();
+
 	// Register a device provider; `poll` runs once per frame BEFORE action evaluation. Event-driven
 	// providers just SetControl from their callbacks and register a no-op.
 	static void RegisterProvider(const std::string& name, std::function<void()> poll);

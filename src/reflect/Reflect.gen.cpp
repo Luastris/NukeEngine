@@ -17,6 +17,7 @@
 #include "API/Model/Collider.h"
 #include "API/Model/DebugDraw.h"
 #include "API/Model/Decal.h"
+#include "API/Model/DevConsole.h"
 #include "API/Model/Environment.h"
 #include "API/Model/Events.h"
 #include "API/Model/Foliage.h"
@@ -422,6 +423,15 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("intensity", &Decal::intensity, "", "Intensity", 0.0f, 8.0f));
 		t.fields.push_back(MakeField("angleFade", &Decal::angleFade, "", "Angle Fade", 0.0f, 1.0f));
 		t.create = []() -> void* { return new Decal(); };
+	}
+	{
+		TypeInfo& t = TypeOf<Console>();
+		t.base = "Object";
+		t.methods.push_back(MakeMethod("SetEnabled", &Console::SetEnabled));
+		t.methods.push_back(MakeMethod("Enabled", &Console::Enabled));
+		t.methods.push_back(MakeMethod("Toggle", &Console::Toggle));
+		t.methods.push_back(MakeMethod("IsOpen", &Console::IsOpen));
+		t.methods.push_back(MakeMethod("Execute", &Console::Execute));
 	}
 	{
 		TypeInfo& t = TypeOf<Environment>();
