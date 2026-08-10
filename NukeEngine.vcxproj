@@ -371,6 +371,7 @@
     <ClCompile Include="src\interface\EditorMenu\MenuStrip.cpp" />
     <ClCompile Include="src\API\Model\Clock.cpp" />
     <ClCompile Include="src\API\Model\Collider.cpp" />
+    <ClCompile Include="src\API\Model\CrashReport.cpp" />
     <ClCompile Include="src\API\Model\Game.cpp" />
     <ClCompile Include="src\API\Model\Module.cpp" />
     <ClCompile Include="src\API\Model\Log.cpp" />
