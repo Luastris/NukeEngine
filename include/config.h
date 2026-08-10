@@ -43,6 +43,8 @@ struct NukeWindow{
     bool  rayTracing  = true;    // false = force the raster path even on RT-capable GPUs ("rayTracing")
     bool  showFps     = true;    // Player: append "N FPS (x.x ms)" to the window title ("showFps")
     bool  vsync       = true;    // cap the main present to the display refresh ("vsync"); live-toggleable
+    bool  clickThrough    = false;  // mouse input passes through to windows beneath ("clickThrough")
+    bool  hideFromCapture = false;  // invisible to screen capture ("hideFromCapture"; Windows/macOS)
 };
 
 // Engine-wide ray-tracing reflection quality, persisted to config/main.json ["raytracing"].

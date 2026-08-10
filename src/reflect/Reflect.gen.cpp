@@ -524,6 +524,9 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("SetTransparent", &Game::SetTransparent));
 		t.methods.push_back(MakeMethod("SetOpacity", &Game::SetOpacity));
 		t.methods.push_back(MakeMethod("SetVSync", &Game::SetVSync));
+		t.methods.push_back(MakeMethod("SetAlwaysOnTop", &Game::SetAlwaysOnTop));
+		t.methods.push_back(MakeMethod("SetClickThrough", &Game::SetClickThrough));
+		t.methods.push_back(MakeMethod("SetHideFromCapture", &Game::SetHideFromCapture));
 		t.methods.push_back(MakeMethod("WindowWidth", &Game::WindowWidth));
 		t.methods.push_back(MakeMethod("WindowHeight", &Game::WindowHeight));
 		t.methods.push_back(MakeMethod("GetWindowMode", &Game::GetWindowMode));
@@ -531,6 +534,9 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("IsTransparent", &Game::IsTransparent));
 		t.methods.push_back(MakeMethod("Opacity", &Game::Opacity));
 		t.methods.push_back(MakeMethod("IsVSync", &Game::IsVSync));
+		t.methods.push_back(MakeMethod("IsAlwaysOnTop", &Game::IsAlwaysOnTop));
+		t.methods.push_back(MakeMethod("IsClickThrough", &Game::IsClickThrough));
+		t.methods.push_back(MakeMethod("IsHideFromCapture", &Game::IsHideFromCapture));
 		t.methods.push_back(MakeMethod("Screenshot", &Game::Screenshot));
 	}
 	{

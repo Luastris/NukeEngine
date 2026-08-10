@@ -96,6 +96,9 @@ struct WindowDesc
     int   backend     = 0;      // 0 = D3D11, 1 = D3D12 (D3D12 enables ray tracing)
     bool  gpuValidation = false; // D3D12 validation layer + DRED (heavy; off by default)
     bool  rayTracing  = true;   // false = force the raster path even on RT-capable GPUs
+    // ABI: cross-DLL struct — new fields are APPENDED at the END, never inserted mid-struct.
+    bool  clickThrough    = false;  // mouse input passes through to the windows beneath (live)
+    bool  hideFromCapture = false;  // invisible to screen capture/recording; the user still sees it (live)
 };
 
 // One record per instance in an instance buffer. Rows are HLSL-ready: row_i dot (localPos, 1)

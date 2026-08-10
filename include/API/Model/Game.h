@@ -79,6 +79,12 @@ public:
 	[[nuke::func]] static void SetTransparent(bool transparent);
 	[[nuke::func]] static void SetOpacity(double opacity);        // whole-window 0..1 (live)
 	[[nuke::func]] static void SetVSync(bool on);                 // cap FPS to display refresh
+	// Overlay flags (desktop-companion class windows). All live-settable.
+	[[nuke::func]] static void SetAlwaysOnTop(bool onTop);        // window stays above all others
+	[[nuke::func]] static void SetClickThrough(bool through);     // clicks pass to windows beneath
+	// Invisible to screenshots/recorders — the user still sees the window, capture sees what is
+	// behind it. Windows + macOS; X11/Wayland have no such protocol (ignored with a log).
+	[[nuke::func]] static void SetHideFromCapture(bool hide);
 
 	[[nuke::func]] static int        WindowWidth();
 	[[nuke::func]] static int        WindowHeight();
@@ -87,6 +93,9 @@ public:
 	[[nuke::func]] static bool       IsTransparent();
 	[[nuke::func]] static double     Opacity();
 	[[nuke::func]] static bool       IsVSync();
+	[[nuke::func]] static bool       IsAlwaysOnTop();
+	[[nuke::func]] static bool       IsClickThrough();
+	[[nuke::func]] static bool       IsHideFromCapture();
 
 	// Queue a capture of the current game image; it happens at the end of this frame's render.
 	// Format by extension (.png/.bmp/.tga, default png). Slow — GPU flush + readback.

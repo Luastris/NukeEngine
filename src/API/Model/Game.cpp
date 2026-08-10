@@ -163,6 +163,8 @@ void ApplyAndSaveWindow()
 	d.transparent = win.transparent; d.opacity = win.opacity;
 	d.backend = win.backend;
 	d.rayTracing = win.rayTracing;   // creation-time only (PSOs); carried for consistency
+	d.clickThrough    = win.clickThrough;
+	d.hideFromCapture = win.hideFromCapture;
 	app->render->applyWindow(d);
 }
 }  // namespace
@@ -196,6 +198,22 @@ void Game::SetOpacity(double opacity)
 	ApplyAndSaveWindow();
 }
 
+void Game::SetAlwaysOnTop(bool onTop)
+{
+	Config::getSingleton()->window.floating = onTop;
+	ApplyAndSaveWindow();
+}
+void Game::SetClickThrough(bool through)
+{
+	Config::getSingleton()->window.clickThrough = through;
+	ApplyAndSaveWindow();
+}
+void Game::SetHideFromCapture(bool hide)
+{
+	Config::getSingleton()->window.hideFromCapture = hide;
+	ApplyAndSaveWindow();
+}
+
 void Game::SetVSync(bool on)
 {
 	Config* c = Config::getSingleton();
@@ -213,6 +231,9 @@ bool       Game::IsBorderless()  { return !Config::getSingleton()->window.decora
 bool   Game::IsTransparent() { return Config::getSingleton()->window.transparent; }
 double Game::Opacity()       { return Config::getSingleton()->window.opacity; }
 bool   Game::IsVSync()       { return Config::getSingleton()->window.vsync; }
+bool   Game::IsAlwaysOnTop()     { return Config::getSingleton()->window.floating; }
+bool   Game::IsClickThrough()    { return Config::getSingleton()->window.clickThrough; }
+bool   Game::IsHideFromCapture() { return Config::getSingleton()->window.hideFromCapture; }
 
 // The request is queued and consumed at the end of World::Render, where the frame is fully
 // drawn; the mutex covers the update/fixed thread setting it while the render thread reads it.
