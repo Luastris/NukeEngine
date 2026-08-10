@@ -20,6 +20,9 @@ struct JobState
 	bool done = false;
 };
 
+// Defined below the pool; JobHandle::Then registers through it.
+void Jobs_AddContinuation(const std::shared_ptr<JobState>&, const boost::function<void()>&);
+
 bool JobHandle::Valid() const { return (bool)state; }
 bool JobHandle::Done() const
 {
@@ -32,6 +35,12 @@ void JobHandle::Wait()
 	if (!state) return;
 	boost::mutex::scoped_lock l(state->m);
 	while (!state->done) state->cv.wait(l);
+}
+JobHandle& JobHandle::Then(const boost::function<void()>& onMain)
+{
+	if (!state) { Jobs::RunOnMain(onMain); return *this; }   // empty handle: next pump
+	Jobs_AddContinuation(state, onMain);
+	return *this;
 }
 
 namespace {
@@ -49,6 +58,10 @@ struct Pool
 	// main-thread delivery queue (RunOnMain -> PumpMain)
 	boost::mutex                            mm;
 	std::deque<boost::function<void()>>     mainQueue;
+
+	// job continuations (JobHandle::Then): PumpMain polls Done and runs them on the main thread
+	boost::mutex cm;
+	std::vector<std::pair<std::shared_ptr<JobState>, boost::function<void()>>> conts;
 };
 Pool g_pool;
 
@@ -85,6 +98,13 @@ void WorkerLoop(int core)
 }
 
 }  // namespace
+
+// JobHandle::Then registers here (defined above the pool — hence the seam function).
+void Jobs_AddContinuation(const std::shared_ptr<JobState>& s, const boost::function<void()>& fn)
+{
+	boost::mutex::scoped_lock l(g_pool.cm);
+	g_pool.conts.emplace_back(s, fn);
+}
 
 void Jobs::Init(int workers, bool pinCores)
 {
@@ -240,6 +260,20 @@ void Jobs::PumpMain()
 	{
 		boost::mutex::scoped_lock l(g_pool.mm);
 		batch.swap(g_pool.mainQueue);
+	}
+	// Then-continuations of completed jobs join this frame's batch (swap-remove; order
+	// across DIFFERENT jobs is not promised, per-job registration order is).
+	{
+		boost::mutex::scoped_lock l(g_pool.cm);
+		for (size_t i = 0; i < g_pool.conts.size();)
+		{
+			bool done;
+			{ boost::mutex::scoped_lock jl(g_pool.conts[i].first->m); done = g_pool.conts[i].first->done; }
+			if (!done) { ++i; continue; }
+			batch.push_back(g_pool.conts[i].second);
+			g_pool.conts[i] = g_pool.conts.back();
+			g_pool.conts.pop_back();
+		}
 	}
 	for (auto& fn : batch)
 	{

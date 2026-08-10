@@ -17,6 +17,11 @@ public:
 	bool Valid() const;   // refers to a scheduled job
 	bool Done() const;    // the job finished (or the handle is empty)
 	void Wait();          // block until finished; call from the MAIN thread, not a worker
+	// Run `onMain` on the MAIN/game thread once the job finishes (the first PumpMain after
+	// completion; an already-finished/empty handle queues it for the next pump). The
+	// "compute on the pool, apply on the game thread" idiom without hand-rolled polling;
+	// chainable — every registered continuation runs.
+	JobHandle& Then(const boost::function<void()>& onMain);
 private:
 	friend class Jobs;
 	std::shared_ptr<JobState> state;
