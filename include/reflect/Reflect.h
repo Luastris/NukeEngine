@@ -128,6 +128,10 @@ struct Field {
     // [[nuke::prop(widget="...")]] named custom widget. Known: "layers" (int bitmask over
     // nuke::Layers). Unknown names fall back to the default widget.
     std::string widget;
+    // [[nuke::prop(net)]] — this field is REPLICATED. NukeNet's NetSync auto-collects every
+    // net field on an atom's components and streams it (server-authoritative). Purely a hint;
+    // the engine itself never reads it.
+    bool net = false;
 };
 
 // One reflected value crossing the scripting boundary. `type` says which member is valid:

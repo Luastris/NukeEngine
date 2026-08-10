@@ -50,7 +50,8 @@ extern "C" { NUKE_ABI_STAMP int nuke_module_abi = NUKE_MODULE_ABI; }
 //  12 — iScript gained ModuleDeps/PlatformOf (mod dependency + platform queries). Service
 //       vtables have NO per-call guard, so growing one is a layout break like any other.
 //  13 — WindowDesc/NukeWindow gained clickThrough + hideFromCapture (overlay window flags)
-#define NUKE_ENGINE_ABI 13
+//  14 — reflection Field gained `net` ([[nuke::prop(net)]] replicated-field tag for NukeNet)
+#define NUKE_ENGINE_ABI 14
 extern "C" { NUKE_ABI_STAMP int nuke_engine_abi = NUKE_ENGINE_ABI; }
 
 namespace nuke {

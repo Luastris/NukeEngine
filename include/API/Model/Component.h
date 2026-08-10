@@ -36,6 +36,7 @@ struct DynProp
 	std::string name;
 	NukeVar     value;
 	NukeVar     def;   // declared default (for an editor reset button)
+	bool        net = false;   // marked replicated (C#: [Net]); NukeNet auto-collects it
 };
 
 

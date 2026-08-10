@@ -60,6 +60,12 @@ public:
 	// its code stays portable. ABI: appended at the END of the vtable.
 	virtual int PlatformOf(const char* path, char* buf, int cap)
 	{ (void)path; (void)buf; (void)cap; return 0; }
+
+	// The class's REPLICATED members (marked [Net] in the backend's language), newline-joined
+	// utf8, same sizing protocol as ListClasses. Lets the network graph list a class's net
+	// fields without instantiating it. 0 = unknown class / none. ABI: appended at the END.
+	virtual int NetFieldsOf(const char* cls, char* buf, int cap)
+	{ (void)cls; (void)buf; (void)cap; return 0; }
 };
 
 }  // namespace nuke
