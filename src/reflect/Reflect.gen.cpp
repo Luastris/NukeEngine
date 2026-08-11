@@ -215,6 +215,7 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("IsPersistent", &Atom::IsPersistent));
 		t.methods.push_back(MakeMethod("SetEnabled", &Atom::SetEnabled));
 		t.methods.push_back(MakeMethod("IsEnabled", &Atom::IsEnabled));
+		t.methods.push_back(MakeMethod("IsFolder", &Atom::IsFolder));
 		t.methods.push_back(MakeMethod("SetParent", &Atom::SetParent));
 		t.methods.push_back(MakeMethod("GetParent", &Atom::GetParent));
 		t.methods.push_back(MakeMethod("AddChild", &Atom::AddChild));

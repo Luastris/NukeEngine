@@ -47,6 +47,11 @@ public:
 	// Must stay APPENDED at the END of the data members (cross-DLL layout).
 	bool enabled = true;
 
+	// Organizational FOLDER node (hierarchy only): no components, transform locked to identity —
+	// children keep their world poses when moved in or out. The runtime treats it as a plain
+	// empty. Appended at the END (cross-DLL layout; part of engine abi 15).
+	bool folder = false;
+
 	Atom();
 	Atom(const char* name);
 	~Atom();
@@ -62,6 +67,7 @@ public:
 	[[nuke::func]] bool IsPersistent();
 	[[nuke::func]] void SetEnabled(bool on);        // whole-atom switch incl. subtree (see `enabled`)
 	[[nuke::func]] bool IsEnabled();                // this atom's OWN flag (an ancestor may still disable it)
+	[[nuke::func]] bool IsFolder();                 // hierarchy folder node (see `folder`)
 	Transform& GetTransform();
 	
 	template<class T>

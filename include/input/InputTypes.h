@@ -41,6 +41,10 @@ struct InputBinding
 	float  longMin      = 0.50f;                   // LongPress: held at least this
 	float  doubleWindow = 0.30f;                   // DoublePress: two presses within this
 	float  sequenceWindow = 0.60f;                 // SEQUENCE: max gap between consecutive presses
+
+	// Provenance (Q6): the .nuinput file that defined this binding, "user" for runtime rebinds,
+	// "" for code-defined. Display/diagnostics only — never evaluated.
+	std::string source;
 };
 
 // A named abstract input. Gameplay binds to actions, not raw keys.
@@ -48,6 +52,7 @@ struct InputAction
 {
 	std::string     name;                          // "Jump", "Move", "Fire"
 	ActionValueType type = ActionValueType::Bool;
+	std::string     source;                        // provenance: first file that defined it (Q6)
 };
 
 // A mapping context ("gameplay", "menu", "vehicle", ...). Several can be active at once; higher
@@ -58,6 +63,7 @@ struct InputContext
 	int                       priority = 0;        // higher = evaluated first
 	bool                      active   = false;    // toggled by Input::PushContext / SetContextActive
 	std::vector<InputBinding> bindings;
+	std::string               source;              // provenance: first file that defined it (Q6)
 };
 
 // Runtime evaluated state of one action this frame (what the query API reports).

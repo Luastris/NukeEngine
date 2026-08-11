@@ -150,6 +150,20 @@ public:
 	double WorldActivationProgress();                       // -1 idle, else 0..1 roots instantiated
 	void   ContinueWorldActivation(bool ignoreBudget = false); // frame boundary: next budget slice
 	void   FlushWorldActivation();                          // finish instantly
+
+	// --- EDITOR MULTI-SELECTION (Q3/Q4). `selectedInHieararchy` stays the PRIMARY selection —
+	// everything existing (modules included) keeps reading it; these are the ADDITIONAL members,
+	// stored as stable ids so a deleted atom can never dangle. Editor-maintained; the outline
+	// pass and the gizmo read them. ABI: appended at the END (engine abi 15).
+	std::vector<unsigned long> selectedExtra;
+	bool IsSelected(Atom* a);          // primary OR extra
+	std::vector<Atom*> Selection();    // live atoms: primary first, then resolvable extras
+	void ClearExtraSelection() { selectedExtra.clear(); }
+
+	// Editor world grid, emitted by World::Render IN-FRAME (lines pushed from the editor UI
+	// land a frame late and shimmer while the camera moves). 0 = hidden; the editor sets the
+	// step each frame from its snap settings. Part of the abi 15 append block.
+	float editorGridStep = 0.0f;
 };
 
 }  // namespace nuke

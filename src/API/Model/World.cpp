@@ -1,4 +1,4 @@
-// Header-only boost.chrono must come BEFORE any boost include: the lib flavor double-defines
+﻿// Header-only boost.chrono must come BEFORE any boost include: the lib flavor double-defines
 // steady_clock::now inside the engine DLL.
 #define BOOST_CHRONO_HEADER_ONLY
 #include <boost/chrono.hpp>
@@ -1914,6 +1914,42 @@ void World::Render(iRender* r)
 		AppInstance* app = AppInstance::GetSingleton();
 		if (app->isEditor() && app->playState == 0 && app->selectedInHieararchy)
 			EmitSelectionGizmos(app->selectedInHieararchy);
+
+		// The editor world grid (Y=0), emitted HERE so it is in-frame with the camera —
+		// depth-tested, LOD-stepped (x10 as the camera rises: constant screen density,
+		// growing coverage, no visible boundary), faint, edge-faded.
+		if (app->isEditor() && app->editorGridStep > 0.0f && r)
+			if (Atom* cam = Get("Editor Camera"))
+			{
+				Vector3 cp = cam->GetTransform().globalPosition();
+				const double camH = std::max(1.0, std::fabs(cp.y));
+				double step = std::max(0.01, (double)app->editorGridStep);
+				while (camH / step > 120.0) step *= 10.0;
+				const double major = step * 10.0;
+				const double ext = step * 80.0;
+				const double cx = std::floor(cp.x / major) * major;
+				const double cz = std::floor(cp.z / major) * major;
+				auto gline = [&](double ax, double az, double bx, double bz, float cr, float cg, float cb, float ca)
+				{
+					float fa[3] = { (float)ax, 0.0f, (float)az };
+					float fb[3] = { (float)bx, 0.0f, (float)bz };
+					float fc[4] = { cr, cg, cb, ca };
+					r->drawDebugLineDepth(fa, fb, fc);
+				};
+				const int n = (int)(ext / step);
+				for (int i = -n; i <= n; ++i)
+				{
+					const double o = i * step;
+					const float fade = 1.0f - (float)std::pow(std::fabs(o) / ext, 3.0);
+					const bool majX = std::fabs(std::remainder(cx + o, major)) < step * 0.25;
+					const bool majZ = std::fabs(std::remainder(cz + o, major)) < step * 0.25;
+					const float aMin = 0.06f * fade, aMaj = 0.14f * fade;
+					gline(cx + o, cz - ext, cx + o, cz + ext, 0.5f, 0.52f, 0.55f, majX ? aMaj : aMin);
+					gline(cx - ext, cz + o, cx + ext, cz + o, 0.5f, 0.52f, 0.55f, majZ ? aMaj : aMin);
+				}
+				if (std::fabs(cp.x) < ext) gline(0, cz - ext, 0, cz + ext, 0.35f, 0.45f, 0.80f, 0.30f);
+				if (std::fabs(cp.z) < ext) gline(cx - ext, 0, cx + ext, 0, 0.75f, 0.35f, 0.35f, 0.30f);
+			}
 	}
 
 	// Advance animated textures by real frame time. Only the current world may do this, or an
@@ -2476,7 +2512,10 @@ void World::Render(iRender* r)
 		// usually carries no mesh of its own, so every mesh below it goes into ONE mask and the
 		// edge pass closes it once: a composite object gets a single silhouette.
 		if (editor)
-			if (Atom* sel = AppInstance::GetSingleton()->selectedInHieararchy)
+		{
+			// The WHOLE selection (primary + multi-select extras) shares one mask/silhouette.
+			std::vector<Atom*> sel = AppInstance::GetSingleton()->Selection();
+			if (!sel.empty())
 			{
 				Profiler::Scope ps("rnd.cam.outline");
 				bool opened = false;
@@ -2498,9 +2537,10 @@ void World::Render(iRender* r)
 						}
 					for (Atom* c : a->children) outline(c);
 				};
-				outline(sel);
+				for (Atom* s : sel) outline(s);
 				if (opened) r->selectionOutlineEnd();
 			}
+		}
 		{ Profiler::Scope ps("rnd.cam.end"); r->endCamera(); }
 	}
 	{
@@ -2520,6 +2560,7 @@ static void SaveAtom(Atom* atom, json& j)
 	if (atom->layer != 0) j["layer"] = atom->layer;                  // 0 = Default, omitted
 	if (atom->persistent) j["persistent"] = true;                    // survives world switches
 	if (!atom->enabled) j["enabled"] = false;
+	if (atom->folder) j["folder"] = true;                            // hierarchy folder node
 	Transform& t = atom->GetTransform();
 	if (TypeInfo* tti = t.GetType())
 		SaveObject(*tti, &t, j["transform"]);
@@ -2618,6 +2659,7 @@ static Atom* LoadAtom(const json& j)
 	atom->layer      = std::max(0, std::min(31, j.value("layer", 0)));
 	atom->persistent = j.value("persistent", false);
 	atom->enabled    = j.value("enabled", true);
+	atom->folder     = j.value("folder", false);
 	if (j.contains("transform"))
 	{
 		Transform& t = atom->GetTransform();
@@ -3323,6 +3365,7 @@ void World::LoadHeaderFromJson(const json& j)
 	if (iPhysics* p = GetService<iPhysics>()) p->reset();
 	if (iAudio* au = GetService<iAudio>()) au->reset();   // silence game voices
 	AppInstance::GetSingleton()->selectedInHieararchy = nullptr;   // would dangle otherwise
+	AppInstance::GetSingleton()->selectedExtra.clear();
 	std::function<void(Atom*)> hardDestroy = [&](Atom* a)
 	{
 		if (!a) return;

@@ -68,6 +68,12 @@ public:
 	static void SetSuppressed(bool on);
 	static bool Suppressed();
 
+	// Q6 input-map explicitness: which content .nuinput files may LOAD. Empty list = auto
+	// (every discovered file, the historical behavior). Paths are content-relative, '/'
+	// separators, case-insensitive. Set BEFORE the content scan (project load / player boot).
+	static void SetEnabledMaps(const std::vector<std::string>& contentRelPaths);
+	static bool MapEnabled(const std::string& contentRelPath);
+
 	// Register a device provider; `poll` runs once per frame BEFORE action evaluation. Event-driven
 	// providers just SetControl from their callbacks and register a no-op.
 	static void RegisterProvider(const std::string& name, std::function<void()> poll);

@@ -34,7 +34,7 @@ struct BindingRT
 	double seqLastTime = -1e9;
 };
 struct EvalBinding { InputBinding b; BindingRT rt; };
-struct EvalContext { std::string name; int priority = 0; bool active = false; std::vector<EvalBinding> bindings; };
+struct EvalContext { std::string name; int priority = 0; bool active = false; std::vector<EvalBinding> bindings; std::string source; };
 
 // -- core state --
 static std::unordered_map<std::string, ControlState> g_controls;
@@ -311,16 +311,52 @@ static InputBinding bindingFromJson(const json& j)
 	return b;
 }
 
+// Q6 provenance: while a .nuinput applies, everything it defines is stamped with its name.
+static std::string g_curSource;
+// Q6 explicit map list: content-relative paths allowed to load; empty = auto (all).
+static std::vector<std::string> g_enabledMaps;
+
+static std::string NormMapPath(const std::string& p)
+{
+	std::string s = p;
+	for (char& c : s) { if (c == '\\') c = '/'; c = (char)tolower((unsigned char)c); }
+	return s;
+}
+void Input::SetEnabledMaps(const std::vector<std::string>& contentRelPaths)
+{
+	g_enabledMaps.clear();
+	for (const std::string& p : contentRelPaths) g_enabledMaps.push_back(NormMapPath(p));
+}
+bool Input::MapEnabled(const std::string& contentRelPath)
+{
+	if (g_enabledMaps.empty()) return true;   // auto: the historical load-everything behavior
+	const std::string n = NormMapPath(contentRelPath);
+	for (const std::string& e : g_enabledMaps) if (e == n) return true;
+	return false;
+}
+
 static bool applyInputJson(const json& j)
 {
 	for (const json& a : j.value("actions", json::array()))
-		Input::DefineAction(a.value("name", ""), (ActionValueType)a.value("type", 0));
+	{
+		const std::string an = a.value("name", "");
+		Input::DefineAction(an, (ActionValueType)a.value("type", 0));
+		for (InputAction& ia : g_actions)
+			if (ia.name == an && ia.source.empty()) ia.source = g_curSource;   // first definer wins
+	}
 	for (const json& c : j.value("contexts", json::array()))
 	{
 		std::string name = c.value("name", "");
 		Input::DefineContext(name, c.value("priority", 0));
+		for (EvalContext& ec : g_ctx)
+			if (ec.name == name && ec.source.empty()) ec.source = g_curSource;
 		if (c.value("active", false)) Input::PushContext(name);
-		for (const json& b : c.value("bindings", json::array())) Input::AddBinding(name, bindingFromJson(b));
+		for (const json& b : c.value("bindings", json::array()))
+		{
+			InputBinding ib = bindingFromJson(b);
+			ib.source = g_curSource;
+			Input::AddBinding(name, ib);
+		}
 	}
 	return true;
 }
@@ -330,19 +366,27 @@ bool Input::LoadAsset(const std::string& path)
 	boost::filesystem::ifstream in(p);
 	if (!in) return false;
 	json j; try { in >> j; } catch (...) { return false; }
-	return applyInputJson(j);
+	g_curSource = p.filename().string();
+	const bool ok = applyInputJson(j);
+	g_curSource.clear();
+	return ok;
 }
 bool Input::LoadAssetFromString(const std::string& text)
 {
 	json j; try { j = json::parse(text); } catch (...) { return false; }
-	return applyInputJson(j);
+	g_curSource = "pak";
+	const bool ok = applyInputJson(j);
+	g_curSource.clear();
+	return ok;
 }
 
 void Input::Rebind(const std::string& context, const InputBinding& b)
 {
-	ClearUserBindings(context, b.action);
-	g_userBindings.push_back({ context, b });
-	AddBinding(context, b);
+	InputBinding ub = b;
+	ub.source = "user";   // Q6: user layer beats assets in the provenance view
+	ClearUserBindings(context, ub.action);
+	g_userBindings.push_back({ context, ub });
+	AddBinding(context, ub);
 }
 void Input::ClearUserBindings(const std::string& context, const std::string& action)
 {
@@ -362,7 +406,12 @@ void Input::SetUserContext(const std::string& context, const std::vector<InputBi
 	EvalContext* c = findCtx(context);
 	if (!c) { DefineContext(context, 0); c = findCtx(context); }
 	c->bindings.clear();
-	for (const InputBinding& b : bindings) c->bindings.push_back({ b, {} });
+	for (const InputBinding& b : bindings)
+	{
+		InputBinding ub = b;
+		ub.source = "user";   // Q6: whole-context user replace
+		c->bindings.push_back({ ub, {} });
+	}
 }
 std::vector<std::string> Input::ListControls()
 {
@@ -421,7 +470,7 @@ std::vector<InputContext> Input::ListContexts()
 	std::vector<InputContext> out;
 	for (EvalContext& c : g_ctx)
 	{
-		InputContext ic; ic.name = c.name; ic.priority = c.priority; ic.active = c.active;
+		InputContext ic; ic.name = c.name; ic.priority = c.priority; ic.active = c.active; ic.source = c.source;
 		for (EvalBinding& eb : c.bindings) ic.bindings.push_back(eb.b);
 		out.push_back(std::move(ic));
 	}

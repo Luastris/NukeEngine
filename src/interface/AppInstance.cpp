@@ -1,4 +1,4 @@
-// Must precede any boost include: the lib flavor double-defines steady_clock::now in the engine DLL.
+﻿// Must precede any boost include: the lib flavor double-defines steady_clock::now in the engine DLL.
 #define BOOST_CHRONO_HEADER_ONLY
 #include "interface/AppInstance.h"
 #include "interface/AssetCreators.h"
@@ -135,6 +135,7 @@ bool AppInstance::OpenWorld(const std::string& relPath)
 	std::string data;
 	if (!ComposeWorldData(relPath, data)) return false;
 	selectedInHieararchy = nullptr;
+	selectedExtra.clear();
 	currentWorld->LoadFromString(data);
 	currentWorldPath = relPath;
 	NameWorldFromPath(relPath);
@@ -246,6 +247,7 @@ void AppInstance::ApplyAsyncWorldLoad()
 	activationDoc.reset();
 
 	selectedInHieararchy = nullptr;
+	selectedExtra.clear();
 	if (activationBudgetMs <= 0.f)
 	{
 		currentWorld->LoadFromJson(*doc);   // pre-parsed: the game thread only instantiates
@@ -369,6 +371,7 @@ void AppInstance::NewWorld()
 	if (currentWorld) currentWorld->Clear();   // empties the world but keeps the editor camera
 	currentWorldPath.clear();
 	selectedInHieararchy = nullptr;
+	selectedExtra.clear();
 }
 
 AppInstance::AppInstance()
@@ -515,6 +518,25 @@ void AppInstance::PushWindow(const char* key, boost::function<void()> fWindow) {
 }
 void AppInstance::PopWindow(string key) {
 	editorWindows->erase(key);
+}
+
+bool AppInstance::IsSelected(Atom* a)
+{
+	if (!a) return false;
+	if (a == selectedInHieararchy) return true;
+	for (unsigned long id : selectedExtra) if (a->id.id == id) return true;
+	return false;
+}
+
+std::vector<Atom*> AppInstance::Selection()
+{
+	std::vector<Atom*> out;
+	if (selectedInHieararchy) out.push_back(selectedInHieararchy);
+	if (!currentWorld) return out;
+	for (unsigned long id : selectedExtra)
+		if (Atom* a = currentWorld->GetById((long)id))
+			if (a != selectedInHieararchy) out.push_back(a);
+	return out;
 }
 
 }  // namespace nuke

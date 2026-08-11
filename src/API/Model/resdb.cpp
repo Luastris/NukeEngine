@@ -529,7 +529,12 @@ void ResDB::LoadContentEntry(const std::string& rel, const std::string& bytes)
 	}
 	else if (ext == ".nuinput")
 	{
-		if (Input::LoadAssetFromString(bytes)) std::cout << "[ResDB]	loaded input map (pak) '" << rel << "'" << std::endl;
+		std::string mrel = rel;
+		if (mrel.rfind("content/", 0) == 0) mrel = mrel.substr(8);
+		if (!Input::MapEnabled(mrel))
+			std::cout << "[ResDB]	input map (pak) '" << rel << "' skipped (not in the project's Input Maps)" << std::endl;
+		else if (Input::LoadAssetFromString(bytes))
+			std::cout << "[ResDB]	loaded input map (pak) '" << rel << "'" << std::endl;
 	}
 	else if (ext == ".nuanim")
 	{
@@ -681,7 +686,18 @@ void ResDB::LoadContentFile(const std::string& path)
 	}
 	else if (ext == ".nuinput")   // input map -> Input system, not a GUID'd asset
 	{
-		if (Input::LoadAsset(path)) std::cout << "[ResDB]	loaded input map '" << p.filename().string() << "'" << std::endl;
+		// Q6: the project may pin an EXPLICIT map list (.nuproj "inputMaps"); default = all.
+		std::string rel = p.generic_string();
+		const std::string& root = AppInstance::GetSingleton()->contentRoot;
+		if (!root.empty() && rel.rfind(boost::filesystem::path(root).generic_string(), 0) == 0)
+		{
+			rel = rel.substr(boost::filesystem::path(root).generic_string().size());
+			while (!rel.empty() && (rel[0] == '/' || rel[0] == '\\')) rel.erase(rel.begin());
+		}
+		if (!Input::MapEnabled(rel))
+			std::cout << "[ResDB]	input map '" << p.filename().string() << "' skipped (not in the project's Input Maps)" << std::endl;
+		else if (Input::LoadAsset(path))
+			std::cout << "[ResDB]	loaded input map '" << p.filename().string() << "'" << std::endl;
 	}
 	else if (ext == ".nuanim")
 	{

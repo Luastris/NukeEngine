@@ -58,6 +58,7 @@ bool Atom::IsPersistent()         { return persistent; }
 // No eager side effects: every consumer gates on the flag per frame.
 void Atom::SetEnabled(bool on) { enabled = on; }
 bool Atom::IsEnabled()         { return enabled; }
+bool Atom::IsFolder()          { return folder; }
 
 Transform& Atom::GetTransform()
 {
