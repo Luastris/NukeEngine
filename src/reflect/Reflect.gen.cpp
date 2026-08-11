@@ -710,6 +710,7 @@ bool NukeReflectInit() {
 		t.base = "Object";
 		t.methods.push_back(MakeMethod("Ms", &Profiler::Ms));
 		t.methods.push_back(MakeMethod("Phases", &Profiler::Phases));
+		t.methods.push_back(MakeMethod("Capture", &Profiler::Capture));
 	}
 	{
 		TypeInfo& t = TypeOf<RagdollDef>();

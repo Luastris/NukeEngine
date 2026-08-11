@@ -16,6 +16,9 @@ public:
 	// Smoothed milliseconds of a phase this frame (0 = unknown phase / not reported yet).
 	[[nuke::func]] static double      Ms(const std::string& phase);
 	[[nuke::func]] static std::string Phases();   // newline-separated known phase names
+	// Snapshot every phase to a CSV ("phase;ms", heaviest first). Relative paths land next
+	// to the executable's working directory. Returns false on IO failure.
+	[[nuke::func]] static bool        Capture(const std::string& file);
 
 	// --- native reporting (engine internals + game modules) ---
 	static void Report(const std::string& phase, double ms);   // thread-safe

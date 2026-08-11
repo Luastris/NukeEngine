@@ -6,7 +6,12 @@
 
 #include <boost/chrono.hpp>
 #include <boost/thread/mutex.hpp>
+#include <boost/filesystem.hpp>
+#include <boost/filesystem/fstream.hpp>
+#include <algorithm>
+#include <iostream>
 #include <map>
+#include <vector>
 
 namespace nuke {
 
@@ -43,6 +48,25 @@ std::string Profiler::Phases()
 	std::string out;
 	for (auto& kv : g_phases) { if (!out.empty()) out += "\n"; out += kv.first; }
 	return out;
+}
+
+bool Profiler::Capture(const std::string& file)
+{
+	if (file.empty()) return false;
+	std::vector<std::pair<std::string, double>> rows;
+	{
+		boost::mutex::scoped_lock lock(g_profMutex);
+		rows.assign(g_phases.begin(), g_phases.end());
+	}
+	std::sort(rows.begin(), rows.end(),
+	          [](const auto& a, const auto& b) { return a.second > b.second; });
+	boost::filesystem::ofstream out{ boost::filesystem::path(file), std::ios::trunc };
+	if (!out) return false;
+	out << "phase;ms\n";
+	for (const auto& r : rows) out << r.first << ";" << r.second << "\n";
+	std::cout << "[Profiler]\tcaptured " << rows.size() << " phase(s) -> "
+	          << boost::filesystem::absolute(file).string() << std::endl;
+	return true;
 }
 
 Profiler::Scope::Scope(const char* phase) : name(phase), t0(NowMs()) {}
