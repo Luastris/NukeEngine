@@ -2552,8 +2552,48 @@ void World::Render(iRender* r)
 
 // --- world serialization (.nuworld JSON via reflection) ---
 
+// E5 prefab-in-prefab: while a PREFAB saves, a nested prefab INSTANCE serializes as a
+// REFERENCE node — { prefabRef, basis, state } — instead of a flattened copy. `basis` is the
+// child prefab's document as the author saw it, `state` the instance's full snapshot; loading
+// three-way-merges state onto the CURRENT child file (the mod machinery), so child-prefab
+// edits propagate into every parent while the instance's own point changes stick.
+static thread_local int   g_prefabSave = 0;
+static thread_local Atom* g_prefabSaveRoot = nullptr;
+
+// Read a prefab's bytes by guid: the raw path first, the content layers (pak) as fallback.
+static bool ReadPrefabByGuid(const std::string& guid, std::string& out)
+{
+	const std::string path = ResDB::getSingleton()->PathForGuid(guid);
+	if (path.empty()) return false;
+	boost::filesystem::ifstream f{ boost::filesystem::path(path), std::ios::binary };
+	if (f) { out.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()); return true; }
+	return AppInstance::GetSingleton()->ReadContent(path, out);
+}
+
 static void SaveAtom(Atom* atom, json& j)
 {
+	// E5: reference-ize nested instances (never the root of the save itself).
+	if (g_prefabSave > 0 && atom != g_prefabSaveRoot && !atom->prefabGuid.empty())
+	{
+		std::string src;
+		json basis;
+		if (ReadPrefabByGuid(atom->prefabGuid, src))
+			basis = json::parse(src, nullptr, false);
+		if (basis.is_object())   // no readable source -> fall through to a plain flattened save
+		{
+			j["prefabRef"] = atom->prefabGuid;
+			j["basis"] = basis;
+			// The snapshot serializes as its OWN prefab root, so instances nested deeper
+			// inside it still reference-ize.
+			Atom* prevRoot = g_prefabSaveRoot;
+			g_prefabSaveRoot = atom;
+			json state;
+			SaveAtom(atom, state);
+			g_prefabSaveRoot = prevRoot;
+			j["state"] = state;
+			return;
+		}
+	}
 	j["name"] = atom->GetName();
 	j["id"]   = atom->id.id;   // stable identity across rebuilds
 	if (!atom->prefabGuid.empty()) j["prefab"] = atom->prefabGuid;   // instance link to a .nuprefab
@@ -2650,8 +2690,25 @@ static std::string ResolveComponentType(const std::string& saved)
 	return type;
 }
 
+// E5: expand a { prefabRef, basis, state } node into a plain atom document by three-way
+// merging the instance's state onto the CURRENT child prefab (basis = what the author saw).
+// Children match cur<->basis by id (same file lineage) and basis<->state by name/order (ids
+// regenerate per instance). Missing/broken source falls back to the recorded state snapshot.
+static thread_local int g_prefabRefDepth = 0;
+
+static json MergePrefabTree(const json& basisA, json cur, const json& stateA);
+static json ExpandPrefabRef(const json& node);
+
 static Atom* LoadAtom(const json& j)
 {
+	if (j.is_object() && j.contains("prefabRef"))
+	{
+		++g_prefabRefDepth;
+		json expanded = ExpandPrefabRef(j);
+		Atom* a = LoadAtom(expanded);
+		--g_prefabRefDepth;
+		return a;
+	}
 	Atom* atom = new Atom(j.value("name", std::string("Atom")).c_str());
 	if (j.contains("id")) { atom->id.id = j["id"].get<long>(); ID::observe(atom->id.id); }   // keep the saved identity
 	atom->prefabGuid = j.value("prefab", std::string());
@@ -2797,7 +2854,13 @@ bool SavePrefab(Atom* root, const std::string& path)
 {
 	if (!root) return false;
 	json j;
+	// E5: nested prefab instances save as references (+ diffs via basis), never flattened.
+	++g_prefabSave;
+	Atom* prevRoot = g_prefabSaveRoot;
+	g_prefabSaveRoot = root;
 	SaveAtom(root, j);
+	g_prefabSaveRoot = prevRoot;
+	--g_prefabSave;
 	boost::filesystem::path p(path);
 	boost::filesystem::ofstream f(p);
 	if (!f) return false;
@@ -3064,7 +3127,7 @@ json MergeObject3(const json& baseO, json cur, const json& layerO, int depth)
 // components the layer adds with "__mod" for provenance.
 json MergeAtomJson(const json& baseA, json cur, const json& layerA, const std::string& layerName)
 {
-	for (const char* key : { "name", "prefab" })
+	for (const char* key : { "name", "prefab", "layer", "persistent", "enabled", "folder" })
 	{
 		const json b = baseA.contains(key) ? baseA[key] : json();
 		const json l = layerA.contains(key) ? layerA[key] : json();
@@ -3165,6 +3228,99 @@ void ApplyLayer(MergeState& cur, const MergeState& baseline,
 		if (!lMap.count(kv.first) && cur.atoms.erase(kv.first) && dels) ++*dels;
 }
 }  // namespace
+
+// Instance component ids REGENERATE at spawn, so the state's cids never match the basis.
+// Components correspond by (type, occurrence) — remap the state's cids onto the basis so the
+// three-way merge sees them as the same components (unmatched = genuinely added, keep theirs).
+static json AlignStateCids(const json& basisA, json stateA)
+{
+	if (!basisA.is_object() || !stateA.is_object()) return stateA;
+	if (!basisA.contains("components") || !stateA.contains("components")) return stateA;
+	std::map<std::string, std::vector<long>> basisByType;
+	for (const json& c : basisA["components"])
+		if (c.is_object()) basisByType[c.value("type", std::string())].push_back(c.value("cid", 0L));
+	std::map<std::string, size_t> used;
+	for (json& c : stateA["components"])
+	{
+		if (!c.is_object()) continue;
+		const std::string ty = c.value("type", std::string());
+		auto it = basisByType.find(ty);
+		if (it == basisByType.end()) continue;
+		size_t& u = used[ty];
+		if (u < it->second.size()) c["cid"] = it->second[u++];
+	}
+	return stateA;
+}
+
+static json MergePrefabTree(const json& basisA, json cur, const json& stateA_)
+{
+	const json stateA = AlignStateCids(basisA, stateA_);
+	cur = MergeAtomJson(basisA, cur, stateA, std::string());
+	// Children of the three documents.
+	auto arr = [](const json& a) -> json
+	{ return a.is_object() && a.contains("children") && a["children"].is_array() ? a["children"] : json::array(); };
+	const json bk = arr(basisA), sk = arr(stateA);
+	json ck = arr(cur);
+	// A state child body may itself be a ref node: name lives in its "state" then.
+	auto nameOf = [](const json& a) -> std::string
+	{
+		if (!a.is_object()) return std::string();
+		if (a.contains("prefabRef")) return a.contains("state") ? a["state"].value("name", std::string()) : std::string();
+		return a.value("name", std::string());
+	};
+	// basis child -> state child: by name (first unused occurrence), else by ordinal.
+	std::vector<int> stateOf(bk.size(), -1);
+	std::vector<char> stateUsed(sk.size(), 0);
+	for (size_t bi = 0; bi < bk.size(); ++bi)
+	{
+		const std::string bn = nameOf(bk[bi]);
+		for (size_t si = 0; si < sk.size(); ++si)
+			if (!stateUsed[si] && nameOf(sk[si]) == bn) { stateOf[bi] = (int)si; stateUsed[si] = 1; break; }
+	}
+	// Renamed-in-instance children still match by their ordinal among the siblings.
+	for (size_t bi = 0; bi < bk.size(); ++bi)
+		if (stateOf[bi] < 0 && bi < sk.size() && !stateUsed[bi])
+		{ stateOf[bi] = (int)bi; stateUsed[bi] = 1; }
+	// basis id -> basis index (cur matches basis by id: both are versions of the same file).
+	std::map<long, size_t> basisById;
+	for (size_t bi = 0; bi < bk.size(); ++bi)
+		if (bk[bi].is_object()) basisById[bk[bi].value("id", 0L)] = bi;
+	json outKids = json::array();
+	for (const json& cc : ck)
+	{
+		const long cid = cc.is_object() ? cc.value("id", 0L) : 0L;
+		auto bit = basisById.find(cid);
+		if (bit == basisById.end()) { outKids.push_back(cc); continue; }   // source ADDED it -> propagate
+		const int si = stateOf[bit->second];
+		if (si < 0) continue;                                              // instance DELETED it
+		outKids.push_back(MergePrefabTree(bk[bit->second], cc, sk[si]));
+	}
+	for (size_t si = 0; si < sk.size(); ++si)
+		if (!stateUsed[si]) outKids.push_back(sk[si]);                     // instance ADDED it
+	cur["children"] = outKids;
+	return cur;
+}
+
+static json ExpandPrefabRef(const json& node)
+{
+	const json state = node.contains("state") ? node["state"] : json::object();
+	if (g_prefabRefDepth > 12)
+	{
+		std::cout << "[Prefab]\t\tprefab reference chain too deep (cycle?) — using the saved snapshot" << std::endl;
+		return state;
+	}
+	std::string src;
+	if (!ReadPrefabByGuid(node.value("prefabRef", std::string()), src))
+	{
+		std::cout << "[Prefab]\t\treferenced prefab missing — using the saved snapshot" << std::endl;
+		return state;
+	}
+	json cur = json::parse(src, nullptr, false);
+	if (!cur.is_object()) return state;
+	const json basis = node.contains("basis") ? node["basis"] : json::object();
+	return MergePrefabTree(basis, cur, state);
+}
+
 
 std::string World::MergeWorldLayers(const std::vector<std::string>& layers)
 {
