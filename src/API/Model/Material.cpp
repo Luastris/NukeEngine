@@ -79,6 +79,12 @@ Material* Material::Clone() const
 	m->detailStrength   = detailStrength;
 	m->triplanar        = triplanar;
 	m->vcolorMode       = vcolorMode;
+	m->clearCoat = clearCoat; m->clearCoatRoughness = clearCoatRoughness;
+	m->anisotropy = anisotropy; m->flowGuid = flowGuid;
+	m->sheen = sheen; m->sheenTint = sheenTint;
+	m->translucency = translucency; m->translucencyTint = translucencyTint;
+	m->ior = ior; m->refractive = refractive;
+	m->iridescence = iridescence; m->iridescenceThickness = iridescenceThickness;
 	m->shaderGuid  = shaderGuid;
 	m->props       = props;
 	m->liveStates  = liveStates;
@@ -233,6 +239,8 @@ void Material::Resolve()
 	else if (!detail || detail->guid != detailGuid)     detail = db->GetTexture(detailGuid);
 	if (detailNormalGuid.empty())                            detailNrm = nullptr;
 	else if (!detailNrm || detailNrm->guid != detailNormalGuid) detailNrm = db->GetTexture(detailNormalGuid);
+	if (flowGuid.empty())                            flow = nullptr;
+	else if (!flow || flow->guid != flowGuid)        flow = db->GetTexture(flowGuid);
 	if (shaderGuid.empty())                              shader = nullptr;
 	else if (!shader || shader->guid != shaderGuid)     shader = db->GetShader(shaderGuid);
 	for (LiveState& s : liveStates)
@@ -324,6 +332,19 @@ void Material::PushRenderProps()
 	if (varOn || props.count("g_Var"))
 		props["g_Var"] = { liveSurface.varAmount, liveSurface.varScale > 1e-3f ? liveSurface.varScale : 4.0f,
 		                   liveSurface.varHue, varFlags };
+
+	// BRDF pack -> g_Brdf1..4 (all defaults = the plain metallic-roughness model).
+	const bool brdfOn = clearCoat > 0.0f || anisotropy != 0.0f || sheen > 0.0f
+	                 || translucency > 0.0f || iridescence > 0.0f || ior != 1.5f
+	                 || refractive;
+	if (brdfOn || props.count("g_Brdf1"))
+	{
+		props["g_Brdf1"] = { clearCoat, clearCoatRoughness, anisotropy, sheen };
+		props["g_Brdf2"] = { translucency, ior, iridescence, iridescenceThickness };
+		props["g_Brdf3"] = { (float)sheenTint.r, (float)sheenTint.g, (float)sheenTint.b, flow ? 1.0f : 0.0f };
+		props["g_Brdf4"] = { (float)translucencyTint.r, (float)translucencyTint.g, (float)translucencyTint.b,
+		                     (blendMode == Transparent && refractive) ? 1.0f : 0.0f };
+	}
 
 	// GPU overlay slots: static layers claim slots first (always on), then the ACTIVE condition
 	// states — set globally, overridden on some atom or painted by some mask (the asset itself
@@ -421,6 +442,15 @@ bool Material::SaveToFile(const std::string& path) const
 	}
 	if (triplanar)       j["triplanar"] = true;
 	if (vcolorMode != 0) j["vcolorMode"] = vcolorMode;
+	if (clearCoat > 0.0f || anisotropy != 0.0f || sheen > 0.0f || translucency > 0.0f
+	    || iridescence > 0.0f || ior != 1.5f || refractive || !flowGuid.empty())
+		j["brdf"] = { {"clearCoat", clearCoat}, {"coatRoughness", clearCoatRoughness},
+		              {"anisotropy", anisotropy}, {"flow", flowGuid},
+		              {"sheen", sheen}, {"sheenTint", {sheenTint.r, sheenTint.g, sheenTint.b}},
+		              {"translucency", translucency},
+		              {"translucencyTint", {translucencyTint.r, translucencyTint.g, translucencyTint.b}},
+		              {"ior", ior}, {"refractive", refractive},
+		              {"iridescence", iridescence}, {"iridescenceThickness", iridescenceThickness} };
 	// LiveMaterial sections: written only when present, so plain materials stay clean.
 	if (HasLive())
 	{
@@ -518,6 +548,24 @@ Material* Material::LoadFromString(const std::string& text)
 	m->detailStrength   = j.value("detailStrength", 0.5f);
 	m->triplanar        = j.value("triplanar", false);
 	m->vcolorMode       = j.value("vcolorMode", 0);
+	if (j.contains("brdf") && j["brdf"].is_object())
+	{
+		const json& b = j["brdf"];
+		m->clearCoat          = b.value("clearCoat", 0.0f);
+		m->clearCoatRoughness = b.value("coatRoughness", 0.1f);
+		m->anisotropy         = b.value("anisotropy", 0.0f);
+		m->flowGuid           = b.value("flow", std::string());
+		m->sheen              = b.value("sheen", 0.0f);
+		m->translucency       = b.value("translucency", 0.0f);
+		m->ior                = b.value("ior", 1.5f);
+		m->refractive         = b.value("refractive", b.value("refraction", 0.0f) > 0.0f);
+		m->iridescence        = b.value("iridescence", 0.0f);
+		m->iridescenceThickness = b.value("iridescenceThickness", 0.5f);
+		if (b.contains("sheenTint") && b["sheenTint"].is_array() && b["sheenTint"].size() == 3)
+		{ m->sheenTint.r = b["sheenTint"][0]; m->sheenTint.g = b["sheenTint"][1]; m->sheenTint.b = b["sheenTint"][2]; }
+		if (b.contains("translucencyTint") && b["translucencyTint"].is_array() && b["translucencyTint"].size() == 3)
+		{ m->translucencyTint.r = b["translucencyTint"][0]; m->translucencyTint.g = b["translucencyTint"][1]; m->translucencyTint.b = b["translucencyTint"][2]; }
+	}
 	if (j.contains("uvTiling") && j["uvTiling"].is_array() && j["uvTiling"].size() == 2)
 	{ m->uvTiling.x = j["uvTiling"][0]; m->uvTiling.y = j["uvTiling"][1]; }
 	if (j.contains("uvOffset") && j["uvOffset"].is_array() && j["uvOffset"].size() == 2)

@@ -12,7 +12,11 @@ cbuffer MatCB { float4 g_Color; float4 g_Params; float4 g_Params2; float4 g_Emis
                 float4 g_OvT0; float4 g_OvT1; float4 g_OvT2; float4 g_OvT3; float4 g_OvT4; float4 g_OvT5; float4 g_OvT6; float4 g_OvT7;
                 float4 g_OvP0; float4 g_OvP1; float4 g_OvP2; float4 g_OvP3; float4 g_OvP4; float4 g_OvP5; float4 g_OvP6; float4 g_OvP7;
                 float4 g_OvM0; float4 g_OvM1; float4 g_OvM2; float4 g_OvMQ;
-                float4 g_Det; float4 g_Var; };
+                float4 g_Det; float4 g_Var;
+                float4 g_Brdf1; float4 g_Brdf2; float4 g_Brdf3; float4 g_Brdf4; };
+// BRDF pack: g_Brdf1 = (clearCoat, coatRoughness, anisotropy, sheen);
+// g_Brdf2 = (translucency, ior, iridescence, iridescenceThickness);
+// g_Brdf3 = (sheen tint rgb, hasFlowMap); g_Brdf4 = (translucency tint rgb, refraction on/off).
 // g_Det = (detail tiling, strength 0=off, flags 1=albedo 2=normal 4=flipG, 0);
 // g_Var = (anti-tiling amount, cell scale in repeats, hue variation, flags 1=triplanar 2=vcolTint 4=vcolMask).
 
@@ -146,6 +150,18 @@ OV_DECL(1) OV_DECL(2) OV_DECL(3) OV_DECL(4) OV_DECL(5) OV_DECL(6) OV_DECL(7)
 Texture2D    g_Mask3D;       // painted SurfaceMask flipbook: width = res*res (Z slabs), height = res
 Texture2D    g_Detail;       // high-frequency detail albedo (gray = neutral) - shares g_Ov0Alb_sampler
 Texture2D    g_DetailNrm;    // high-frequency detail normal
+Texture2D    g_Flow;         // RG = anisotropy tangent direction (0.5,0.5 = neutral)
+Texture2D    g_SceneRefr;    // pre-transparent scene snapshot (1x1 white when absent)
+
+// Anisotropic GGX: the highlight stretches along the tangent (at) vs the bitangent (ab).
+float D_Aniso(float3 N, float3 H, float3 T, float3 B, float rough, float aniso)
+{
+    float at = max(rough * (1.0 + aniso), 0.02);
+    float ab = max(rough * (1.0 - aniso), 0.02);
+    float th = dot(T, H), bh = dot(B, H), nh = max(dot(N, H), 0.0);
+    float d = th * th / (at * at) + bh * bh / (ab * ab) + nh * nh;
+    return 1.0 / max(3.14159265 * at * ab * d * d, 1e-5);
+}
 
 // The material UV transform, shared by every projection plane (0,0 tiling = identity).
 float2 ApplyUVT(float2 uv)
@@ -437,7 +453,37 @@ float4 main(in PSIn i) : SV_Target
     }
     float3 swpos = i.wpos + N * g_ShadowParams.y;   // normal-offset bias: sample shadows slightly off the surface
 
-    float3 F0 = lerp(0.04 * specF, albedo, metallic);   // dielectric F0 scaled by KHR specular; conductor uses albedo
+    // Anisotropy tangent frame (cotangent trick), rotated by the flow map when present.
+    const float aniso = g_Brdf1.z;
+    float3 anisoT = float3(1.0, 0.0, 0.0), anisoB = float3(0.0, 1.0, 0.0);
+    [branch] if (abs(aniso) > 0.001)
+    {
+        float3 dp1 = ddx(i.wpos), dp2 = ddy(i.wpos);
+        float2 du1 = ddx(i.uv), du2 = ddy(i.uv);
+        float3 dp2p = cross(dp2, N), dp1p = cross(N, dp1);
+        anisoT = dp2p * du1.x + dp1p * du2.x;
+        anisoT = normalize(anisoT + float3(1e-5, 0.0, 0.0));
+        [branch] if (g_Brdf3.w > 0.5)
+        {
+            float2 f = g_Flow.Sample(g_Ov0Alb_sampler, i.uv).rg * 2.0 - 1.0;
+            float3 B0 = normalize(cross(N, anisoT));
+            anisoT = normalize(anisoT * f.x + B0 * f.y + float3(1e-5, 0.0, 0.0));
+        }
+        anisoT = normalize(anisoT - N * dot(N, anisoT));
+        anisoB = cross(N, anisoT);
+    }
+
+    // IOR reshapes the dielectric base reflectance ((n-1)/(n+1))^2; ior 1.5 = the classic 0.04.
+    float f0i = pow((g_Brdf2.y - 1.0) / (g_Brdf2.y + 1.0), 2.0);
+    if (g_Brdf2.y < 1.01) f0i = 0.04;   // unset/zeroed CB reads as the default
+    float3 F0 = lerp(f0i * specF, albedo, metallic);   // dielectric F0 scaled by KHR specular; conductor uses albedo
+    // Thin-film iridescence: a spectral phase shift over the view angle re-tints F0.
+    [branch] if (g_Brdf2.z > 0.0)
+    {
+        float ndv0 = saturate(dot(N, V));
+        float3 shift = 0.5 + 0.5 * cos(6.28318 * ((g_Brdf2.w * 4.0 + 1.0) * ndv0 + float3(0.0, 0.33, 0.67)));
+        F0 = lerp(F0, shift * saturate(F0 * 2.0 + 0.05), g_Brdf2.z);
+    }
     float3 Lo = 0.0;
 
     int cnt = (int)g_LightCount.x;
@@ -466,6 +512,13 @@ float4 main(in PSIn i) : SV_Target
             }
         }
         float ndl = max(dot(N, L), 0.0);
+        // Translucency: light leaking THROUGH the surface (works for back lights too).
+        [branch] if (g_Brdf2.x > 0.0 && atten > 1e-6)
+        {
+            float tw = pow(saturate(dot(V, -normalize(L + N * 0.4))), 3.0);
+            Lo += g_Brdf2.x * g_Brdf4.rgb * albedo * tw
+                * lt.colorIntensity.rgb * lt.colorIntensity.w * atten;
+        }
         if (ndl <= 0.0 || atten <= 1e-6) continue;
         float3 H = normalize(V + L);
         float3 radiance = lt.colorIntensity.rgb * lt.colorIntensity.w * atten;
@@ -484,12 +537,28 @@ float4 main(in PSIn i) : SV_Target
 #endif
         }
 
-        float  D = DistributionGGX(N, H, rough);
+        float  D = (abs(aniso) > 0.001) ? D_Aniso(N, H, anisoT, anisoB, rough, aniso)
+                                        : DistributionGGX(N, H, rough);
         float  G = GeometrySmith(N, V, L, rough);
         float3 F = FresnelSchlick(max(dot(H, V), 0.0), F0);
         float3 spec = (D * G) * F / max(4.0 * max(dot(N, V), 0.0) * ndl, 1e-4);
+        // Clear coat: a second fixed-F0 glossy lobe on top; the base dims under the coat.
+        [branch] if (g_Brdf1.x > 0.0)
+        {
+            float Fc = (0.04 + 0.96 * pow(saturate(1.0 - max(dot(H, V), 0.0)), 5.0)) * g_Brdf1.x;
+            float Dc = DistributionGGX(N, H, max(g_Brdf1.y, 0.02));
+            spec = spec * (1.0 - Fc) + Dc * G * Fc / max(4.0 * max(dot(N, V), 0.0) * ndl, 1e-4);
+        }
         float3 kd = (1.0 - F) * (1.0 - metallic);
         Lo += (kd * albedo / PI + spec) * radiance * ndl;
+        // Sheen: soft retro-reflective grazing lobe (Charlie-style falloff).
+        [branch] if (g_Brdf1.w > 0.0)
+        {
+            float ndh = max(dot(N, H), 0.0);
+            float ia = 0.5 / clamp(rough, 0.07, 1.0);
+            float sD = (1.0 + ia) * pow(1.0 - ndh * ndh, ia) / 6.28318;
+            Lo += g_Brdf1.w * g_Brdf3.rgb * sD * radiance * ndl;
+        }
     }
 
     float ao = (g_Params2.y > 0.5) ? g_Occlusion.Sample(g_Occlusion_sampler, i.uv).r : 1.0;
@@ -546,5 +615,38 @@ float4 main(in PSIn i) : SV_Target
         color = color * (1.0 + color / (W * W)) / (1.0 + color);  // extended Reinhard
         color = pow(max(color, 0.0), 1.0 / 2.2);                  // linear -> sRGB
     }
-    return float4(color, base.a);
+    // Background refraction (Transparent blend): bend the pre-transparent scene snapshot
+    // through the surface and OWN the pixel (the mix happens here, so alpha goes out 1).
+    float alphaOut = base.a;
+    [branch] if (g_Brdf4.w > 0.0)
+    {
+        uint rw, rh;
+        g_SceneRefr.GetDimensions(rw, rh);
+        [branch] if (rw > 1)
+        {
+            // Glass lens: Snell gives the deviation direction; the sample moves AGAINST it,
+            // pulling content from deeper inside whatever sits behind. At an occlusion edge
+            // this MAGNIFIES the object through the glass (the edge bulges outward) - the
+            // opposite sign pulls from the empty side and visibly bites chunks out of it.
+            float3 rd = refract(-V, N, 1.0 / max(g_Brdf2.y, 1.01));
+            if (dot(rd, rd) < 1e-6) rd = reflect(-V, N);   // total internal reflection
+            float3 dv = rd + V;                            // deviation vs continuing straight
+            // The bend strength is PURE Snell: the IOR alone decides how far dv swings
+            // (water 1.33 bends gently, glass 1.5 more, diamond 2.4 hard). The constant only
+            // converts the angular deviation into screen space (assumed background distance).
+            float2 off = -float2(dot(dv, normalize(ddx(i.wpos))),
+                                 dot(dv, normalize(ddy(i.wpos)))) * 0.15;
+            float ol = length(off);
+            if (ol > 0.05) off *= 0.05 / ol;
+            float2 suv = i.pos.xy / float2(rw, rh);
+            // Chromatic split: the three channels refract slightly apart (dispersion).
+            float3 bg;
+            bg.r = g_SceneRefr.Sample(g_Ov0Alb_sampler, clamp(suv + off * 0.80, 0.002, 0.998)).r;
+            bg.g = g_SceneRefr.Sample(g_Ov0Alb_sampler, clamp(suv + off,        0.002, 0.998)).g;
+            bg.b = g_SceneRefr.Sample(g_Ov0Alb_sampler, clamp(suv + off * 1.20, 0.002, 0.998)).b;
+            color = lerp(bg * lerp(float3(1.0, 1.0, 1.0), albedo, saturate(base.a)), color, saturate(base.a));
+            alphaOut = 1.0;
+        }
+    }
+    return float4(color, alphaOut);
 }

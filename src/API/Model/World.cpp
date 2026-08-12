@@ -1191,36 +1191,47 @@ static void DrawGBuffer(std::vector<DrawItem>& items, iRender* r, bool cull)
 		}
 }
 
-// Draws a gathered scene for one camera: opaque first, then transparent/additive sorted
-// back-to-front by camera distance. Frustum-culled when `cull`.
+// Draws the OPAQUE part of a gathered scene. The transparent part runs as its own pass
+// (DrawCollectedTransparent) AFTER every opaque draw — instanced sets included — so the
+// refraction snapshot sees the whole opaque scene and nothing opaque lands over glass.
 static void DrawCollected(std::vector<DrawItem>& items, const Vector3& camPos, iRender* r, bool cull)
 {
 	float vp[16]; if (cull) CameraVP(r, vp);
-	auto culled = [&](const DrawItem& it) { return cull && FrustumCull(it, vp); };
-
 	for (auto& it : items)
-		if (it.anyOpaque && !culled(it))
+		if (it.anyOpaque && !(cull && FrustumCull(it, vp)))
 		{
 			PushLiveContext(it);
 			if (it.matCount > 1) r->renderObjectMulti(it.mesh, it.mats, it.matCount, it.pos, it.quat, it.scale, 0);
 			else if (it.blend == 0) r->renderObject(it.mesh, it.mat, it.pos, it.quat, it.scale);
 		}
+}
 
+// Transparent/additive items sorted back-to-front; snapshots the scene for refraction first.
+static void DrawCollectedTransparent(std::vector<DrawItem>& items, const Vector3& camPos, iRender* r, bool cull)
+{
+	float vp[16]; if (cull) CameraVP(r, vp);
 	std::vector<DrawItem*> tr;
-	for (auto& it : items) if (it.anyBlend && !culled(it)) tr.push_back(&it);
-	if (!tr.empty())
+	for (auto& it : items) if (it.anyBlend && !(cull && FrustumCull(it, vp))) tr.push_back(&it);
+	if (tr.empty()) return;
+	// Background refraction: let the renderer snapshot the opaque scene first.
+	bool wantRefr = false;
+	for (DrawItem* it : tr)
 	{
-		auto dist2 = [&](const DrawItem* it) {
-			double dx = it->wpos.x - camPos.x, dy = it->wpos.y - camPos.y, dz = it->wpos.z - camPos.z;
-			return dx*dx + dy*dy + dz*dz;
-		};
-		std::sort(tr.begin(), tr.end(), [&](const DrawItem* a, const DrawItem* b) { return dist2(a) > dist2(b); });
-		for (auto* it : tr)
-		{
-			PushLiveContext(*it);
-			if (it->matCount > 1) r->renderObjectMulti(it->mesh, it->mats, it->matCount, it->pos, it->quat, it->scale, 1);
-			else r->renderObject(it->mesh, it->mat, it->pos, it->quat, it->scale);
-		}
+		auto chk = [&](Material* m) { if (m && m->blendMode == 1 && m->refractive) wantRefr = true; };
+		if (it->matCount > 1) { for (int s = 0; s < it->matCount; ++s) chk(it->mats[s]); }
+		else chk(it->mat);
+	}
+	if (wantRefr) r->beginTransparent();
+	auto dist2 = [&](const DrawItem* it) {
+		double dx = it->wpos.x - camPos.x, dy = it->wpos.y - camPos.y, dz = it->wpos.z - camPos.z;
+		return dx*dx + dy*dy + dz*dz;
+	};
+	std::sort(tr.begin(), tr.end(), [&](const DrawItem* a, const DrawItem* b) { return dist2(a) > dist2(b); });
+	for (auto* it : tr)
+	{
+		PushLiveContext(*it);
+		if (it->matCount > 1) r->renderObjectMulti(it->mesh, it->mats, it->matCount, it->pos, it->quat, it->scale, 1);
+		else r->renderObject(it->mesh, it->mat, it->pos, it->quat, it->scale);
 	}
 }
 
@@ -2502,6 +2513,9 @@ void World::Render(iRender* r)
 			{ Profiler::Scope ps("rnd.cam.opaque"); DrawCollected(items, cp, r, settings.frustumCull); }
 			{ Profiler::Scope ps("rnd.cam.inst");   DrawInstancedMeshes(camInstSets, r, settings.frustumCull); }
 			{ Profiler::Scope ps("rnd.cam.hooks");  DrawComponentHooks(*hierarchy, r, RenderPhase::Opaque, camMask); }
+			// Transparent AFTER every opaque draw: the refraction snapshot must hold the whole
+			// opaque scene (foliage included), and nothing opaque may land over glass.
+			{ Profiler::Scope ps("rnd.cam.blend");  DrawCollectedTransparent(items, cp, r, settings.frustumCull); }
 			{ Profiler::Scope ps("rnd.cam.decals"); DrawDecals(decals, r); }
 			{ Profiler::Scope ps("rnd.cam.sprites"); DrawSprites(*hierarchy, d, cp, r, cam, camMask); }   // after opaque, back-to-front
 			{

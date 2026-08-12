@@ -589,6 +589,10 @@ public:
     // hands the snap step over once per frame.
     virtual void drawEditorGrid(float step) {}
 
+    // LiveMaterial background refraction (LM-6): called between the opaque and transparent
+    // passes when a transparent material refracts — snapshot the scene for g_SceneRefr.
+    virtual void beginTransparent() {}
+
     // ABI: new virtuals are appended at the END of the class, NEVER inserted mid-vtable —
     // plugins are separate DLLs built at different times, and an inserted slot shifts every later one.
 };

@@ -200,6 +200,29 @@ public:
     // first four overlay slots' weights by R/G/B/A (painted-in-DCC material blending).
     [[nuke::prop(label="Vertex Color", enum="Off,Tint,Overlay Mask", tip="Tint: multiply base color; Overlay Mask: R/G/B/A drive overlay slots 0-3")]]
     int vcolorMode = 0;
+    // ---- BRDF pack (defaults = the plain metallic-roughness model) ----
+    [[nuke::prop(label="Clear Coat", min=0, max=1, tip="Lacquer layer: a second glossy highlight on top (car paint, varnish)")]]
+    float clearCoat = 0.0f;
+    [[nuke::prop(label="Coat Roughness", min=0.01, max=1)]]
+    float clearCoatRoughness = 0.1f;
+    [[nuke::prop(label="Anisotropy", min=-1, max=1, tip="Stretches the highlight along the surface tangent (brushed metal); negative = across")]]
+    float anisotropy = 0.0f;
+    [[nuke::prop(asset="texture", label="Flow Map", tip="RG = tangent direction for anisotropy (0.5,0.5 = neutral); brushed circles, hair flow")]]
+    std::string flowGuid;
+    [[nuke::prop(label="Sheen", min=0, max=1, tip="Soft grazing highlight (velvet, fabric)")]]
+    float sheen = 0.0f;
+    [[nuke::prop(label="Sheen Tint")]] Color sheenTint = Color(1, 1, 1, 1);
+    [[nuke::prop(label="Translucency", min=0, max=1, tip="Light through thin surfaces (leaves, wax, skin-ish)")]]
+    float translucency = 0.0f;
+    [[nuke::prop(label="Translucency Tint")]] Color translucencyTint = Color(1, 0.9, 0.8, 1);
+    [[nuke::prop(label="IOR", min=1, max=3, tip="Index of refraction: 1.33 water, 1.5 glass, 2.4 diamond. Drives the dielectric F0 AND how hard Refraction bends the background.")]]
+    float ior = 1.5f;
+    [[nuke::prop(label="Refraction", tip="Transparent blend: bend the background through the surface; the bend strength comes from the IOR")]]
+    bool refractive = false;
+    [[nuke::prop(label="Iridescence", min=0, max=1, tip="Thin-film rainbow (soap bubble, oil slick)")]]
+    float iridescence = 0.0f;
+    [[nuke::prop(label="Iridescence Thickness", min=0, max=1, tip="Film thickness sweep - shifts the rainbow bands")]]
+    float iridescenceThickness = 0.5f;
 
     Texture* diff = nullptr;       // runtime-resolved textures (via Resolve())
     Texture* norm = nullptr;
@@ -210,6 +233,7 @@ public:
     Texture* wipe = nullptr;       // luma-wipe mask
     Texture* detail = nullptr;     // detail albedo
     Texture* detailNrm = nullptr;  // detail normal
+    Texture* flow = nullptr;       // anisotropy flow map
 
     Shader*      shader = nullptr;
     aiMaterial*  aiMat  = nullptr;

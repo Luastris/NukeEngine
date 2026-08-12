@@ -7,7 +7,8 @@ cbuffer MatCB { float4 g_Color; float4 g_Params; float4 g_Params2; float4 g_Emis
                 float4 g_OvT0; float4 g_OvT1; float4 g_OvT2; float4 g_OvT3; float4 g_OvT4; float4 g_OvT5; float4 g_OvT6; float4 g_OvT7;
                 float4 g_OvP0; float4 g_OvP1; float4 g_OvP2; float4 g_OvP3; float4 g_OvP4; float4 g_OvP5; float4 g_OvP6; float4 g_OvP7;
                 float4 g_OvM0; float4 g_OvM1; float4 g_OvM2; float4 g_OvMQ;
-                float4 g_Det; float4 g_Var; };
+                float4 g_Det; float4 g_Var;
+                float4 g_Brdf1; float4 g_Brdf2; float4 g_Brdf3; float4 g_Brdf4; };
 Texture2D    g_MetalRough;   SamplerState g_MetalRough_sampler;   // G = roughness, B = metallic (glTF)
 Texture2D    g_Normal;       SamplerState g_Normal_sampler;       // tangent-space normal map
 Texture2D    g_Tex;          SamplerState g_Tex_sampler;          // base color (alpha for cutout)
@@ -137,6 +138,8 @@ void main(PSIn i, out PSOut o)
                if (g_OvP##N.y >= 0.0) rough    = lerp(rough, clamp(g_OvP##N.y, 0.04, 1.0), ovW[N]); } \
     }
     OVG_MR(0) OVG_MR(1) OVG_MR(2) OVG_MR(3) OVG_MR(4) OVG_MR(5) OVG_MR(6) OVG_MR(7)
+    // Clear coat: reflections (SSR) follow the coat's gloss where the coat is strong.
+    rough = lerp(rough, max(g_Brdf1.y, 0.02), g_Brdf1.x);
 
     float3 N = normalize(i.nrm);
     // g_Params.y: 0 = none, >0 = OpenGL green (flip), <0 = DirectX. Must match world.ps.

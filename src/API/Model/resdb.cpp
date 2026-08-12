@@ -422,6 +422,12 @@ void ResDB::HotReloadAssets(iRender* r)
 			m->metallicGuid = fresh->metallicGuid; m->roughnessGuid = fresh->roughnessGuid; m->opacityGuid = fresh->opacityGuid;
 			m->wipeGuid = fresh->wipeGuid; m->wipeThreshold = fresh->wipeThreshold; m->wipeFeather = fresh->wipeFeather;
 			m->liveStates = fresh->liveStates; m->liveLayers = fresh->liveLayers; m->liveHits = fresh->liveHits;
+			m->clearCoat = fresh->clearCoat; m->clearCoatRoughness = fresh->clearCoatRoughness;
+			m->anisotropy = fresh->anisotropy; m->flowGuid = fresh->flowGuid;
+			m->sheen = fresh->sheen; m->sheenTint = fresh->sheenTint;
+			m->translucency = fresh->translucency; m->translucencyTint = fresh->translucencyTint;
+			m->ior = fresh->ior; m->refractive = fresh->refractive;
+			m->iridescence = fresh->iridescence; m->iridescenceThickness = fresh->iridescenceThickness;
 			m->liveFoliage = fresh->liveFoliage; m->liveTweens = fresh->liveTweens;
 			m->liveSound = fresh->liveSound;   m->liveSurface = fresh->liveSurface;
 			m->physTag = fresh->physTag; m->liveFriction = fresh->liveFriction; m->liveBounce = fresh->liveBounce;
