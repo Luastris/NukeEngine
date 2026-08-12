@@ -31,6 +31,7 @@
 #include "API/Model/DebugDraw.h"
 #include "API/Model/InstancedMesh.h"
 #include "API/Model/Wind.h"
+#include "API/Model/Surface.h"
 #include "interface/WorldHooks.h"
 #include "API/Model/BendVolumes.h"
 #include "interface/Services.h"
@@ -451,6 +452,13 @@ static void SyncBodies(bc::list<Atom*>& gos, iPhysics* p, std::map<uint64_t, Col
 				d.halfHeight = col->halfHeight * (float)fabs(scl.y);
 				d.friction    = col->friction;
 				d.restitution = col->restitution;
+				// LiveMaterial surface identity: material friction/bounciness beat the collider's.
+				if (MeshRenderer* smr = atom->GetComponent<MeshRenderer>())
+					if (smr->mat)
+					{
+						if (smr->mat->liveFriction >= 0.0f) d.friction    = smr->mat->liveFriction;
+						if (smr->mat->liveBounce   >= 0.0f) d.restitution = smr->mat->liveBounce;
+					}
 				d.isTrigger   = col->isTrigger;
 				d.convex      = col->convex;
 				d.motion = rb ? (rb->isKinematic ? 2 : 1) : 0;
@@ -780,6 +788,8 @@ static void DispatchContacts(iPhysics* p, const std::map<uint64_t, Collider*>& b
 			if (!aa || !ab) continue;
 			const bool trigger = ca->isTrigger || cb->isTrigger;
 			const bool enter   = ev[i].phase == 0;
+			// LiveMaterial hit reactions: solid impacts fire the surfaces' own responses.
+			if (enter && !trigger) Surface::ContactHit(aa, ab, ev[i].point, ev[i].normal);
 			auto notify = [&](Atom* self, Atom* other)
 			{
 				for (Component* c : self->components)
@@ -961,7 +971,16 @@ static const int kMaxDrawSlots = 16;
 struct DrawItem { Mesh* mesh; Material* mat; float pos[3], quat[4], scale[3]; Vector3 wpos; int blend; bool inReflections;
                   float prevPos[3], prevQuat[4], prevScale[3]; bool hasPrev;   // prev transform for TAA velocity
                   Material* mats[kMaxDrawSlots]; int matCount = 0;             // per-slot materials (v4 sections)
-                  bool anyOpaque = true, anyBlend = false; };                  // pass membership across slots
+                  bool anyOpaque = true, anyBlend = false;                     // pass membership across slots
+                  Atom* atom = nullptr; };                                     // source atom (overlay draw context)
+
+// LiveMaterial overlay context: per-atom condition values + painted mask reach the renderer
+// through the material's liveDraw* fields, written right before the synchronous submit.
+static inline void PushLiveContext(DrawItem& it)
+{
+	if (it.matCount > 1) { for (int s = 0; s < it.matCount; ++s) if (it.mats[s]) Surface::PushDrawContext(it.atom, it.mats[s]); }
+	else if (it.mat) Surface::PushDrawContext(it.atom, it.mat);
+}
 
 // Render-layer filter: bit i of `mask` = render atoms with Atom::layer == i.
 static inline bool LayerVisible(Atom* atom, unsigned int mask) { return (mask >> (atom->layer & 31)) & 1u; }
@@ -980,6 +999,7 @@ static void CollectMeshes(bc::list<Atom*>& gos, std::vector<DrawItem>& out, unsi
 				Quaternion q = t.globalRotation();
 				Vector3    s = t.globalScale();
 				DrawItem it;
+				it.atom = atom;
 				it.mesh = mr->mesh; it.mat = mr->mat;
 				it.pos[0]=(float)p.x; it.pos[1]=(float)p.y; it.pos[2]=(float)p.z;
 				it.quat[0]=(float)q.x; it.quat[1]=(float)q.y; it.quat[2]=(float)q.z; it.quat[3]=(float)q.w;
@@ -1096,6 +1116,9 @@ static void DrawInstancedMeshes(std::vector<InstancedMesh*>& ims, iRender* r, bo
 	for (InstancedMesh* im : ims)
 	{
 		if (!im->EnsureRenderReady(r)) continue;
+		// Overlay context for the whole set: the source atom's condition values + painted mask
+		// (the CB keeps the patched values across the chunks; the renderer clears the flag).
+		if (im->mat && im->mat->liveOvCount > 0) Surface::PushDrawContext(im->atom, im->mat);
 		for (const InstancedMesh::Chunk& c : im->chunks)
 			if (!(cull && CullAABB(c.mn, c.mx, vp)))
 				r->renderObjectInstanced(im->mesh, im->mat, im->gpuBuf, c.first, c.count);
@@ -1111,6 +1134,7 @@ static void DrawInstancedGBuffer(std::vector<InstancedMesh*>& ims, iRender* r, b
 	{
 		if (im->mat && im->mat->blendMode != 0) continue;
 		if (!im->EnsureRenderReady(r)) continue;
+		if (im->mat && im->mat->liveOvCount > 0) Surface::PushDrawContext(im->atom, im->mat);
 		for (const InstancedMesh::Chunk& c : im->chunks)
 			if (!(cull && CullAABB(c.mn, c.mx, vp)))
 				r->renderGBufferInstanced(im->mesh, im->mat, im->gpuBuf, c.first, c.count);
@@ -1157,6 +1181,7 @@ static void DrawGBuffer(std::vector<DrawItem>& items, iRender* r, bool cull)
 	for (auto& it : items)
 		if (it.anyOpaque && !(cull && FrustumCull(it, vp)))
 		{
+			PushLiveContext(it);   // overlays shape the G-buffer normal/roughness too (SSR)
 			if (it.matCount > 1)
 				r->renderGBufferObjectMulti(it.mesh, it.mats, it.matCount, it.pos, it.quat, it.scale,
 				                            it.hasPrev ? it.prevPos : nullptr, it.hasPrev ? it.prevQuat : nullptr, it.hasPrev ? it.prevScale : nullptr, 0);
@@ -1176,6 +1201,7 @@ static void DrawCollected(std::vector<DrawItem>& items, const Vector3& camPos, i
 	for (auto& it : items)
 		if (it.anyOpaque && !culled(it))
 		{
+			PushLiveContext(it);
 			if (it.matCount > 1) r->renderObjectMulti(it.mesh, it.mats, it.matCount, it.pos, it.quat, it.scale, 0);
 			else if (it.blend == 0) r->renderObject(it.mesh, it.mat, it.pos, it.quat, it.scale);
 		}
@@ -1191,6 +1217,7 @@ static void DrawCollected(std::vector<DrawItem>& items, const Vector3& camPos, i
 		std::sort(tr.begin(), tr.end(), [&](const DrawItem* a, const DrawItem* b) { return dist2(a) > dist2(b); });
 		for (auto* it : tr)
 		{
+			PushLiveContext(*it);
 			if (it->matCount > 1) r->renderObjectMulti(it->mesh, it->mats, it->matCount, it->pos, it->quat, it->scale, 1);
 			else r->renderObject(it->mesh, it->mat, it->pos, it->quat, it->scale);
 		}
@@ -1909,6 +1936,10 @@ void World::Render(iRender* r)
 	// Layout must run before anything gathers transforms this frame.
 	ApplyCanvasLayouts(*hierarchy, nullptr);
 
+	// LiveMaterial auto-foliage: surfaces whose material carries foliage entries grow them
+	// (transient components). Render-phase so it runs in BOTH edit mode and PIE.
+	if (!auxiliary) Surface::DriveFoliage(this);
+
 	// Editor gizmos for the selection; lines live for one frame.
 	{
 		AppInstance* app = AppInstance::GetSingleton();
@@ -1918,38 +1949,10 @@ void World::Render(iRender* r)
 		// The editor world grid (Y=0), emitted HERE so it is in-frame with the camera —
 		// depth-tested, LOD-stepped (x10 as the camera rises: constant screen density,
 		// growing coverage, no visible boundary), faint, edge-faded.
-		if (app->isEditor() && app->editorGridStep > 0.0f && r)
-			if (Atom* cam = Get("Editor Camera"))
-			{
-				Vector3 cp = cam->GetTransform().globalPosition();
-				const double camH = std::max(1.0, std::fabs(cp.y));
-				double step = std::max(0.01, (double)app->editorGridStep);
-				while (camH / step > 120.0) step *= 10.0;
-				const double major = step * 10.0;
-				const double ext = step * 80.0;
-				const double cx = std::floor(cp.x / major) * major;
-				const double cz = std::floor(cp.z / major) * major;
-				auto gline = [&](double ax, double az, double bx, double bz, float cr, float cg, float cb, float ca)
-				{
-					float fa[3] = { (float)ax, 0.0f, (float)az };
-					float fb[3] = { (float)bx, 0.0f, (float)bz };
-					float fc[4] = { cr, cg, cb, ca };
-					r->drawDebugLineDepth(fa, fb, fc);
-				};
-				const int n = (int)(ext / step);
-				for (int i = -n; i <= n; ++i)
-				{
-					const double o = i * step;
-					const float fade = 1.0f - (float)std::pow(std::fabs(o) / ext, 3.0);
-					const bool majX = std::fabs(std::remainder(cx + o, major)) < step * 0.25;
-					const bool majZ = std::fabs(std::remainder(cz + o, major)) < step * 0.25;
-					const float aMin = 0.06f * fade, aMaj = 0.14f * fade;
-					gline(cx + o, cz - ext, cx + o, cz + ext, 0.5f, 0.52f, 0.55f, majX ? aMaj : aMin);
-					gline(cx - ext, cz + o, cx + ext, cz + o, 0.5f, 0.52f, 0.55f, majZ ? aMaj : aMin);
-				}
-				if (std::fabs(cp.x) < ext) gline(0, cz - ext, 0, cz + ext, 0.35f, 0.45f, 0.80f, 0.30f);
-				if (std::fabs(cp.z) < ext) gline(cx - ext, 0, cx + ext, 0, 0.75f, 0.35f, 0.35f, 0.30f);
-			}
+		// The grid itself is an ANALYTIC SHADER PLANE in the renderer (AA lines, x10 adaptive
+		// LOD, distance fade — infinite from any angle); the editor only hands the step over.
+		if (app->isEditor() && r)
+			r->drawEditorGrid(app->editorGridStep);
 	}
 
 	// Advance animated textures by real frame time. Only the current world may do this, or an
@@ -2343,6 +2346,7 @@ void World::Render(iRender* r)
 				r->beginCubeFace(probe->cubeId, f, pos, probe->nearZ, probe->farZ);
 				for (auto& it : items) if (it.anyOpaque)
 				{
+					PushLiveContext(it);
 					if (it.matCount > 1) r->renderObjectMulti(it.mesh, it.mats, it.matCount, it.pos, it.quat, it.scale, 0);
 					else if (it.blend == 0) r->renderObject(it.mesh, it.mat, it.pos, it.quat, it.scale);
 				}
@@ -2606,6 +2610,7 @@ static void SaveAtom(Atom* atom, json& j)
 		SaveObject(*tti, &t, j["transform"]);
 	for (Component* c : atom->components)
 	{
+		if (c->transient) continue;   // derived (auto-generated) component: its owner recreates it
 		if (UnknownComponent* uc = dynamic_cast<UnknownComponent*>(c))
 		{
 			// Plugin type not loaded: write the preserved type + props back verbatim.
@@ -3041,7 +3046,8 @@ std::string World::SaveToString()
 		                  {"hour", t->hour}, {"minute", t->minute}, {"sec", t->sec},
 		                  {"totalgt", t->totalgt}, {"totalgd", t->totalgd} };
 		j["events"] = Events::SaveJson();
-		Wind::SaveJson(j);   // "wind" block, omitted when windless
+		Wind::SaveJson(j);      // "wind" block, omitted when windless
+		Surface::SaveJson(j);   // "surface" block (global conditions), omitted when empty
 	}
 	j["atoms"] = json::array();
 	for (Atom* atom : *hierarchy)
@@ -3512,7 +3518,8 @@ void World::LoadHeaderFromJson(const json& j)
 			Events::LoadJson(j["events"].get<std::string>());
 		else
 			Events::ResetSchedule();
-		Wind::LoadJson(j);   // "wind" block, or windless defaults when absent
+		Wind::LoadJson(j);      // "wind" block, or windless defaults when absent
+		Surface::LoadJson(j);   // "surface" block, or no global conditions when absent
 	}
 	// Old atoms get a full teardown (Component::Destroy + delete): a leaked component keeps
 	// module-owned resources (e.g. std::functions whose code lives in a module DLL) alive past

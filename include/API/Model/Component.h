@@ -98,6 +98,10 @@ public:
 	// lives outside the props re-encode it here. Keep it cheap; runs on every world save.
 	// ABI: appended at the END of the vtable.
 	virtual void OnBeforeSave() {}
+
+	// Derived/generated component (e.g. LiveMaterial auto-foliage): never serialized with the
+	// world or prefabs — its owner recreates it. ABI: data appended at the END (engine abi 18).
+	bool transient = false;
 };
 }  // namespace nuke
 

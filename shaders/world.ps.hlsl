@@ -1,6 +1,20 @@
 // World (3D) lit pixel shader: metallic-roughness PBR, directional/point/spot lights, base-color + normal maps.
 // MatCB packing: g_Params = (hasBaseTex, hasNormalTex, metallic, roughness); g_Params2 = (hasMR, hasAO, hasEmissive, specularFactor); g_Emissive2 = (rgb, intensity).
-cbuffer MatCB { float4 g_Color; float4 g_Params; float4 g_Params2; float4 g_Emissive2; };
+// LiveMaterial: g_UVT = (uvTiling.xy, uvOffset.xy + tween scroll; 0,0 tiling = identity);
+// g_UVT2 = (uvRotation rad, alphaCutoff 0=off, wipeThreshold 0=off, wipeFeather);
+// g_Disp = (POM depth uv-space 0=off, tess displacement m, mid level, reserved).
+// Overlay slots (states + static layers): g_Ov = (value, threshold, feather, topOnly);
+// g_OvT = tint rgba; g_OvP = (metallic target -1=keep, roughness target -1=keep, mask3D channel
+// -1=none, flags 1=albedo 2=normal 4=MR 8=mask2D 16=flipG); g_OvM0..2 = world->mask uvw rows;
+// g_OvMQ = (mask resolution, hasMask3D, 0, 0).
+cbuffer MatCB { float4 g_Color; float4 g_Params; float4 g_Params2; float4 g_Emissive2; float4 g_UVT; float4 g_UVT2; float4 g_Disp;
+                float4 g_Ov0;  float4 g_Ov1;  float4 g_Ov2;  float4 g_Ov3;  float4 g_Ov4;  float4 g_Ov5;  float4 g_Ov6;  float4 g_Ov7;
+                float4 g_OvT0; float4 g_OvT1; float4 g_OvT2; float4 g_OvT3; float4 g_OvT4; float4 g_OvT5; float4 g_OvT6; float4 g_OvT7;
+                float4 g_OvP0; float4 g_OvP1; float4 g_OvP2; float4 g_OvP3; float4 g_OvP4; float4 g_OvP5; float4 g_OvP6; float4 g_OvP7;
+                float4 g_OvM0; float4 g_OvM1; float4 g_OvM2; float4 g_OvMQ;
+                float4 g_Det; float4 g_Var; };
+// g_Det = (detail tiling, strength 0=off, flags 1=albedo 2=normal 4=flipG, 0);
+// g_Var = (anti-tiling amount, cell scale in repeats, hue variation, flags 1=triplanar 2=vcolTint 4=vcolMask).
 
 #define MAX_LIGHTS 256   // must match the renderer's FrameCB light array
 struct Light { float4 posType; float4 dirRange; float4 colorIntensity; float4 spot; };
@@ -119,12 +133,100 @@ Texture2D    g_MetalRough;   SamplerState g_MetalRough_sampler;  // G = roughnes
 Texture2D    g_Occlusion;    SamplerState g_Occlusion_sampler;   // R = ambient occlusion
 Texture2D    g_Emissive;     SamplerState g_Emissive_sampler;    // emissive color
 Texture2D    g_Spec;         SamplerState g_Spec_sampler;        // specular reflectance (KHR); white = 0.04 F0
+Texture2D    g_WipeMask;     SamplerState g_WipeMask_sampler;    // luma-wipe mask (white = last to dissolve)
+Texture2D    g_Height;       SamplerState g_Height_sampler;      // R = height (POM + displacement)
+
+// Overlay slot maps (8 slots x albedo/normal/MR/mask2D). ONE shared sampler (g_Ov0Alb_sampler)
+// serves the whole block — D3D11 caps samplers at 16 per stage; the 3D-mask coordinates are
+// clamped manually so wrap never engages.
+#define OV_DECL(N) Texture2D g_Ov##N##Alb; Texture2D g_Ov##N##Nrm; Texture2D g_Ov##N##MR; Texture2D g_Ov##N##Mask;
+Texture2D    g_Ov0Alb;       SamplerState g_Ov0Alb_sampler;
+Texture2D    g_Ov0Nrm; Texture2D g_Ov0MR; Texture2D g_Ov0Mask;
+OV_DECL(1) OV_DECL(2) OV_DECL(3) OV_DECL(4) OV_DECL(5) OV_DECL(6) OV_DECL(7)
+Texture2D    g_Mask3D;       // painted SurfaceMask flipbook: width = res*res (Z slabs), height = res
+Texture2D    g_Detail;       // high-frequency detail albedo (gray = neutral) - shares g_Ov0Alb_sampler
+Texture2D    g_DetailNrm;    // high-frequency detail normal
+
+// The material UV transform, shared by every projection plane (0,0 tiling = identity).
+float2 ApplyUVT(float2 uv)
+{
+    float2 tl = (abs(g_UVT.x) + abs(g_UVT.y) < 1e-6) ? float2(1.0, 1.0) : g_UVT.xy;
+    uv = uv * tl + g_UVT.zw;
+    if (abs(g_UVT2.x) > 1e-6)
+    {
+        float sr, cr; sincos(g_UVT2.x, sr, cr);
+        uv = float2(uv.x * cr - uv.y * sr, uv.x * sr + uv.y * cr);
+    }
+    return uv;
+}
+
+// Cheap 2D hash for the anti-tiling cells.
+float3 Hash3(float2 c)
+{
+    float3 p3 = frac(float3(c.xyx) * float3(0.1031, 0.1030, 0.0973));
+    p3 += dot(p3, p3.yzx + 33.33);
+    return frac((p3.xxy + p3.yzz) * p3.zyx);
+}
+
+// Anti-tiling albedo sample: two half-cell-offset grids, each cell reads the texture at a
+// hashed offset (scaled by amount); blended by distance to the owning cell's centre.
+float4 SampleAntiTile(Texture2D t, SamplerState smp, float2 uv)
+{
+    float amount = g_Var.x;
+    if (amount <= 0.0) return t.Sample(smp, uv);
+    float scale = max(g_Var.y, 1e-3);
+    float2 cf = uv / scale;
+    float2 cA = floor(cf), cB = floor(cf + 0.5);
+    float2 offA = (Hash3(cA).xy - 0.5) * amount;
+    float2 offB = (Hash3(cB * 1.37 + 17.0).xy - 0.5) * amount;
+    float2 fA = abs(frac(cf) - 0.5), fB = abs(frac(cf + 0.5) - 0.5);
+    float wA = saturate(1.0 - 2.0 * max(fA.x, fA.y));
+    float wB = saturate(1.0 - 2.0 * max(fB.x, fB.y));
+    float w = wA / max(wA + wB, 1e-4);
+    return lerp(t.Sample(smp, uv + offB), t.Sample(smp, uv + offA), w);
+}
+
+// Painted-mask channel at a world position; 0 outside the mask box. Manual trilinear Z: the
+// flipbook stores slab z at x-offset z*res, matching the CPU grid layout.
+float OvMask3D(float3 wpos, float chan)
+{
+    float4 hp = float4(wpos, 1.0);
+    float3 c = float3(dot(g_OvM0, hp), dot(g_OvM1, hp), dot(g_OvM2, hp));
+    if (any(c < 0.0) || any(c > 1.0)) return 0.0;
+    float res  = g_OvMQ.x;
+    float3 cell = c * res;
+    float sx = clamp(cell.x, 0.5, res - 0.5);
+    float sv = clamp(cell.y, 0.5, res - 0.5) / res;
+    float fz = clamp(cell.z - 0.5, 0.0, res - 1.001);
+    float z0 = floor(fz), tz = fz - z0;
+    float u0 = (z0 * res + sx) / (res * res);
+    float u1 = (min(z0 + 1.0, res - 1.0) * res + sx) / (res * res);
+    float4 a = g_Mask3D.SampleLevel(g_Ov0Alb_sampler, float2(u0, sv), 0);
+    float4 b = g_Mask3D.SampleLevel(g_Ov0Alb_sampler, float2(u1, sv), 0);
+    float4 s = lerp(a, b, tz);
+    return (chan < 0.5) ? s.r : (chan < 1.5) ? s.g : (chan < 2.5) ? s.b : s.a;
+}
+
+// Blend weight of one overlay slot: uniform value lifted by the painted mask, modulated by the
+// slot's 2D mask map, thresholded with a feathered edge, optionally settled on up-facing only.
+float OvWeight(float4 ov, float4 ovp, uint flags, float mask2d, float3 wpos, float3 ng)
+{
+    float v = ov.x;
+    if (g_OvMQ.y > 0.5 && ovp.z >= 0.0) v = max(v, OvMask3D(wpos, ovp.z));
+    if (flags & 8u) v *= mask2d;
+    float w = smoothstep(ov.y, ov.y + max(ov.z, 1e-3), v);
+    if (ov.w > 0.0) { float up = saturate(ng.y); w *= lerp(1.0, up * up, ov.w); }
+    return w;
+}
 
 // NUKE_INSTANCED opt-in: per-instance tint + custom float4 arrive as extra interpolants.
 // This struct must mirror world.vs's instanced PSIn exactly.
 #if NUKE_INSTANCED
 struct PSIn { float4 pos : SV_POSITION; float3 wpos : TEXCOORD0; float3 nrm : TEXCOORD1; float2 uv : TEXCOORD2;
               float4 icol : TEXCOORD3; float4 icustom : TEXCOORD4; };
+#elif NUKE_VCTINT
+struct PSIn { float4 pos : SV_POSITION; float3 wpos : TEXCOORD0; float3 nrm : TEXCOORD1; float2 uv : TEXCOORD2;
+              float4 vcol : TEXCOORD3; };
 #else
 struct PSIn { float4 pos : SV_POSITION; float3 wpos : TEXCOORD0; float3 nrm : TEXCOORD1; float2 uv : TEXCOORD2; };
 #endif
@@ -159,12 +261,126 @@ float3 PerturbNormal(float3 N, float3 n, float3 dp1, float3 dp2, float2 du1, flo
 
 float4 main(in PSIn i) : SV_Target
 {
+    // Triplanar projection (world position, UV Tiling = repeats per meter): the base albedo
+    // blends across the three planes; everything else follows the DOMINANT plane's uv so all
+    // downstream sampling (POM, wipe, overlays, detail) stays consistent.
+    const uint varF = (uint)(g_Var.w + 0.5);
+    float3 triW = float3(0.0, 0.0, 0.0);
+    float2 triUVx = float2(0.0, 0.0), triUVy = float2(0.0, 0.0), triUVz = float2(0.0, 0.0);
+    [branch] if (varF & 1u)
+    {
+        float3 an = abs(normalize(i.nrm));
+        triW = pow(an, 8.0); triW /= (triW.x + triW.y + triW.z);
+        triUVx = ApplyUVT(i.wpos.zy); triUVy = ApplyUVT(i.wpos.xz); triUVz = ApplyUVT(i.wpos.xy);
+        i.uv = (an.x >= an.y && an.x >= an.z) ? triUVx : (an.y >= an.z ? triUVy : triUVz);
+    }
+    else
+        // LiveMaterial UV transform: applied once, every map below samples the transformed uv.
+        i.uv = ApplyUVT(i.uv);
+
+    // Parallax occlusion mapping: march the height field along the tangent-space view ray and
+    // shift the uv to the intersection. Tangent frame from screen-space derivatives (the same
+    // cotangent trick normal mapping uses), so no mesh tangents are needed.
+    if (g_Disp.x > 0.0)
+    {
+        float3 Ng = normalize(i.nrm);
+        float3 dp1 = ddx(i.wpos), dp2 = ddy(i.wpos);
+        float2 du1 = ddx(i.uv),  du2 = ddy(i.uv);
+        float3 dp2p = cross(dp2, Ng), dp1p = cross(Ng, dp1);
+        float3 T = dp2p * du1.x + dp1p * du2.x;
+        float3 B = dp2p * du1.y + dp1p * du2.y;
+        float inv = rsqrt(max(max(dot(T, T), dot(B, B)), 1e-20));
+        T *= inv; B *= inv;
+        float3 Vw = normalize(g_CamPos.xyz - i.wpos);
+        float3 Vt = float3(dot(Vw, T), dot(Vw, B), dot(Vw, Ng));
+        const int kSteps = 16;
+        float2 duv  = (Vt.xy / max(Vt.z, 0.2)) * (g_Disp.x / kSteps);
+        float  stp  = 1.0 / kSteps;
+        float2 uvp  = i.uv;
+        float  cur  = 0.0;
+        float  h    = 1.0 - g_Height.SampleLevel(g_Height_sampler, uvp, 0).r;   // depth below the surface
+        [loop] for (int s = 0; s < kSteps; ++s)
+        {
+            if (cur >= h) break;
+            uvp -= duv; cur += stp;
+            h = 1.0 - g_Height.SampleLevel(g_Height_sampler, uvp, 0).r;
+        }
+        // One secant refinement between the last two samples smooths the stair-stepping.
+        {
+            float2 uvPrev = uvp + duv;
+            float  hPrev  = 1.0 - g_Height.SampleLevel(g_Height_sampler, uvPrev, 0).r;
+            float  aPrev  = (cur - stp) - hPrev, aCur = cur - h;
+            float  w = saturate(aCur / max(aCur - aPrev, 1e-5));
+            uvp = lerp(uvp, uvPrev, w);
+        }
+        i.uv = uvp;
+    }
+
+    // Overlay slot weights (uv after POM so the overlays sit on the parallaxed surface; the
+    // geometric normal drives topOnly — snow settles by geometry, not by the normal map).
+    float3 ovNg = normalize(i.nrm);
+    uint  ovF[8];
+    float ovW[8];
+#define OV_WEIGHT(N) \
+    ovF[N] = (uint)(g_OvP##N.w + 0.5); ovW[N] = 0.0; \
+    [branch] if (g_Ov##N.x > 0.0 || g_OvP##N.z >= 0.0) \
+        ovW[N] = OvWeight(g_Ov##N, g_OvP##N, ovF[N], (ovF[N] & 8u) ? g_Ov##N##Mask.Sample(g_Ov0Alb_sampler, i.uv).r : 1.0, i.wpos, ovNg);
+    OV_WEIGHT(0) OV_WEIGHT(1) OV_WEIGHT(2) OV_WEIGHT(3)
+    OV_WEIGHT(4) OV_WEIGHT(5) OV_WEIGHT(6) OV_WEIGHT(7)
+#if NUKE_VCTINT
+    // Vertex Color = Overlay Mask: R/G/B/A painted in the DCC drive overlay slots 0-3.
+    if ((uint)(g_Var.w + 0.5) & 4u)
+    { ovW[0] *= i.vcol.r; ovW[1] *= i.vcol.g; ovW[2] *= i.vcol.b; ovW[3] *= i.vcol.a; }
+#endif
+
+    // Luma wipe: pixels whose mask luma falls below the animated threshold dissolve; the band
+    // just above the edge glows (burn) within the feather width.
+    float wipeL = 1.0;
+    if (g_UVT2.z > 0.0)
+    {
+        wipeL = g_WipeMask.Sample(g_WipeMask_sampler, i.uv).r;
+        clip(wipeL - g_UVT2.z);
+    }
+
     float4 base = g_Color;
 #if NUKE_INSTANCED
     base *= i.icol;   // per-instance tint
 #endif
-    if (g_Params.x > 0.5) base *= g_Tex.Sample(g_Tex_sampler, i.uv);
+    if (g_Params.x > 0.5)
+    {
+        [branch] if (varF & 1u)
+            base *= g_Tex.Sample(g_Tex_sampler, triUVx) * triW.x
+                  + g_Tex.Sample(g_Tex_sampler, triUVy) * triW.y
+                  + g_Tex.Sample(g_Tex_sampler, triUVz) * triW.z;
+        else
+            base *= SampleAntiTile(g_Tex, g_Tex_sampler, i.uv);
+    }
+#if NUKE_VCTINT
+    if (varF & 2u) base *= i.vcol;   // Vertex Color = Tint
+#endif
+    // Per-cell hue/brightness variation breaks the remaining repetition.
+    if (g_Var.z > 0.0)
+        base.rgb *= 1.0 + (Hash3(floor(i.uv / max(g_Var.y, 1e-3))) - 0.5) * g_Var.z * 0.6;
+    if (g_UVT2.y > 0.0) clip(base.a - g_UVT2.y);   // Cutout blend: alpha clip at the threshold
     float3 albedo = pow(max(base.rgb, 0.0), 2.2);   // sRGB -> linear
+
+    // Detail albedo: gray-neutral overlay multiply at its own tiling (close-up texture).
+    const uint detF = (uint)(g_Det.z + 0.5);
+    [branch] if (g_Det.y > 0.0 && (detF & 1u))
+    {
+        float3 d = g_Detail.Sample(g_Ov0Alb_sampler, i.uv * g_Det.x).rgb;
+        albedo = lerp(albedo, saturate(albedo * d * 2.0), g_Det.y);
+    }
+
+    // Overlay albedo: blend toward the slot's tinted map (or the tint alone when it has none).
+#define OV_ALBEDO(N) \
+    [branch] if (ovW[N] > 0.001) \
+    { \
+        float3 oa = (ovF[N] & 1u) ? pow(max(g_Ov##N##Alb.Sample(g_Ov0Alb_sampler, i.uv).rgb, 0.0), 2.2) : float3(1.0, 1.0, 1.0); \
+        albedo = lerp(albedo, oa * pow(max(g_OvT##N.rgb, 0.0), 2.2), ovW[N] * saturate(g_OvT##N.a)); \
+    }
+    OV_ALBEDO(0) OV_ALBEDO(1) OV_ALBEDO(2) OV_ALBEDO(3)
+    OV_ALBEDO(4) OV_ALBEDO(5) OV_ALBEDO(6) OV_ALBEDO(7)
 
     float metallic = saturate(g_Params.z);
     float rough    = clamp(g_Params.w, 0.04, 1.0);
@@ -173,19 +389,51 @@ float4 main(in PSIn i) : SV_Target
         float3 m = g_MetalRough.Sample(g_MetalRough_sampler, i.uv).rgb;
         rough = clamp(m.g, 0.04, 1.0); metallic = saturate(m.b);
     }
+    // Overlay metal/rough: the slot's MR map wins; otherwise its scalar targets (-1 = keep).
+#define OV_MR(N) \
+    [branch] if (ovW[N] > 0.001) \
+    { \
+        if (ovF[N] & 4u) { float3 m = g_Ov##N##MR.Sample(g_Ov0Alb_sampler, i.uv).rgb; rough = lerp(rough, clamp(m.g, 0.04, 1.0), ovW[N]); metallic = lerp(metallic, saturate(m.b), ovW[N]); } \
+        else { if (g_OvP##N.x >= 0.0) metallic = lerp(metallic, saturate(g_OvP##N.x), ovW[N]); \
+               if (g_OvP##N.y >= 0.0) rough    = lerp(rough, clamp(g_OvP##N.y, 0.04, 1.0), ovW[N]); } \
+    }
+    OV_MR(0) OV_MR(1) OV_MR(2) OV_MR(3) OV_MR(4) OV_MR(5) OV_MR(6) OV_MR(7)
 
     float3 specF = g_Params2.w * g_Spec.Sample(g_Spec_sampler, i.uv).rgb;   // KHR specular: factor x spec map
 
     float3 V = normalize(g_CamPos.xyz - i.wpos);
     float3 N = normalize(i.nrm);
+    // Tangent-space normal accumulates: base map first, then each overlay slot lerps its own
+    // map in by its weight — an overlay can perturb even when the base has no normal map.
     // g_Params.y: 0 = no normal map; >0 = OpenGL green (+Y, flip); <0 = DirectX green (no flip).
     // RG only + reconstructed Z, so BC5 (which stores no Z) works.
-    if (abs(g_Params.y) > 0.5)
     {
-        float2 nxy = g_Normal.Sample(g_Normal_sampler, i.uv).rg * 2.0 - 1.0;
-        if (g_Params.y > 0.0) nxy.y = -nxy.y;
-        float3 nTS = float3(nxy, sqrt(saturate(1.0 - dot(nxy, nxy))));
-        N = PerturbNormal(N, nTS, ddx(i.wpos), ddy(i.wpos), ddx(i.uv), ddy(i.uv));
+        float3 nTS = float3(0.0, 0.0, 1.0);
+        bool anyN = false;
+        if (abs(g_Params.y) > 0.5)
+        {
+            float2 nxy = g_Normal.Sample(g_Normal_sampler, i.uv).rg * 2.0 - 1.0;
+            if (g_Params.y > 0.0) nxy.y = -nxy.y;
+            nTS = float3(nxy, sqrt(saturate(1.0 - dot(nxy, nxy))));
+            anyN = true;
+        }
+        // Detail normal: added in tangent space at the detail tiling, scaled by strength.
+        [branch] if (g_Det.y > 0.0 && (detF & 2u))
+        {
+            float2 dxy = g_DetailNrm.Sample(g_Ov0Alb_sampler, i.uv * g_Det.x).rg * 2.0 - 1.0;
+            if (detF & 4u) dxy.y = -dxy.y;
+            nTS = normalize(float3(nTS.xy + dxy * g_Det.y, nTS.z)); anyN = true;
+        }
+#define OV_NRM(N) \
+        [branch] if (ovW[N] > 0.001 && (ovF[N] & 2u)) \
+        { \
+            float2 oxy = g_Ov##N##Nrm.Sample(g_Ov0Alb_sampler, i.uv).rg * 2.0 - 1.0; \
+            if (ovF[N] & 16u) oxy.y = -oxy.y; \
+            nTS = lerp(nTS, float3(oxy, sqrt(saturate(1.0 - dot(oxy, oxy)))), ovW[N]); anyN = true; \
+        }
+        OV_NRM(0) OV_NRM(1) OV_NRM(2) OV_NRM(3) OV_NRM(4) OV_NRM(5) OV_NRM(6) OV_NRM(7)
+        if (anyN)
+            N = PerturbNormal(N, normalize(nTS), ddx(i.wpos), ddy(i.wpos), ddx(i.uv), ddy(i.uv));
     }
     float3 swpos = i.wpos + N * g_ShadowParams.y;   // normal-offset bias: sample shadows slightly off the surface
 
@@ -283,6 +531,12 @@ float4 main(in PSIn i) : SV_Target
         ambient = g_Ambient.rgb * g_Ambient.w * albedo * ao;                   // flat ambient (no sky)
     float3 emissive = g_Emissive2.rgb * g_Emissive2.w;
     if (g_Params2.z > 0.5) emissive *= g_Emissive.Sample(g_Emissive_sampler, i.uv).rgb;
+    // Luma-wipe burn edge: the band just above the dissolve threshold glows within the feather.
+    if (g_UVT2.z > 0.0 && g_UVT2.w > 0.0)
+    {
+        float edge = saturate(1.0 - (wipeL - g_UVT2.z) / g_UVT2.w);
+        emissive += albedo * (edge * edge * 6.0);
+    }
     float3 color = ambient + Lo + emissive;
 
     // g_SkyParams.z == 0: emit linear HDR and let the post pass tonemap; == 1: tonemap here.

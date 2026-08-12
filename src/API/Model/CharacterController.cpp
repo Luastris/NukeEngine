@@ -1,4 +1,6 @@
 #include "API/Model/CharacterController.h"
+#include "API/Model/Surface.h"
+#include "API/Model/Time.h"
 #include "API/Model/Atom.h"
 #include "API/Model/MeshRenderer.h"
 #include "API/Model/Mesh.h"
@@ -86,7 +88,33 @@ bool CharacterController::FitToMesh()
 	return true;
 }
 
-void CharacterController::Update()      {}
+// LiveMaterial footsteps: a step every Step Stride meters of ground travel + a landing step.
+void CharacterController::Update()
+{
+	if (!footsteps || !atom) { stepWasGrounded = IsGrounded(); return; }
+	const bool grounded = IsGrounded();
+	const Vector3 v = Velocity();
+	const Vector3 p = atom->GetTransform().globalPosition();
+	if (grounded)
+	{
+		if (!stepWasGrounded && stepPrevVy < -3.0f)   // landed hard enough to hear
+			Surface::FootstepOn(GroundAtom(), p, stepVolume * 1.4);
+		const double speed = std::sqrt(v.x * v.x + v.z * v.z);
+		if (speed > 0.4)
+		{
+			stepAcc += (float)(speed * Time::getSingleton()->delta);
+			if (stepAcc >= stepStride)
+			{
+				stepAcc = std::fmod(stepAcc, stepStride);
+				Surface::FootstepOn(GroundAtom(), p, stepVolume);
+			}
+		}
+		else
+			stepAcc = stepStride * 0.6f;   // idle: the next walk starts stepping quickly
+	}
+	stepWasGrounded = grounded;
+	stepPrevVy = (float)v.y;
+}
 void CharacterController::FixedUpdate() {}
 void CharacterController::Pause()       {}
 void CharacterController::Reset()

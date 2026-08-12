@@ -37,6 +37,10 @@ public:
 	[[nuke::prop(label="Auto Gravity", tip="On: SetMove + Jump, gravity is integrated for you.\nOff: SetVelocity is applied verbatim - your own movement code owns gravity/jumps.")]] bool autoGravity = true;
 	[[nuke::prop(label="Gravity Scale", tip="Multiplier over the world gravity (Auto Gravity only).")]] float gravityScale = 1.0f;
 	[[nuke::prop(label="Inherit Platform", tip="Carried by moving ground (elevators, platforms). Auto Gravity only.")]] bool inheritPlatform = true;
+	// LiveMaterial footsteps: the ground material's step sounds, cadenced by distance walked.
+	[[nuke::prop(label="Footsteps", tip="Play the ground material's step sounds while walking (LiveMaterial sound identity)")]] bool footsteps = true;
+	[[nuke::prop(label="Step Stride", min=0.2, tip="Meters travelled per footstep")]]  float stepStride = 1.9f;
+	[[nuke::prop(label="Step Volume", min=0, max=2)]]                                  float stepVolume = 1.0f;
 
 	// ---- gameplay API ----
 	// Desired HORIZONTAL velocity (world units/s); the vertical component is ignored.
@@ -54,6 +58,11 @@ public:
 	// Size + place the capsule from the sibling MeshRenderer's mesh bounds (pivot=Center,
 	// offset = the mesh's local center, height/radius from the AABB).
 	[[nuke::func]] bool    FitToMesh();                   // false = no sibling mesh
+
+	// footstep cadence (runtime only)
+	float stepAcc = 0.0f;
+	bool  stepWasGrounded = false;
+	float stepPrevVy = 0.0f;
 
 	CharacterController();
 	void Init(Atom* parent) override;

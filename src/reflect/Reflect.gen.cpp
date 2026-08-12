@@ -49,6 +49,7 @@
 #include "API/Model/SkinnedMeshRenderer.h"
 #include "API/Model/Sprite.h"
 #include "API/Model/SpriteAnimator.h"
+#include "API/Model/Surface.h"
 #include "API/Model/Texture.h"
 #include "API/Model/Time.h"
 #include "API/Model/Transform.h"
@@ -365,6 +366,11 @@ bool NukeReflectInit() {
 		t.fields.back().tip = "Multiplier over the world gravity (Auto Gravity only).";
 		t.fields.push_back(MakeField("inheritPlatform", &CharacterController::inheritPlatform, "", "Inherit Platform"));
 		t.fields.back().tip = "Carried by moving ground (elevators, platforms). Auto Gravity only.";
+		t.fields.push_back(MakeField("footsteps", &CharacterController::footsteps, "", "Footsteps"));
+		t.fields.back().tip = "Play the ground material's step sounds while walking (LiveMaterial sound identity)";
+		t.fields.push_back(MakeField("stepStride", &CharacterController::stepStride, "", "Step Stride"));
+		t.fields.back().tip = "Meters travelled per footstep";
+		t.fields.push_back(MakeField("stepVolume", &CharacterController::stepVolume, "", "Step Volume", 0.0f, 2.0f));
 		t.methods.push_back(MakeMethod("SetMove", &CharacterController::SetMove));
 		t.methods.push_back(MakeMethod("SetVelocity", &CharacterController::SetVelocity));
 		t.methods.push_back(MakeMethod("Velocity", &CharacterController::Velocity));
@@ -474,6 +480,8 @@ bool NukeReflectInit() {
 		t.category = "World";
 		t.fields.push_back(MakeField("surface", &Foliage::surface, "", "Surface"));
 		t.fields.back().tip = "Atom (with its children) whose meshes to scatter over. Empty = this atom's own meshes.";
+		t.fields.push_back(MakeField("onlyMatGuid", &Foliage::onlyMatGuid, "material", "Only On Material"));
+		t.fields.back().tip = "Scatter only over mesh sections drawn with this material; empty = the whole surface. LiveMaterial auto-foliage sets this to its own material.";
 		t.fields.push_back(MakeField("density", &Foliage::density, "", "Density"));
 		t.fields.back().tip = "Instances per square meter of surface area.";
 		t.fields.push_back(MakeField("seed", &Foliage::seed, "", "Seed"));
@@ -612,8 +620,20 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("normalGuid", &Material::normalGuid, "texture", "Normal Map"));
 		t.fields.push_back(MakeField("specularGuid", &Material::specularGuid, "texture", "Specular Map"));
 		t.fields.push_back(MakeField("metalRoughGuid", &Material::metalRoughGuid, "texture", "Metallic-Roughness Map"));
+		t.fields.push_back(MakeField("metallicGuid", &Material::metallicGuid, "texture", "Metallic Map"));
+		t.fields.back().tip = "Separate grayscale metallic (Substance export); combined Metallic-Roughness wins when both are set";
+		t.fields.push_back(MakeField("roughnessGuid", &Material::roughnessGuid, "texture", "Roughness Map"));
+		t.fields.back().tip = "Separate grayscale roughness (Substance export)";
+		t.fields.push_back(MakeField("opacityGuid", &Material::opacityGuid, "texture", "Opacity Map"));
+		t.fields.back().tip = "Grayscale opacity baked into the base color alpha (set Blend to Transparent to see it)";
 		t.fields.push_back(MakeField("occlusionGuid", &Material::occlusionGuid, "texture", "Occlusion Map"));
 		t.fields.push_back(MakeField("emissiveGuid", &Material::emissiveGuid, "texture", "Emissive Map"));
+		t.fields.push_back(MakeField("wipeGuid", &Material::wipeGuid, "texture", "Wipe Map"));
+		t.fields.back().tip = "Grayscale luma-wipe mask; the Wipe threshold dissolves pixels by this map";
+		t.fields.push_back(MakeField("wipeThreshold", &Material::wipeThreshold, "", "Wipe", 0.0f, 1.0f));
+		t.fields.back().tip = "Luma-wipe threshold: 0 = fully visible, 1 = fully dissolved; animate with a \\";
+		t.fields.push_back(MakeField("wipeFeather", &Material::wipeFeather, "", "Wipe Feather", 0.0f, 0.5f));
+		t.fields.back().tip = "Softness of the dissolve edge";
 		t.fields.push_back(MakeField("metallic", &Material::metallic, "", "Metallic", 0.0f, 1.0f));
 		t.fields.push_back(MakeField("roughness", &Material::roughness, "", "Roughness", 0.0f, 1.0f));
 		t.fields.push_back(MakeField("specular", &Material::specular, "", "Specular", 0.0f, 1.0f));
@@ -622,8 +642,32 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("castShadows", &Material::castShadows, "", "Cast Shadows"));
 		t.fields.push_back(MakeField("receiveShadows", &Material::receiveShadows, "", "Receive Shadows"));
 		t.fields.back().tip = "Off: surfaces with this material ignore all shadowing and stay fully lit.";
-		t.fields.push_back(MakeField("blendMode", &Material::blendMode, "", "Blend", 0.0f, 0.0f, "Opaque,Transparent,Additive"));
+		t.fields.push_back(MakeField("blendMode", &Material::blendMode, "", "Blend", 0.0f, 0.0f, "Opaque,Transparent,Additive,Cutout"));
+		t.fields.push_back(MakeField("alphaCutoff", &Material::alphaCutoff, "", "Alpha Cutoff", 0.01f, 1.0f));
+		t.fields.back().tip = "Cutout blend: pixels with base alpha below this are clipped";
+		t.fields.push_back(MakeField("uvTiling", &Material::uvTiling, "", "UV Tiling"));
+		t.fields.back().tip = "Texture repeats across the 0..1 UV range";
+		t.fields.push_back(MakeField("uvOffset", &Material::uvOffset, "", "UV Offset"));
+		t.fields.push_back(MakeField("uvRotation", &Material::uvRotation, "", "UV Rotation", -360.0f, 360.0f));
+		t.fields.back().tip = "Degrees around the UV origin";
+		t.fields.push_back(MakeField("detailGuid", &Material::detailGuid, "texture", "Detail Map"));
+		t.fields.back().tip = "High-frequency albedo detail, overlay-blended (gray = neutral)";
+		t.fields.push_back(MakeField("detailNormalGuid", &Material::detailNormalGuid, "texture", "Detail Normal"));
+		t.fields.back().tip = "High-frequency normal detail";
+		t.fields.push_back(MakeField("detailTiling", &Material::detailTiling, "", "Detail Tiling", 0.1f, 256.0f));
+		t.fields.back().tip = "Detail repeats per base UV tile";
+		t.fields.push_back(MakeField("detailStrength", &Material::detailStrength, "", "Detail Strength", 0.0f, 1.0f));
+		t.fields.push_back(MakeField("triplanar", &Material::triplanar, "", "Triplanar"));
+		t.fields.back().tip = "Project maps by world position instead of mesh UVs (UV Tiling = repeats per meter)";
+		t.fields.push_back(MakeField("vcolorMode", &Material::vcolorMode, "", "Vertex Color", 0.0f, 0.0f, "Off,Tint,Overlay Mask"));
+		t.fields.back().tip = "Tint: multiply base color; Overlay Mask: R/G/B/A drive overlay slots 0-3";
 		t.fields.push_back(MakeField("shaderGuid", &Material::shaderGuid, "shader", "Shader"));
+		t.fields.push_back(MakeField("physTag", &Material::physTag, "", "Physics Tag"));
+		t.fields.back().tip = "Surface identity for gameplay/physics queries (e.g. metal, wood, flesh); empty = untagged";
+		t.fields.push_back(MakeField("liveFriction", &Material::liveFriction, "", "Friction", -1.0f, 2.0f));
+		t.fields.back().tip = "Surface friction override; -1 = keep the body's value";
+		t.fields.push_back(MakeField("liveBounce", &Material::liveBounce, "", "Bounciness", -1.0f, 1.0f));
+		t.fields.back().tip = "Surface restitution override; -1 = keep the body's value";
 		t.create = []() -> void* { return new Material(); };
 	}
 	{
@@ -908,6 +952,49 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("SetFrame", &SpriteAnimator::SetFrame));
 		t.methods.push_back(MakeMethod("CurrentFrame", &SpriteAnimator::CurrentFrame));
 		t.create = []() -> void* { return new SpriteAnimator(); };
+	}
+	{
+		TypeInfo& t = TypeOf<SurfaceState>();
+		t.base = "Component";
+		t.category = "World";
+		t.fields.push_back(MakeField("states", &SurfaceState::states, "", "States"));
+		t.fields.back().tip = "Condition ids overridden here (wet/snow/dust/rust/...)";
+		t.fields.push_back(MakeField("values", &SurfaceState::values, "", "Values"));
+		t.fields.back().tip = "Value 0..1 for each state above, by index";
+		t.methods.push_back(MakeMethod("SetState", &SurfaceState::SetState));
+		t.methods.push_back(MakeMethod("ClearState", &SurfaceState::ClearState));
+		t.create = []() -> void* { return new SurfaceState(); };
+	}
+	{
+		TypeInfo& t = TypeOf<SurfaceMask>();
+		t.base = "Component";
+		t.category = "World";
+		t.fields.push_back(MakeField("state0", &SurfaceMask::state0, "", "State R"));
+		t.fields.back().tip = "Condition id painted into the R channel";
+		t.fields.push_back(MakeField("state1", &SurfaceMask::state1, "", "State G"));
+		t.fields.push_back(MakeField("state2", &SurfaceMask::state2, "", "State B"));
+		t.fields.push_back(MakeField("state3", &SurfaceMask::state3, "", "State A"));
+		t.fields.push_back(MakeField("resolution", &SurfaceMask::resolution, "", "Resolution", 4.0f, 64.0f));
+		t.fields.back().tip = "Grid cells per axis (memory = res^3 x 4 bytes)";
+		t.fields.push_back(MakeField("halfExtents", &SurfaceMask::halfExtents, "", "Half Extents"));
+		t.fields.back().tip = "Local-space box the grid spans around the atom";
+		t.fields.push_back(MakeField("data", &SurfaceMask::data));
+		t.fields.back().hidden = true;
+		t.methods.push_back(MakeMethod("Paint", &SurfaceMask::Paint));
+		t.methods.push_back(MakeMethod("Clear", &SurfaceMask::Clear));
+		t.methods.push_back(MakeMethod("SampleChannel", &SurfaceMask::SampleChannel));
+		t.create = []() -> void* { return new SurfaceMask(); };
+	}
+	{
+		TypeInfo& t = TypeOf<Surface>();
+		t.base = "Object";
+		t.methods.push_back(MakeMethod("SetCondition", &Surface::SetCondition));
+		t.methods.push_back(MakeMethod("Condition", &Surface::Condition));
+		t.methods.push_back(MakeMethod("ClearConditions", &Surface::ClearConditions));
+		t.methods.push_back(MakeMethod("ValueAt", &Surface::ValueAt));
+		t.methods.push_back(MakeMethod("Footstep", &Surface::Footstep));
+		t.methods.push_back(MakeMethod("Hit", &Surface::Hit));
+		t.methods.push_back(MakeMethod("TagAt", &Surface::TagAt));
 	}
 	{
 		TypeInfo& t = TypeOf<Texture>();

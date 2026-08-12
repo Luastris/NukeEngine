@@ -269,7 +269,9 @@ static bool RendererInternalShader(const std::string& name)
 	return name == "ui" || name == "shadow" || name == "sky" || name == "post" || name == "debug"
 	    || name == "sprite" || name == "sprite_lit" || name == "decal"
 	    || name.rfind("outline", 0) == 0 || name.rfind("water", 0) == 0    // water* = 7.5 surface/sim/FFT passes
-	    || name == "skin";                                                 // GPU skinning compute (stage 3)
+	    || name == "skin"                                                  // GPU skinning compute (stage 3)
+	    || name == "grid"                                                  // analytic editor grid pass
+	    || name == "gbuffer";                                              // SSR/TAA prepass
 }
 
 void ResDB::LoadShadersDir(const std::string& dir)
@@ -417,6 +419,12 @@ void ResDB::HotReloadAssets(iRender* r)
 			m->shaderGuid   = fresh->shaderGuid;
 			m->diffuseGuid  = fresh->diffuseGuid; m->normalGuid = fresh->normalGuid; m->specularGuid = fresh->specularGuid;
 			m->metalRoughGuid = fresh->metalRoughGuid; m->occlusionGuid = fresh->occlusionGuid; m->emissiveGuid = fresh->emissiveGuid;
+			m->metallicGuid = fresh->metallicGuid; m->roughnessGuid = fresh->roughnessGuid; m->opacityGuid = fresh->opacityGuid;
+			m->wipeGuid = fresh->wipeGuid; m->wipeThreshold = fresh->wipeThreshold; m->wipeFeather = fresh->wipeFeather;
+			m->liveStates = fresh->liveStates; m->liveLayers = fresh->liveLayers; m->liveHits = fresh->liveHits;
+			m->liveFoliage = fresh->liveFoliage; m->liveTweens = fresh->liveTweens;
+			m->liveSound = fresh->liveSound;   m->liveSurface = fresh->liveSurface;
+			m->physTag = fresh->physTag; m->liveFriction = fresh->liveFriction; m->liveBounce = fresh->liveBounce;
 			delete fresh;
 			m->Resolve();
 			std::cout << "[ResDB]\thot-reloaded material " << bfs::path(p).filename().string() << std::endl;

@@ -23,6 +23,29 @@ void main(in VSIn i, out PSIn o)
     o.icol    = i.iColor;
     o.icustom = i.iCustom;
 }
+#elif NUKE_TESS
+// Displacement tessellation path: pure local-space passthrough — the hull/domain pair
+// (world.hs/world.ds) subdivides, displaces along the normal by g_Height and projects.
+struct VSIn { float3 pos : ATTRIB0; float3 nrm : ATTRIB1; float2 uv : ATTRIB2; };
+struct HSIn { float3 pos : TEXCOORD0; float3 nrm : TEXCOORD1; float2 uv : TEXCOORD2; };
+void main(in VSIn i, out HSIn o)
+{
+    o.pos = i.pos; o.nrm = i.nrm; o.uv = i.uv;
+}
+#elif NUKE_VCTINT
+// Vertex-color variant (meshes with a color stream, material Vertex Color = Tint/Overlay Mask):
+// the color rides one extra interpolant into world.ps.
+struct VSIn { float3 pos : ATTRIB0; float3 nrm : ATTRIB1; float2 uv : ATTRIB2; float4 col : ATTRIB3; };
+struct PSIn { float4 pos : SV_POSITION; float3 wpos : TEXCOORD0; float3 nrm : TEXCOORD1; float2 uv : TEXCOORD2;
+              float4 vcol : TEXCOORD3; };
+void main(in VSIn i, out PSIn o)
+{
+    o.wpos = mul(g_World, float4(i.pos, 1.0)).xyz;
+    o.pos  = mul(g_WVP,   float4(i.pos, 1.0));
+    o.nrm  = mul((float3x3)g_World, i.nrm);
+    o.uv   = i.uv;
+    o.vcol = i.col;
+}
 #else
 struct VSIn { float3 pos : ATTRIB0; float3 nrm : ATTRIB1; float2 uv : ATTRIB2; };
 struct PSIn { float4 pos : SV_POSITION; float3 wpos : TEXCOORD0; float3 nrm : TEXCOORD1; float2 uv : TEXCOORD2; };

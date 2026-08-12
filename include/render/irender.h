@@ -584,6 +584,11 @@ public:
     virtual void setSkinPalette(Mesh* instance, Mesh* source, const float* palette16, int boneCount,
                                 const float* morphWeights = nullptr, int morphCount = 0) {}
 
+    // Editor infinite ground grid: an analytic shader plane (AA lines, x10 adaptive LOD,
+    // distance fade), drawn depth-tested under the gizmos. step <= 0 hides it; the editor
+    // hands the snap step over once per frame.
+    virtual void drawEditorGrid(float step) {}
+
     // ABI: new virtuals are appended at the END of the class, NEVER inserted mid-vtable —
     // plugins are separate DLLs built at different times, and an inserted slot shifts every later one.
 };

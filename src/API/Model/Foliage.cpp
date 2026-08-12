@@ -124,8 +124,33 @@ void Foliage::Scatter(const Vector3& brushPos, float brushR, float densMul)
 		const glm::mat4 w = AtomWorldM(a);
 		const Mesh* m = mr->mesh;
 		const int tris = m->TriCount();
+		// Material filter: with `onlyMatGuid` set, scatter only over the LOD0 sections drawn
+		// with that material (a dirt patch inside asphalt grows nothing on the asphalt).
+		std::vector<std::pair<uint32_t, uint32_t>> allowed;   // matching LOD0 index ranges
+		if (!onlyMatGuid.empty())
+		{
+			const MeshLOD L0 = m->Lod(0);
+			for (int s = 0; s < L0.sectionCount; ++s)
+			{
+				const MeshSection sec = m->Section(L0.firstSection + s);
+				const std::string& g = (sec.slot >= 0 && sec.slot < (int)mr->matGuids.size()
+				                        && !mr->matGuids[sec.slot].empty())
+				                     ? mr->matGuids[sec.slot] : mr->matGuid;
+				if (g == onlyMatGuid)
+					allowed.push_back({ sec.firstIndex, sec.firstIndex + sec.indexCount });
+			}
+			if (allowed.empty()) continue;   // this renderer draws none of the target material
+		}
 		for (int t = 0; t < tris; ++t)
 		{
+			if (!allowed.empty())
+			{
+				const uint32_t i0 = (uint32_t)t * 3;   // LOD0 starts at IB offset 0 by construction
+				bool ok = false;
+				for (const auto& r : allowed)
+					if (i0 >= r.first && i0 < r.second) { ok = true; break; }
+				if (!ok) continue;
+			}
 			const float* v0 = m->vertexArray + (size_t)m->TriIndex(t, 0) * 3;
 			const float* v1 = m->vertexArray + (size_t)m->TriIndex(t, 1) * 3;
 			const float* v2 = m->vertexArray + (size_t)m->TriIndex(t, 2) * 3;

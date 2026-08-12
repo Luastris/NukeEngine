@@ -164,6 +164,25 @@ public:
 	// land a frame late and shimmer while the camera moves). 0 = hidden; the editor sets the
 	// step each frame from its snap settings. Part of the abi 15 append block.
 	float editorGridStep = 0.0f;
+
+	// --- EDITOR VIEWPORT TOOL FEED (abi 16 append block). The editor publishes the scene-view
+	// mouse state each frame so MODULES can build viewport tools (terrain brushes, foliage
+	// paint, road splines...) without knowing editor internals. Valid only while the mouse is
+	// over the scene view and no gizmo/marquee owns it.
+	bool  editorRayValid = false;      // editorRay* hold this frame's cursor ray (editor camera)
+	float editorRayOrigin[3] = { 0.f, 0.f, 0.f };
+	float editorRayDir[3]    = { 0.f, 0.f, 1.f };
+	bool  editorMouseDown  = false;    // LMB held over the scene view (tool stroke)
+	bool  editorMouseWentDown = false; // LMB pressed this frame (stroke start)
+	// A module viewport tool CLAIMS the cursor by holding this true while its tool is selected
+	// (state, not per-frame): the editor suppresses its own click-selection so strokes don't
+	// re-select atoms. The module clears it when its tool deactivates.
+	bool  editorToolActive = false;
+	// Editor undo seam: the editor installs its command-stack hook here; modules push their
+	// own undo/redo closures (terrain strokes...) through it. Null outside the editor.
+	boost::function<void(const std::string& label,
+	                     boost::function<void()> undo,
+	                     boost::function<void()> redo)> editorUndoHook;
 };
 
 }  // namespace nuke

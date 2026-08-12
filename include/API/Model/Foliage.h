@@ -14,6 +14,8 @@ class NUKEENGINE_API Foliage : public InstancedMesh
 public:
 	// ---- scatter ---------------------------------------------------------------------------
 	[[nuke::prop(label="Surface", tip="Atom (with its children) whose meshes to scatter over. Empty = this atom's own meshes.")]] Atom* surface = nullptr;
+	[[nuke::prop(asset="material", label="Only On Material", tip="Scatter only over mesh sections drawn with this material; empty = the whole surface. LiveMaterial auto-foliage sets this to its own material.")]]
+	std::string onlyMatGuid;
 	[[nuke::prop(label="Density", min=0, tip="Instances per square meter of surface area.")]] float density = 4.0f;
 	[[nuke::prop(label="Seed", min=0, tip="Same seed + same rules = the same scatter.")]] int seed = 1337;
 	[[nuke::prop(label="Scale Min", min=0.01)]] float scaleMin = 0.8f;
