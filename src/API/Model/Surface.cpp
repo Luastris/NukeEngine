@@ -14,6 +14,8 @@
 #include "API/Model/Wind.h"
 #include "API/Model/Time.h"
 #include "interface/AppInstance.h"   // renderer access: invalidate the rebuilt mask flipbook
+#include "API/Model/resdb.h"
+#include "reflect/ReflectBind.h"     // terrain layer material via reflection (no module link)
 #include <render/irender.h>
 #include <nlohmann/json.hpp>
 #include <algorithm>
@@ -507,9 +509,28 @@ static std::vector<PendingHit> g_pendingHits;
 struct SpawnedHit { World* target; long id; double deadline; };
 static std::vector<SpawnedHit> g_hitSpawned;
 
+// Terrain-aware material: an atom carrying a "Terrain" component (module class, reached via
+// reflection — the engine links no module) answers with the splat LAYER material under the
+// world point. Null when the atom is not terrain / the point is air / the layer is unset.
+static Material* TerrainLayerMaterial(Atom* a, const Vector3& pos)
+{
+	Component* t = a ? Reflect_FindComponent(a, "Terrain") : nullptr;
+	if (!t) return nullptr;
+	TypeInfo* ti = Registry_Find("Terrain");
+	const Method* m = ti ? Reflect_FindMethod(ti, "LayerMaterialAt") : nullptr;
+	if (!m) return nullptr;
+	ReflectValue arg;
+	detail::ToRV(pos, arg);
+	ReflectValue ret;
+	if (!Reflect_Invoke(t, *m, &arg, 1, ret) || ret.type != FT::String || ret.str.empty())
+		return nullptr;
+	return ResDB::getSingleton()->GetMaterial(ret.str);
+}
+
 bool Surface::FootstepOn(Atom* ground, const Vector3& pos, double volume)
 {
 	Material* m = MaterialOf(ground);
+	if (!m) m = TerrainLayerMaterial(ground, pos);
 	if (!m || m->liveSound.footsteps.empty()) return false;
 	static std::map<const Material*, unsigned> rr;   // round-robin step index per material
 	const unsigned n = rr[m]++;
@@ -538,6 +559,7 @@ bool Surface::HitIn(World* target, Atom* atom, const std::string& hitType, const
                     const Vector3& normal, double impulse)
 {
 	Material* m = MaterialOf(atom);
+	if (!m) m = TerrainLayerMaterial(atom, pos);   // terrain: the splat layer under the hit
 	if (!m || m->liveHits.empty()) return false;
 	const LiveHit* best = nullptr;
 	for (const LiveHit& h : m->liveHits)
@@ -777,6 +799,38 @@ void Surface::DriveFoliage(World* w)
 					consider(mr->mat);
 					for (Material* sm : mr->mats) consider(sm);
 				}
+				// Terrain atoms: the splat LAYER materials are surface sources too — their
+				// auto-foliage grows through the scatter-source seam, their sound identity
+				// plays like any surface. The fingerprint carries the module's quiet-edit
+				// stamp, so digs reflow the growth once the sculpting settles.
+				std::string terraFp;
+				if (Component* tc = Reflect_FindComponent(a, "Terrain"))
+					if (TypeInfo* ti = Registry_Find("Terrain"))
+					{
+						for (int li = 0; li < 8; ++li)
+						{
+							const Field* f = Reflect_FindField(ti, "layer" + std::to_string(li));
+							if (!f) continue;
+							ReflectValue rv = Reflect_GetField(tc, *f);
+							if (rv.type != FT::String || rv.str.empty()) continue;
+							Material* lm = ResDB::getSingleton()->GetMaterial(rv.str);
+							if (!lm) continue;
+							if (!snd && (!lm->liveSound.ambientGuid.empty() || !lm->liveSound.windGuid.empty())) snd = lm;
+							if (lm->liveFoliage.empty()) continue;
+							bool dup = false;
+							for (Material* e : srcs) if (e->guid == lm->guid) { dup = true; break; }
+							if (!dup) srcs.push_back(lm);
+						}
+						if (const Method* fm = Reflect_FindMethod(ti, "FoliageStamp"))
+						{
+							ReflectValue ret;
+							if (Reflect_Invoke(tc, *fm, nullptr, 0, ret))
+							{
+								std::ostringstream ts; ts << '~' << ret.num;
+								terraFp = ts.str();
+							}
+						}
+					}
 				// Ambient/wind loops from the surface's sound identity (transient sources; the
 				// wind loop's volume follows the global wind strength each frame).
 				{
@@ -833,7 +887,7 @@ void Surface::DriveFoliage(World* w)
 					d.seen = true;
 					d.world = w;
 					d.atomId = (long long)a->id.id;
-					std::string fp;
+					std::string fp = terraFp;
 					for (Material* s : srcs) fp += s->guid + '#' + FoliageFp(s->liveFoliage);
 					if (fp != d.fp)
 					{

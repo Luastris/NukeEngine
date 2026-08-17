@@ -36,6 +36,37 @@ static Collider* FindColliderByBody(bc::list<Atom*>& gos, uint64_t body)
 	return nullptr;
 }
 
+// Module-created bodies (terrain chunk colliders): body -> owning atom's STABLE id. Resolution
+// walks the current world by id, so a stale entry (world switched, atom gone) answers null.
+static std::map<uint64_t, unsigned long> g_extBody;
+
+void Physics::RegisterExternalBody(uint64_t body, Atom* atom)
+{
+	if (body && atom) g_extBody[body] = atom->id.id;
+}
+void Physics::UnregisterExternalBody(uint64_t body) { g_extBody.erase(body); }
+
+static Atom* FindAtomById(bc::list<Atom*>& gos, unsigned long id)
+{
+	for (Atom* atom : gos)
+	{
+		if (!atom) continue;
+		if (atom->id.id == id) return atom;
+		if (!atom->children.empty())
+			if (Atom* a = FindAtomById(atom->children, id)) return a;
+	}
+	return nullptr;
+}
+
+// Hit-atom resolution shared by every cast: colliders first, then the external registry.
+static Atom* AtomOfBody(World* w, uint64_t body)
+{
+	if (!w) return nullptr;
+	if (Collider* col = FindColliderByBody(w->GetHierarchy(), body)) return col->atom;
+	auto it = g_extBody.find(body);
+	return it == g_extBody.end() ? nullptr : FindAtomById(w->GetHierarchy(), it->second);
+}
+
 bool Physics::Available() { return GetService<iPhysics>() != nullptr; }
 
 bool Physics::Raycast(const Vector3& from, const Vector3& dir, double maxDist)
@@ -52,8 +83,7 @@ bool Physics::Raycast(const Vector3& from, const Vector3& dir, double maxDist)
 	float point[3], normal[3];
 	if (!p->raycast(f, d, (float)maxDist, body, point, normal)) return false;
 
-	Collider* col = FindColliderByBody(w->GetHierarchy(), body);
-	tl_lastHit.atom   = col ? col->atom : nullptr;
+	tl_lastHit.atom   = AtomOfBody(w, body);
 	tl_lastHit.point  = Vector3(point[0], point[1], point[2]);
 	tl_lastHit.normal = Vector3(normal[0], normal[1], normal[2]);
 	Vector3 delta(tl_lastHit.point.x - from.x, tl_lastHit.point.y - from.y, tl_lastHit.point.z - from.z);
@@ -87,8 +117,7 @@ bool Physics::RaycastIgnore(const Vector3& from, const Vector3& dir, double maxD
 	float point[3], normal[3];
 	if (!p->raycastIgnore(f, d, (float)maxDist, ignoreBody, body, point, normal)) return false;
 
-	Collider* col = FindColliderByBody(w->GetHierarchy(), body);
-	tl_lastHit.atom   = col ? col->atom : nullptr;
+	tl_lastHit.atom   = AtomOfBody(w, body);
 	tl_lastHit.point  = Vector3(point[0], point[1], point[2]);
 	tl_lastHit.normal = Vector3(normal[0], normal[1], normal[2]);
 	Vector3 delta(tl_lastHit.point.x - from.x, tl_lastHit.point.y - from.y, tl_lastHit.point.z - from.z);
@@ -128,8 +157,7 @@ static bool FinishCast(bool hit, uint64_t body, const float point[3], const floa
 {
 	if (!hit) return false;
 	World* w = AppInstance::GetSingleton()->currentWorld;
-	Collider* col = w ? FindColliderByBody(w->GetHierarchy(), body) : nullptr;
-	tl_lastHit.atom   = col ? col->atom : nullptr;
+	tl_lastHit.atom   = AtomOfBody(w, body);
 	tl_lastHit.point  = Vector3(point[0], point[1], point[2]);
 	tl_lastHit.normal = Vector3(normal[0], normal[1], normal[2]);
 	Vector3 delta(tl_lastHit.point.x - from.x, tl_lastHit.point.y - from.y, tl_lastHit.point.z - from.z);

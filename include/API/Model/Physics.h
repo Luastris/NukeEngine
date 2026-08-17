@@ -69,6 +69,12 @@ public:
 	// MESH-space uv of `atom`'s render mesh under a surface point (probed along -normal;
 	// LOD0, skinned = bind pose). False when the atom has no readable mesh/uv.
 	static bool MeshUVAt(Atom* atom, const Vector3& point, const Vector3& normal, float& u, float& v);
+
+	// EXTERNAL body ownership: modules creating raw iPhysics bodies (terrain chunk colliders)
+	// register them so casts resolve the hit atom. Stored by STABLE atom id, resolved against
+	// the current world — a stale entry answers null, never a recycled pointer.
+	static void RegisterExternalBody(uint64_t body, Atom* atom);
+	static void UnregisterExternalBody(uint64_t body);
 };
 
 }  // namespace nuke

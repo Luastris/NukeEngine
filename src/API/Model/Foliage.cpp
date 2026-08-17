@@ -2,6 +2,7 @@
 #include "API/Model/MeshRenderer.h"
 #include "API/Model/Atom.h"
 #include "API/Model/Noise.h"
+#include "interface/ScatterSources.h"
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -90,6 +91,16 @@ bool Foliage::EnsureRenderReady(iRender* r)
 	return InstancedMesh::EnsureRenderReady(r);
 }
 
+// ---- scatter-source registry (interface/ScatterSources.h) ---------------------------------
+// Modules owning ground the engine can't see through MeshRenderers (voxel terrain nodes)
+// register providers; Scatter falls back to them for atoms without a renderable mesh.
+static std::vector<ScatterSource*> g_scatterSrc;
+void RegisterScatterSource(ScatterSource* s)
+{ if (s && std::find(g_scatterSrc.begin(), g_scatterSrc.end(), s) == g_scatterSrc.end()) g_scatterSrc.push_back(s); }
+void UnregisterScatterSource(ScatterSource* s)
+{ g_scatterSrc.erase(std::remove(g_scatterSrc.begin(), g_scatterSrc.end(), s), g_scatterSrc.end()); }
+const std::vector<ScatterSource*>& ScatterSourceList() { return g_scatterSrc; }
+
 // ---- scatter ------------------------------------------------------------------------------
 
 void Foliage::Scatter(const Vector3& brushPos, float brushR, float densMul)
@@ -113,6 +124,61 @@ void Foliage::Scatter(const Vector3& brushPos, float brushR, float densMul)
 	const float slopeCosMin = cosf(glm::radians(std::min(std::max(maxSlope, 0.0f), 90.0f)));
 	const float sMinV = std::min(scaleMin, scaleMax), sMaxV = std::max(scaleMin, scaleMax);
 
+	// Sample instances over ONE world-space triangle (shared by the mesh path and the
+	// scatter-source providers; wMul scales the density — splat layer weight).
+	auto scatterTri = [&](const glm::vec3& A, const glm::vec3& B, const glm::vec3& C, float wMul)
+	{
+		glm::vec3 n = glm::cross(B - A, C - A);
+		const float n2 = glm::length(n);
+		if (n2 < 1e-9f) return;
+		const float area = 0.5f * n2;
+		n /= n2;
+		if (n.y < 0.0f) n = -n;               // ground is ground from either winding
+		if (n.y < slopeCosMin) return;        // slope mask (per triangle)
+		if (brushR > 0.0f)
+		{
+			// cheap pre-cull: brush sphere vs triangle AABB
+			glm::vec3 mn = glm::min(A, glm::min(B, C)) - brushR;
+			glm::vec3 mx = glm::max(A, glm::max(B, C)) + brushR;
+			if (bp.x < mn.x || bp.x > mx.x || bp.y < mn.y || bp.y > mx.y || bp.z < mn.z || bp.z > mx.z) return;
+		}
+		const float expect = area * density * densMul * wMul;
+		int cnt = (int)expect;
+		if (rng.Next() < expect - (float)cnt) ++cnt;
+		for (int k = 0; k < cnt; ++k)
+		{
+			float u = rng.Next(), v = rng.Next();
+			if (u + v > 1.0f) { u = 1.0f - u; v = 1.0f - v; }
+			glm::vec3 P = A + (B - A) * u + (C - A) * v;
+			if (brushR > 0.0f)
+			{
+				glm::vec3 d = P - bp;
+				if (glm::dot(d, d) > brushR2) continue;
+			}
+			if (P.y < heightMin || P.y > heightMax) continue;   // height band
+			if (noiseCover < 1.0f)                              // patchiness
+			{
+				const double ns = noiseScale > 0.1f ? noiseScale : 0.1f;
+				const float nz = 0.5f + 0.5f * (float)Noise::Perlin2((double)seed, P.x / ns, P.z / ns);
+				if (nz > noiseCover) continue;
+			}
+			glm::vec3 axis = glm::normalize(glm::mix(glm::vec3(0, 1, 0), n, std::min(std::max(alignToNormal, 0.0f), 1.0f)));
+			glm::quat q = UpTo(axis);
+			if (randomYaw) q = q * glm::angleAxis(rng.Next() * 6.2831853f, glm::vec3(0, 1, 0));
+			P += axis * surfaceOffset;
+			const float sc = sMinV + rng.Next() * (sMaxV - sMinV);
+
+			const glm::vec3 lp = glm::vec3(inv * glm::vec4(P, 1));
+			const glm::quat lq = invARot * q;
+			Inst in{};
+			in.pos[0] = lp.x; in.pos[1] = lp.y; in.pos[2] = lp.z;
+			in.quat[0] = lq.x; in.quat[1] = lq.y; in.quat[2] = lq.z; in.quat[3] = lq.w;
+			in.scale[0] = in.scale[1] = in.scale[2] = sc;
+			in.color[0] = in.color[1] = in.color[2] = in.color[3] = 1.0f;
+			instances.push_back(in);
+		}
+	};
+
 	std::vector<Atom*> stack{ root };
 	while (!stack.empty())
 	{
@@ -120,7 +186,17 @@ void Foliage::Scatter(const Vector3& brushPos, float brushR, float densMul)
 		if (!a) continue;
 		for (Atom* c : a->children) stack.push_back(c);
 		MeshRenderer* mr = a->GetComponent<MeshRenderer>();
-		if (!mr || !mr->enabled || !mr->mesh || !mr->mesh->vertexArray || mr->mesh->numVerts < 3) continue;
+		if (!mr || !mr->enabled || !mr->mesh || !mr->mesh->vertexArray || mr->mesh->numVerts < 3)
+		{
+			// No renderable mesh: a scatter source may own this atom's ground (voxel terrain).
+			std::vector<ScatterTri> ext;
+			for (ScatterSource* src : ScatterSourceList())
+				if (src->Collect(a, onlyMatGuid, ext)) break;
+			for (const ScatterTri& t : ext)
+				scatterTri(glm::vec3(t.a[0], t.a[1], t.a[2]), glm::vec3(t.b[0], t.b[1], t.b[2]),
+				           glm::vec3(t.c[0], t.c[1], t.c[2]), std::min(std::max(t.weight, 0.0f), 1.0f));
+			continue;
+		}
 		const glm::mat4 w = AtomWorldM(a);
 		const Mesh* m = mr->mesh;
 		const int tris = m->TriCount();
@@ -158,58 +234,9 @@ void Foliage::Scatter(const Vector3& brushPos, float brushR, float densMul)
 			const float* v0 = m->vertexArray + (size_t)m->TriIndex(t, 0) * 3;
 			const float* v1 = m->vertexArray + (size_t)m->TriIndex(t, 1) * 3;
 			const float* v2 = m->vertexArray + (size_t)m->TriIndex(t, 2) * 3;
-			glm::vec3 A = glm::vec3(w * glm::vec4(v0[0], v0[1], v0[2], 1));
-			glm::vec3 B = glm::vec3(w * glm::vec4(v1[0], v1[1], v1[2], 1));
-			glm::vec3 C = glm::vec3(w * glm::vec4(v2[0], v2[1], v2[2], 1));
-			glm::vec3 n = glm::cross(B - A, C - A);
-			const float n2 = glm::length(n);
-			if (n2 < 1e-9f) continue;
-			const float area = 0.5f * n2;
-			n /= n2;
-			if (n.y < 0.0f) n = -n;               // ground is ground from either winding
-			if (n.y < slopeCosMin) continue;      // slope mask (per triangle)
-			if (brushR > 0.0f)
-			{
-				// cheap pre-cull: brush sphere vs triangle AABB
-				glm::vec3 mn = glm::min(A, glm::min(B, C)) - brushR;
-				glm::vec3 mx = glm::max(A, glm::max(B, C)) + brushR;
-				if (bp.x < mn.x || bp.x > mx.x || bp.y < mn.y || bp.y > mx.y || bp.z < mn.z || bp.z > mx.z) continue;
-			}
-			const float expect = area * density * densMul;
-			int cnt = (int)expect;
-			if (rng.Next() < expect - (float)cnt) ++cnt;
-			for (int k = 0; k < cnt; ++k)
-			{
-				float u = rng.Next(), v = rng.Next();
-				if (u + v > 1.0f) { u = 1.0f - u; v = 1.0f - v; }
-				glm::vec3 P = A + (B - A) * u + (C - A) * v;
-				if (brushR > 0.0f)
-				{
-					glm::vec3 d = P - bp;
-					if (glm::dot(d, d) > brushR2) continue;
-				}
-				if (P.y < heightMin || P.y > heightMax) continue;   // height band
-				if (noiseCover < 1.0f)                              // patchiness
-				{
-					const double ns = noiseScale > 0.1f ? noiseScale : 0.1f;
-					const float nz = 0.5f + 0.5f * (float)Noise::Perlin2((double)seed, P.x / ns, P.z / ns);
-					if (nz > noiseCover) continue;
-				}
-				glm::vec3 axis = glm::normalize(glm::mix(glm::vec3(0, 1, 0), n, std::min(std::max(alignToNormal, 0.0f), 1.0f)));
-				glm::quat q = UpTo(axis);
-				if (randomYaw) q = q * glm::angleAxis(rng.Next() * 6.2831853f, glm::vec3(0, 1, 0));
-				P += axis * surfaceOffset;
-				const float sc = sMinV + rng.Next() * (sMaxV - sMinV);
-
-				const glm::vec3 lp = glm::vec3(inv * glm::vec4(P, 1));
-				const glm::quat lq = invARot * q;
-				Inst in{};
-				in.pos[0] = lp.x; in.pos[1] = lp.y; in.pos[2] = lp.z;
-				in.quat[0] = lq.x; in.quat[1] = lq.y; in.quat[2] = lq.z; in.quat[3] = lq.w;
-				in.scale[0] = in.scale[1] = in.scale[2] = sc;
-				in.color[0] = in.color[1] = in.color[2] = in.color[3] = 1.0f;
-				instances.push_back(in);
-			}
+			scatterTri(glm::vec3(w * glm::vec4(v0[0], v0[1], v0[2], 1)),
+			           glm::vec3(w * glm::vec4(v1[0], v1[1], v1[2], 1)),
+			           glm::vec3(w * glm::vec4(v2[0], v2[1], v2[2], 1)), 1.0f);
 		}
 	}
 }
