@@ -1121,11 +1121,13 @@ void LoadBuiltinShaders(iRender* render, const std::string& dir)
 	for (bfs::directory_iterator it(shaderDir, ec), end; it != end; it.increment(ec))
 	{
 		if (ec) break;
-		if (bfs::is_directory(it->path()) || it->path().extension() != ".hlsl") continue;
+		const bool isInclude = it->path().extension() == ".hlsli";   // include files keep their full name
+		if (bfs::is_directory(it->path()) || (it->path().extension() != ".hlsl" && !isInclude)) continue;
 		bfs::ifstream f(it->path(), std::ios::binary);
 		if (!f) continue;
 		std::string src((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
-		std::string name = it->path().stem().string();   // "world.vs.hlsl" -> "world.vs"
+		std::string name = isInclude ? it->path().filename().string()
+		                             : it->path().stem().string();   // "world.vs.hlsl" -> "world.vs"
 		render->setShaderSource(name.c_str(), src.c_str());
 		cout << "[Modular]\tshader '" << name << "' (" << src.size() << " bytes)" << endl;
 	}
@@ -1139,11 +1141,16 @@ void LoadBuiltinShadersPackaged(iRender* render)
 	int n = 0;
 	for (const std::string& rel : Package::List("shaders/"))
 	{
-		const std::string suf = ".hlsl";
-		if (rel.size() <= suf.size() || rel.compare(rel.size() - suf.size(), suf.size(), suf) != 0) continue;
+		const std::string suf = ".hlsl", isuf = ".hlsli";
+		const bool isInclude = rel.size() > isuf.size()
+		                    && rel.compare(rel.size() - isuf.size(), isuf.size(), isuf) == 0;
+		if (!isInclude && (rel.size() <= suf.size()
+		 || rel.compare(rel.size() - suf.size(), suf.size(), suf) != 0)) continue;
 		std::string src;
 		if (!Package::Read(rel, src)) continue;
-		std::string name = bfs::path(rel).stem().string();   // "shaders/world.vs.hlsl" -> "world.vs"
+		// includes keep the full filename so the compiler's #include "x.hlsli" resolves
+		std::string name = isInclude ? bfs::path(rel).filename().string()
+		                             : bfs::path(rel).stem().string();   // "shaders/world.vs.hlsl" -> "world.vs"
 		render->setShaderSource(name.c_str(), src.c_str());
 		++n;
 	}

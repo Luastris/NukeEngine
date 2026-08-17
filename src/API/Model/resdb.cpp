@@ -1,5 +1,9 @@
 #include "API/Model/resdb.h"
 #include <cstring>
+#include <functional>
+#include "API/Model/Atom.h"          // live-world clone refresh on material hot reload
+#include "API/Model/World.h"
+#include "API/Model/MeshRenderer.h"
 #include "API/Model/Package.h"   // packed-content scan (3.2)
 #include "API/Model/Jobs.h"      // Stopping(): background scans bail on shutdown
 #include "API/Model/Prefab.h"   // PrefabGuid (register prefab guid<->path)
@@ -242,6 +246,7 @@ void ResDB::HotReloadShaders(iRender* r)
 			if (!fresh) continue;
 			s->psSource = fresh->psSource; s->psTime = fresh->psTime;
 			s->props    = fresh->props;    // re-parsed PostParams (a param may have been added/removed)
+			s->includeProps = fresh->includeProps;
 			delete fresh;
 			uint64_t h = r->createPostPipeline(s->name.c_str(), s->psSource.c_str());
 			if (h) { s->rendererHandle = h; std::cout << "[ResDB]\thot-reloaded post shader '" << s->name << "' -> handle " << h << std::endl; }
@@ -256,6 +261,7 @@ void ResDB::HotReloadShaders(iRender* r)
 		s->vsSource = fresh->vsSource; s->psSource = fresh->psSource;
 		s->vsTime   = fresh->vsTime;   s->psTime   = fresh->psTime;
 		s->props    = fresh->props;    // re-parsed MatCB params (a prop may have been added/removed)
+		s->includeProps = fresh->includeProps;
 		delete fresh;
 		uint64_t h = r->createShaderPipeline(s->name.c_str(), s->vsSource.c_str(), s->psSource.c_str());
 		if (h) { s->rendererHandle = h; std::cout << "[ResDB]\thot-reloaded shader '" << s->name << "' -> handle " << h << std::endl; }
@@ -379,6 +385,41 @@ std::string ResDB::GuidForContentPath(const std::string& contentRel) const
 	return std::string();
 }
 
+// Every serialized .numat field, template -> destination IN PLACE (renderer/surface driver
+// hold Material pointers across frames — never delete/re-clone). Used for both the ResDB
+// template and the live-world MeshRenderer clones so saved edits reach standing surfaces.
+static void ApplyMatTemplate(Material* m, const Material* fresh)
+{
+	m->matName = fresh->matName;
+	m->color = fresh->color; m->emissive = fresh->emissive;
+	m->metallic = fresh->metallic; m->roughness = fresh->roughness; m->specular = fresh->specular;
+	m->emissiveIntensity = fresh->emissiveIntensity;
+	m->shaderGuid   = fresh->shaderGuid;
+	m->diffuseGuid  = fresh->diffuseGuid; m->normalGuid = fresh->normalGuid; m->specularGuid = fresh->specularGuid;
+	m->metalRoughGuid = fresh->metalRoughGuid; m->occlusionGuid = fresh->occlusionGuid; m->emissiveGuid = fresh->emissiveGuid;
+	m->metallicGuid = fresh->metallicGuid; m->roughnessGuid = fresh->roughnessGuid; m->opacityGuid = fresh->opacityGuid;
+	m->wipeGuid = fresh->wipeGuid; m->wipeThreshold = fresh->wipeThreshold; m->wipeFeather = fresh->wipeFeather;
+	m->castShadows = fresh->castShadows; m->receiveShadows = fresh->receiveShadows;
+	m->blendMode = fresh->blendMode; m->alphaCutoff = fresh->alphaCutoff;
+	m->uvTiling = fresh->uvTiling; m->uvOffset = fresh->uvOffset; m->uvRotation = fresh->uvRotation;
+	m->detailGuid = fresh->detailGuid; m->detailNormalGuid = fresh->detailNormalGuid;
+	m->detailTiling = fresh->detailTiling; m->detailStrength = fresh->detailStrength;
+	m->triplanar = fresh->triplanar; m->vcolorMode = fresh->vcolorMode;
+	m->clearCoat = fresh->clearCoat; m->clearCoatRoughness = fresh->clearCoatRoughness;
+	m->anisotropy = fresh->anisotropy; m->flowGuid = fresh->flowGuid;
+	m->sheen = fresh->sheen; m->sheenTint = fresh->sheenTint;
+	m->translucency = fresh->translucency; m->translucencyTint = fresh->translucencyTint;
+	m->ior = fresh->ior; m->refractive = fresh->refractive;
+	m->iridescence = fresh->iridescence; m->iridescenceThickness = fresh->iridescenceThickness;
+	m->liveStates = fresh->liveStates; m->liveLayers = fresh->liveLayers; m->liveHits = fresh->liveHits;
+	m->liveFoliage = fresh->liveFoliage; m->liveTweens = fresh->liveTweens;
+	m->liveMasks = fresh->liveMasks;   m->liveEvents = fresh->liveEvents;
+	m->liveSound = fresh->liveSound;   m->liveSurface = fresh->liveSurface;
+	m->physTag = fresh->physTag; m->liveFriction = fresh->liveFriction; m->liveBounce = fresh->liveBounce;
+	m->Resolve();
+	m->PushRenderProps();
+}
+
 void ResDB::HotReloadAssets(iRender* r)
 {
 	boost::system::error_code ec;
@@ -402,7 +443,10 @@ void ResDB::HotReloadAssets(iRender* r)
 			std::cout << "[ResDB]\thot-reloaded texture " << bfs::path(p).filename().string() << std::endl;
 		}
 	}
-	// Materials: reload the ResDB template + re-Resolve (binds shader/textures). Instances are clones.
+	// Materials: reload the ResDB template, then push the SAME copy into every live-world
+	// clone of it (MeshRenderer instances) — a saved .numat must reach surfaces already
+	// standing in the world, not only future clones.
+	std::vector<Material*> changed;
 	for (auto& kv : matByGuid)
 	{
 		Material* m = kv.second; if (!m) continue;
@@ -414,27 +458,38 @@ void ResDB::HotReloadAssets(iRender* r)
 		assetMtime[p] = mt;
 		if (Material* fresh = Material::LoadFromFile(p))
 		{
-			m->color = fresh->color; m->emissive = fresh->emissive;
-			m->metallic = fresh->metallic; m->roughness = fresh->roughness; m->emissiveIntensity = fresh->emissiveIntensity;
-			m->shaderGuid   = fresh->shaderGuid;
-			m->diffuseGuid  = fresh->diffuseGuid; m->normalGuid = fresh->normalGuid; m->specularGuid = fresh->specularGuid;
-			m->metalRoughGuid = fresh->metalRoughGuid; m->occlusionGuid = fresh->occlusionGuid; m->emissiveGuid = fresh->emissiveGuid;
-			m->metallicGuid = fresh->metallicGuid; m->roughnessGuid = fresh->roughnessGuid; m->opacityGuid = fresh->opacityGuid;
-			m->wipeGuid = fresh->wipeGuid; m->wipeThreshold = fresh->wipeThreshold; m->wipeFeather = fresh->wipeFeather;
-			m->liveStates = fresh->liveStates; m->liveLayers = fresh->liveLayers; m->liveHits = fresh->liveHits;
-			m->clearCoat = fresh->clearCoat; m->clearCoatRoughness = fresh->clearCoatRoughness;
-			m->anisotropy = fresh->anisotropy; m->flowGuid = fresh->flowGuid;
-			m->sheen = fresh->sheen; m->sheenTint = fresh->sheenTint;
-			m->translucency = fresh->translucency; m->translucencyTint = fresh->translucencyTint;
-			m->ior = fresh->ior; m->refractive = fresh->refractive;
-			m->iridescence = fresh->iridescence; m->iridescenceThickness = fresh->iridescenceThickness;
-			m->liveFoliage = fresh->liveFoliage; m->liveTweens = fresh->liveTweens;
-			m->liveSound = fresh->liveSound;   m->liveSurface = fresh->liveSurface;
-			m->physTag = fresh->physTag; m->liveFriction = fresh->liveFriction; m->liveBounce = fresh->liveBounce;
+			ApplyMatTemplate(m, fresh);
 			delete fresh;
-			m->Resolve();
+			changed.push_back(m);
 			std::cout << "[ResDB]\thot-reloaded material " << bfs::path(p).filename().string() << std::endl;
 		}
+	}
+	AppInstance* app = AppInstance::GetSingleton();
+	if (!changed.empty() && app && app->currentWorld)
+	{
+		// In-place field copy (never delete/re-clone): renderer + surface driver hold these
+		// Material pointers across frames.
+		std::function<void(bc::list<Atom*>&)> walk = [&](bc::list<Atom*>& atoms)
+		{
+			for (Atom* a : atoms)
+			{
+				if (!a) continue;
+				for (Component* c : a->components)
+				{
+					if (!c) continue;
+					if (std::strcmp(c->name, "MeshRenderer") != 0 && std::strcmp(c->name, "SkinnedMeshRenderer") != 0) continue;
+					MeshRenderer* mr = (MeshRenderer*)c;
+					for (Material* t : changed)
+					{
+						if (mr->mat && mr->mat->guid == t->guid) ApplyMatTemplate(mr->mat, t);
+						for (Material* sm : mr->mats)
+							if (sm && sm->guid == t->guid) ApplyMatTemplate(sm, t);
+					}
+				}
+				walk(a->children);
+			}
+		};
+		walk(app->currentWorld->GetHierarchy());
 	}
 }
 

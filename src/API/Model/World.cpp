@@ -233,7 +233,8 @@ Atom* World::Pick(const Vector3& origin, const Vector3& dir) { float d; return P
 
 World::~World()
 {
-	Reflect_DropObject(this);   // invalidate script handles to this world
+	Surface::ForgetWorld(this);   // drop grown foliage/sound records + queued hit spawns
+	Reflect_DropObject(this);     // invalidate script handles to this world
 }
 
 static Atom* FindByName(Atom* node, const std::string& name)
@@ -299,6 +300,23 @@ void World::QueueDestroy(long atomId)
 	destroyQueue.push_back(atomId);
 }
 
+// Deferred destroys. Update() flushes the live world at the frame boundary; worlds that
+// never tick (editor previews) must be pumped by their owner or queued atoms live forever.
+// Swap first: RemoveAtomById may queue more destroys, and those must wait one round.
+void World::FlushDestroyQueue()
+{
+	boost::recursive_mutex::scoped_lock lock(gameLock);
+	if (destroyQueue.empty()) return;
+	std::vector<long> doomed;
+	doomed.swap(destroyQueue);
+	for (long id : doomed)
+	{
+		if (!GetById(id))
+			std::cout << "[World]\t\t\t" << "destroy flush: atom " << id << " not found" << std::endl;
+		RemoveAtomById(id);
+	}
+}
+
 void World::Start()
 {
 
@@ -344,19 +362,8 @@ void World::Update()
 		atom->Update();
 	}
 	app->worldTickActive = false;
-	// Flush deferred destruction after the traversal, still under the game lock. Swap first:
-	// RemoveAtomById may queue more destroys, and those must wait one frame.
-	if (!destroyQueue.empty())
-	{
-		std::vector<long> doomed;
-		doomed.swap(destroyQueue);
-		for (long id : doomed)
-		{
-			if (!GetById(id))
-				std::cout << "[World]\t\t\t" << "destroy flush: atom " << id << " not found" << std::endl;
-			RemoveAtomById(id);
-		}
-	}
+	// Flush deferred destruction after the traversal, still under the game lock.
+	FlushDestroyQueue();
 	// Script-queued world switch, applied at the frame boundary (traversal done, lock held).
 	if (!app->pendingWorldLoad.empty())
 	{
@@ -1593,7 +1600,16 @@ static void DrawDecals(std::vector<Decal*>& decals, iRender* r)
 		float quat[4]  = { (float)q.x, (float)q.y, (float)q.z, (float)q.w };
 		float scale[3] = { (float)s.x, (float)s.y, (float)s.z };
 		float tn[4]    = { dc->tint.r, dc->tint.g, dc->tint.b, dc->tint.a };
-		r->drawDecal(dc->tex, pos, quat, scale, tn, dc->intensity, dc->angleFade, (int)dc->mode);
+		// Appear envelope: fade/spread in after spawn, dissolve before a timed death.
+		const double now = Time::getSingleton()->elapsed;
+		float appear = 1.0f;
+		if (dc->fadeIn > 1e-4f && dc->spawnTime >= 0.0)
+			appear = (float)std::min(1.0, std::max(0.0, (now - dc->spawnTime) / (double)dc->fadeIn));
+		if (dc->dieTime > 0.0 && dc->fadeOut > 1e-4f)
+			appear = std::min(appear, (float)std::min(1.0, std::max(0.0, (dc->dieTime - now) / (double)dc->fadeOut)));
+		if (appear <= 0.0f) continue;
+		r->drawDecal(dc->tex, pos, quat, scale, tn, dc->intensity, dc->angleFade, (int)dc->mode,
+		             appear, dc->appear);
 	}
 }
 // Editor-only: draws the selected atom's decal box wireframe plus its projection axis.
@@ -1962,8 +1978,11 @@ void World::Render(iRender* r)
 		// growing coverage, no visible boundary), faint, edge-faded.
 		// The grid itself is an ANALYTIC SHADER PLANE in the renderer (AA lines, x10 adaptive
 		// LOD, distance fade — infinite from any angle); the editor only hands the step over.
+		// Hand over 0 (= hidden) rather than skipping the call: gridStep is a handover the
+		// renderer keeps until the next world render, so a stale step would leak into this
+		// world's camera passes (previews render before the live world each frame).
 		if (app->isEditor() && r)
-			r->drawEditorGrid(app->editorGridStep);
+			r->drawEditorGrid(editorGrid ? app->editorGridStep : 0.0f);
 	}
 
 	// Advance animated textures by real frame time. Only the current world may do this, or an
@@ -2939,10 +2958,10 @@ std::string PrefabGuidFromString(const std::string& text)
 
 // Script-facing prefab spawn: reads content through the engine's layered resolution,
 // reconstructs the subtree and adds it to the current world root.
-Atom* Prefabs::Spawn(const std::string& contentRelPath)
+Atom* Prefabs::SpawnIn(World* w, const std::string& contentRelPath)
 {
 	AppInstance* app = AppInstance::GetSingleton();
-	if (!app || !app->currentWorld || contentRelPath.empty()) return nullptr;
+	if (!app || !w || contentRelPath.empty()) return nullptr;
 	std::string text;
 	if (!app->ReadContent(contentRelPath, text) || text.empty())
 	{
@@ -2955,10 +2974,16 @@ Atom* Prefabs::Spawn(const std::string& contentRelPath)
 		std::cout << "[Prefab]\t\tInstantiate: '" << contentRelPath << "' is not a valid prefab" << std::endl;
 		return nullptr;
 	}
-	app->currentWorld->LockGame();   // scripts spawn mid-frame
-	app->currentWorld->Add(a);
-	app->currentWorld->UnlockGame();
+	w->LockGame();   // scripts spawn mid-frame
+	w->Add(a);
+	w->UnlockGame();
 	return a;
+}
+
+Atom* Prefabs::Spawn(const std::string& contentRelPath)
+{
+	AppInstance* app = AppInstance::GetSingleton();
+	return app ? SpawnIn(app->currentWorld, contentRelPath) : nullptr;
 }
 
 std::string SaveAtomToString(Atom* root)
@@ -3599,6 +3624,7 @@ void World::Clear()
 	boost::recursive_mutex::scoped_lock fixedGuard(gameLock);   // don't tear down under the fixed thread
 	if (iPhysics* p = GetService<iPhysics>()) p->reset();   // atoms drop without Destroy: wipe bodies
 	if (iAudio* au = GetService<iAudio>()) au->reset();     // and their voices
+	Surface::ForgetWorld(this);   // ...and the foliage/sound growth records (components die with atoms)
 	for (auto it = hierarchy->begin(); it != hierarchy->end(); )   // keep editor camera
 	{
 		if ((*it)->GetName() == "Editor Camera") ++it;

@@ -51,7 +51,7 @@ extern "C" { NUKE_ABI_STAMP int nuke_module_abi = NUKE_MODULE_ABI; }
 //       vtables have NO per-call guard, so growing one is a layout break like any other.
 //  13 — WindowDesc/NukeWindow gained clickThrough + hideFromCapture (overlay window flags)
 //  14 — reflection Field gained `net` ([[nuke::prop(net)]] replicated-field tag for NukeNet)
-#define NUKE_ENGINE_ABI 18   // 18: LiveMaterial batch — Component.transient + Material live sections/foliage/tweens/wipe/Substance maps
+#define NUKE_ENGINE_ABI 18   // 18: LiveMaterial batch — Component.transient + Material live sections/foliage/tweens (ease curve)/wipe/Substance maps
 extern "C" { NUKE_ABI_STAMP int nuke_engine_abi = NUKE_ENGINE_ABI; }
 
 namespace nuke {

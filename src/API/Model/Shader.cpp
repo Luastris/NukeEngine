@@ -26,8 +26,65 @@ static int CompsOf(const std::string& t)
 	return 0;
 }
 
-void Shader::ParseCBProps(const std::string& src, const char* cbName, std::vector<ShaderProp>& out)
+// Expand `#include "file"` textually (one level) so the PROP PARSER sees included cbuffer
+// fields (matcb_std.hlsli). The GPU compiler never sees this — it resolves includes itself
+// through the renderer's shader stream factory. Search: next to the source file (LoadPair
+// passes psPath's dir via the thread-local below), then the exe-relative shaders/ dir.
+static thread_local std::string s_parseDir;   // include search dir for the CURRENT parse
+// The concatenated text of every include spliced in by the last ExpandIncludes call: prop
+// declarations found in it are library plumbing (matcb_std), not the shader's own params.
+static thread_local std::string s_includedText;
+static std::string ExpandIncludes(const std::string& text, const std::string& selfDir)
 {
+	s_includedText.clear();
+	if (text.find("#include") == std::string::npos) return text;
+	std::string out; out.reserve(text.size() + 4096);
+	std::istringstream is(text);
+	std::string line;
+	while (std::getline(is, line))
+	{
+		const size_t h = line.find("#include");
+		size_t q1 = std::string::npos, q2 = std::string::npos;
+		if (h != std::string::npos && line.find("//") >= h)
+		{ q1 = line.find('"', h); if (q1 != std::string::npos) q2 = line.find('"', q1 + 1); }
+		if (q2 != std::string::npos)
+		{
+			const std::string name = line.substr(q1 + 1, q2 - q1 - 1);
+			std::string inc;
+			if (!selfDir.empty()) inc = ReadAll(selfDir + "/" + name);
+			if (inc.empty())      inc = ReadAll("shaders/" + name);
+			if (!inc.empty()) { out += inc; out += '\n'; s_includedText += inc; s_includedText += '\n'; continue; }
+		}
+		out += line; out += '\n';
+	}
+	return out;
+}
+
+// `ident` is DECLARED (word-boundary match outside // comments) somewhere in the include text.
+static bool DeclaredInIncludes(const std::string& ident)
+{
+	const std::string& t = s_includedText;
+	for (size_t pos = t.find(ident); pos != std::string::npos; pos = t.find(ident, pos + 1))
+	{
+		if (pos > 0 && (std::isalnum((unsigned char)t[pos - 1]) || t[pos - 1] == '_')) continue;
+		const size_t e = pos + ident.size();
+		if (e < t.size() && (std::isalnum((unsigned char)t[e]) || t[e] == '_')) continue;
+		const size_t bol = t.rfind('\n', pos);
+		const size_t cmt = t.find("//", bol == std::string::npos ? 0 : bol);
+		if (cmt != std::string::npos && cmt < pos) continue;   // only mentioned in a comment
+		return true;
+	}
+	return false;
+}
+static std::string DirOf(const std::string& p)
+{
+	const size_t s = p.find_last_of("/\\");
+	return s == std::string::npos ? std::string() : p.substr(0, s);
+}
+
+void Shader::ParseCBProps(const std::string& rawSrc, const char* cbName, std::vector<ShaderProp>& out)
+{
+	const std::string src = ExpandIncludes(rawSrc, s_parseDir);
 	out.clear();
 	const bool isMat = std::string(cbName) == "MatCB";
 	size_t cb = src.find(std::string("cbuffer ") + cbName);
@@ -111,7 +168,11 @@ Shader* Shader::LoadPair(const std::string& name, const std::string& vsPath, con
 	boost::system::error_code ec;
 	s->vsTime = bfs::last_write_time(bfs::path(vsPath), ec);
 	s->psTime = bfs::last_write_time(bfs::path(psPath), ec);
+	s_parseDir = DirOf(psPath);
 	ParseMatCBProps(s->psSource, s->props);   // engine-side reflection from the source text
+	s_parseDir.clear();
+	for (const ShaderProp& p : s->props)
+		if (DeclaredInIncludes(p.name)) s->includeProps.push_back(p.name);
 	return s;
 }
 
@@ -136,6 +197,8 @@ Shader* Shader::FromSources(const std::string& name, const std::string& vsSrc, c
 	s->guid = name; s->name = name;
 	s->vsSource = vsSrc; s->psSource = psSrc;
 	ParseMatCBProps(s->psSource, s->props);
+	for (const ShaderProp& p : s->props)
+		if (DeclaredInIncludes(p.name)) s->includeProps.push_back(p.name);
 	return s;
 }
 

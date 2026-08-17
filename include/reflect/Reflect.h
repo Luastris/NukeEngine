@@ -47,6 +47,18 @@ NUKEENGINE_API void*         Reflect_ObjectPtr(unsigned long id, const char* typ
 NUKEENGINE_API unsigned long Reflect_WrapObjectPtr(void* obj, const char* typeName);
 NUKEENGINE_API void          Reflect_DropObject(void* obj);
 
+// Method documentation SIDE registry (kept out of `Method` — its layout is module ABI).
+// nukegen emits a Reflect_SetMethodDoc per [[nuke::func]] with the header comment above the
+// declaration and the real parameter names; script backends read it to emit docs/signatures.
+struct MethodDoc
+{
+	std::string doc;                       // the // comment block above the declaration
+	std::vector<std::string> params;       // parameter names, in order
+};
+NUKEENGINE_API void             Reflect_SetMethodDoc(const char* type, const char* method,
+                                                     const char* doc, const char* paramsCsv);
+NUKEENGINE_API const MethodDoc* Reflect_MethodDoc(const char* type, const char* method);
+
 namespace detail {
 // Compile-time "is a NUKE_CLASS type": detected by the macro-provided __NukeTypeName().
 template<class T, class = void> struct IsReflected : std::false_type {};

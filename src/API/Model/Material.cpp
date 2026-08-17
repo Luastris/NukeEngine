@@ -1,5 +1,6 @@
 #include "API/Model/Material.h"
-#include "API/Model/Surface.h"   // global condition values for the overlay-state slots
+#include "API/Model/Surface.h"
+#include "API/Model/Time.h"   // event-started tween instances stamp their start   // global condition values for the overlay-state slots
 #include "API/Model/resdb.h"
 #include "interface/AppInstance.h"   // renderer access: invalidate re-baked textures
 #include <render/irender.h>
@@ -8,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cctype>
 #include <map>
 
 namespace nuke {
@@ -92,6 +94,8 @@ Material* Material::Clone() const
 	m->liveHits    = liveHits;
 	m->liveFoliage = liveFoliage;
 	m->liveTweens  = liveTweens;
+	m->liveMasks   = liveMasks;
+	m->liveEvents  = liveEvents;
 	m->liveSound   = liveSound;
 	m->liveSurface = liveSurface;
 	m->physTag      = physTag;
@@ -105,6 +109,7 @@ Material* Material::Clone() const
 bool Material::HasLive() const
 {
 	return !liveStates.empty() || !liveLayers.empty() || !liveHits.empty() || !liveFoliage.empty() || !liveTweens.empty() || !physTag.empty()
+	    || !liveMasks.empty() || !liveEvents.empty()
 	    || !liveSound.footsteps.empty() || !liveSound.ambientGuid.empty() || !liveSound.windGuid.empty()
 	    || !liveSurface.heightGuid.empty() || liveSurface.dispScale != 0.0f || liveSurface.varAmount != 0.0f
 	    || liveFriction >= 0.0f || liveBounce >= 0.0f;
@@ -241,6 +246,13 @@ void Material::Resolve()
 	else if (!detailNrm || detailNrm->guid != detailNormalGuid) detailNrm = db->GetTexture(detailNormalGuid);
 	if (flowGuid.empty())                            flow = nullptr;
 	else if (!flow || flow->guid != flowGuid)        flow = db->GetTexture(flowGuid);
+	mskStamp = nullptr;
+	for (LiveMask& mk : liveMasks)
+	{
+		if (mk.stampGuid.empty())                          mk.stamp = nullptr;
+		else if (!mk.stamp || mk.stamp->guid != mk.stampGuid) mk.stamp = db->GetTexture(mk.stampGuid);
+		if (!mskStamp && mk.stamp) mskStamp = mk.stamp;   // the shader's single g_MskStamp slot
+	}
 	if (shaderGuid.empty())                              shader = nullptr;
 	else if (!shader || shader->guid != shaderGuid)     shader = db->GetShader(shaderGuid);
 	for (LiveState& s : liveStates)
@@ -264,41 +276,370 @@ void Material::Resolve()
 		if (Texture* od = BakeOpacityDiffuse(this, db)) diff = od;
 }
 
-// Cubic-bezier easing with control points at x = 1/3 and 2/3 (so x(u) == u exactly) and the
-// tween's Y values — evaluate y(u) directly.
-static float TweenEase(float u, float y1, float y2)
+// Case-insensitive equality for tween-target matching: `param` may arrive as the storage
+// key ("dispScale") or as the inspector label ("Disp Scale") — both must resolve.
+static bool IEq(const std::string& a, const char* b)
 {
-	const float iu = 1.0f - u;
-	return 3.0f * iu * iu * u * y1 + 3.0f * iu * u * u * y2 + u * u * u;
+	size_t i = 0;
+	for (; i < a.size() && b[i]; ++i)
+		if (std::tolower((unsigned char)a[i]) != std::tolower((unsigned char)b[i])) return false;
+	return i == a.size() && !b[i];
+}
+static bool IEq(const std::string& a, const std::string& b) { return IEq(a, b.c_str()); }
+
+// One channel of a tween timeline: cubic-Hermite VALUE keys (t, value, inTan, outTan) — a
+// key IS a waypoint and its tangents ARE the easing. Empty channel evaluates to 0.
+static float EvalChan(const std::vector<float>& c, float u)
+{
+	const size_t n = c.size() / 4;
+	if (!n) return 0.0f;
+	if (n == 1 || u <= c[0]) return c[1];
+	if (u >= c[(n - 1) * 4]) return c[(n - 1) * 4 + 1];
+	size_t k = 1; while (k < n && u > c[k * 4]) ++k;
+	const float t0 = c[(k - 1) * 4], v0 = c[(k - 1) * 4 + 1];
+	const float t1 = c[k * 4],       v1 = c[k * 4 + 1];
+	const float h = t1 - t0; if (h < 1e-6f) return v1;
+	const float m0 = c[(k - 1) * 4 + 3] * h, m1 = c[k * 4 + 2] * h;
+	const float x = (u - t0) / h, x2 = x * x, x3 = x2 * x;
+	return (2 * x3 - 3 * x2 + 1) * v0 + (x3 - 2 * x2 + x) * m0 + (-2 * x3 + 3 * x2) * v1 + (x3 - x2) * m1;
+}
+
+// Color gradient stops (t, r, g, b, a): piecewise-linear, flat before/after the end stops —
+// exactly what the editor's gradient bar shows.
+static void SampleGrad(const std::vector<float>& s, float e, float out[4])
+{
+	const size_t n = s.size() / 5;
+	out[0] = out[1] = out[2] = 0.0f; out[3] = 1.0f;
+	if (!n) return;
+	if (e <= s[0]) { for (int i = 0; i < 4; ++i) out[i] = s[1 + i]; return; }
+	if (e >= s[(n - 1) * 5]) { for (int i = 0; i < 4; ++i) out[i] = s[(n - 1) * 5 + 1 + i]; return; }
+	size_t k = 1; while (k < n && e > s[k * 5]) ++k;
+	const float t0 = s[(k - 1) * 5], t1 = s[k * 5];
+	const float x = (t1 - t0) > 1e-6f ? (e - t0) / (t1 - t0) : 0.0f;
+	for (int i = 0; i < 4; ++i)
+		out[i] = s[(k - 1) * 5 + 1 + i] + (s[k * 5 + 1 + i] - s[(k - 1) * 5 + 1 + i]) * x;
+}
+
+// Mesh-space uv -> the shader's TRANSFORMED uv (ApplyUVT: tiling -> offset + tween scroll ->
+// rotation) — the masks live in that space; mirrors the shader math exactly.
+void Material::MapMeshUV(float& u, float& v) const
+{
+	const bool idTile = std::fabs((float)uvTiling.x) + std::fabs((float)uvTiling.y) < 1e-6f;
+	float su = u * (idTile ? 1.0f : (float)uvTiling.x) + (float)uvOffset.x + uvAnim[0];
+	float sv = v * (idTile ? 1.0f : (float)uvTiling.y) + (float)uvOffset.y + uvAnim[1];
+	if (std::fabs(uvRotation) > 1e-6f)
+	{
+		const float rr = uvRotation * 0.01745329252f, sr = std::sin(rr), cr = std::cos(rr);
+		const float ru = su * cr - sv * sr, rv = su * sr + sv * cr;
+		su = ru; sv = rv;
+	}
+	u = su; v = sv;
+}
+
+void Material::TriggerAt(const std::string& eventName, double u, double v)
+{
+	float su = (float)u, sv = (float)v;
+	MapMeshUV(su, sv);
+	float p[3] = { su, sv, 0 };
+	FireEvent(eventName, p, false, -1);
+}
+
+void Material::TriggerAtHit(const std::string& eventName, const Vector3& p, double u, double v)
+{
+	float su = (float)u, sv = (float)v;
+	MapMeshUV(su, sv);
+	const float w[3] = { (float)p.x, (float)p.y, (float)p.z };
+	const float t[2] = { su, sv };
+	FireEvent(eventName, w, true, -1, t);
+}
+
+int Material::MaskIndex(const std::string& n) const
+{
+	if (n.empty()) return -1;
+	for (int i = 0; i < (int)liveMasks.size(); ++i)
+		if (IEq(n, liveMasks[i].name)) return i;
+	return -1;
+}
+
+// Masked tween application: the BASE param stays untouched; the tweened value goes into a
+// TWIN prop whose .w carries maskSlot+1 — the shader lerps base -> twin per pixel by the
+// mask weight. Built-in twins: g_DispT (pom, dispScale, dispMid), g_ColorT (base rgb),
+// g_EmisT (final emissive rgb), g_ParamsT (metallic, roughness, wipe). A custom "g_X"
+// target writes "g_XT" — any shader supports masking by declaring the twin and calling
+// NukeMasked() (nuke_material.hlsli). Twins merge within one tick (two masked tweens may
+// drive different components of one twin; the LAST mask index wins the slot).
+bool Material::ApplyMaskedTwin(const std::string& p, const float v[4], int mi)
+{
+	const float mw = (float)(mi + 1);
+	auto twin = [&](const char* name, int comp, float val, float b0, float b1, float b2)
+	{
+		auto it = props.find(name);
+		const bool fresh = it == props.end() || it->second[3] <= 0.0f;
+		std::array<float, 4>& d = props[name];
+		if (fresh) { d[0] = b0; d[1] = b1; d[2] = b2; }
+		d[comp] = val; d[3] = mw;
+		liveTwinsWritten.push_back(name);
+	};
+	if      (IEq(p, "dispScale") || IEq(p, "Disp Scale"))
+		twin("g_DispT", 1, v[0], liveSurface.parallax, liveSurface.dispScale, liveSurface.dispMid);
+	else if (IEq(p, "parallax") || IEq(p, "Parallax"))
+		twin("g_DispT", 0, v[0], liveSurface.parallax, liveSurface.dispScale, liveSurface.dispMid);
+	else if (IEq(p, "dispMid") || IEq(p, "Disp Mid"))
+		twin("g_DispT", 2, v[0], liveSurface.parallax, liveSurface.dispScale, liveSurface.dispMid);
+	else if (IEq(p, "color") || IEq(p, "Base Color"))
+	{
+		props["g_ColorT"] = { v[0], v[1], v[2], mw };
+		liveTwinsWritten.push_back("g_ColorT");
+	}
+	else if (IEq(p, "emissive") || IEq(p, "Emissive"))
+	{
+		props["g_EmisT"] = { v[0] * emissiveIntensity, v[1] * emissiveIntensity, v[2] * emissiveIntensity, mw };
+		liveTwinsWritten.push_back("g_EmisT");
+	}
+	else if (IEq(p, "emissiveIntensity") || IEq(p, "Emissive Intensity"))
+	{
+		props["g_EmisT"] = { (float)emissive.r * v[0], (float)emissive.g * v[0], (float)emissive.b * v[0], mw };
+		liveTwinsWritten.push_back("g_EmisT");
+	}
+	else if (IEq(p, "metallic") || IEq(p, "Metallic"))
+		twin("g_ParamsT", 0, v[0], metallic, roughness, wipeThreshold);
+	else if (IEq(p, "roughness") || IEq(p, "Roughness"))
+		twin("g_ParamsT", 1, v[0], metallic, roughness, wipeThreshold);
+	else if (IEq(p, "wipe") || IEq(p, "Wipe"))
+		twin("g_ParamsT", 2, v[0], metallic, roughness, wipeThreshold);
+	else if (p.rfind("g_", 0) == 0)
+	{
+		const std::string tn = p + "T";
+		props[tn] = { v[0], v[1], v[2], mw };
+		liveTwinsWritten.push_back(tn);
+	}
+	else return false;   // no per-pixel meaning -> caller applies unmasked
+	return true;
+}
+
+void Material::SetParam(const std::string& param, const float v[4])
+{
+	// mask fields: "mask:<name>:<field>" — the masks ARE animatable props
+	if (param.rfind("mask:", 0) == 0)
+	{
+		const size_t c2 = param.find(':', 5);
+		if (c2 == std::string::npos) return;
+		const std::string mn = param.substr(5, c2 - 5), mf = param.substr(c2 + 1);
+		for (LiveMask& mk : liveMasks)
+		{
+			if (!IEq(mn, mk.name)) continue;
+			if      (IEq(mf, "scale"))    mk.scale    = v[0];
+			else if (IEq(mf, "repeat"))   mk.repeat   = v[0];
+			else if (IEq(mf, "rotation")) mk.rotation = v[0];
+			else if (IEq(mf, "fade"))     mk.fade     = v[0];
+			else if (IEq(mf, "softness")) mk.softness = v[0];
+			else if (IEq(mf, "strength")) mk.strength = v[0];
+			else if (IEq(mf, "cx"))       mk.cx       = v[0];
+			else if (IEq(mf, "cy"))       mk.cy       = v[0];
+			else if (IEq(mf, "cz"))       mk.cz       = v[0];
+			return;
+		}
+		return;
+	}
+	auto is = [&](const char* key, const char* lbl) { return IEq(param, key) || IEq(param, lbl); };
+	if      (is("uv", "UV Scroll"))                         { uvAnim[0] = v[0]; uvAnim[1] = v[1]; }
+	else if (is("color", "Base Color"))                     color    = Color(v[0], v[1], v[2], v[3]);
+	else if (is("emissive", "Emissive"))                    emissive = Color(v[0], v[1], v[2], v[3]);
+	else if (is("emissiveIntensity", "Emissive Intensity")) emissiveIntensity = v[0];
+	else if (is("wipe", "Wipe"))                            wipeThreshold = v[0];
+	else if (is("metallic", "Metallic"))                    metallic  = v[0];
+	else if (is("roughness", "Roughness"))                  roughness = v[0];
+	else if (is("specular", "Specular"))                    specular  = v[0];
+	else if (is("parallax", "Parallax"))                    liveSurface.parallax  = v[0];
+	else if (is("dispScale", "Disp Scale"))                 liveSurface.dispScale = v[0];
+	else if (is("dispMid", "Disp Mid"))                     liveSurface.dispMid   = v[0];
+	else if (is("varAmount", "Variation"))                  liveSurface.varAmount = v[0];
+	else if (is("varScale", "Var Cell"))                    liveSurface.varScale  = v[0];
+	else if (is("varHue", "Var Hue"))                       liveSurface.varHue    = v[0];
+	else if (is("footVolume", "Step Volume"))               liveSound.footVolume    = v[0];
+	else if (is("ambientVolume", "Ambient Volume"))         liveSound.ambientVolume = v[0];
+	else if (is("windVolume", "Wind Volume"))               liveSound.windVolume    = v[0];
+	else
+	{
+		// Any reflected material prop, matched by field name OR inspector label; names
+		// matching nothing land in the shader MatCB props map (g_*).
+		bool wrote = false;
+		if (TypeInfo* ti = GetType())
+			for (const Field& f : ti->fields)
+			{
+				if (!IEq(param, f.name) && !(!f.label.empty() && IEq(param, f.label))) continue;
+				void* p = f.addr(this);
+				switch (f.type)
+				{
+					case FT::Float:  *(float*)p  = v[0];                             wrote = true; break;
+					case FT::Double: *(double*)p = v[0];                             wrote = true; break;
+					case FT::Vec2:   *(Vector2*)p = Vector2(v[0], v[1]);             wrote = true; break;
+					case FT::Vec3:   *(Vector3*)p = Vector3(v[0], v[1], v[2]);       wrote = true; break;
+					case FT::Vec4:   *(Vector4*)p = Vector4(v[0], v[1], v[2], v[3]); wrote = true; break;
+					case FT::Color:  *(Color*)p  = Color(v[0], v[1], v[2], v[3]);    wrote = true; break;
+					default: break;
+				}
+				break;
+			}
+		if (!wrote) props[param] = { v[0], v[1], v[2], v[3] };
+	}
+}
+
+void Material::EvalTween(int index, double time, double& prevCyc)
+{
+	const LiveTween& tw = liveTweens[index];
+	if (tw.duration <= 1e-4f || tw.param.empty()) { prevCyc = -1.0; return; }
+	const double cyc = std::max(time, 0.0) / tw.duration;
+	float u;
+	if (tw.loop == 0)      u = (float)std::min(cyc, 1.0);
+	else if (tw.loop == 2) { const double pp = std::fmod(cyc, 2.0); u = (float)(pp <= 1.0 ? pp : 2.0 - pp); }
+	else                   u = (float)std::fmod(cyc, 1.0);
+	// timeline trigger marks: fire every crossing since the previous evaluation
+	if (!tw.trigT.empty() && prevCyc >= 0.0 && cyc > prevCyc)
+		for (size_t k = 0; k < tw.trigT.size() && k < tw.trigEvent.size(); ++k)
+		{
+			const double T = std::min(std::max((double)tw.trigT[k], 0.0), 1.0);
+			bool crossed;
+			if (tw.loop == 0)      crossed = prevCyc < T && cyc >= T;
+			else if (tw.loop == 1) crossed = std::floor(cyc - T) > std::floor(prevCyc - T);
+			else                   crossed = std::floor((cyc - T) * 0.5) > std::floor((prevCyc - T) * 0.5)
+			                              || std::floor((cyc - (2.0 - T)) * 0.5) > std::floor((prevCyc - (2.0 - T)) * 0.5);
+			if (crossed) FireEvent(tw.trigEvent[k], nullptr, false, index);
+		}
+	prevCyc = cyc;
+	float v[4];
+	if (!tw.grad.empty()) SampleGrad(tw.grad, u, v);
+	else for (int i = 0; i < 4; ++i) v[i] = EvalChan(tw.chan[i], u);
+	// masked tween -> per-pixel twin props; everything else applies directly
+	const int mi = tw.param.rfind("mask:", 0) == 0 ? -1 : MaskIndex(tw.mask);
+	if (mi >= 0 && ApplyMaskedTwin(tw.param, v, mi)) return;
+	SetParam(tw.param, v);
+}
+
+void Material::FireEvent(const std::string& eventName, const float* point, bool world, int excludeTween,
+                         const float* uvPoint)
+{
+	static int depth = 0;                 // runaway chain guard (event -> tween -> event ...)
+	if (depth > 8 || eventName.empty()) return;
+	++depth;
+	for (const LiveEvent& e : liveEvents)
+	{
+		if (!IEq(eventName, e.name)) continue;
+		// A point fire routes the point into every mask this event's actions touch: the
+		// modulating mask of each started tween and the target of any "mask:<name>:*"
+		// tween/set-param. Global fires (no point) simply skip this.
+		if (point)
+		{
+			auto touch = [&](const std::string& maskName)
+			{
+				if (maskName.empty()) return;
+				for (LiveMask& mk : liveMasks)
+					if (IEq(maskName, mk.name))
+					{
+						// The mask's AUTHORED space wins — the point converts, the space never
+						// flips (a flip re-reads `scale` in different units and the SAME effect
+						// changes size between trigger paths).
+						if (mk.space == 0)
+						{
+							const float* uv = world ? uvPoint : point;   // hits carry both
+							if (uv) { mk.cx = uv[0]; mk.cy = uv[1]; mk.cz = 0.0f; }
+						}
+						else if (world)
+						{
+							mk.cx = point[0]; mk.cy = point[1]; mk.cz = point[2];
+						}
+						break;
+					}
+			};
+			auto maskOfParam = [](const std::string& p) -> std::string
+			{
+				if (p.rfind("mask:", 0) != 0) return std::string();
+				const size_t c2 = p.find(':', 5);
+				return c2 == std::string::npos ? std::string() : p.substr(5, c2 - 5);
+			};
+			for (const std::string& tn : e.startTweens)
+				for (const LiveTween& tw : liveTweens)
+				{
+					const std::string& nm = tw.name.empty() ? tw.param : tw.name;
+					if (!IEq(tn, nm)) continue;
+					touch(tw.mask);
+					touch(maskOfParam(tw.param));
+					break;
+				}
+			for (const std::string& sp : e.setParams)
+				touch(maskOfParam(sp));
+		}
+		for (size_t s = 0; s < e.setParams.size(); ++s)
+		{
+			float sv[4] = { 0, 0, 0, 0 };
+			for (size_t q = 0; q < 4 && s * 4 + q < e.setValues.size(); ++q) sv[q] = e.setValues[s * 4 + q];
+			SetParam(e.setParams[s], sv);
+		}
+		const double now = Time::getSingleton()->elapsed;
+		for (const std::string& tn : e.startTweens)
+			for (int ti = 0; ti < (int)liveTweens.size(); ++ti)
+			{
+				const std::string& nm = liveTweens[ti].name.empty() ? liveTweens[ti].param : liveTweens[ti].name;
+				if (ti == excludeTween || !IEq(tn, nm)) continue;
+				bool has = false;   // restart the live instance instead of stacking a second
+				for (TweenRun& r : liveRuns)
+					if (r.tween == ti) { r.start = now; r.prevCyc = -1.0; has = true; break; }
+				if (!has) liveRuns.push_back({ ti, now, -1.0 });
+				break;
+			}
+		break;
+	}
+	--depth;
 }
 
 void Material::ApplyTweens(double time)
 {
-	for (const LiveTween& tw : liveTweens)
+	// Masked twin props go stale unless rewritten every tick: switch them off first.
+	for (const std::string& tn : liveTwinsWritten)
 	{
-		if (tw.duration <= 1e-4f) continue;
-		float u;
-		const double cyc = time / tw.duration;
-		if (tw.loop == 0)      u = (float)std::min(cyc, 1.0);
-		else if (tw.loop == 2) { const double p = std::fmod(cyc, 2.0); u = (float)(p <= 1.0 ? p : 2.0 - p); }
-		else                   u = (float)std::fmod(cyc, 1.0);
-		const float e = TweenEase(u, tw.bez1, tw.bez2);
-		float v[4];
-		for (int i = 0; i < 4; ++i) v[i] = tw.from[i] + (tw.to[i] - tw.from[i]) * e;
-		if      (tw.param == "uv")        { uvAnim[0] = v[0]; uvAnim[1] = v[1]; }
-		else if (tw.param == "color")     color    = Color(v[0], v[1], v[2], v[3]);
-		else if (tw.param == "emissive")  emissive = Color(v[0], v[1], v[2], 1.0);
-		else if (tw.param == "emissiveIntensity") emissiveIntensity = v[0];
-		else if (tw.param == "wipe")      wipeThreshold = v[0];
-		else if (tw.param == "metallic")  metallic  = v[0];
-		else if (tw.param == "roughness") roughness = v[0];
-		else if (tw.param == "specular")  specular  = v[0];
-		else if (!tw.param.empty())       props[tw.param] = { v[0], v[1], v[2], v[3] };   // custom MatCB prop
+		auto it = props.find(tn);
+		if (it != props.end()) it->second[3] = 0.0f;
+	}
+	liveTwinsWritten.clear();
+	if (tweenPrevCyc.size() != liveTweens.size()) tweenPrevCyc.assign(liveTweens.size(), -1.0);
+	for (int ti = 0; ti < (int)liveTweens.size(); ++ti)
+		if (liveTweens[ti].runMode == 0)
+			EvalTween(ti, time, tweenPrevCyc[ti]);
+	for (size_t r = 0; r < liveRuns.size();)
+	{
+		TweenRun& run = liveRuns[r];
+		if (run.tween < 0 || run.tween >= (int)liveTweens.size()) { liveRuns.erase(liveRuns.begin() + r); continue; }
+		const LiveTween& tw = liveTweens[run.tween];
+		const double local = time - run.start;
+		EvalTween(run.tween, local, run.prevCyc);
+		if (tw.loop == 0 && tw.duration > 1e-4f && local > tw.duration + 0.25)
+		{ liveRuns.erase(liveRuns.begin() + r); continue; }   // once-instances retire past the end
+		++r;
 	}
 }
 
 void Material::PushRenderProps()
 {
+	// Spatial masks -> g_Msk* GPU slots (6; strength 0 = slot off). Pushed every frame so
+	// tween-animated mask params (expanding rings) reach the shader live.
+	if (!liveMasks.empty() || props.count("g_MskA0"))
+	{
+		char nm[16];
+		for (int i = 0; i < 6; ++i)
+		{
+			const LiveMask* mk = i < (int)liveMasks.size() ? &liveMasks[i] : nullptr;
+			snprintf(nm, sizeof(nm), "g_MskA%d", i);
+			props[nm] = mk ? std::array<float, 4>{ mk->cx, mk->cy, mk->cz, (float)(mk->shape + mk->space * 4) }
+			               : std::array<float, 4>{ 0, 0, 0, 0 };
+			snprintf(nm, sizeof(nm), "g_MskB%d", i);
+			props[nm] = mk ? std::array<float, 4>{ mk->scale, mk->repeat, mk->rotation * 0.01745329252f, mk->fade }
+			               : std::array<float, 4>{ 0, 0, 0, 0 };
+			snprintf(nm, sizeof(nm), "g_MskC%d", i);
+			props[nm] = mk ? std::array<float, 4>{ mk->softness, mk->strength, mk->stamp ? 1.0f : 0.0f, 0 }
+			               : std::array<float, 4>{ 0, 0, 0, 0 };
+		}
+	}
+
 	// g_UVT = (tiling.xy, offset.xy + tween scroll); zero tiling reads as identity in the shader,
 	// so materials that never push stay correct. Write only when live to keep the map small.
 	const bool uvOn = uvTiling.x != 1.0 || uvTiling.y != 1.0 || uvOffset.x != 0.0 || uvOffset.y != 0.0
@@ -470,19 +811,36 @@ bool Material::SaveToFile(const std::string& path) const
 			                        {"feather", ly.feather}, {"topOnly", ly.topOnly} });
 		for (const LiveHit& h : liveHits)
 			l["hits"].push_back({ {"type", h.hitType}, {"prefab", h.prefabGuid}, {"decal", h.decalGuid},
-			                      {"sound", h.soundGuid}, {"minImpulse", h.minImpulse},
-			                      {"lifetime", h.lifetime}, {"decalSize", h.decalSize} });
+			                      {"sound", h.soundGuid}, {"event", h.eventName}, {"minImpulse", h.minImpulse},
+			                      {"lifetime", h.lifetime}, {"decalSize", h.decalSize},
+			                      {"decalTint", {h.decalTint.r, h.decalTint.g, h.decalTint.b, h.decalTint.a}},
+			                      {"decalIntensity", h.decalIntensity}, {"decalMode", h.decalMode},
+			                      {"decalFade", h.decalFade} });
 		for (const LiveFoliage& f : liveFoliage)
 			l["foliage"].push_back({ {"mesh", f.meshGuid}, {"material", f.matGuid}, {"density", f.density},
 			                         {"scaleMin", f.scaleMin}, {"scaleMax", f.scaleMax}, {"maxSlope", f.maxSlope},
 			                         {"align", f.align}, {"windBend", f.windBend}, {"interBend", f.interBend},
 			                         {"seed", f.seed} });
 		for (const LiveTween& tw : liveTweens)
-			l["tweens"].push_back({ {"param", tw.param},
-			                        {"from", {tw.from[0], tw.from[1], tw.from[2], tw.from[3]}},
-			                        {"to",   {tw.to[0],   tw.to[1],   tw.to[2],   tw.to[3]}},
-			                        {"duration", tw.duration}, {"loop", tw.loop},
-			                        {"bez1", tw.bez1}, {"bez2", tw.bez2} });
+		{
+			json tj = { {"param", tw.param}, {"duration", tw.duration}, {"loop", tw.loop} };
+			if (!tw.name.empty()) tj["name"] = tw.name;
+			if (tw.runMode)       tj["runMode"] = tw.runMode;
+			if (!tw.mask.empty()) tj["mask"] = tw.mask;
+			if (!tw.trigT.empty()) { tj["trigT"] = tw.trigT; tj["trigEvent"] = tw.trigEvent; }
+			if (!tw.grad.empty()) tj["grad"] = tw.grad;
+			for (int c = 0; c < 4; ++c)
+				if (!tw.chan[c].empty()) tj["chan" + std::to_string(c)] = tw.chan[c];
+			l["tweens"].push_back(std::move(tj));
+		}
+		for (const LiveMask& mk : liveMasks)
+			l["masks"].push_back({ {"name", mk.name}, {"space", mk.space}, {"shape", mk.shape},
+			                       {"stamp", mk.stampGuid}, {"cx", mk.cx}, {"cy", mk.cy}, {"cz", mk.cz},
+			                       {"scale", mk.scale}, {"repeat", mk.repeat}, {"rotation", mk.rotation},
+			                       {"fade", mk.fade}, {"softness", mk.softness}, {"strength", mk.strength} });
+		for (const LiveEvent& e : liveEvents)
+			l["events"].push_back({ {"name", e.name}, {"startTweens", e.startTweens},
+			                        {"setParams", e.setParams}, {"setValues", e.setValues} });
 		if (!liveSound.footsteps.empty() || !liveSound.ambientGuid.empty() || !liveSound.windGuid.empty())
 			l["sound"] = { {"footsteps", liveSound.footsteps}, {"ambient", liveSound.ambientGuid},
 			               {"wind", liveSound.windGuid}, {"footVolume", liveSound.footVolume},
@@ -632,9 +990,18 @@ Material* Material::LoadFromString(const std::string& text)
 				lh.prefabGuid = h.value("prefab", std::string());
 				lh.decalGuid  = h.value("decal", std::string());
 				lh.soundGuid  = h.value("sound", std::string());
+				lh.eventName  = h.value("event", std::string());
 				lh.minImpulse = h.value("minImpulse", 0.0f);
 				lh.lifetime   = h.value("lifetime", 4.0f);
 				lh.decalSize  = h.value("decalSize", 0.5f);
+				lh.decalIntensity = h.value("decalIntensity", 1.0f);
+				lh.decalMode      = h.value("decalMode", 2);
+				lh.decalFade      = h.value("decalFade", 0.35f);
+				if (h.contains("decalTint") && h["decalTint"].is_array() && h["decalTint"].size() == 4)
+				{
+					lh.decalTint.r = h["decalTint"][0]; lh.decalTint.g = h["decalTint"][1];
+					lh.decalTint.b = h["decalTint"][2]; lh.decalTint.a = h["decalTint"][3];
+				}
 				m->liveHits.push_back(std::move(lh));
 			}
 		if (l.contains("foliage"))
@@ -660,13 +1027,84 @@ Material* Material::LoadFromString(const std::string& text)
 				tw.param    = t.value("param", std::string());
 				tw.duration = t.value("duration", 1.0f);
 				tw.loop     = t.value("loop", 1);
-				tw.bez1     = t.value("bez1", 0.333f);
-				tw.bez2     = t.value("bez2", 0.667f);
-				if (t.contains("from") && t["from"].is_array() && t["from"].size() == 4)
-					for (int i = 0; i < 4; ++i) tw.from[i] = t["from"][i];
-				if (t.contains("to") && t["to"].is_array() && t["to"].size() == 4)
-					for (int i = 0; i < 4; ++i) tw.to[i] = t["to"][i];
+				tw.name    = t.value("name", std::string());
+				tw.runMode = t.value("runMode", 0);
+				tw.mask    = t.value("mask", std::string());
+				if (t.contains("trigT") && t["trigT"].is_array())
+					tw.trigT = t["trigT"].get<std::vector<float>>();
+				if (t.contains("trigEvent") && t["trigEvent"].is_array())
+					tw.trigEvent = t["trigEvent"].get<std::vector<std::string>>();
+				for (int c = 0; c < 4; ++c)
+				{
+					const std::string ck = "chan" + std::to_string(c);
+					if (t.contains(ck) && t[ck].is_array())
+						tw.chan[c] = t[ck].get<std::vector<float>>();
+				}
+				if (t.contains("grad") && t["grad"].is_array())
+					tw.grad = t["grad"].get<std::vector<float>>();
+				if (tw.grad.empty() && tw.chan[0].empty() && tw.chan[1].empty()
+				 && tw.chan[2].empty() && tw.chan[3].empty())
+				{
+					// Legacy tweens: "stops" (t,x,y,z,w) or a from/to pair -> one timeline.
+					std::vector<float> st;
+					if (t.contains("stops") && t["stops"].is_array() && t["stops"].size() % 5 == 0)
+						st = t["stops"].get<std::vector<float>>();
+					if (st.empty())
+					{
+						float f[4] = { 0, 0, 0, 0 }, o[4] = { 1, 0, 0, 0 };
+						if (t.contains("from") && t["from"].is_array() && t["from"].size() == 4)
+							for (int i = 0; i < 4; ++i) f[i] = t["from"][i];
+						if (t.contains("to") && t["to"].is_array() && t["to"].size() == 4)
+							for (int i = 0; i < 4; ++i) o[i] = t["to"][i];
+						st = { 0, f[0], f[1], f[2], f[3],  1, o[0], o[1], o[2], o[3] };
+					}
+					if (tw.param == "color" || tw.param == "emissive")
+						tw.grad = st;   // same layout: (t, r, g, b, a)
+					else
+					{
+						const size_t ns = st.size() / 5;
+						for (int c = 0; c < 4; ++c)
+							for (size_t s = 0; s < ns; ++s)
+							{
+								// auto tangents from neighbour slopes keep the linear shape
+								const size_t qa = s ? s - 1 : 0, qb = s + 1 < ns ? s + 1 : ns - 1;
+								const float dt = st[qb * 5] - st[qa * 5];
+								const float mm = dt > 1e-6f ? (st[qb * 5 + 1 + c] - st[qa * 5 + 1 + c]) / dt : 0.f;
+								tw.chan[c].insert(tw.chan[c].end(), { st[s * 5], st[s * 5 + 1 + c], mm, mm });
+							}
+					}
+				}
 				m->liveTweens.push_back(std::move(tw));
+			}
+		if (l.contains("masks"))
+			for (const json& mj : l["masks"])
+			{
+				LiveMask mk;
+				mk.name      = mj.value("name", std::string());
+				mk.space     = mj.value("space", 0);
+				mk.shape     = mj.value("shape", 0);
+				mk.stampGuid = mj.value("stamp", std::string());
+				mk.cx = mj.value("cx", 0.5f); mk.cy = mj.value("cy", 0.5f); mk.cz = mj.value("cz", 0.0f);
+				mk.scale    = mj.value("scale", 0.25f);
+				mk.repeat   = mj.value("repeat", 0.0f);
+				mk.rotation = mj.value("rotation", 0.0f);
+				mk.fade     = mj.value("fade", 0.0f);
+				mk.softness = mj.value("softness", 0.25f);
+				mk.strength = mj.value("strength", 1.0f);
+				m->liveMasks.push_back(std::move(mk));
+			}
+		if (l.contains("events"))
+			for (const json& ej : l["events"])
+			{
+				LiveEvent e;
+				e.name = ej.value("name", std::string());
+				if (ej.contains("startTweens") && ej["startTweens"].is_array())
+					e.startTweens = ej["startTweens"].get<std::vector<std::string>>();
+				if (ej.contains("setParams") && ej["setParams"].is_array())
+					e.setParams = ej["setParams"].get<std::vector<std::string>>();
+				if (ej.contains("setValues") && ej["setValues"].is_array())
+					e.setValues = ej["setValues"].get<std::vector<float>>();
+				m->liveEvents.push_back(std::move(e));
 			}
 		if (l.contains("sound") && l["sound"].is_object())
 		{

@@ -1,4 +1,5 @@
 #include "API/Model/Decal.h"
+#include "API/Model/Time.h"
 
 namespace nuke {
 
@@ -9,11 +10,12 @@ void Decal::Init(Atom* parent)
 	atom = parent;
 	transform = &parent->GetTransform();
 	parent->components.push_back(this);
+	spawnTime = Time::getSingleton()->elapsed;
 }
 
 void Decal::Update()      {}
 void Decal::FixedUpdate() {}
-void Decal::Reset()       {}
+void Decal::Reset()       { spawnTime = Time::getSingleton()->elapsed; }   // PIE start replays the appear
 void Decal::Pause()       {}
 void Decal::Destroy()     {}
 

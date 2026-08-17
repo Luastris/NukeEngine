@@ -2,13 +2,9 @@
 // MatCB g_Disp.w — CPU-computed per draw with a distance fade, so 1.0 collapses to the plain
 // (untessellated) look and the renderer swaps back to the normal PSO seamlessly.
 // MatCB layout must byte-match world.ps.
-cbuffer MatCB { float4 g_Color; float4 g_Params; float4 g_Params2; float4 g_Emissive2; float4 g_UVT; float4 g_UVT2; float4 g_Disp;
-                float4 g_Ov0;  float4 g_Ov1;  float4 g_Ov2;  float4 g_Ov3;  float4 g_Ov4;  float4 g_Ov5;  float4 g_Ov6;  float4 g_Ov7;
-                float4 g_OvT0; float4 g_OvT1; float4 g_OvT2; float4 g_OvT3; float4 g_OvT4; float4 g_OvT5; float4 g_OvT6; float4 g_OvT7;
-                float4 g_OvP0; float4 g_OvP1; float4 g_OvP2; float4 g_OvP3; float4 g_OvP4; float4 g_OvP5; float4 g_OvP6; float4 g_OvP7;
-                float4 g_OvM0; float4 g_OvM1; float4 g_OvM2; float4 g_OvMQ;
-                float4 g_Det; float4 g_Var;
-                float4 g_Brdf1; float4 g_Brdf2; float4 g_Brdf3; float4 g_Brdf4; };
+cbuffer MatCB {
+#include "matcb_std.hlsli"
+};
 
 struct HSIn  { float3 pos : TEXCOORD0; float3 nrm : TEXCOORD1; float2 uv : TEXCOORD2; };
 struct HSOut { float3 pos : TEXCOORD0; float3 nrm : TEXCOORD1; float2 uv : TEXCOORD2; };

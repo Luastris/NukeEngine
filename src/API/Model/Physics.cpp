@@ -2,17 +2,25 @@
 #include "API/Model/Atom.h"
 #include "API/Model/CharacterController.h"
 #include "API/Model/Collider.h"
+#include "API/Model/MeshRenderer.h"   // HitUV: render-mesh probe under the last hit
 #include "API/Model/World.h"
 #include "interface/AppInstance.h"
 #include "interface/Services.h"
 #include "service/iPhysics.h"
 #include <cmath>
+#include <cstring>
 #include <vector>
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 namespace nuke {
 
 // Last hit, PER THREAD: game-thread and fixed-thread casts must not clobber each other.
 static thread_local RayHit tl_lastHit;
+// Lazy mesh-UV of the last hit (computed on the first HitUV() after a cast).
+static thread_local bool    tl_uvDone = false;
+static thread_local Vector2 tl_uv;
 
 // bodyId -> Collider by walking the live world (no cache — it would go stale).
 static Collider* FindColliderByBody(bc::list<Atom*>& gos, uint64_t body)
@@ -33,6 +41,7 @@ bool Physics::Available() { return GetService<iPhysics>() != nullptr; }
 bool Physics::Raycast(const Vector3& from, const Vector3& dir, double maxDist)
 {
 	tl_lastHit = RayHit{};
+	tl_uvDone = false; tl_uv = Vector2();
 	iPhysics* p = GetService<iPhysics>();
 	World* w = AppInstance::GetSingleton()->currentWorld;
 	if (!p || !w) return false;
@@ -66,6 +75,7 @@ static uint64_t BodyOfAtom(iPhysics* p, Atom* a)
 bool Physics::RaycastIgnore(const Vector3& from, const Vector3& dir, double maxDist, Atom* ignore)
 {
 	tl_lastHit = RayHit{};
+	tl_uvDone = false; tl_uv = Vector2();
 	iPhysics* p = GetService<iPhysics>();
 	World* w = AppInstance::GetSingleton()->currentWorld;
 	if (!p || !w) return false;
@@ -90,6 +100,7 @@ bool Physics::SphereCastIgnore(const Vector3& from, double radius, const Vector3
                                double maxDist, Atom* ignore)
 {
 	tl_lastHit = RayHit{};
+	tl_uvDone = false; tl_uv = Vector2();
 	iPhysics* p = GetService<iPhysics>();
 	World* w = AppInstance::GetSingleton()->currentWorld;
 	if (!p || !w) return false;
@@ -130,6 +141,7 @@ static bool ShapeCastCommon(const NukeShapeDesc& s, const Vector3& from, const Q
                             const Vector3& dir, double maxDist)
 {
 	tl_lastHit = RayHit{};
+	tl_uvDone = false; tl_uv = Vector2();
 	iPhysics* p = GetService<iPhysics>();
 	if (!p) return false;
 	float f[3]  = { (float)from.x, (float)from.y, (float)from.z };
@@ -213,6 +225,46 @@ Atom*   Physics::HitAtom()     { return tl_lastHit.atom; }
 Vector3 Physics::HitPoint()    { return tl_lastHit.point; }
 Vector3 Physics::HitNormal()   { return tl_lastHit.normal; }
 double  Physics::HitDistance() { return tl_lastHit.distance; }
+
+bool Physics::MeshUVAt(Atom* a, const Vector3& point, const Vector3& normal, float& u, float& v)
+{
+	u = v = 0.0f;
+	if (!a) return false;
+	// The atom's render mesh (colliders approximate it; a physics point sits on the collider,
+	// not the surface): probe a short ray through the point ALONG -normal and take the mesh
+	// triangle it crosses.
+	Mesh* mesh = nullptr;
+	for (Component* c : a->components)
+	{
+		if (!c || (std::strcmp(c->name, "MeshRenderer") != 0 && std::strcmp(c->name, "SkinnedMeshRenderer") != 0)) continue;
+		if (((MeshRenderer*)c)->mesh) { mesh = ((MeshRenderer*)c)->mesh; break; }
+	}
+	if (!mesh) return false;
+	Transform& t = a->GetTransform();
+	const Vector3 P = t.globalPosition(); const Quaternion Q = t.globalRotation(); const Vector3 S = t.globalScale();
+	const glm::mat4 world = glm::translate(glm::mat4(1.0f), glm::vec3((float)P.x, (float)P.y, (float)P.z))
+	                      * glm::mat4_cast(glm::quat((float)Q.w, (float)Q.x, (float)Q.y, (float)Q.z))
+	                      * glm::scale(glm::mat4(1.0f), glm::vec3((float)S.x, (float)S.y, (float)S.z));
+	const glm::mat4 inv = glm::inverse(world);
+	// World-space probe: start slightly OUTSIDE the surface, aim through it.
+	Vector3 n = normal;
+	{ const double L = std::sqrt(n.x * n.x + n.y * n.y + n.z * n.z); if (L > 1e-12) { n.x /= L; n.y /= L; n.z /= L; } else n = Vector3(0, 1, 0); }
+	const glm::vec4 lo = inv * glm::vec4((float)(point.x + n.x * 0.01),
+	                                     (float)(point.y + n.y * 0.01),
+	                                     (float)(point.z + n.z * 0.01), 1.0f);
+	const glm::vec4 ld = inv * glm::vec4((float)-n.x, (float)-n.y, (float)-n.z, 0.0f);
+	return mesh->RaycastUV(Vector3(lo.x, lo.y, lo.z), Vector3(ld.x, ld.y, ld.z), u, v) >= 0.0f;
+}
+
+Vector2 Physics::HitUV()
+{
+	if (tl_uvDone) return tl_uv;
+	tl_uvDone = true; tl_uv = Vector2();
+	float u = 0, v = 0;
+	if (MeshUVAt(tl_lastHit.atom, tl_lastHit.point, tl_lastHit.normal, u, v))
+		tl_uv = Vector2(u, v);
+	return tl_uv;
+}
 
 const RayHit& Physics::LastHit() { return tl_lastHit; }
 

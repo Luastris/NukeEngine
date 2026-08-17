@@ -51,6 +51,13 @@ public:
 	// standard lit fields (g_Color/g_Params/...) are excluded.
 	static void ParseCBProps(const std::string& psSource, const char* cbName, std::vector<ShaderProp>& out);
 	static void ParseMatCBProps(const std::string& psSource, std::vector<ShaderProp>& out) { ParseCBProps(psSource, "MatCB", out); }
+
+	// APPEND-ONLY (module ABI): names of props declared inside #include'd files (matcb_std &
+	// co) — engine-driven plumbing the editor hides from Shader Params. Offsets still count
+	// them, so they stay in `props`.
+	std::vector<std::string> includeProps;
+	bool FromInclude(const std::string& propName) const
+	{ for (const std::string& n : includeProps) if (n == propName) return true; return false; }
 };
 }  // namespace nuke
 

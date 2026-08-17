@@ -125,6 +125,9 @@ public:
 	// Valid for tri < TriCount(): LOD0 starts at IB offset 0 by construction.
 	uint32_t TriIndex(int tri, int k) const
 	{ return numIndices > 0 ? indexArray[(size_t)tri * 3 + k] : (uint32_t)(tri * 3 + k); }
+	// Nearest LOD0 triangle along a LOCAL-space ray: returns the hit distance (negative on
+	// miss) and fills the interpolated UV from the uv stream (0,0 without one).
+	float RaycastUV(const Vector3& ro, const Vector3& rd, float& u, float& v) const;
 	// Effective section list: `sections` or the implicit whole-mesh one.
 	int SectionCount() const { return sections.empty() ? 1 : (int)sections.size(); }
 	MeshSection Section(int s) const

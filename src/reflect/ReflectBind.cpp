@@ -254,6 +254,39 @@ void Reflect_DropObject(void* obj)
 	ObjIndex().erase(idx);
 }
 
+// ---- method documentation side registry (nukegen-fed; see Reflect.h) -----------------------
+static std::map<std::string, MethodDoc>& DocTable()
+{
+	static std::map<std::string, MethodDoc> t;
+	return t;
+}
+
+void Reflect_SetMethodDoc(const char* type, const char* method, const char* doc, const char* paramsCsv)
+{
+	if (!type || !method) return;
+	MethodDoc& d = DocTable()[std::string(type) + "::" + method];
+	d.doc = doc ? doc : "";
+	d.params.clear();
+	std::string cur;
+	for (const char* p = paramsCsv ? paramsCsv : ""; ; ++p)
+	{
+		if (*p == ',' || *p == '\0')
+		{
+			if (!cur.empty()) d.params.push_back(cur);
+			cur.clear();
+			if (*p == '\0') break;
+		}
+		else cur += *p;
+	}
+}
+
+const MethodDoc* Reflect_MethodDoc(const char* type, const char* method)
+{
+	if (!type || !method) return nullptr;
+	auto it = DocTable().find(std::string(type) + "::" + method);
+	return it == DocTable().end() ? nullptr : &it->second;
+}
+
 unsigned long Reflect_ObjectFromGuid(const std::string& guid)
 {
 	if (guid.empty()) return 0;

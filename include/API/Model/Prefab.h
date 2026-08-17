@@ -8,6 +8,7 @@
 namespace nuke {
 
 class Atom;
+class World;
 
 // A prefab (.nuprefab) is a saved Atom subtree (same JSON shape as a world atom); save/load
 // reuse the world's atom (de)serialization, so components resolve the same way.
@@ -35,6 +36,8 @@ public:
 	// world root, through the layered resolution (raw project or pak + mods) with fresh stable
 	// ids. Returns the new root atom, null on failure.
 	[[nuke::func]] static Atom* Spawn(const std::string& contentRelPath);
+	// Same, into an EXPLICIT world (editor previews spawn hit reactions into their own world).
+	static Atom* SpawnIn(World* w, const std::string& contentRelPath);
 };
 
 }  // namespace nuke

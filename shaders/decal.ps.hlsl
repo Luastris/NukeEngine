@@ -6,7 +6,7 @@ cbuffer DecalCB
     float4x4 g_InvWorld;
     float4x4 g_InvViewProj;
     float4   g_Tint;
-    float4   g_Params;     // x = intensity, y = angleFade
+    float4   g_Params;     // x = intensity, y = angleFade, z = appear 0..1, w = appear mode (0 fade, 1 spread)
     float4   g_ProjAxis;   // xyz = world projection axis (box +Z)
     float4   g_Res;        // xy = resolution
 };
@@ -34,5 +34,22 @@ float4 main(float4 svpos : SV_POSITION) : SV_TARGET
     float  ndl = abs(dot(n, g_ProjAxis.xyz));
     float  fade = (g_Params.y > 0.001) ? smoothstep(0.0, g_Params.y, ndl) : 1.0;
 
-    return float4(tex.rgb, tex.a * fade * g_Params.x);
+    // PREMULTIPLIED output for the modulate blend (dest * lerp(1, tex.rgb, a)): the decal
+    // tints the ALREADY-LIT pixel, so lighting and shadows stay intact underneath it.
+    float a = saturate(tex.a * fade * g_Params.x);
+
+    // Appear envelope: Spread reveals by the texture's density SHAPED from the decal center —
+    // the dense core lands first and edges creep outward (blood); a flat-alpha texture still
+    // creeps radially instead of popping. Fade is a plain alpha ramp.
+    const float t = saturate(g_Params.z);
+    if (g_Params.w > 0.5)
+    {
+        const float f   = 0.18;
+        const float key = tex.a * (1.0 - saturate(length(lp.xy) * 1.6));
+        const float th  = (1.0 - t) * (1.0 + f) - f;   // t=0 -> nothing shown, t=1 -> everything
+        a *= saturate((key - th) / f);
+    }
+    else
+        a *= t;
+    return float4(tex.rgb * a, a);
 }

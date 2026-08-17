@@ -22,6 +22,8 @@ struct ControlState
 	double downTime = -1e9, upTime = -1e9;   // last down / up transition time
 	double prevDownTime = -1e9;               // the down BEFORE the last (double-press)
 	bool   downEdge = false, upEdge = false;  // transition happened THIS frame
+	bool   pendingDown = false;               // press LATCH: a click fully inside one poll interval must not vanish
+	bool   replaying   = false;               // the latched press is live THIS tick; releases at the next
 };
 
 // -- per-binding runtime (chord completion / sequence progress) --
@@ -62,7 +64,15 @@ static const ActionValueType actionType(const std::string& a)
 }
 
 // ---- raw feed / providers ----------------------------------------------------------------------------
-void Input::SetControl(const std::string& id, float value) { g_controls[id].value = value; }
+void Input::SetControl(const std::string& id, float value)
+{
+	ControlState& c = g_controls[id];
+	// BUTTON-value presses (exact ±1) latch so a click fully inside one poll interval still
+	// registers; analog feeds (sticks, mouse deltas) never latch — a replayed 1.0 would spike them.
+	if (fabsf(c.value) < 0.5f && fabsf(value) == 1.0f) c.pendingDown = true;
+	c.replaying = false;   // real data supersedes any in-flight replay
+	c.value = value;
+}
 float Input::Control(const std::string& id) { auto it = g_controls.find(id); return it == g_controls.end() ? 0.0f : it->second.value; }
 
 // Cursor in GAME-SCREEN pixels: the window cursor shifted by the game screen's top-left
@@ -179,6 +189,12 @@ void Input::Update(double dt)
 	for (auto& kv : g_controls)
 	{
 		ControlState& s = kv.second;
+		// A press latched between polls counts as down for the WHOLE of this tick even if the
+		// release already landed (fast click inside one frame): the value is resurrected to 1
+		// so edges AND binding evaluation see it, and the release lands at the NEXT tick.
+		if (s.replaying) { s.value = 0.0f; s.replaying = false; }
+		if (s.pendingDown && fabsf(s.value) < 0.5f) { s.value = 1.0f; s.replaying = true; }
+		s.pendingDown = false;
 		bool down = fabsf(s.value) >= 0.5f, wasDown = fabsf(s.prev) >= 0.5f;
 		s.downEdge = down && !wasDown;
 		s.upEdge   = !down && wasDown;
@@ -222,7 +238,8 @@ void Input::Update(double dt)
 					if (rt.seqIndex >= (int)b.controls.size())
 					{
 						rt.seqIndex = 0;
-						if (b.phase == InputPhase::Pressed || b.phase == InputPhase::Tap) { as.pressed = true; as.tapped = true; }
+						as.pressed = true;   // a completed combo IS a press, whatever the phase
+						if (b.phase == InputPhase::Tap) as.tapped = true;
 						as.held = true; as.value = 1.0f;
 						if (b.consume) for (const std::string& ctl : b.controls) consumed.insert(ctl);
 					}
@@ -256,11 +273,13 @@ void Input::Update(double dt)
 				else                              as.value += v;
 			}
 
+			// Basic button states ride the completion EDGES for EVERY binding — a Held-phase
+			// binding still answers Pressed()/Released(). The phase only selects the specialty
+			// triggers below and which edge OnAction callbacks fire on.
+			if (justComplete)   as.pressed  = true;
+			if (justUncomplete) as.released = true;
 			switch (b.phase)
 			{
-				case InputPhase::Pressed:  if (justComplete) as.pressed = true; break;
-				case InputPhase::Released: if (justUncomplete) as.released = true; break;
-				case InputPhase::Held:     /* handled by `complete` above */ break;
 				case InputPhase::Tap:
 					if (justUncomplete && (rt.uncompleteTime - rt.completeTime) <= b.tapMax) as.tapped = true;
 					break;
@@ -270,6 +289,7 @@ void Input::Update(double dt)
 				case InputPhase::DoublePress:
 					if (justComplete && (rt.completeTime - rt.lastCompleteTime) <= b.doubleWindow) as.doublePressed = true;
 					break;
+				default: break;   // Pressed/Released/Held: fully covered by the edge lines above
 			}
 			if (complete && b.consume) for (const std::string& ctl : b.controls) consumed.insert(ctl);
 			rt.wasComplete = complete;

@@ -360,9 +360,11 @@ public:
 
     // Composite a screen-space decal box onto the scene colour after the opaque pass; `tex` is
     // projected along the box's local +Z. mode 0 = Albedo (blend), 1 = Light Projector (add).
-    // Requires the depth prepass to have run this camera.
+    // appear = 0..1 envelope (spawn fade-in / pre-death fade-out); appearMode 0 = alpha ramp,
+    // 1 = spread (reveal by the texture's density). Requires this camera's depth prepass.
     virtual void drawDecal(Texture* tex, const float pos[3], const float quat[4], const float scale[3],
-                           const float tint[4], float intensity, float angleFade, int mode) {}
+                           const float tint[4], float intensity, float angleFade, int mode,
+                           float appear = 1.0f, int appearMode = 0) {}
 
     // drawSpriteScreen with an explicit scale mode: 0 Fit (letterboxed), 1 Stretch, 2 Expand
     // (covers/crops), 3 FitWidth, 4 FitHeight. The old method behaves as mode 0.

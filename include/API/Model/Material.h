@@ -49,9 +49,17 @@ struct NUKEENGINE_API LiveHit
 	std::string prefabGuid;            // prefab spawned at the hit point (particles/debris; content-relative .nuprefab)
 	std::string decalGuid;             // decal texture stamped at the hit
 	std::string soundGuid;             // impact sound (content-relative audio file)
+	// Material event fired AT the hit point (world) — masked reactions/ripples run from real
+	// gameplay hits, not just the editor tool. The hit's own parameters ride along in the
+	// g_Hit shader prop: (impulse, hit normal xyz).
+	std::string eventName;
 	float minImpulse = 0.0f;           // reactions below this impulse are skipped
 	float lifetime  = 4.0f;            // spawned prefab/decal auto-destroy (seconds; 0 = keep)
 	float decalSize = 0.5f;            // decal box half-size (meters)
+	Color decalTint = Color(1, 1, 1, 1);
+	float decalIntensity = 1.0f;
+	int   decalMode = 2;               // 0 = Albedo (on top), 1 = Light Projector, 2 = Stain (lit)
+	float decalFade = 0.35f;           // spread-in seconds (blood creep; 0 = instant stamp)
 };
 
 // The surface's sound identity (all refs = content-relative audio files).
@@ -63,20 +71,67 @@ struct NUKEENGINE_API LiveSound
 	float footVolume = 1.0f, ambientVolume = 1.0f, windVolume = 1.0f;
 };
 
+// Spatial mask: a named shape the tweens/events use to LOCALIZE effects (ripples from a
+// drop land HERE, not everywhere). Every scalar below is tween-animatable as a
+// "mask:<name>:<field>" target (scale 0->R + strength 1->0 = an expanding, dying ring).
+// Point events move the center. Rendered per pixel by the shader (g_Msk* slots).
+struct NUKEENGINE_API LiveMask
+{
+	std::string name;
+	int space = 0;              // 0 = material UV, 1 = world position
+	int shape = 0;              // 0 = filled circle, 1 = ring, 2 = stamp texture (star, splat...)
+	std::string stampGuid;      // shape = 2: grayscale stamp
+	float cx = 0.5f, cy = 0.5f, cz = 0.0f;   // center (UV or world)
+	float scale    = 0.25f;     // radius / stamp half-size (UV units or meters)
+	float repeat   = 0.0f;      // ring: extra concentric rings per radius (0 = single)
+	float rotation = 0.0f;      // stamp rotation, degrees
+	float fade     = 0.0f;      // 0..1 radial fade toward the edge
+	float softness = 0.25f;     // edge feather, relative to the radius
+	float strength = 1.0f;      // master weight (animate for decay)
+	Texture* stamp = nullptr;   // runtime-resolved
+};
+
+// Named material event: what happens when a trigger fires it. Triggers come from tween
+// timelines (global) or from outside — Trigger()/TriggerAt()/TriggerAtWorld() — with or
+// without a point (point info is required only for localized reactions: it moves `maskAt`).
+// The event carries the point and runs its actions — nothing else. A point fire routes the
+// point AUTOMATICALLY into every mask the actions touch: the modulating mask of each started
+// tween and the target mask of any "mask:<name>:*" tween/set-param.
+struct NUKEENGINE_API LiveEvent
+{
+	std::string name;
+	std::vector<std::string> startTweens;   // tweens (by name) started as one-shot instances
+	std::vector<std::string> setParams;     // params set instantly on fire...
+	std::vector<float>       setValues;     // ...4 floats per entry
+};
+
 // Parameter tween: a value animated from game boot time (STATELESS — value = f(t), so every
 // instance and every save/load agrees). `param` targets a built-in ("uv" = UV scroll offset,
-// "color", "emissive", "emissiveIntensity", "metallic", "roughness", "specular") or any custom
-// MatCB prop name of the material's shader.
+// "color", "emissive", "emissiveIntensity", "metallic", "roughness", "specular", surface
+// scalars "dispScale"/"dispMid"/"parallax"/"varAmount"/"varScale"/"varHue"), ANY reflected
+// material prop by field name (BRDF pack, UV transform, tints, live scalars), or a custom
+// MatCB prop name of the material's shader (g_*).
 struct NUKEENGINE_API LiveTween
 {
+	std::string name;                    // display/reference name (events start tweens by it)
 	std::string param;                   // target (see above)
-	float from[4] = { 0, 0, 0, 0 };
-	float to[4]   = { 1, 0, 0, 0 };
 	float duration = 1.0f;               // seconds per leg
 	int   loop = 1;                      // 0 = once, 1 = loop, 2 = ping-pong
-	// Cubic-bezier easing: control points at x = 1/3 and 2/3 with these Y values
-	// (0.333/0.667 = linear, 0/1 = ease-in-out-ish, 1/0 = overshoot flavors).
-	float bez1 = 0.333f, bez2 = 0.667f;
+	int   runMode = 0;                   // 0 = auto (runs from game time), 1 = on-event only
+	// Modulating mask (by name; empty = whole surface): shader-visible targets then blend
+	// per pixel by the mask weight — dispScale changes only where the mask says so.
+	std::string mask;
+	// Trigger marks on the timeline: crossing `trigT[k]` fires material event `trigEvent[k]`
+	// (global). A tween's triggers can never (re)start that same tween — cycle guard.
+	std::vector<float>       trigT;
+	std::vector<std::string> trigEvent;
+	// ONE timeline (0..1, scaled by duration). Non-color targets: per-component cubic-Hermite
+	// VALUE curves (t, value, inTan, outTan) — a curve key IS a waypoint and its tangents ARE
+	// the easing. Channels beyond the target's dimension stay empty (empty channel = 0).
+	std::vector<float> chan[4];
+	// Color targets (color / emissive / any reflected Color prop) animate through a visual
+	// gradient instead: stops (t, r, g, b, a).
+	std::vector<float> grad;
 };
 
 // Auto-foliage: any surface (mesh or terrain layer) using this material GROWS this scatter —
@@ -251,8 +306,43 @@ public:
     std::vector<LiveHit>   liveHits;      // typed hit reactions
     std::vector<LiveFoliage> liveFoliage; // auto-foliage grown on surfaces using this material
     std::vector<LiveTween>   liveTweens;  // parameter animations (stateless, from game boot time)
+    std::vector<LiveMask>    liveMasks;   // spatial masks localizing tween effects (GPU g_Msk*)
+    std::vector<LiveEvent>   liveEvents;  // named reactions the triggers fire
     float uvAnim[2] = { 0, 0 };           // runtime: current "uv" tween offset
     void ApplyTweens(double time);        // evaluate liveTweens at `time` into this material's fields
+    // --- event/trigger runtime (never serialized) --------------------------------------
+    struct TweenRun { int tween = -1; double start = 0.0; double prevCyc = -1.0; };
+    std::vector<TweenRun>    liveRuns;         // event-started tween instances
+    std::vector<double>      tweenPrevCyc;     // per-auto-tween trigger crossing detection
+    std::vector<std::string> liveTwinsWritten; // masked twin props written last tick
+    Texture* mskStamp = nullptr;               // first stamp-mask texture (shader g_MskStamp)
+    // Fire a material event (scriptable): global, at a UV point, or at a world point. Point
+    // info moves the driven masks' centers; global fires skip that (point OPTIONAL for
+    // global reactions, required only for localized ones).
+    [[nuke::func]] void Trigger(const std::string& eventName)           { FireEvent(eventName, nullptr, false, -1); }
+    // `u`/`v` are MESH-space UVs (exactly what Physics.HitUV yields); mapped through the
+    // material's UV transform internally — the masks live in the shader's transformed UV.
+    [[nuke::func]] void TriggerAt(const std::string& eventName, double u, double v);
+    [[nuke::func]] void TriggerAtWorld(const std::string& eventName, const Vector3& p) { float q[3] = { (float)p.x, (float)p.y, (float)p.z }; FireEvent(eventName, q, true, -1); }
+    // Fire with BOTH the world point and the MESH-space uv under it (what a hit knows): every
+    // routed mask receives the point in its AUTHORED space, so the effect size never depends
+    // on the trigger path. Prefer this whenever the uv is available.
+    [[nuke::func]] void TriggerAtHit(const std::string& eventName, const Vector3& p, double u, double v);
+    // Set ANY material parameter by key or label (the tween-target resolver: built-ins,
+    // liveSurface, sound volumes, mask:<name>:<field>, reflected fields, custom g_*).
+    [[nuke::func]] void SetScalar(const std::string& param, double v)   { float q[4] = { (float)v, 0, 0, 0 }; SetParam(param, q); }
+    [[nuke::func]] void SetVector(const std::string& param, const Vector3& v, double w) { float q[4] = { (float)v.x, (float)v.y, (float)v.z, (float)w }; SetParam(param, q); }
+    // excludeTween: cycle guard — events fired from a tween's timeline can never (re)start it.
+    // uvPoint (optional, with a WORLD point): the shader-space uv under the hit for UV masks.
+    void FireEvent(const std::string& eventName, const float* point, bool world, int excludeTween,
+                   const float* uvPoint = nullptr);
+    void MapMeshUV(float& u, float& v) const;   // mesh uv -> the shader's transformed uv
+    void SetParam(const std::string& param, const float v[4]);   // tween-target resolver, applied once
+    int  MaskIndex(const std::string& name) const;               // -1 = none
+private:
+    void EvalTween(int index, double localTime, double& prevCyc);
+    bool ApplyMaskedTwin(const std::string& param, const float v[4], int maskIndex);
+public:
     // Mirror the UV transform / cutout / wipe state into `props` (g_UVT/g_UVT2) for the world
     // shader's MatCB. Called each frame for every material in use; cheap when all-default.
     // Also assigns the GPU overlay slots (liveLayers first, then liveStates, capped at

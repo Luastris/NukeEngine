@@ -24,6 +24,11 @@ public:
     // The material drawn for mesh slot `s`: matGuids[s] instance, else the single `mat`.
     Material* MaterialForSlot(int s) const
     { return (s >= 0 && s < (int)mats.size() && mats[s]) ? mats[s] : mat; }
+    // Scriptable access to the LIVE material INSTANCE this renderer draws (slot 0 = the
+    // whole mesh / first section): trigger events, set params, read props — on THIS
+    // surface only, the shared asset stays untouched. Null until the world resolves it.
+    [[nuke::func]] Material* GetMaterial(int slot)
+    { return MaterialForSlot(slot); }
     // (Re)clone per-slot instances from matGuids; drops stale ones. Safe to call repeatedly.
     void ResolveMaterials();
 

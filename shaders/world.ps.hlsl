@@ -7,13 +7,10 @@
 // g_OvT = tint rgba; g_OvP = (metallic target -1=keep, roughness target -1=keep, mask3D channel
 // -1=none, flags 1=albedo 2=normal 4=MR 8=mask2D 16=flipG); g_OvM0..2 = world->mask uvw rows;
 // g_OvMQ = (mask resolution, hasMask3D, 0, 0).
-cbuffer MatCB { float4 g_Color; float4 g_Params; float4 g_Params2; float4 g_Emissive2; float4 g_UVT; float4 g_UVT2; float4 g_Disp;
-                float4 g_Ov0;  float4 g_Ov1;  float4 g_Ov2;  float4 g_Ov3;  float4 g_Ov4;  float4 g_Ov5;  float4 g_Ov6;  float4 g_Ov7;
-                float4 g_OvT0; float4 g_OvT1; float4 g_OvT2; float4 g_OvT3; float4 g_OvT4; float4 g_OvT5; float4 g_OvT6; float4 g_OvT7;
-                float4 g_OvP0; float4 g_OvP1; float4 g_OvP2; float4 g_OvP3; float4 g_OvP4; float4 g_OvP5; float4 g_OvP6; float4 g_OvP7;
-                float4 g_OvM0; float4 g_OvM1; float4 g_OvM2; float4 g_OvMQ;
-                float4 g_Det; float4 g_Var;
-                float4 g_Brdf1; float4 g_Brdf2; float4 g_Brdf3; float4 g_Brdf4; };
+cbuffer MatCB {
+#include "matcb_std.hlsli"
+};
+#include "nuke_material.hlsli"
 // BRDF pack: g_Brdf1 = (clearCoat, coatRoughness, anisotropy, sheen);
 // g_Brdf2 = (translucency, ior, iridescence, iridescenceThickness);
 // g_Brdf3 = (sheen tint rgb, hasFlowMap); g_Brdf4 = (translucency tint rgb, refraction on/off).
@@ -297,7 +294,10 @@ float4 main(in PSIn i) : SV_Target
     // Parallax occlusion mapping: march the height field along the tangent-space view ray and
     // shift the uv to the intersection. Tangent frame from screen-space derivatives (the same
     // cotangent trick normal mapping uses), so no mesh tangents are needed.
-    if (g_Disp.x > 0.0)
+    float pomD = g_Disp.x;
+    [branch] if (g_DispT.w > 0.5)   // masked POM depth tween
+        pomD = lerp(pomD, g_DispT.x, NukeMaskW((int)(g_DispT.w - 0.5), i.uv, i.wpos, g_MskStamp, g_Ov0Alb_sampler));
+    if (pomD > 0.0)
     {
         float3 Ng = normalize(i.nrm);
         float3 dp1 = ddx(i.wpos), dp2 = ddy(i.wpos);
@@ -310,7 +310,7 @@ float4 main(in PSIn i) : SV_Target
         float3 Vw = normalize(g_CamPos.xyz - i.wpos);
         float3 Vt = float3(dot(Vw, T), dot(Vw, B), dot(Vw, Ng));
         const int kSteps = 16;
-        float2 duv  = (Vt.xy / max(Vt.z, 0.2)) * (g_Disp.x / kSteps);
+        float2 duv  = (Vt.xy / max(Vt.z, 0.2)) * (pomD / kSteps);
         float  stp  = 1.0 / kSteps;
         float2 uvp  = i.uv;
         float  cur  = 0.0;
@@ -351,14 +351,20 @@ float4 main(in PSIn i) : SV_Target
 
     // Luma wipe: pixels whose mask luma falls below the animated threshold dissolve; the band
     // just above the edge glows (burn) within the feather width.
+    // Wipe threshold, per-pixel maskable (g_ParamsT.z twin): a dissolve can spread from a point.
+    float wipeTh = g_UVT2.z;
+    [branch] if (g_ParamsT.w > 0.5)
+        wipeTh = lerp(wipeTh, g_ParamsT.z, NukeMaskW((int)(g_ParamsT.w - 0.5), i.uv, i.wpos, g_MskStamp, g_Ov0Alb_sampler));
     float wipeL = 1.0;
-    if (g_UVT2.z > 0.0)
+    if (wipeTh > 0.0)
     {
         wipeL = g_WipeMask.Sample(g_WipeMask_sampler, i.uv).r;
-        clip(wipeL - g_UVT2.z);
+        clip(wipeL - wipeTh);
     }
 
     float4 base = g_Color;
+    [branch] if (g_ColorT.w > 0.5)   // masked base-color tween: blend by the mask, per pixel
+        base.rgb = lerp(base.rgb, g_ColorT.rgb, NukeMaskW((int)(g_ColorT.w - 0.5), i.uv, i.wpos, g_MskStamp, g_Ov0Alb_sampler));
 #if NUKE_INSTANCED
     base *= i.icol;   // per-instance tint
 #endif
@@ -414,6 +420,12 @@ float4 main(in PSIn i) : SV_Target
                if (g_OvP##N.y >= 0.0) rough    = lerp(rough, clamp(g_OvP##N.y, 0.04, 1.0), ovW[N]); } \
     }
     OV_MR(0) OV_MR(1) OV_MR(2) OV_MR(3) OV_MR(4) OV_MR(5) OV_MR(6) OV_MR(7)
+    [branch] if (g_ParamsT.w > 0.5)   // masked metallic/roughness tween
+    {
+        float mtw = NukeMaskW((int)(g_ParamsT.w - 0.5), i.uv, i.wpos, g_MskStamp, g_Ov0Alb_sampler);
+        metallic = lerp(metallic, saturate(g_ParamsT.x), mtw);
+        rough    = lerp(rough, clamp(g_ParamsT.y, 0.04, 1.0), mtw);
+    }
 
     float3 specF = g_Params2.w * g_Spec.Sample(g_Spec_sampler, i.uv).rgb;   // KHR specular: factor x spec map
 
@@ -599,11 +611,13 @@ float4 main(in PSIn i) : SV_Target
     else
         ambient = g_Ambient.rgb * g_Ambient.w * albedo * ao;                   // flat ambient (no sky)
     float3 emissive = g_Emissive2.rgb * g_Emissive2.w;
+    [branch] if (g_EmisT.w > 0.5)   // masked emissive tween (rgb premultiplied by intensity)
+        emissive = lerp(emissive, g_EmisT.rgb, NukeMaskW((int)(g_EmisT.w - 0.5), i.uv, i.wpos, g_MskStamp, g_Ov0Alb_sampler));
     if (g_Params2.z > 0.5) emissive *= g_Emissive.Sample(g_Emissive_sampler, i.uv).rgb;
     // Luma-wipe burn edge: the band just above the dissolve threshold glows within the feather.
-    if (g_UVT2.z > 0.0 && g_UVT2.w > 0.0)
+    if (wipeTh > 0.0 && g_UVT2.w > 0.0)
     {
-        float edge = saturate(1.0 - (wipeL - g_UVT2.z) / g_UVT2.w);
+        float edge = saturate(1.0 - (wipeL - wipeTh) / g_UVT2.w);
         emissive += albedo * (edge * edge * 6.0);
     }
     float3 color = ambient + Lo + emissive;

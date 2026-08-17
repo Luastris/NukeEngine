@@ -70,27 +70,48 @@ bool NukeReflectInit() {
 		TypeInfo& t = TypeOf<Ui>();
 		t.base = "Object";
 		t.methods.push_back(MakeMethod("Window", &Ui::Window));
+		Reflect_SetMethodDoc("Ui", "Window", "--- declaration (create or update by id; parent = window id) ----------------------", "id,title");
 		t.methods.push_back(MakeMethod("Text", &Ui::Text));
+		Reflect_SetMethodDoc("Ui", "Text", "", "id,parent,text");
 		t.methods.push_back(MakeMethod("Button", &Ui::Button));
+		Reflect_SetMethodDoc("Ui", "Button", "", "id,parent,label");
 		t.methods.push_back(MakeMethod("Checkbox", &Ui::Checkbox));
+		Reflect_SetMethodDoc("Ui", "Checkbox", "", "id,parent,label,value");
 		t.methods.push_back(MakeMethod("Slider", &Ui::Slider));
+		Reflect_SetMethodDoc("Ui", "Slider", "", "id,parent,label,value,lo,hi");
 		t.methods.push_back(MakeMethod("Input", &Ui::Input));
+		Reflect_SetMethodDoc("Ui", "Input", "", "id,parent,label,value");
 		t.methods.push_back(MakeMethod("Combo", &Ui::Combo));
+		Reflect_SetMethodDoc("Ui", "Combo", "", "id,parent,label,items,index");
 		t.methods.push_back(MakeMethod("Image", &Ui::Image));
+		Reflect_SetMethodDoc("Ui", "Image", "", "id,parent,texGuid,w,h");
 		t.methods.push_back(MakeMethod("Progress", &Ui::Progress));
+		Reflect_SetMethodDoc("Ui", "Progress", "", "id,parent,fraction,overlay");
 		t.methods.push_back(MakeMethod("Separator", &Ui::Separator));
+		Reflect_SetMethodDoc("Ui", "Separator", "", "id,parent");
 		t.methods.push_back(MakeMethod("SameLine", &Ui::SameLine));
+		Reflect_SetMethodDoc("Ui", "SameLine", "--- layout / lifetime --------------------------------------------------------------", "id,on");
 		t.methods.push_back(MakeMethod("Show", &Ui::Show));
+		Reflect_SetMethodDoc("Ui", "Show", "", "id,visible");
 		t.methods.push_back(MakeMethod("SetRect", &Ui::SetRect));
+		Reflect_SetMethodDoc("Ui", "SetRect", "", "id,x,y,w,h");
 		t.methods.push_back(MakeMethod("Remove", &Ui::Remove));
+		Reflect_SetMethodDoc("Ui", "Remove", "", "id");
 		t.methods.push_back(MakeMethod("Clear", &Ui::Clear));
 		t.methods.push_back(MakeMethod("Clicked", &Ui::Clicked));
+		Reflect_SetMethodDoc("Ui", "Clicked", "--- state / events (Clicked & Changed latch until read) -----------------------------", "id");
 		t.methods.push_back(MakeMethod("Changed", &Ui::Changed));
+		Reflect_SetMethodDoc("Ui", "Changed", "", "id");
 		t.methods.push_back(MakeMethod("Value", &Ui::Value));
+		Reflect_SetMethodDoc("Ui", "Value", "", "id");
 		t.methods.push_back(MakeMethod("TextOf", &Ui::TextOf));
+		Reflect_SetMethodDoc("Ui", "TextOf", "", "id");
 		t.methods.push_back(MakeMethod("SetValue", &Ui::SetValue));
+		Reflect_SetMethodDoc("Ui", "SetValue", "", "id,v");
 		t.methods.push_back(MakeMethod("SetText", &Ui::SetText));
+		Reflect_SetMethodDoc("Ui", "SetText", "", "id,text");
 		t.methods.push_back(MakeMethod("SetLabel", &Ui::SetLabel));
+		Reflect_SetMethodDoc("Ui", "SetLabel", "", "id,label");
 	}
 	{
 		TypeInfo& t = TypeOf<Animator>();
@@ -108,46 +129,79 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("smJson", &Animator::smJson));
 		t.fields.back().hidden = true;
 		t.methods.push_back(MakeMethod("Play", &Animator::Play));
+		Reflect_SetMethodDoc("Animator", "Play", "--- script surface (auto-bound) ---", "clip");
 		t.methods.push_back(MakeMethod("CrossFade", &Animator::CrossFade));
+		Reflect_SetMethodDoc("Animator", "CrossFade", "", "clip,fade");
 		t.methods.push_back(MakeMethod("Stop", &Animator::Stop));
 		t.methods.push_back(MakeMethod("IsPlaying", &Animator::IsPlaying));
 		t.methods.push_back(MakeMethod("CurrentClip", &Animator::CurrentClip));
 		t.methods.push_back(MakeMethod("ClipTime", &Animator::ClipTime));
 		t.methods.push_back(MakeMethod("SetClipTime", &Animator::SetClipTime));
+		Reflect_SetMethodDoc("Animator", "SetClipTime", "", "t");
 		t.methods.push_back(MakeMethod("AddState", &Animator::AddState));
+		Reflect_SetMethodDoc("Animator", "AddState", "State machine — serialized with the component (smJson); auto-enters `entry` on play.", "name,clip,stateLoop,stateSpeed");
 		t.methods.push_back(MakeMethod("RemoveState", &Animator::RemoveState));
+		Reflect_SetMethodDoc("Animator", "RemoveState", "", "name");
 		t.methods.push_back(MakeMethod("AddTransition", &Animator::AddTransition));
+		Reflect_SetMethodDoc("Animator", "AddTransition", "", "from,to,fade");
 		t.methods.push_back(MakeMethod("RemoveTransition", &Animator::RemoveTransition));
+		Reflect_SetMethodDoc("Animator", "RemoveTransition", "", "from,to");
 		t.methods.push_back(MakeMethod("SetEntry", &Animator::SetEntry));
+		Reflect_SetMethodDoc("Animator", "SetEntry", "", "name");
 		t.methods.push_back(MakeMethod("Entry", &Animator::Entry));
 		t.methods.push_back(MakeMethod("SetState", &Animator::SetState));
+		Reflect_SetMethodDoc("Animator", "SetState", "", "name");
 		t.methods.push_back(MakeMethod("State", &Animator::State));
 		t.methods.push_back(MakeMethod("AddEvent", &Animator::AddEvent));
+		Reflect_SetMethodDoc("Animator", "AddEvent", "Add a marker to a clip (guid or name); fired as Component::OnAnimEvent on siblings.", "clip,t,name");
 		t.methods.push_back(MakeMethod("MapBone", &Animator::MapBone));
+		Reflect_SetMethodDoc("Animator", "MapBone", "Retarget: rename clip channels onto this skeleton's bone names, for every clip played.", "from,to");
 		t.methods.push_back(MakeMethod("ClearBoneMap", &Animator::ClearBoneMap));
 		t.methods.push_back(MakeMethod("SetIK", &Animator::SetIK));
+		Reflect_SetMethodDoc("Animator", "SetIK", "IK post-pass on the sampled pose: pull `tipBone` toward a WORLD-space target, weight [0..1] blends against the clip. Chain 2 = analytic two-bone, more = FABRIK; the pole is a WORLD-space point aiming the bend plane.", "tipBone,target,weight");
 		t.methods.push_back(MakeMethod("SetIKPole", &Animator::SetIKPole));
+		Reflect_SetMethodDoc("Animator", "SetIKPole", "", "tipBone,pole");
 		t.methods.push_back(MakeMethod("SetIKChain", &Animator::SetIKChain));
+		Reflect_SetMethodDoc("Animator", "SetIKChain", "", "tipBone,segments");
 		t.methods.push_back(MakeMethod("ClearIK", &Animator::ClearIK));
+		Reflect_SetMethodDoc("Animator", "ClearIK", "", "tipBone");
 		t.methods.push_back(MakeMethod("SetChainIK", &Animator::SetChainIK));
+		Reflect_SetMethodDoc("Animator", "SetChainIK", "Same solver driven by a NAMED CHAIN from the skeleton's IK rig (.nuskel `chains`, root -> tip) — no bone names or segment counts at the call site. The optional NORMAL aligns the chain tip's up-axis to a world surface normal after the reach (foot roll).", "chain,target,weight");
 		t.methods.push_back(MakeMethod("SetChainIKPole", &Animator::SetChainIKPole));
+		Reflect_SetMethodDoc("Animator", "SetChainIKPole", "", "chain,pole");
 		t.methods.push_back(MakeMethod("SetChainIKNormal", &Animator::SetChainIKNormal));
+		Reflect_SetMethodDoc("Animator", "SetChainIKNormal", "", "chain,normal,weight");
 		t.methods.push_back(MakeMethod("ClearChainIK", &Animator::ClearChainIK));
+		Reflect_SetMethodDoc("Animator", "ClearChainIK", "", "chain");
 		t.methods.push_back(MakeMethod("SetLookAt", &Animator::SetLookAt));
+		Reflect_SetMethodDoc("Animator", "SetLookAt", "Look-at: turn a weighted joint chain (spine -> head, from the IK rig) so the tip's forward aims at a WORLD target; the turn spreads along the chain growing toward the tip, capped at maxAngle degrees. A bare bone name works as a one-joint chain.", "chain,target,weight,maxAngle");
 		t.methods.push_back(MakeMethod("ClearLookAt", &Animator::ClearLookAt));
 		t.methods.push_back(MakeMethod("SetPelvisOffset", &Animator::SetPelvisOffset));
+		Reflect_SetMethodDoc("Animator", "SetPelvisOffset", "Vertical hips offset in world units, applied to the common ancestor of the active IK chains (FootIK lowers the pelvis so every foot can reach the ground).", "dy");
 		t.methods.push_back(MakeMethod("SetFloat", &Animator::SetFloat));
+		Reflect_SetMethodDoc("Animator", "SetFloat", "Controller parameters (smGuid mode). Triggers auto-reset when a transition consumes them.", "param,v");
 		t.methods.push_back(MakeMethod("GetFloat", &Animator::GetFloat));
+		Reflect_SetMethodDoc("Animator", "GetFloat", "", "param");
 		t.methods.push_back(MakeMethod("SetBool", &Animator::SetBool));
+		Reflect_SetMethodDoc("Animator", "SetBool", "", "param,v");
 		t.methods.push_back(MakeMethod("GetBool", &Animator::GetBool));
+		Reflect_SetMethodDoc("Animator", "GetBool", "", "param");
 		t.methods.push_back(MakeMethod("SetTrigger", &Animator::SetTrigger));
+		Reflect_SetMethodDoc("Animator", "SetTrigger", "", "param");
 		t.methods.push_back(MakeMethod("ResetTrigger", &Animator::ResetTrigger));
+		Reflect_SetMethodDoc("Animator", "ResetTrigger", "", "param");
 		t.methods.push_back(MakeMethod("CurveValue", &Animator::CurveValue));
+		Reflect_SetMethodDoc("Animator", "CurveValue", "Blended value of a named clip float curve this frame (0 when no active clip carries it).", "curve");
 		t.methods.push_back(MakeMethod("LayerState", &Animator::LayerState));
+		Reflect_SetMethodDoc("Animator", "LayerState", "Controller layers: current state name + runtime weight override (index = .nusm order).", "layer");
 		t.methods.push_back(MakeMethod("SetLayerWeight", &Animator::SetLayerWeight));
+		Reflect_SetMethodDoc("Animator", "SetLayerWeight", "", "layer,weight");
 		t.methods.push_back(MakeMethod("RootDelta", &Animator::RootDelta));
+		Reflect_SetMethodDoc("Animator", "RootDelta", "Root motion applied to the atom LAST frame (world units) — feed a CharacterController.", "");
 		t.methods.push_back(MakeMethod("SetMirror", &Animator::SetMirror));
+		Reflect_SetMethodDoc("Animator", "SetMirror", "Runtime whole-pose mirror override on top of the per-state flags.", "mirrored");
 		t.methods.push_back(MakeMethod("MatchTo", &Animator::MatchTo));
+		Reflect_SetMethodDoc("Animator", "MatchTo", "Motion-matching jump: play `clipRef` FROM `time` with an inertialized blend over `blend` seconds (no pop, the old stream is never sampled again). Legacy drive mode.", "clipRef,time,blend");
 		t.create = []() -> void* { return new Animator(); };
 	}
 	{
@@ -156,9 +210,13 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("name", &AnimClip::name, "", "Name"));
 		t.fields.push_back(MakeField("duration", &AnimClip::duration, "", "Duration"));
 		t.methods.push_back(MakeMethod("AddEvent", &AnimClip::AddEvent));
+		Reflect_SetMethodDoc("AnimClip", "AddEvent", "", "t,name");
 		t.methods.push_back(MakeMethod("AddNotify", &AnimClip::AddNotify));
+		Reflect_SetMethodDoc("AnimClip", "AddNotify", "", "t,type,name,asset,socket,a,b,c");
 		t.methods.push_back(MakeMethod("AddCurveKey", &AnimClip::AddCurveKey));
+		Reflect_SetMethodDoc("AnimClip", "AddCurveKey", "", "curve,t,v");
 		t.methods.push_back(MakeMethod("AddPropKey", &AnimClip::AddPropKey));
+		Reflect_SetMethodDoc("AnimClip", "AddPropKey", "", "path,comp,prop,t,v");
 		t.create = []() -> void* { return new AnimClip(); };
 	}
 	{
@@ -209,43 +267,66 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("GetName", &Atom::GetName));
 		t.methods.push_back(MakeMethod("GetTag", &Atom::GetTag));
 		t.methods.push_back(MakeMethod("SetName", &Atom::SetName));
+		Reflect_SetMethodDoc("Atom", "SetName", "", "name");
 		t.methods.push_back(MakeMethod("SetTag", &Atom::SetTag));
+		Reflect_SetMethodDoc("Atom", "SetTag", "", "tag");
 		t.methods.push_back(MakeMethod("SetLayer", &Atom::SetLayer));
+		Reflect_SetMethodDoc("Atom", "SetLayer", "", "index");
 		t.methods.push_back(MakeMethod("GetLayer", &Atom::GetLayer));
 		t.methods.push_back(MakeMethod("SetPersistent", &Atom::SetPersistent));
+		Reflect_SetMethodDoc("Atom", "SetPersistent", "", "on");
 		t.methods.push_back(MakeMethod("IsPersistent", &Atom::IsPersistent));
 		t.methods.push_back(MakeMethod("SetEnabled", &Atom::SetEnabled));
+		Reflect_SetMethodDoc("Atom", "SetEnabled", "", "on");
 		t.methods.push_back(MakeMethod("IsEnabled", &Atom::IsEnabled));
 		t.methods.push_back(MakeMethod("IsFolder", &Atom::IsFolder));
 		t.methods.push_back(MakeMethod("SetParent", &Atom::SetParent));
+		Reflect_SetMethodDoc("Atom", "SetParent", "", "newparent");
 		t.methods.push_back(MakeMethod("GetParent", &Atom::GetParent));
 		t.methods.push_back(MakeMethod("AddChild", &Atom::AddChild));
+		Reflect_SetMethodDoc("Atom", "AddChild", "", "newChild");
 		t.methods.push_back(MakeMethod("Destroy", &Atom::Destroy));
+		Reflect_SetMethodDoc("Atom", "Destroy", "DEFERRED destruction: the subtree is deleted at the end of the current Update.", "");
 	}
 	{
 		TypeInfo& t = TypeOf<Audio>();
 		t.base = "Object";
 		t.methods.push_back(MakeMethod("Available", &Audio::Available));
 		t.methods.push_back(MakeMethod("Play", &Audio::Play));
+		Reflect_SetMethodDoc("Audio", "Play", "One-shot / manual playback. bus: 0 = Music, 1 = SFX, 2 = Preview (editor).", "clip,volume,loop,bus");
 		t.methods.push_back(MakeMethod("PlayAt", &Audio::PlayAt));
+		Reflect_SetMethodDoc("Audio", "PlayAt", "", "clip,pos,volume,minDist,maxDist,bus");
 		t.methods.push_back(MakeMethod("Stop", &Audio::Stop));
+		Reflect_SetMethodDoc("Audio", "Stop", "", "voice");
 		t.methods.push_back(MakeMethod("StopAll", &Audio::StopAll));
 		t.methods.push_back(MakeMethod("IsPlaying", &Audio::IsPlaying));
+		Reflect_SetMethodDoc("Audio", "IsPlaying", "", "voice");
 		t.methods.push_back(MakeMethod("SetPaused", &Audio::SetPaused));
+		Reflect_SetMethodDoc("Audio", "SetPaused", "", "voice,paused");
 		t.methods.push_back(MakeMethod("SetVolume", &Audio::SetVolume));
+		Reflect_SetMethodDoc("Audio", "SetVolume", "", "voice,volume");
 		t.methods.push_back(MakeMethod("SetPitch", &Audio::SetPitch));
+		Reflect_SetMethodDoc("Audio", "SetPitch", "", "voice,pitch");
 		t.methods.push_back(MakeMethod("Seek", &Audio::Seek));
+		Reflect_SetMethodDoc("Audio", "Seek", "", "voice,seconds");
 		t.methods.push_back(MakeMethod("Time", &Audio::Time));
+		Reflect_SetMethodDoc("Audio", "Time", "", "voice");
 		t.methods.push_back(MakeMethod("Length", &Audio::Length));
+		Reflect_SetMethodDoc("Audio", "Length", "", "voice");
 		t.methods.push_back(MakeMethod("SetBusVolume", &Audio::SetBusVolume));
+		Reflect_SetMethodDoc("Audio", "SetBusVolume", "Mix control.", "bus,volume");
 		t.methods.push_back(MakeMethod("GetBusVolume", &Audio::GetBusVolume));
+		Reflect_SetMethodDoc("Audio", "GetBusVolume", "", "bus");
 		t.methods.push_back(MakeMethod("SetMasterVolume", &Audio::SetMasterVolume));
+		Reflect_SetMethodDoc("Audio", "SetMasterVolume", "", "volume");
 		t.methods.push_back(MakeMethod("GetMasterVolume", &Audio::GetMasterVolume));
 		t.methods.push_back(MakeMethod("GetKick", &Audio::GetKick));
+		Reflect_SetMethodDoc("Audio", "GetKick", "Music analysis (this frame's snapshot; all [0..1] unless noted).", "");
 		t.methods.push_back(MakeMethod("GetSnare", &Audio::GetSnare));
 		t.methods.push_back(MakeMethod("GetBass", &Audio::GetBass));
 		t.methods.push_back(MakeMethod("GetEnergy", &Audio::GetEnergy));
 		t.methods.push_back(MakeMethod("GetChroma", &Audio::GetChroma));
+		Reflect_SetMethodDoc("Audio", "GetChroma", "", "note");
 		t.methods.push_back(MakeMethod("GetNote", &Audio::GetNote));
 		t.methods.push_back(MakeMethod("GetNoteStrength", &Audio::GetNoteStrength));
 		t.methods.push_back(MakeMethod("GetBeatPhase", &Audio::GetBeatPhase));
@@ -271,8 +352,10 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("maxDist", &AudioSource::maxDist, "", "Max Distance"));
 		t.fields.push_back(MakeField("decode", &AudioSource::decode, "", "Decode", 0.0f, 0.0f, "Auto,Memory,Stream"));
 		t.methods.push_back(MakeMethod("Play", &AudioSource::Play));
+		Reflect_SetMethodDoc("AudioSource", "Play", "Script/game control (auto-bound via component reflection).", "");
 		t.methods.push_back(MakeMethod("Stop", &AudioSource::Stop));
 		t.methods.push_back(MakeMethod("SetPaused", &AudioSource::SetPaused));
+		Reflect_SetMethodDoc("AudioSource", "SetPaused", "", "paused");
 		t.methods.push_back(MakeMethod("IsPlaying", &AudioSource::IsPlaying));
 		t.create = []() -> void* { return new AudioSource(); };
 	}
@@ -316,15 +399,22 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("targetTexGuid", &Camera::targetTexGuid, "texture", "Target Texture"));
 		t.fields.back().tip = "Render into this texture asset instead of the screen";
 		t.methods.push_back(MakeMethod("SetProjection", &Camera::SetProjection));
+		Reflect_SetMethodDoc("Camera", "SetProjection", "Reflected camera API. Setting the projection animates the switch (per projTransition).", "p");
 		t.methods.push_back(MakeMethod("GetProjection", &Camera::GetProjection));
 		t.methods.push_back(MakeMethod("SetOrthoSize", &Camera::SetOrthoSize));
+		Reflect_SetMethodDoc("Camera", "SetOrthoSize", "", "size");
 		t.methods.push_back(MakeMethod("GetOrthoSize", &Camera::GetOrthoSize));
 		t.methods.push_back(MakeMethod("SetLayerMask", &Camera::SetLayerMask));
+		Reflect_SetMethodDoc("Camera", "SetLayerMask", "Render-layer mask (bitmask over nuke::Layers indices; compose with Layers.MaskOf(\"UI,FX\")).", "mask");
 		t.methods.push_back(MakeMethod("GetLayerMask", &Camera::GetLayerMask));
 		t.methods.push_back(MakeMethod("ScreenRayOrigin", &Camera::ScreenRayOrigin));
+		Reflect_SetMethodDoc("Camera", "ScreenRayOrigin", "Screen -> world ray. px/py are GAME-SCREEN pixels (Screen.Width/Height space, top-left origin — what Input.MouseX/Y return). Ortho-aware: follows the live projection blend.", "px,py");
 		t.methods.push_back(MakeMethod("ScreenRayDir", &Camera::ScreenRayDir));
+		Reflect_SetMethodDoc("Camera", "ScreenRayDir", "", "px,py");
 		t.methods.push_back(MakeMethod("ScreenToWorldPoint", &Camera::ScreenToWorldPoint));
+		Reflect_SetMethodDoc("Camera", "ScreenToWorldPoint", "The world point `depth` units along that ray.", "px,py,depth");
 		t.methods.push_back(MakeMethod("AddShake", &Camera::AddShake));
+		Reflect_SetMethodDoc("Camera", "AddShake", "Procedural view shake (anim Shake notifies, hits, explosions): an impulse of `amplitude` world units wobbling at `frequency` Hz fades out over `duration` seconds. Impulses stack; the offset perturbs only the rendered view, never the transform.", "amplitude,frequency,duration");
 		t.create = []() -> void* { return new Camera(); };
 	}
 	{
@@ -372,16 +462,21 @@ bool NukeReflectInit() {
 		t.fields.back().tip = "Meters travelled per footstep";
 		t.fields.push_back(MakeField("stepVolume", &CharacterController::stepVolume, "", "Step Volume", 0.0f, 2.0f));
 		t.methods.push_back(MakeMethod("SetMove", &CharacterController::SetMove));
+		Reflect_SetMethodDoc("CharacterController", "SetMove", "---- gameplay API ---- Desired HORIZONTAL velocity (world units/s); the vertical component is ignored.", "v");
 		t.methods.push_back(MakeMethod("SetVelocity", &CharacterController::SetVelocity));
+		Reflect_SetMethodDoc("CharacterController", "SetVelocity", "Full desired velocity, applied verbatim (the autoGravity=false driving style).", "v");
 		t.methods.push_back(MakeMethod("Velocity", &CharacterController::Velocity));
 		t.methods.push_back(MakeMethod("Jump", &CharacterController::Jump));
+		Reflect_SetMethodDoc("CharacterController", "Jump", "", "speed");
 		t.methods.push_back(MakeMethod("IsGrounded", &CharacterController::IsGrounded));
 		t.methods.push_back(MakeMethod("GroundState", &CharacterController::GroundState));
 		t.methods.push_back(MakeMethod("GroundNormal", &CharacterController::GroundNormal));
 		t.methods.push_back(MakeMethod("GroundVelocity", &CharacterController::GroundVelocity));
 		t.methods.push_back(MakeMethod("GroundAtom", &CharacterController::GroundAtom));
 		t.methods.push_back(MakeMethod("Teleport", &CharacterController::Teleport));
+		Reflect_SetMethodDoc("CharacterController", "Teleport", "", "pos");
 		t.methods.push_back(MakeMethod("FitToMesh", &CharacterController::FitToMesh));
+		Reflect_SetMethodDoc("CharacterController", "FitToMesh", "Size + place the capsule from the sibling MeshRenderer's mesh bounds (pivot=Center, offset = the mesh's local center, height/radius from the AABB).", "");
 		t.create = []() -> void* { return new CharacterController(); };
 	}
 	{
@@ -393,6 +488,7 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("IsPaused", &Clock::IsPaused));
 		t.methods.push_back(MakeMethod("Elapsed", &Clock::Elapsed));
 		t.methods.push_back(MakeMethod("Now", &Clock::Now));
+		Reflect_SetMethodDoc("Clock", "Now", "Monotonic seconds since process start — the timeline every Clock measures on.", "");
 		t.create = []() -> void* { return new Clock(); };
 	}
 	{
@@ -413,32 +509,48 @@ bool NukeReflectInit() {
 		TypeInfo& t = TypeOf<DebugDraw>();
 		t.base = "Object";
 		t.methods.push_back(MakeMethod("Line", &DebugDraw::Line));
+		Reflect_SetMethodDoc("DebugDraw", "Line", "", "a,b,color");
 		t.methods.push_back(MakeMethod("Arrow", &DebugDraw::Arrow));
+		Reflect_SetMethodDoc("DebugDraw", "Arrow", "", "from,to,color");
 		t.methods.push_back(MakeMethod("WireBox", &DebugDraw::WireBox));
+		Reflect_SetMethodDoc("DebugDraw", "WireBox", "", "center,halfExtents,rot,color");
 		t.methods.push_back(MakeMethod("WireSphere", &DebugDraw::WireSphere));
+		Reflect_SetMethodDoc("DebugDraw", "WireSphere", "", "center,radius,color");
 		t.methods.push_back(MakeMethod("WireCapsule", &DebugDraw::WireCapsule));
+		Reflect_SetMethodDoc("DebugDraw", "WireCapsule", "", "center,radius,halfHeight,rot,color");
 		t.methods.push_back(MakeMethod("WireCone", &DebugDraw::WireCone));
+		Reflect_SetMethodDoc("DebugDraw", "WireCone", "Cone from `apex` opening along `dir`: `angleDeg` = half-angle, `range` = height.", "apex,dir,angleDeg,range,color");
 		t.methods.push_back(MakeMethod("WireCircle", &DebugDraw::WireCircle));
+		Reflect_SetMethodDoc("DebugDraw", "WireCircle", "", "center,normal,radius,color");
 	}
 	{
 		TypeInfo& t = TypeOf<Decal>();
 		t.base = "Component";
 		t.category = "Rendering";
 		t.fields.push_back(MakeField("textureGuid", &Decal::textureGuid, "texture", "Texture"));
-		t.fields.push_back(MakeField("mode", &Decal::mode, "", "Mode", 0.0f, 0.0f, "Albedo,Light Projector"));
+		t.fields.push_back(MakeField("mode", &Decal::mode, "", "Mode", 0.0f, 0.0f, "Albedo,Light Projector,Stain"));
+		t.fields.back().tip = "Albedo: the texture as-is on top (bright decals stay bright); Light Projector: additive glow; Stain: tints the LIT surface — lighting and shadows show through (bullet holes, scorch, dirt)";
 		t.fields.push_back(MakeField("tint", &Decal::tint, "", "Tint"));
 		t.fields.push_back(MakeField("intensity", &Decal::intensity, "", "Intensity", 0.0f, 8.0f));
 		t.fields.push_back(MakeField("angleFade", &Decal::angleFade, "", "Angle Fade", 0.0f, 1.0f));
+		t.fields.push_back(MakeField("fadeIn", &Decal::fadeIn, "", "Fade In"));
+		t.fields.back().tip = "Seconds to appear after spawn; 0 = instant";
+		t.fields.push_back(MakeField("appear", &Decal::appear, "", "Appear", 0.0f, 0.0f, "Fade,Spread"));
+		t.fields.back().tip = "Fade: alpha ramp; Spread: reveal by the texture's density — dense core first, thin edges last (blood creep)";
+		t.fields.push_back(MakeField("fadeOut", &Decal::fadeOut, "", "Fade Out"));
+		t.fields.back().tip = "Seconds to dissolve before a timed death (hit decal Lifetime); 0 = instant cut";
 		t.create = []() -> void* { return new Decal(); };
 	}
 	{
 		TypeInfo& t = TypeOf<Console>();
 		t.base = "Object";
 		t.methods.push_back(MakeMethod("SetEnabled", &Console::SetEnabled));
+		Reflect_SetMethodDoc("Console", "SetEnabled", "", "on");
 		t.methods.push_back(MakeMethod("Enabled", &Console::Enabled));
 		t.methods.push_back(MakeMethod("Toggle", &Console::Toggle));
 		t.methods.push_back(MakeMethod("IsOpen", &Console::IsOpen));
 		t.methods.push_back(MakeMethod("Execute", &Console::Execute));
+		Reflect_SetMethodDoc("Console", "Execute", "Run one console line NOW; returns the printable result (also logged, tag \"Console\").", "line");
 	}
 	{
 		TypeInfo& t = TypeOf<Environment>();
@@ -469,9 +581,13 @@ bool NukeReflectInit() {
 		TypeInfo& t = TypeOf<Events>();
 		t.base = "Object";
 		t.methods.push_back(MakeMethod("Emit", &Events::Emit));
+		Reflect_SetMethodDoc("Events", "Emit", "", "name,payload");
 		t.methods.push_back(MakeMethod("After", &Events::After));
+		Reflect_SetMethodDoc("Events", "After", "Fire once after `gameSeconds` of GAME time (speed-scaled, frozen while paused). Returns a cancel id.", "gameSeconds,name,payload");
 		t.methods.push_back(MakeMethod("Every", &Events::Every));
+		Reflect_SetMethodDoc("Events", "Every", "Fire repeatedly every `gameSeconds` of game time. Returns a cancel id.", "gameSeconds,name,payload");
 		t.methods.push_back(MakeMethod("Cancel", &Events::Cancel));
+		Reflect_SetMethodDoc("Events", "Cancel", "", "id");
 		t.methods.push_back(MakeMethod("PendingCount", &Events::PendingCount));
 	}
 	{
@@ -508,8 +624,11 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("interactionBend", &Foliage::interactionBend, "", "Interaction Bend", 0.0f, 2.0f));
 		t.fields.back().tip = "How much characters and moving bodies part this layer.";
 		t.methods.push_back(MakeMethod("Rebuild", &Foliage::Rebuild));
+		Reflect_SetMethodDoc("Foliage", "Rebuild", "---- reflected ops (editor Fill/Paint tools and scripts) ----", "");
 		t.methods.push_back(MakeMethod("PaintAt", &Foliage::PaintAt));
+		Reflect_SetMethodDoc("Foliage", "PaintAt", "", "worldPos,radius,densityMul");
 		t.methods.push_back(MakeMethod("EraseAt", &Foliage::EraseAt));
+		Reflect_SetMethodDoc("Foliage", "EraseAt", "", "worldPos,radius");
 		t.create = []() -> void* { return new Foliage(); };
 	}
 	{
@@ -517,35 +636,52 @@ bool NukeReflectInit() {
 		t.base = "Object";
 		t.methods.push_back(MakeMethod("GetWorld", &Game::GetWorld));
 		t.methods.push_back(MakeMethod("LoadWorld", &Game::LoadWorld));
+		Reflect_SetMethodDoc("Game", "LoadWorld", "Switch to another world from project content (content-relative path, e.g. \"Worlds/level2.nuworld\").", "contentRelPath");
 		t.methods.push_back(MakeMethod("LoadWorldAsync", &Game::LoadWorldAsync));
+		Reflect_SetMethodDoc("Game", "LoadWorldAsync", "--- ASYNC world loading ---- Background load on the job pool while the current world keeps running; poll LoadWorldProgress/LoadWorldReady, then ActivateLoadedWorld to swap at the frame boundary.", "contentRelPath");
 		t.methods.push_back(MakeMethod("LoadWorldProgress", &Game::LoadWorldProgress));
 		t.methods.push_back(MakeMethod("LoadWorldReady", &Game::LoadWorldReady));
 		t.methods.push_back(MakeMethod("ActivateLoadedWorld", &Game::ActivateLoadedWorld));
 		t.methods.push_back(MakeMethod("CancelLoadWorld", &Game::CancelLoadWorld));
 		t.methods.push_back(MakeMethod("SetWorldActivationBudget", &Game::SetWorldActivationBudget));
+		Reflect_SetMethodDoc("Game", "SetWorldActivationBudget", "--- INCREMENTAL activation ---- With a budget (ms of instantiation per frame) ActivateLoadedWorld streams root atoms in over several frames, optionally ordered outward from the activation origin. Budget 0 = all at once. Emits \"world.atomActivated\" {\"id\",\"name\"} per root atom and \"world.activationComplete\" {\"path\"}.", "msPerFrame");
 		t.methods.push_back(MakeMethod("GetWorldActivationBudget", &Game::GetWorldActivationBudget));
 		t.methods.push_back(MakeMethod("SetWorldActivationOrigin", &Game::SetWorldActivationOrigin));
+		Reflect_SetMethodDoc("Game", "SetWorldActivationOrigin", "", "worldPos");
 		t.methods.push_back(MakeMethod("ClearWorldActivationOrigin", &Game::ClearWorldActivationOrigin));
 		t.methods.push_back(MakeMethod("WorldActivationProgress", &Game::WorldActivationProgress));
 		t.methods.push_back(MakeMethod("IsEditor", &Game::IsEditor));
 		t.methods.push_back(MakeMethod("IsPlaying", &Game::IsPlaying));
 		t.methods.push_back(MakeMethod("IsPaused", &Game::IsPaused));
 		t.methods.push_back(MakeMethod("SetPaused", &Game::SetPaused));
+		Reflect_SetMethodDoc("Game", "SetPaused", "", "paused");
 		t.methods.push_back(MakeMethod("SetTimeScale", &Game::SetTimeScale));
+		Reflect_SetMethodDoc("Game", "SetTimeScale", "Game speed: scales Time.Delta(), the game calendar and the fixed physics cadence. 0 = frozen but Update still runs (unlike SetPaused), 1 = normal. Clamped to [0..8]; edit mode ignores the scale.", "scale");
 		t.methods.push_back(MakeMethod("GetTimeScale", &Game::GetTimeScale));
 		t.methods.push_back(MakeMethod("Quit", &Game::Quit));
 		t.methods.push_back(MakeMethod("SaveGame", &Game::SaveGame));
+		Reflect_SetMethodDoc("Game", "SaveGame", "--- SAVEGAMES: runtime snapshots, distinct from world assets ---- SaveGame writes the running world (atoms, script state, tilemaps, calendar, event schedule) to `<slot>.nusave` in the save dir. LoadGame applies at the frame boundary. ListSaves returns newline-separated slot names, newest first.", "slot");
 		t.methods.push_back(MakeMethod("LoadGame", &Game::LoadGame));
+		Reflect_SetMethodDoc("Game", "LoadGame", "", "slot");
 		t.methods.push_back(MakeMethod("ListSaves", &Game::ListSaves));
 		t.methods.push_back(MakeMethod("SetResolution", &Game::SetResolution));
+		Reflect_SetMethodDoc("Game", "SetResolution", "--- WINDOW control ---- Every setter updates + persists the window config and applies it live through the renderer; in the editor the live change is skipped but the config is still written for the game.", "width,height");
 		t.methods.push_back(MakeMethod("SetWindowMode", &Game::SetWindowMode));
+		Reflect_SetMethodDoc("Game", "SetWindowMode", "", "mode");
 		t.methods.push_back(MakeMethod("SetBorderless", &Game::SetBorderless));
+		Reflect_SetMethodDoc("Game", "SetBorderless", "", "borderless");
 		t.methods.push_back(MakeMethod("SetTransparent", &Game::SetTransparent));
+		Reflect_SetMethodDoc("Game", "SetTransparent", "Per-pixel desktop transparency. The swap chain alpha mode is fixed at creation, so this only takes effect on the NEXT launch.", "transparent");
 		t.methods.push_back(MakeMethod("SetOpacity", &Game::SetOpacity));
+		Reflect_SetMethodDoc("Game", "SetOpacity", "", "opacity");
 		t.methods.push_back(MakeMethod("SetVSync", &Game::SetVSync));
+		Reflect_SetMethodDoc("Game", "SetVSync", "", "on");
 		t.methods.push_back(MakeMethod("SetAlwaysOnTop", &Game::SetAlwaysOnTop));
+		Reflect_SetMethodDoc("Game", "SetAlwaysOnTop", "Overlay flags (desktop-companion class windows). All live-settable.", "onTop");
 		t.methods.push_back(MakeMethod("SetClickThrough", &Game::SetClickThrough));
+		Reflect_SetMethodDoc("Game", "SetClickThrough", "", "through");
 		t.methods.push_back(MakeMethod("SetHideFromCapture", &Game::SetHideFromCapture));
+		Reflect_SetMethodDoc("Game", "SetHideFromCapture", "Invisible to screenshots/recorders — the user still sees the window, capture sees what is behind it. Windows + macOS; X11/Wayland have no such protocol (ignored with a log).", "hide");
 		t.methods.push_back(MakeMethod("WindowWidth", &Game::WindowWidth));
 		t.methods.push_back(MakeMethod("WindowHeight", &Game::WindowHeight));
 		t.methods.push_back(MakeMethod("GetWindowMode", &Game::GetWindowMode));
@@ -557,6 +693,7 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("IsClickThrough", &Game::IsClickThrough));
 		t.methods.push_back(MakeMethod("IsHideFromCapture", &Game::IsHideFromCapture));
 		t.methods.push_back(MakeMethod("Screenshot", &Game::Screenshot));
+		Reflect_SetMethodDoc("Game", "Screenshot", "Queue a capture of the current game image; it happens at the end of this frame's render. Format by extension (.png/.bmp/.tga, default png). Slow — GPU flush + readback.", "file");
 	}
 	{
 		TypeInfo& t = TypeOf<InstancedMesh>();
@@ -576,10 +713,15 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("data", &InstancedMesh::data));
 		t.fields.back().hidden = true;
 		t.methods.push_back(MakeMethod("AddInstance", &InstancedMesh::AddInstance));
+		Reflect_SetMethodDoc("InstancedMesh", "AddInstance", "---- reflected instance API ----", "pos,eulerDeg,scale");
 		t.methods.push_back(MakeMethod("SetInstancePos", &InstancedMesh::SetInstancePos));
+		Reflect_SetMethodDoc("InstancedMesh", "SetInstancePos", "", "index,pos");
 		t.methods.push_back(MakeMethod("SetInstanceTint", &InstancedMesh::SetInstanceTint));
+		Reflect_SetMethodDoc("InstancedMesh", "SetInstanceTint", "", "index,r,g,b,a");
 		t.methods.push_back(MakeMethod("SetInstanceCustom", &InstancedMesh::SetInstanceCustom));
+		Reflect_SetMethodDoc("InstancedMesh", "SetInstanceCustom", "", "index,x,y,z,w");
 		t.methods.push_back(MakeMethod("RemoveInstance", &InstancedMesh::RemoveInstance));
+		Reflect_SetMethodDoc("InstancedMesh", "RemoveInstance", "", "index");
 		t.methods.push_back(MakeMethod("ClearInstances", &InstancedMesh::ClearInstances));
 		t.methods.push_back(MakeMethod("InstanceCount", &InstancedMesh::InstanceCount));
 		t.create = []() -> void* { return new InstancedMesh(); };
@@ -588,9 +730,13 @@ bool NukeReflectInit() {
 		TypeInfo& t = TypeOf<Layers>();
 		t.base = "Object";
 		t.methods.push_back(MakeMethod("Name", &Layers::Name));
+		Reflect_SetMethodDoc("Layers", "Name", "---- reflected ----", "index");
 		t.methods.push_back(MakeMethod("IndexOf", &Layers::IndexOf));
+		Reflect_SetMethodDoc("Layers", "IndexOf", "", "name");
 		t.methods.push_back(MakeMethod("MaskOf", &Layers::MaskOf));
+		Reflect_SetMethodDoc("Layers", "MaskOf", "", "names");
 		t.methods.push_back(MakeMethod("SetName", &Layers::SetName));
+		Reflect_SetMethodDoc("Layers", "SetName", "", "index,name");
 	}
 	{
 		TypeInfo& t = TypeOf<Light>();
@@ -609,8 +755,11 @@ bool NukeReflectInit() {
 		TypeInfo& t = TypeOf<Log>();
 		t.base = "Object";
 		t.methods.push_back(MakeMethod("Info", &Log::Info));
+		Reflect_SetMethodDoc("Log", "Info", "", "tag,text");
 		t.methods.push_back(MakeMethod("Warn", &Log::Warn));
+		Reflect_SetMethodDoc("Log", "Warn", "", "tag,text");
 		t.methods.push_back(MakeMethod("Error", &Log::Error));
+		Reflect_SetMethodDoc("Log", "Error", "", "tag,text");
 	}
 	{
 		TypeInfo& t = TypeOf<Material>();
@@ -689,6 +838,18 @@ bool NukeReflectInit() {
 		t.fields.back().tip = "Surface friction override; -1 = keep the body's value";
 		t.fields.push_back(MakeField("liveBounce", &Material::liveBounce, "", "Bounciness", -1.0f, 1.0f));
 		t.fields.back().tip = "Surface restitution override; -1 = keep the body's value";
+		t.methods.push_back(MakeMethod("Trigger", &Material::Trigger));
+		Reflect_SetMethodDoc("Material", "Trigger", "Fire a material event (scriptable): global, at a UV point, or at a world point. Point info moves the driven masks' centers; global fires skip that (point OPTIONAL for global reactions, required only for localized ones).", "eventName");
+		t.methods.push_back(MakeMethod("TriggerAt", &Material::TriggerAt));
+		Reflect_SetMethodDoc("Material", "TriggerAt", "`u`/`v` are MESH-space UVs (exactly what Physics.HitUV yields); mapped through the material's UV transform internally — the masks live in the shader's transformed UV.", "eventName,u,v");
+		t.methods.push_back(MakeMethod("TriggerAtWorld", &Material::TriggerAtWorld));
+		Reflect_SetMethodDoc("Material", "TriggerAtWorld", "", "eventName,p");
+		t.methods.push_back(MakeMethod("TriggerAtHit", &Material::TriggerAtHit));
+		Reflect_SetMethodDoc("Material", "TriggerAtHit", "Fire with BOTH the world point and the MESH-space uv under it (what a hit knows): every routed mask receives the point in its AUTHORED space, so the effect size never depends on the trigger path. Prefer this whenever the uv is available.", "eventName,p,u,v");
+		t.methods.push_back(MakeMethod("SetScalar", &Material::SetScalar));
+		Reflect_SetMethodDoc("Material", "SetScalar", "Set ANY material parameter by key or label (the tween-target resolver: built-ins, liveSurface, sound volumes, mask:<name>:<field>, reflected fields, custom g_*).", "param,v");
+		t.methods.push_back(MakeMethod("SetVector", &Material::SetVector));
+		Reflect_SetMethodDoc("Material", "SetVector", "", "param,v,w");
 		t.create = []() -> void* { return new Material(); };
 	}
 	{
@@ -704,6 +865,8 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("matGuid", &MeshRenderer::matGuid, "material", "Material"));
 		t.fields.push_back(MakeField("matGuids", &MeshRenderer::matGuids, "material", "Materials"));
 		t.fields.push_back(MakeField("inReflections", &MeshRenderer::inReflections, "", "In Reflections"));
+		t.methods.push_back(MakeMethod("GetMaterial", &MeshRenderer::GetMaterial));
+		Reflect_SetMethodDoc("MeshRenderer", "GetMaterial", "Scriptable access to the LIVE material INSTANCE this renderer draws (slot 0 = the whole mesh / first section): trigger events, set params, read props — on THIS surface only, the shared asset stays untouched. Null until the world resolves it.", "slot");
 		t.create = []() -> void* { return new MeshRenderer(); };
 	}
 	{
@@ -724,7 +887,9 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("keepWindow", &MotionMatcher::keepWindow, "", "Keep Window", 0.0f, 1.0f));
 		t.fields.back().tip = "Seconds around the current playhead that count as 'already there'.";
 		t.methods.push_back(MakeMethod("SetDesiredVelocity", &MotionMatcher::SetDesiredVelocity));
+		Reflect_SetMethodDoc("MotionMatcher", "SetDesiredVelocity", "Desired velocity, WORLD units/s (a controller feeds it; zero = settle into idle-ish data).", "v");
 		t.methods.push_back(MakeMethod("MatchedClip", &MotionMatcher::MatchedClip));
+		Reflect_SetMethodDoc("MotionMatcher", "MatchedClip", "The clip the matcher is currently inside + the DB size (diagnostics).", "");
 		t.methods.push_back(MakeMethod("SampleCount", &MotionMatcher::SampleCount));
 		t.create = []() -> void* { return new MotionMatcher(); };
 	}
@@ -732,31 +897,50 @@ bool NukeReflectInit() {
 		TypeInfo& t = TypeOf<Noise>();
 		t.base = "Object";
 		t.methods.push_back(MakeMethod("Perlin2", &Noise::Perlin2));
+		Reflect_SetMethodDoc("Noise", "Perlin2", "Improved Perlin gradient noise (seed-hashed permutation).", "seed,x,y");
 		t.methods.push_back(MakeMethod("Perlin3", &Noise::Perlin3));
+		Reflect_SetMethodDoc("Noise", "Perlin3", "", "seed,x,y,z");
 		t.methods.push_back(MakeMethod("Fbm", &Noise::Fbm));
+		Reflect_SetMethodDoc("Noise", "Fbm", "Fractal Brownian motion over Perlin2: `octaves` layers, each `lacunarity`x the frequency and `gain`x the amplitude of the previous (classic terrain: 4, 2.0, 0.5).", "seed,x,y,octaves,lacunarity,gain");
 		t.methods.push_back(MakeMethod("Voronoi2", &Noise::Voronoi2));
+		Reflect_SetMethodDoc("Noise", "Voronoi2", "Cellular/Voronoi F1: distance to the nearest jittered feature point. CellId returns a stable id of the owning cell for region labeling.", "seed,x,y");
 		t.methods.push_back(MakeMethod("CellId2", &Noise::CellId2));
+		Reflect_SetMethodDoc("Noise", "CellId2", "", "seed,x,y");
 		t.methods.push_back(MakeMethod("WarpX", &Noise::WarpX));
+		Reflect_SetMethodDoc("Noise", "WarpX", "Domain warp: returns the sample position offset by `amp` — call per axis.", "seed,x,y,amp");
 		t.methods.push_back(MakeMethod("WarpY", &Noise::WarpY));
+		Reflect_SetMethodDoc("Noise", "WarpY", "", "seed,x,y,amp");
 	}
 	{
 		TypeInfo& t = TypeOf<Physics>();
 		t.base = "Object";
 		t.methods.push_back(MakeMethod("Available", &Physics::Available));
 		t.methods.push_back(MakeMethod("Raycast", &Physics::Raycast));
+		Reflect_SetMethodDoc("Physics", "Raycast", "Nearest hit along the ray (dir need not be normalized). True = hit; read it via HitAtom/HitPoint/HitNormal/HitDistance (valid until the next cast on this thread).", "from,dir,maxDist");
 		t.methods.push_back(MakeMethod("RaycastIgnore", &Physics::RaycastIgnore));
+		Reflect_SetMethodDoc("Physics", "RaycastIgnore", "Raycast that IGNORES one atom's physics body (its CharacterController capsule or Collider).", "from,dir,maxDist,ignore");
 		t.methods.push_back(MakeMethod("SphereCastIgnore", &Physics::SphereCastIgnore));
+		Reflect_SetMethodDoc("Physics", "SphereCastIgnore", "Sphere sweep with the same one-atom exclusion.", "from,radius,dir,maxDist,ignore");
 		t.methods.push_back(MakeMethod("SphereCast", &Physics::SphereCast));
+		Reflect_SetMethodDoc("Physics", "SphereCast", "SHAPE casts — sweep a volume instead of a thin ray. Same last-hit contract as Raycast; `rot` orients the box/capsule.", "from,radius,dir,maxDist");
 		t.methods.push_back(MakeMethod("BoxCast", &Physics::BoxCast));
+		Reflect_SetMethodDoc("Physics", "BoxCast", "", "from,halfExtents,rot,dir,maxDist");
 		t.methods.push_back(MakeMethod("CapsuleCast", &Physics::CapsuleCast));
+		Reflect_SetMethodDoc("Physics", "CapsuleCast", "", "from,radius,halfHeight,rot,dir,maxDist");
 		t.methods.push_back(MakeMethod("HitAtom", &Physics::HitAtom));
 		t.methods.push_back(MakeMethod("HitPoint", &Physics::HitPoint));
 		t.methods.push_back(MakeMethod("HitNormal", &Physics::HitNormal));
 		t.methods.push_back(MakeMethod("HitDistance", &Physics::HitDistance));
+		t.methods.push_back(MakeMethod("HitUV", &Physics::HitUV));
+		Reflect_SetMethodDoc("Physics", "HitUV", "Mesh UV under the last hit: the hit atom's render mesh (LOD0; skinned meshes read the bind pose) probed at the hit point. Zeros when the atom has no readable mesh. Feed it to Material.TriggerAt for point reactions from gameplay casts.", "");
 		t.methods.push_back(MakeMethod("OverlapSphere", &Physics::OverlapSphere));
+		Reflect_SetMethodDoc("Physics", "OverlapSphere", "OVERLAP queries — live atoms inside the volume (triggers included). Returns the count and stores the atoms thread-locally; read via OverlapAtom(i) until the next Overlap* call.", "center,radius");
 		t.methods.push_back(MakeMethod("OverlapBox", &Physics::OverlapBox));
+		Reflect_SetMethodDoc("Physics", "OverlapBox", "", "center,halfExtents,rot");
 		t.methods.push_back(MakeMethod("OverlapCapsule", &Physics::OverlapCapsule));
+		Reflect_SetMethodDoc("Physics", "OverlapCapsule", "", "center,radius,halfHeight,rot");
 		t.methods.push_back(MakeMethod("OverlapAtom", &Physics::OverlapAtom));
+		Reflect_SetMethodDoc("Physics", "OverlapAtom", "", "index");
 	}
 	{
 		TypeInfo& t = TypeOf<PostProcess>();
@@ -770,13 +954,16 @@ bool NukeReflectInit() {
 		TypeInfo& t = TypeOf<Prefabs>();
 		t.base = "Object";
 		t.methods.push_back(MakeMethod("Spawn", &Prefabs::Spawn));
+		Reflect_SetMethodDoc("Prefabs", "Spawn", "Reconstruct a .nuprefab from the project CONTENT (content-relative path) into the current world root, through the layered resolution (raw project or pak + mods) with fresh stable ids. Returns the new root atom, null on failure.", "contentRelPath");
 	}
 	{
 		TypeInfo& t = TypeOf<Profiler>();
 		t.base = "Object";
 		t.methods.push_back(MakeMethod("Ms", &Profiler::Ms));
+		Reflect_SetMethodDoc("Profiler", "Ms", "Smoothed milliseconds of a phase this frame (0 = unknown phase / not reported yet).", "phase");
 		t.methods.push_back(MakeMethod("Phases", &Profiler::Phases));
 		t.methods.push_back(MakeMethod("Capture", &Profiler::Capture));
+		Reflect_SetMethodDoc("Profiler", "Capture", "Snapshot every phase to a CSV (\"phase;ms\", heaviest first). Relative paths land next to the executable's working directory. Returns false on IO failure.", "file");
 	}
 	{
 		TypeInfo& t = TypeOf<RagdollDef>();
@@ -800,21 +987,31 @@ bool NukeReflectInit() {
 		t.fields.back().tip = "Partial mode: physics owns this bone's subtree.";
 		t.fields.push_back(MakeField("totalMass", &Ragdoll::totalMass, "", "Total Mass", 1.0f, 500.0f));
 		t.methods.push_back(MakeMethod("SetMode", &Ragdoll::SetMode));
+		Reflect_SetMethodDoc("Ragdoll", "SetMode", "", "m");
 		t.methods.push_back(MakeMethod("GetMode", &Ragdoll::GetMode));
 		t.methods.push_back(MakeMethod("Impulse", &Ragdoll::Impulse));
+		Reflect_SetMethodDoc("Ragdoll", "Impulse", "", "bone,worldImpulse");
 		t.create = []() -> void* { return new Ragdoll(); };
 	}
 	{
 		TypeInfo& t = TypeOf<Rand>();
 		t.base = "Object";
 		t.methods.push_back(MakeMethod("Seed", &Rand::Seed));
+		Reflect_SetMethodDoc("Rand", "Seed", "Seed a stream. Same seed = same sequence on every machine.", "stream,seed");
 		t.methods.push_back(MakeMethod("Value", &Rand::Value));
+		Reflect_SetMethodDoc("Rand", "Value", "Uniform double in [0, 1).", "stream");
 		t.methods.push_back(MakeMethod("Range", &Rand::Range));
+		Reflect_SetMethodDoc("Rand", "Range", "Uniform double in [min, max).", "stream,minv,maxv");
 		t.methods.push_back(MakeMethod("RangeInt", &Rand::RangeInt));
+		Reflect_SetMethodDoc("Rand", "RangeInt", "Uniform int in [min, max] (inclusive).", "stream,minv,maxv");
 		t.methods.push_back(MakeMethod("Chance", &Rand::Chance));
+		Reflect_SetMethodDoc("Rand", "Chance", "True with probability p (0..1).", "stream,p");
 		t.methods.push_back(MakeMethod("Gauss", &Rand::Gauss));
+		Reflect_SetMethodDoc("Rand", "Gauss", "Normal distribution (Box-Muller) with the given mean / standard deviation.", "stream,mean,dev");
 		t.methods.push_back(MakeMethod("State", &Rand::State));
+		Reflect_SetMethodDoc("Rand", "State", "Raw stream state for savegames: capture with State, restore with SetState.", "stream");
 		t.methods.push_back(MakeMethod("SetState", &Rand::SetState));
+		Reflect_SetMethodDoc("Rand", "SetState", "", "stream,state");
 	}
 	{
 		TypeInfo& t = TypeOf<RectAnchor>();
@@ -850,6 +1047,7 @@ bool NukeReflectInit() {
 		TypeInfo& t = TypeOf<Retargeter>();
 		t.base = "Object";
 		t.methods.push_back(MakeMethod("Bake", &Retargeter::Bake));
+		Reflect_SetMethodDoc("Retargeter", "Bake", "clipRef = guid or name; dstSkelGuid = target .nuskel; outContentRel = content-relative .nuanim path to write. Returns the new clip's guid (\"\" on failure). The baked clip is registered in the ResDB immediately.", "clipRef,dstSkelGuid,outContentRel");
 	}
 	{
 		TypeInfo& t = TypeOf<Rigidbody>();
@@ -861,10 +1059,14 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("linearDamping", &Rigidbody::linearDamping, "", "Linear Damping", 0.0f, 1.0f));
 		t.fields.push_back(MakeField("angularDamping", &Rigidbody::angularDamping, "", "Angular Damping", 0.0f, 1.0f));
 		t.methods.push_back(MakeMethod("AddForce", &Rigidbody::AddForce));
+		Reflect_SetMethodDoc("Rigidbody", "AddForce", "Gameplay API acting on the sibling Collider's body; no-ops until the body exists (first fixed step of play mode).", "force");
 		t.methods.push_back(MakeMethod("AddImpulse", &Rigidbody::AddImpulse));
+		Reflect_SetMethodDoc("Rigidbody", "AddImpulse", "", "impulse");
 		t.methods.push_back(MakeMethod("SetVelocity", &Rigidbody::SetVelocity));
+		Reflect_SetMethodDoc("Rigidbody", "SetVelocity", "", "v");
 		t.methods.push_back(MakeMethod("Velocity", &Rigidbody::Velocity));
 		t.methods.push_back(MakeMethod("SetAngularVelocity", &Rigidbody::SetAngularVelocity));
+		Reflect_SetMethodDoc("Rigidbody", "SetAngularVelocity", "", "v");
 		t.methods.push_back(MakeMethod("AngularVelocity", &Rigidbody::AngularVelocity));
 		t.create = []() -> void* { return new Rigidbody(); };
 	}
@@ -893,10 +1095,13 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("Play", &SequencePlayer::Play));
 		t.methods.push_back(MakeMethod("Stop", &SequencePlayer::Stop));
 		t.methods.push_back(MakeMethod("SetPaused", &SequencePlayer::SetPaused));
+		Reflect_SetMethodDoc("SequencePlayer", "SetPaused", "", "paused");
 		t.methods.push_back(MakeMethod("IsPlaying", &SequencePlayer::IsPlaying));
 		t.methods.push_back(MakeMethod("Time", &SequencePlayer::Time));
 		t.methods.push_back(MakeMethod("SetTime", &SequencePlayer::SetTime));
+		Reflect_SetMethodDoc("SequencePlayer", "SetTime", "", "t");
 		t.methods.push_back(MakeMethod("BakeSkeletal", &SequencePlayer::BakeSkeletal));
+		Reflect_SetMethodDoc("SequencePlayer", "BakeSkeletal", "Bake this sequence's BONE tracks into a .nuanim on the subtree's skeleton — keyframe animation authoring. Returns the new clip guid (\"\" when there are no bone tracks).", "outContentRel");
 		t.create = []() -> void* { return new SequencePlayer(); };
 	}
 	{
@@ -920,15 +1125,23 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("morphWeights", &SkinnedMeshRenderer::morphWeights, "", "Morph Weights"));
 		t.fields.back().tip = "Blend-shape weights, one per target (mesh order).";
 		t.methods.push_back(MakeMethod("ResetPose", &SkinnedMeshRenderer::ResetPose));
+		Reflect_SetMethodDoc("SkinnedMeshRenderer", "ResetPose", "--- script surface (auto-bound) ---", "");
 		t.methods.push_back(MakeMethod("SetMorphWeight", &SkinnedMeshRenderer::SetMorphWeight));
+		Reflect_SetMethodDoc("SkinnedMeshRenderer", "SetMorphWeight", "", "morph,w");
 		t.methods.push_back(MakeMethod("MorphWeight", &SkinnedMeshRenderer::MorphWeight));
+		Reflect_SetMethodDoc("SkinnedMeshRenderer", "MorphWeight", "", "morph");
 		t.methods.push_back(MakeMethod("MorphNames", &SkinnedMeshRenderer::MorphNames));
 		t.methods.push_back(MakeMethod("SetBonePosition", &SkinnedMeshRenderer::SetBonePosition));
+		Reflect_SetMethodDoc("SkinnedMeshRenderer", "SetBonePosition", "", "bone,p");
 		t.methods.push_back(MakeMethod("SetBoneRotation", &SkinnedMeshRenderer::SetBoneRotation));
+		Reflect_SetMethodDoc("SkinnedMeshRenderer", "SetBoneRotation", "", "bone,q");
 		t.methods.push_back(MakeMethod("Apply", &SkinnedMeshRenderer::Apply));
 		t.methods.push_back(MakeMethod("BonePosition", &SkinnedMeshRenderer::BonePosition));
+		Reflect_SetMethodDoc("SkinnedMeshRenderer", "BonePosition", "", "bone");
 		t.methods.push_back(MakeMethod("SocketPosition", &SkinnedMeshRenderer::SocketPosition));
+		Reflect_SetMethodDoc("SkinnedMeshRenderer", "SocketPosition", "", "socket");
 		t.methods.push_back(MakeMethod("SocketRotation", &SkinnedMeshRenderer::SocketRotation));
+		Reflect_SetMethodDoc("SkinnedMeshRenderer", "SocketRotation", "", "socket");
 		t.create = []() -> void* { return new SkinnedMeshRenderer(); };
 	}
 	{
@@ -953,9 +1166,13 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("flipX", &Sprite::flipX, "", "Flip X"));
 		t.fields.push_back(MakeField("flipY", &Sprite::flipY, "", "Flip Y"));
 		t.methods.push_back(MakeMethod("SetTint", &Sprite::SetTint));
+		Reflect_SetMethodDoc("Sprite", "SetTint", "Reflected API (C#/Lua).", "r,g,b,a");
 		t.methods.push_back(MakeMethod("SetSize", &Sprite::SetSize));
+		Reflect_SetMethodDoc("Sprite", "SetSize", "", "w,h");
 		t.methods.push_back(MakeMethod("SetPivot", &Sprite::SetPivot));
+		Reflect_SetMethodDoc("Sprite", "SetPivot", "", "x,y");
 		t.methods.push_back(MakeMethod("SetFrame", &Sprite::SetFrame));
+		Reflect_SetMethodDoc("Sprite", "SetFrame", "", "u0v,v0v,u1v,v1v");
 		t.create = []() -> void* { return new Sprite(); };
 	}
 	{
@@ -971,6 +1188,7 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("Stop", &SpriteAnimator::Stop));
 		t.methods.push_back(MakeMethod("IsPlaying", &SpriteAnimator::IsPlaying));
 		t.methods.push_back(MakeMethod("SetFrame", &SpriteAnimator::SetFrame));
+		Reflect_SetMethodDoc("SpriteAnimator", "SetFrame", "", "index");
 		t.methods.push_back(MakeMethod("CurrentFrame", &SpriteAnimator::CurrentFrame));
 		t.create = []() -> void* { return new SpriteAnimator(); };
 	}
@@ -983,7 +1201,9 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("values", &SurfaceState::values, "", "Values"));
 		t.fields.back().tip = "Value 0..1 for each state above, by index";
 		t.methods.push_back(MakeMethod("SetState", &SurfaceState::SetState));
+		Reflect_SetMethodDoc("SurfaceState", "SetState", "", "state,value");
 		t.methods.push_back(MakeMethod("ClearState", &SurfaceState::ClearState));
+		Reflect_SetMethodDoc("SurfaceState", "ClearState", "", "state");
 		t.create = []() -> void* { return new SurfaceState(); };
 	}
 	{
@@ -1002,20 +1222,28 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("data", &SurfaceMask::data));
 		t.fields.back().hidden = true;
 		t.methods.push_back(MakeMethod("Paint", &SurfaceMask::Paint));
+		Reflect_SetMethodDoc("SurfaceMask", "Paint", "Stamp a sphere: channel 0..3, amount added per call (negative erases), soft falloff.", "worldPos,radius,channel,amount");
 		t.methods.push_back(MakeMethod("Clear", &SurfaceMask::Clear));
 		t.methods.push_back(MakeMethod("SampleChannel", &SurfaceMask::SampleChannel));
+		Reflect_SetMethodDoc("SurfaceMask", "SampleChannel", "", "worldPos,channel");
 		t.create = []() -> void* { return new SurfaceMask(); };
 	}
 	{
 		TypeInfo& t = TypeOf<Surface>();
 		t.base = "Object";
 		t.methods.push_back(MakeMethod("SetCondition", &Surface::SetCondition));
+		Reflect_SetMethodDoc("Surface", "SetCondition", "", "state,value");
 		t.methods.push_back(MakeMethod("Condition", &Surface::Condition));
+		Reflect_SetMethodDoc("Surface", "Condition", "", "state");
 		t.methods.push_back(MakeMethod("ClearConditions", &Surface::ClearConditions));
 		t.methods.push_back(MakeMethod("ValueAt", &Surface::ValueAt));
+		Reflect_SetMethodDoc("Surface", "ValueAt", "Effective value for an atom at a world point: nearest-ancestor SurfaceState override (else the global), maxed with every SurfaceMask along the ancestor chain.", "atom,state,worldPos");
 		t.methods.push_back(MakeMethod("Footstep", &Surface::Footstep));
+		Reflect_SetMethodDoc("Surface", "Footstep", "---- LM-4 surface responses ------------------------------------------------------------- Footstep for `self` (a character): raycasts down from its position (ignoring its own body), picks the ground material's round-robin step clip and plays it 3D with a slight pitch variation. Returns false when nothing is underfoot or the surface has no steps.", "self,volume");
 		t.methods.push_back(MakeMethod("Hit", &Surface::Hit));
+		Reflect_SetMethodDoc("Surface", "Hit", "Typed hit on an atom's surface (\"bullet\"/\"blunt\"/...; empty matches the material's any-hit entry): plays the reaction sound now and queues the prefab/decal spawn for the next frame (outside the physics step). `impulse` gates entries by their Min Impulse.", "atom,hitType,pos,normal,impulse");
 		t.methods.push_back(MakeMethod("TagAt", &Surface::TagAt));
+		Reflect_SetMethodDoc("Surface", "TagAt", "The surface identity of an atom's material for gameplay queries (\"\" = untagged).", "atom");
 	}
 	{
 		TypeInfo& t = TypeOf<Texture>();
@@ -1039,8 +1267,11 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("sliceBottom", &Texture::sliceBottom, "", "Slice Bottom"));
 		t.methods.push_back(MakeMethod("SpriteCount", &Texture::SpriteCount));
 		t.methods.push_back(MakeMethod("GuessUsage", &Texture::GuessUsage));
+		Reflect_SetMethodDoc("Texture", "GuessUsage", "", "filename");
 		t.methods.push_back(MakeMethod("Recompress", &Texture::Recompress));
+		Reflect_SetMethodDoc("Texture", "Recompress", "", "targetFormat");
 		t.methods.push_back(MakeMethod("ApplyChromaKey", &Texture::ApplyChromaKey));
+		Reflect_SetMethodDoc("Texture", "ApplyChromaKey", "Background removal: pixels within `tolerance` (per-channel, 0..255) of (r,g,b) become transparent. outsideOnly keys only the background connected to the border (flood fill). Re-encodes BC -> BC3 to carry alpha; single-frame only.", "r,g,b,tolerance,outsideOnly");
 		t.create = []() -> void* { return new Texture(); };
 	}
 	{
@@ -1048,8 +1279,10 @@ bool NukeReflectInit() {
 		t.base = "Object";
 		t.methods.push_back(MakeMethod("Elapsed", &Time::Elapsed));
 		t.methods.push_back(MakeMethod("Delta", &Time::Delta));
+		Reflect_SetMethodDoc("Time", "Delta", "GAME frame delta: real delta × time scale (Game.SetTimeScale) — what gameplay reads.", "");
 		t.methods.push_back(MakeMethod("UnscaledDelta", &Time::UnscaledDelta));
 		t.methods.push_back(MakeMethod("TotalGameSeconds", &Time::TotalGameSeconds));
+		Reflect_SetMethodDoc("Time", "TotalGameSeconds", "--- game calendar (reflected getters; state saves with the world) ---", "");
 		t.methods.push_back(MakeMethod("TimeOfDay", &Time::TimeOfDay));
 		t.methods.push_back(MakeMethod("Second", &Time::Second));
 		t.methods.push_back(MakeMethod("Minute", &Time::Minute));
@@ -1060,8 +1293,11 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("DayOfYear", &Time::DayOfYear));
 		t.methods.push_back(MakeMethod("DayOfWeek", &Time::DayOfWeek));
 		t.methods.push_back(MakeMethod("GameToReal", &Time::GameToReal));
+		Reflect_SetMethodDoc("Time", "GameToReal", "Calendar speed: game seconds per real second at 1x (an in-game day = 86400/gtr real seconds). Per-world (serialized); may change mid-game.", "");
 		t.methods.push_back(MakeMethod("SetGameToReal", &Time::SetGameToReal));
+		Reflect_SetMethodDoc("Time", "SetGameToReal", "", "gameSecondsPerRealSecond");
 		t.methods.push_back(MakeMethod("SetDate", &Time::SetDate));
+		Reflect_SetMethodDoc("Time", "SetDate", "Set the calendar date/time (mapgen/scenario start). Resets TotalGameSeconds to 0.", "year,month,day,hour,minute");
 	}
 	{
 		TypeInfo& t = TypeOf<Transform>();
@@ -1078,9 +1314,12 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("globalRotation", &Transform::globalRotation));
 		t.methods.push_back(MakeMethod("globalScale", &Transform::globalScale));
 		t.methods.push_back(MakeMethod("SetGlobal", &Transform::SetGlobal));
+		Reflect_SetMethodDoc("Transform", "SetGlobal", "Set local values so the WORLD pose equals these (inverse of the global* getters, relative to the current parent).", "pos,rot,scale");
 		t.methods.push_back(MakeMethod("SetEulerDeg", &Transform::SetEulerDeg));
+		Reflect_SetMethodDoc("Transform", "SetEulerDeg", "Euler helpers (degrees) for the inspector / authoring. Internally quaternion.", "deg");
 		t.methods.push_back(MakeMethod("EulerDeg", &Transform::EulerDeg));
 		t.methods.push_back(MakeMethod("setEuler", &Transform::setEuler));
+		Reflect_SetMethodDoc("Transform", "setEuler", "Legacy SCRIPT-facing aliases, reflected on purpose (real methods, not binder shims, so the script surface stays 100% reflection-driven).", "x,y,z");
 		t.methods.push_back(MakeMethod("euler", &Transform::euler));
 	}
 	{
@@ -1108,83 +1347,134 @@ bool NukeReflectInit() {
 		TypeInfo& t = TypeOf<Wind>();
 		t.base = "Object";
 		t.methods.push_back(MakeMethod("SetDirection", &Wind::SetDirection));
+		Reflect_SetMethodDoc("Wind", "SetDirection", "---- reflected global parameters -------------------------------------------------------", "dir");
 		t.methods.push_back(MakeMethod("Direction", &Wind::Direction));
 		t.methods.push_back(MakeMethod("SetStrength", &Wind::SetStrength));
+		Reflect_SetMethodDoc("Wind", "SetStrength", "", "metersPerSec");
 		t.methods.push_back(MakeMethod("Strength", &Wind::Strength));
 		t.methods.push_back(MakeMethod("SetGusts", &Wind::SetGusts));
+		Reflect_SetMethodDoc("Wind", "SetGusts", "Gusts: periodic strength swell. `amount` 0..1 scales the swell (0 = steady wind), `frequency` in Hz-ish (Perlin octave rate over game time).", "amount,frequency");
 		t.methods.push_back(MakeMethod("GustAmount", &Wind::GustAmount));
 		t.methods.push_back(MakeMethod("GustFrequency", &Wind::GustFrequency));
 		t.methods.push_back(MakeMethod("SetTurbulence", &Wind::SetTurbulence));
+		Reflect_SetMethodDoc("Wind", "SetTurbulence", "Turbulence: spatial direction noise. `amount` 0..1 (fraction of strength deflected), `scale` = world-units per noise feature.", "amount,scale");
 		t.methods.push_back(MakeMethod("TurbulenceAmount", &Wind::TurbulenceAmount));
 		t.methods.push_back(MakeMethod("TurbulenceScale", &Wind::TurbulenceScale));
 		t.methods.push_back(MakeMethod("Sample", &Wind::Sample));
+		Reflect_SetMethodDoc("Wind", "Sample", "The full wind VECTOR at a world point right now: gusted global + turbulence + zones.", "worldPos");
 	}
 	{
 		TypeInfo& t = TypeOf<World>();
 		t.base = "Object";
 		t.fields.push_back(MakeField("name", &World::name));
 		t.methods.push_back(MakeMethod("Get", &World::Get));
+		Reflect_SetMethodDoc("World", "Get", "", "name");
 		t.methods.push_back(MakeMethod("GetById", &World::GetById));
+		Reflect_SetMethodDoc("World", "GetById", "", "id");
 		t.methods.push_back(MakeMethod("Add", &World::Add));
+		Reflect_SetMethodDoc("World", "Add", "", "atom");
 		t.methods.push_back(MakeMethod("CreateAtom", &World::CreateAtom));
+		Reflect_SetMethodDoc("World", "CreateAtom", "Create an empty atom at the world root (fresh stable id) — the script-side factory.", "name");
 		t.methods.push_back(MakeMethod("QueueDestroy", &World::QueueDestroy));
+		Reflect_SetMethodDoc("World", "QueueDestroy", "Deferred destruction: queue an atom subtree by id; it is removed and deleted at a SAFE point (end of Update, game lock held) — never mid-iteration, so scripts may destroy anything from Update/collision callbacks without invalidating the running traversal.", "atomId");
 		t.methods.push_back(MakeMethod("GetMainCamera", &World::GetMainCamera));
+		Reflect_SetMethodDoc("World", "GetMainCamera", "The camera the GAME is viewed through: the one whose Main Camera flag is set, else the world's FIRST camera in hierarchy order. Editor cameras (Camera::editorCamera) never count.", "");
 		t.methods.push_back(MakeMethod("Pick", &World::Pick));
+		Reflect_SetMethodDoc("World", "Pick", "Ray-pick the nearest Atom (with a MeshRenderer) hit by a world-space ray; nullptr on miss.", "origin,dir");
 		t.methods.push_back(MakeMethod("SaveToString", &World::SaveToString));
+		Reflect_SetMethodDoc("World", "SaveToString", "Text (.nuworld JSON) serialization via reflection. The editor camera is excluded from save and preserved across load.", "");
 		t.methods.push_back(MakeMethod("LoadFromString", &World::LoadFromString));
+		Reflect_SetMethodDoc("World", "LoadFromString", "", "data");
 		t.methods.push_back(MakeMethod("SaveToFile", &World::SaveToFile));
+		Reflect_SetMethodDoc("World", "SaveToFile", "", "path");
 		t.methods.push_back(MakeMethod("LoadFromFile", &World::LoadFromFile));
+		Reflect_SetMethodDoc("World", "LoadFromFile", "", "path");
 		t.methods.push_back(MakeMethod("Clear", &World::Clear));
 		t.methods.push_back(MakeMethod("Reparent", &World::Reparent));
+		Reflect_SetMethodDoc("World", "Reparent", "Move an atom under a new parent (nullptr = world root); detaches from its current location first and ignores cycles (parenting under a descendant).", "a,newParent");
 		t.methods.push_back(MakeMethod("ReparentBefore", &World::ReparentBefore));
+		Reflect_SetMethodDoc("World", "ReparentBefore", "Like Reparent, but insert `a` directly BEFORE `sibling` in `sibling`'s parent. nullptr sibling is ignored.", "a,sibling");
 	}
 	{
 		TypeInfo& t = TypeOf<Input>();
 		t.base = "Object";
 		t.methods.push_back(MakeMethod("Pressed", &Input::Pressed));
+		Reflect_SetMethodDoc("Input", "Pressed", "---- reflected QUERY (poll from gameplay/scripts) ------------------------------------------------", "action");
 		t.methods.push_back(MakeMethod("Held", &Input::Held));
+		Reflect_SetMethodDoc("Input", "Held", "", "action");
 		t.methods.push_back(MakeMethod("Released", &Input::Released));
+		Reflect_SetMethodDoc("Input", "Released", "", "action");
 		t.methods.push_back(MakeMethod("Tapped", &Input::Tapped));
+		Reflect_SetMethodDoc("Input", "Tapped", "", "action");
 		t.methods.push_back(MakeMethod("LongPressed", &Input::LongPressed));
+		Reflect_SetMethodDoc("Input", "LongPressed", "", "action");
 		t.methods.push_back(MakeMethod("DoublePressed", &Input::DoublePressed));
+		Reflect_SetMethodDoc("Input", "DoublePressed", "", "action");
 		t.methods.push_back(MakeMethod("Value", &Input::Value));
+		Reflect_SetMethodDoc("Input", "Value", "", "action");
 		t.methods.push_back(MakeMethod("Axis2", &Input::Axis2));
+		Reflect_SetMethodDoc("Input", "Axis2", "", "action");
 		t.methods.push_back(MakeMethod("PushContext", &Input::PushContext));
+		Reflect_SetMethodDoc("Input", "PushContext", "---- reflected CONTEXTS (hot-swap key maps on the fly) ------------------------------------------", "name");
 		t.methods.push_back(MakeMethod("PopContext", &Input::PopContext));
+		Reflect_SetMethodDoc("Input", "PopContext", "", "name");
 		t.methods.push_back(MakeMethod("SetContextActive", &Input::SetContextActive));
+		Reflect_SetMethodDoc("Input", "SetContextActive", "", "name,on");
 		t.methods.push_back(MakeMethod("ContextActive", &Input::ContextActive));
+		Reflect_SetMethodDoc("Input", "ContextActive", "", "name");
 		t.methods.push_back(MakeMethod("SetControl", &Input::SetControl));
+		Reflect_SetMethodDoc("Input", "SetControl", "---- reflected RAW controls ---------------------------------------------------------------------", "id,value");
 		t.methods.push_back(MakeMethod("Control", &Input::Control));
+		Reflect_SetMethodDoc("Input", "Control", "", "id");
 		t.methods.push_back(MakeMethod("MouseX", &Input::MouseX));
+		Reflect_SetMethodDoc("Input", "MouseX", "---- reflected CURSOR --------------------------------------------------------------------------- Raw pixel position in GAME-SCREEN space (same space as Screen.Width/Height, top-left origin).", "");
 		t.methods.push_back(MakeMethod("MouseY", &Input::MouseY));
 		t.methods.push_back(MakeMethod("SetCursorMode", &Input::SetCursorMode));
+		Reflect_SetMethodDoc("Input", "SetCursorMode", "Cursor mode: 0 Normal (visible, free), 1 Hidden (invisible, free), 2 Locked (invisible + pinned to the window center, raw deltas), 3 Confined (visible, clamped to the window).", "mode");
 		t.methods.push_back(MakeMethod("CursorMode", &Input::CursorMode));
 		t.methods.push_back(MakeMethod("CursorVisible", &Input::CursorVisible));
+		Reflect_SetMethodDoc("Input", "CursorVisible", "True while the OS cursor is on screen (Normal/Confined). Gate camera look on this so a visible menu cursor doesn't also spin the camera.", "");
 		t.methods.push_back(MakeMethod("MapJson", &Input::MapJson));
+		Reflect_SetMethodDoc("Input", "MapJson", "---- reflected USER REMAPS ---------------------------------------------------------------------- Reflection can't marshal InputBinding/vectors, so the model crosses as JSON strings using the .nuinput schema. MapJson = the live model to draw a rebind UI from; ControlsJson = every known raw control id (press-to-bind); RebindJson replaces the user binding for (context, action).", "");
 		t.methods.push_back(MakeMethod("ControlsJson", &Input::ControlsJson));
 		t.methods.push_back(MakeMethod("RebindJson", &Input::RebindJson));
+		Reflect_SetMethodDoc("Input", "RebindJson", "", "context,bindingJson");
 		t.methods.push_back(MakeMethod("ClearUserBindings", &Input::ClearUserBindings));
+		Reflect_SetMethodDoc("Input", "ClearUserBindings", "", "context,action");
 		t.methods.push_back(MakeMethod("SaveUserBindings", &Input::SaveUserBindings));
 		t.methods.push_back(MakeMethod("LoadUserBindings", &Input::LoadUserBindings));
+		Reflect_SetMethodDoc("Input", "LoadUserBindings", "", "json");
 	}
 	{
 		TypeInfo& t = TypeOf<Gui>();
 		t.base = "Object";
 		t.methods.push_back(MakeMethod("Begin", &Gui::Begin));
+		Reflect_SetMethodDoc("Gui", "Begin", "", "name");
 		t.methods.push_back(MakeMethod("End", &Gui::End));
 		t.methods.push_back(MakeMethod("Text", &Gui::Text));
+		Reflect_SetMethodDoc("Gui", "Text", "", "text");
 		t.methods.push_back(MakeMethod("Button", &Gui::Button));
+		Reflect_SetMethodDoc("Gui", "Button", "", "label");
 		t.methods.push_back(MakeMethod("SameLine", &Gui::SameLine));
 		t.methods.push_back(MakeMethod("Separator", &Gui::Separator));
 		t.methods.push_back(MakeMethod("Checkbox", &Gui::Checkbox));
+		Reflect_SetMethodDoc("Gui", "Checkbox", "", "label,value");
 		t.methods.push_back(MakeMethod("Slider", &Gui::Slider));
+		Reflect_SetMethodDoc("Gui", "Slider", "", "label,value,lo,hi");
 		t.methods.push_back(MakeMethod("Input", &Gui::Input));
+		Reflect_SetMethodDoc("Gui", "Input", "Combo items are ';'-separated; index is 0-based.", "label,value");
 		t.methods.push_back(MakeMethod("Combo", &Gui::Combo));
+		Reflect_SetMethodDoc("Gui", "Combo", "", "label,index,items");
 		t.methods.push_back(MakeMethod("Image", &Gui::Image));
+		Reflect_SetMethodDoc("Gui", "Image", "", "texGuid,w,h");
 		t.methods.push_back(MakeMethod("Progress", &Gui::Progress));
+		Reflect_SetMethodDoc("Gui", "Progress", "", "fraction,overlay");
 		t.methods.push_back(MakeMethod("StyleColor", &Gui::StyleColor));
+		Reflect_SetMethodDoc("Gui", "StyleColor", "Styling by name, mapped onto NukeUIColor/NukeUIStyleVar; unknown names warn once. Colors: text windowBg frameBg frameBgHovered frameBgActive titleBg titleBgActive button buttonHovered buttonActive checkMark sliderGrab border separator progress. Vars: alpha windowRounding frameRounding grabRounding borderSize windowPadding framePadding itemSpacing (padding/spacing take x,y).", "name,r,g,b,a");
 		t.methods.push_back(MakeMethod("StyleVar", &Gui::StyleVar));
+		Reflect_SetMethodDoc("Gui", "StyleVar", "", "name,x,y");
 		t.methods.push_back(MakeMethod("FontScale", &Gui::FontScale));
+		Reflect_SetMethodDoc("Gui", "FontScale", "", "s");
 		t.methods.push_back(MakeMethod("ResetStyle", &Gui::ResetStyle));
 	}
 	return true;

@@ -136,6 +136,16 @@ public:
 	// engine: automatic impact reactions from solid contact-begin events (World physics
 	// dispatch); the closing speed along the normal gates Min Impulse (m/s).
 	static void ContactHit(Atom* a, Atom* b, const float point[3], const float normal[3]);
+	// Hit with an EXPLICIT target world for the spawns (editor previews); plain Hit() targets
+	// the live pump's world.
+	static bool HitIn(World* target, Atom* atom, const std::string& hitType, const Vector3& pos,
+	                  const Vector3& normal, double impulse);
+	// Drain the queued hit spawns (prefab/decal) into `w` and expire their lifetimes.
+	// DriveFoliage pumps this for the live world; the editor pumps it for preview worlds
+	// (called right after a preview Hit so the LIVE world never receives the spawn).
+	static void DrainHits(World* w);
+	// Forget growth/queued spawns of a dying world (called from ~World; nothing dereferenced).
+	static void ForgetWorld(World* w);
 	static void SaveJson(nlohmann::json& j);         // world "surface" block (omitted when empty)
 	static void LoadJson(const nlohmann::json& j);
 	static void ResetDefaults();

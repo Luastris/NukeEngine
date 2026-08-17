@@ -490,9 +490,22 @@ static Material* MaterialOf(Atom* a)
 
 // Prefab/decal spawns queued by Hit(); DriveFoliage drains them outside the physics step and
 // expires the spawned atoms' lifetimes.
-struct PendingHit { std::string prefab, decal; float decalSize, lifetime; Vector3 pos, nrm; };
-static std::vector<PendingHit>              g_pendingHits;
-static std::vector<std::pair<long, double>> g_hitSpawned;   // atom id -> game-time deadline
+// Every entry remembers its TARGET world: hits on preview atoms (editor tool) must spawn
+// into and expire from the PREVIEW world, never the live one — and vice versa.
+struct PendingHit
+{
+	World* target;
+	std::string prefab, decal;
+	float decalSize, lifetime;
+	Vector3 pos, nrm;
+	Color decalTint;
+	float decalIntensity;
+	int   decalMode;
+	float decalFade;   // spread-in seconds (0 = instant)
+};
+static std::vector<PendingHit> g_pendingHits;
+struct SpawnedHit { World* target; long id; double deadline; };
+static std::vector<SpawnedHit> g_hitSpawned;
 
 bool Surface::FootstepOn(Atom* ground, const Vector3& pos, double volume)
 {
@@ -518,6 +531,12 @@ bool Surface::Footstep(Atom* self, double volume)
 bool Surface::Hit(Atom* atom, const std::string& hitType, const Vector3& pos,
                   const Vector3& normal, double impulse)
 {
+	return HitIn(nullptr, atom, hitType, pos, normal, impulse);   // null = the live pump's world
+}
+
+bool Surface::HitIn(World* target, Atom* atom, const std::string& hitType, const Vector3& pos,
+                    const Vector3& normal, double impulse)
+{
 	Material* m = MaterialOf(atom);
 	if (!m || m->liveHits.empty()) return false;
 	const LiveHit* best = nullptr;
@@ -528,9 +547,30 @@ bool Surface::Hit(Atom* atom, const std::string& hitType, const Vector3& pos,
 			if (h.hitType.empty()) { best = &h; break; }
 	if (!best || impulse < best->minImpulse) return false;
 	if (!best->soundGuid.empty())
-		Audio::PlayAt(best->soundGuid, pos, 1.0, 1.0, 30.0, 1);
+	{
+		// Preview worlds have no audio listener in their space — a positional voice there
+		// sits at the wrong distance and stays silent. Editor hits play FLAT on the
+		// Preview bus; live-world hits stay positional.
+		if (target) Audio::Play(best->soundGuid, 1.0, false, 2);
+		else        Audio::PlayAt(best->soundGuid, pos, 1.0, 1.0, 30.0, 1);
+	}
+	if (!best->eventName.empty())
+	{
+		// The hit's own parameters ride into the event: shaders/reactions read g_Hit
+		// (impulse, hit normal); the point routes into the event's masks — each in its
+		// AUTHORED space (uv probed under the hit, so uv masks keep their authored size).
+		m->props["g_Hit"] = { (float)impulse, (float)normal.x, (float)normal.y, (float)normal.z };
+		float hu = 0, hv = 0;
+		if (Physics::MeshUVAt(atom, pos, normal, hu, hv))
+			m->TriggerAtHit(best->eventName, pos, hu, hv);
+		else
+			m->TriggerAtWorld(best->eventName, pos);
+	}
 	if (!best->prefabGuid.empty() || !best->decalGuid.empty())
-		g_pendingHits.push_back({ best->prefabGuid, best->decalGuid, best->decalSize, best->lifetime, pos, normal });
+		g_pendingHits.push_back({ target, best->prefabGuid, best->decalGuid,
+		                          best->decalSize, best->lifetime, pos, normal,
+		                          best->decalTint, best->decalIntensity, best->decalMode,
+		                          best->decalFade });
 	return true;
 }
 
@@ -567,6 +607,8 @@ struct DrivenFoliage
 {
 	std::vector<Foliage*> comps;
 	std::string fp;      // entry fingerprint the comps were built from
+	World* world = nullptr;   // owning world: mark-and-sweep is PER world (previews drive too)
+	long long atomId = 0;     // stable id: a RECYCLED heap address must never match a dead atom's entry
 	bool seen = false;   // mark-and-sweep against destroyed atoms
 };
 static std::map<Atom*, DrivenFoliage> g_grown;
@@ -577,6 +619,8 @@ struct DrivenSound
 	AudioSource* amb = nullptr;
 	AudioSource* wind = nullptr;
 	std::string fp;
+	World* world = nullptr;
+	long long atomId = 0;
 	bool seen = false;
 };
 static std::map<Atom*, DrivenSound> g_sndGrown;
@@ -617,52 +661,73 @@ static void DropGrown(Atom* a, DrivenFoliage& d)
 	d.fp.clear();
 }
 
-void Surface::DriveFoliage(World* w)
+void Surface::DrainHits(World* w)
 {
 	if (!w) return;
-	RefreshInUse();   // active-state set for this frame's overlay slot assignment
-
 	// LM-4: spawn queued hit reactions (outside the physics step) and expire their lifetimes.
 	const double nowT = Time::getSingleton()->elapsed;
-	for (const PendingHit& ph : g_pendingHits)
+	for (size_t phi = 0; phi < g_pendingHits.size(); )
 	{
+		const PendingHit& ph = g_pendingHits[phi];
+		if (ph.target && ph.target != w) { ++phi; continue; }   // someone else's world drains it
 		const Vector3 up = std::fabs(ph.nrm.y) > 0.99 ? Vector3(1, 0, 0) : Vector3(0, 1, 0);
 		if (!ph.prefab.empty())
-			if (Atom* sp = Prefabs::Spawn(ph.prefab))
+			if (Atom* sp = Prefabs::SpawnIn(w, ph.prefab))
 			{
 				// +Y along the surface normal: debris/particles erupt away from the surface.
 				const Vector3 fwd = Vector3(up.y * ph.nrm.z - up.z * ph.nrm.y,
 				                            up.z * ph.nrm.x - up.x * ph.nrm.z,
 				                            up.x * ph.nrm.y - up.y * ph.nrm.x);
 				sp->GetTransform().SetGlobal(ph.pos, Quaternion::LookRotation(fwd, ph.nrm), Vector3(1, 1, 1));
-				if (ph.lifetime > 0.0f) g_hitSpawned.push_back({ (long)sp->id.id, nowT + ph.lifetime });
+				if (ph.lifetime > 0.0f) g_hitSpawned.push_back({ w, (long)sp->id.id, nowT + ph.lifetime });
 			}
 		if (!ph.decal.empty())
 		{
 			Atom* d = w->CreateAtom("HitDecal");
 			Decal* dc = new Decal();
 			dc->textureGuid = ph.decal;
+			dc->tint       = ph.decalTint;
+			dc->intensity  = ph.decalIntensity;
+			dc->mode       = (DecalMode)ph.decalMode;
+			dc->fadeIn     = ph.decalFade;   // spread-in (blood creep); auto-dissolve before death
+			dc->appear     = 1;
+			if (ph.lifetime > 0.0f)
+			{
+				dc->dieTime = nowT + ph.lifetime;
+				dc->fadeOut = std::min(0.6f, ph.lifetime * 0.25f);
+			}
 			d->AddComponent(dc);
 			// The decal box projects along its local +Z: aim it INTO the surface.
 			d->GetTransform().SetGlobal(ph.pos,
 				Quaternion::LookRotation(Vector3(-ph.nrm.x, -ph.nrm.y, -ph.nrm.z), up),
 				Vector3(ph.decalSize, ph.decalSize, ph.decalSize));
-			if (ph.lifetime > 0.0f) g_hitSpawned.push_back({ (long)d->id.id, nowT + ph.lifetime });
+			if (ph.lifetime > 0.0f) g_hitSpawned.push_back({ w, (long)d->id.id, nowT + ph.lifetime });
 		}
+		g_pendingHits.erase(g_pendingHits.begin() + phi);
 	}
-	g_pendingHits.clear();
 	for (size_t i = 0; i < g_hitSpawned.size(); )
 	{
-		if (nowT >= g_hitSpawned[i].second)
+		SpawnedHit& sh = g_hitSpawned[i];
+		if (sh.target == w && nowT >= sh.deadline)
 		{
-			w->QueueDestroy(g_hitSpawned[i].first);
+			w->QueueDestroy(sh.id);
 			g_hitSpawned.erase(g_hitSpawned.begin() + i);
 		}
+		else if (nowT >= sh.deadline + 120.0)   // its world stopped pumping (closed preview)
+			g_hitSpawned.erase(g_hitSpawned.begin() + i);
 		else ++i;
 	}
+}
 
-	for (auto& kv : g_grown) kv.second.seen = false;
-	for (auto& kv : g_sndGrown) kv.second.seen = false;
+void Surface::DriveFoliage(World* w)
+{
+	if (!w) return;
+	RefreshInUse();   // active-state set for this frame's overlay slot assignment
+
+	DrainHits(w);
+
+	for (auto& kv : g_grown) if (kv.second.world == w) kv.second.seen = false;
+	for (auto& kv : g_sndGrown) if (kv.second.world == w) kv.second.seen = false;
 
 	std::function<void(bc::list<Atom*>&)> walk = [&](bc::list<Atom*>& atoms)
 	{
@@ -672,10 +737,12 @@ void Surface::DriveFoliage(World* w)
 			if (!a->enabled)
 			{
 				// Disabled subtree: keep any growth (paused, not rendered), never sweep it away.
+				// Id mismatch = a DEAD atom's entry on a recycled address: leave it unseen (the
+				// sweep forgets it without dereferencing anything).
 				auto git = g_grown.find(a);
-				if (git != g_grown.end()) git->second.seen = true;
+				if (git != g_grown.end() && git->second.atomId == (long long)a->id.id) git->second.seen = true;
 				auto sit = g_sndGrown.find(a);
-				if (sit != g_sndGrown.end())
+				if (sit != g_sndGrown.end() && sit->second.atomId == (long long)a->id.id)
 				{
 					sit->second.seen = true;   // keep, but silence while disabled
 					if (sit->second.amb)  sit->second.amb->Stop();
@@ -714,10 +781,16 @@ void Surface::DriveFoliage(World* w)
 				// wind loop's volume follows the global wind strength each frame).
 				{
 					auto sit = g_sndGrown.find(a);
+					// Recycled heap address: the entry belongs to a DEAD atom (its transient
+					// sources died with it) — forget it, NEVER touch the dangling pointers.
+					if (sit != g_sndGrown.end() && sit->second.atomId != (long long)a->id.id)
+					{ g_sndGrown.erase(sit); sit = g_sndGrown.end(); }
 					if (snd)
 					{
 						DrivenSound& ds = g_sndGrown[a];
 						ds.seen = true;
+						ds.world = w;
+						ds.atomId = (long long)a->id.id;
 						const LiveSound& ls = snd->liveSound;
 						std::ostringstream fo;
 						fo << ls.ambientGuid << '|' << ls.windGuid << '|' << ls.ambientVolume << '|' << ls.windVolume;
@@ -751,10 +824,15 @@ void Surface::DriveFoliage(World* w)
 				}
 
 				auto git = g_grown.find(a);
+				// Same recycled-address guard as the sound entries above.
+				if (git != g_grown.end() && git->second.atomId != (long long)a->id.id)
+				{ g_grown.erase(git); git = g_grown.end(); }
 				if (!srcs.empty() && meshReady)
 				{
 					DrivenFoliage& d = g_grown[a];
 					d.seen = true;
+					d.world = w;
+					d.atomId = (long long)a->id.id;
 					std::string fp;
 					for (Material* s : srcs) fp += s->guid + '#' + FoliageFp(s->liveFoliage);
 					if (fp != d.fp)
@@ -795,12 +873,26 @@ void Surface::DriveFoliage(World* w)
 	};
 	walk(w->GetHierarchy());
 
-	// Sweep entries whose atoms vanished this frame (their components died with the atom —
-	// never dereference, just forget).
+	// Sweep THIS world's entries whose atoms vanished this frame (their components died with
+	// the atom — never dereference, just forget). Other worlds' entries are theirs to sweep.
 	for (auto it = g_grown.begin(); it != g_grown.end(); )
-		if (!it->second.seen) it = g_grown.erase(it); else ++it;
+		if (it->second.world == w && !it->second.seen) it = g_grown.erase(it); else ++it;
 	for (auto it = g_sndGrown.begin(); it != g_sndGrown.end(); )
-		if (!it->second.seen) it = g_sndGrown.erase(it); else ++it;
+		if (it->second.world == w && !it->second.seen) it = g_sndGrown.erase(it); else ++it;
+}
+
+void Surface::ForgetWorld(World* w)
+{
+	if (!w) return;
+	// The world is dying: forget everything grown/queued for it (components die with it).
+	for (auto it = g_grown.begin(); it != g_grown.end(); )
+		if (it->second.world == w) it = g_grown.erase(it); else ++it;
+	for (auto it = g_sndGrown.begin(); it != g_sndGrown.end(); )
+		if (it->second.world == w) it = g_sndGrown.erase(it); else ++it;
+	for (auto it = g_pendingHits.begin(); it != g_pendingHits.end(); )
+		if (it->target == w) it = g_pendingHits.erase(it); else ++it;
+	for (auto it = g_hitSpawned.begin(); it != g_hitSpawned.end(); )
+		if (it->target == w) it = g_hitSpawned.erase(it); else ++it;
 }
 
 }  // namespace nuke

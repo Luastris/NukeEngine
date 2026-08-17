@@ -43,6 +43,14 @@ public:
 	// so it skips the global heavy passes (RT build) — the live world must stay the last writer.
 	bool auxiliary = false;
 
+	// Deferred destroys: Update() flushes at the frame boundary; auxiliary worlds never
+	// tick, so their owner (editor preview pump) must call this or queued atoms live forever.
+	void FlushDestroyQueue();
+
+	// Editor infinite ground grid in this world's render (material previews turn it off —
+	// a floating sample wants a clean sky backdrop, not a plane slicing through it).
+	bool editorGrid = true;
+
 	World();
 	~World();   // drops every script handle wrapping this world
 

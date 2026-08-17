@@ -73,6 +73,63 @@ void WriteInfoAndMarker()
 
 #ifdef _WIN32
 
+// Symbolized stack into the report: dbghelp walk over the given context (the FAULTING one
+// for SEH, the current thread for abort/assert — the handler runs on the aborting thread).
+// Best effort: dbghelp may be unusable in a crashed process; the minidump (written first)
+// stays the authoritative record. POD locals only — the caller wraps this in __try.
+void WriteStackTrace(std::FILE* f, CONTEXT* ctx)
+{
+#if defined(_M_X64)
+	HANDLE proc = GetCurrentProcess(), thread = GetCurrentThread();
+	SymSetOptions(SYMOPT_LOAD_LINES | SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS);
+	SymInitialize(proc, nullptr, TRUE);
+	CONTEXT local;
+	if (!ctx) { RtlCaptureContext(&local); ctx = &local; }
+	CONTEXT walk = *ctx;   // StackWalk64 mutates the context
+	STACKFRAME64 sf{};
+	sf.AddrPC.Offset = walk.Rip; sf.AddrFrame.Offset = walk.Rbp; sf.AddrStack.Offset = walk.Rsp;
+	sf.AddrPC.Mode = sf.AddrFrame.Mode = sf.AddrStack.Mode = AddrModeFlat;
+	std::fprintf(f, "stack:\n");
+	for (int i = 0; i < 64; ++i)
+	{
+		if (!StackWalk64(IMAGE_FILE_MACHINE_AMD64, proc, thread, &sf, &walk, nullptr,
+		                 SymFunctionTableAccess64, SymGetModuleBase64, nullptr)) break;
+		if (!sf.AddrPC.Offset) break;
+		char symBuf[sizeof(SYMBOL_INFO) + 256] = {};
+		SYMBOL_INFO* sym = (SYMBOL_INFO*)symBuf;
+		sym->SizeOfStruct = sizeof(SYMBOL_INFO); sym->MaxNameLen = 255;
+		DWORD64 disp = 0;
+		const char* name = SymFromAddr(proc, sf.AddrPC.Offset, &disp, sym) ? sym->Name : "?";
+		char modName[MAX_PATH]; modName[0] = '?'; modName[1] = 0;
+		HMODULE mod = nullptr;
+		if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+		                       GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+		                       (LPCSTR)sf.AddrPC.Offset, &mod) && mod)
+		{
+			GetModuleFileNameA(mod, modName, MAX_PATH);
+			const char* slash = std::strrchr(modName, '\\');
+			if (slash) std::memmove(modName, slash + 1, std::strlen(slash + 1) + 1);
+		}
+		IMAGEHLP_LINE64 line{}; line.SizeOfStruct = sizeof(line);
+		DWORD ld = 0;
+		if (SymGetLineFromAddr64(proc, sf.AddrPC.Offset, &ld, &line))
+			std::fprintf(f, "#%02d %s!%s+0x%llX  (%s:%lu)\n", i, modName, name,
+			             (unsigned long long)disp, line.FileName, (unsigned long)line.LineNumber);
+		else
+			std::fprintf(f, "#%02d %s!%s+0x%llX\n", i, modName, name, (unsigned long long)disp);
+	}
+#else
+	(void)ctx;
+	std::fprintf(f, "(no stack walker for this architecture — see crash.dmp)\n");
+#endif
+}
+
+void WriteStackTraceGuarded(std::FILE* f, CONTEXT* ctx)
+{
+	__try { WriteStackTrace(f, ctx); }
+	__except (EXCEPTION_EXECUTE_HANDLER) { std::fprintf(f, "(stack walk failed — see crash.dmp)\n"); }
+}
+
 void WriteWindowsBundle(EXCEPTION_POINTERS* ep, const char* what)
 {
 	static volatile LONG once = 0;   // one bundle per process, whoever reports first
@@ -111,6 +168,7 @@ void WriteWindowsBundle(EXCEPTION_POINTERS* ep, const char* what)
 		}
 		else
 			std::fprintf(f, "%s\n", what);
+		WriteStackTraceGuarded(f, ep ? ep->ContextRecord : nullptr);
 		std::fclose(f);
 	}
 

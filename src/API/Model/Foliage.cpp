@@ -133,9 +133,13 @@ void Foliage::Scatter(const Vector3& brushPos, float brushR, float densMul)
 			for (int s = 0; s < L0.sectionCount; ++s)
 			{
 				const MeshSection sec = m->Section(L0.firstSection + s);
-				const std::string& g = (sec.slot >= 0 && sec.slot < (int)mr->matGuids.size()
-				                        && !mr->matGuids[sec.slot].empty())
-				                     ? mr->matGuids[sec.slot] : mr->matGuid;
+				// Effective material identity, INSTANCE first: editor previews stage a bare
+				// material clone with the renderer's guid strings cleared.
+				std::string g;
+				if (sec.slot >= 0 && sec.slot < (int)mr->mats.size() && mr->mats[sec.slot]) g = mr->mats[sec.slot]->guid;
+				if (g.empty() && sec.slot >= 0 && sec.slot < (int)mr->matGuids.size()) g = mr->matGuids[sec.slot];
+				if (g.empty() && mr->mat) g = mr->mat->guid;
+				if (g.empty()) g = mr->matGuid;
 				if (g == onlyMatGuid)
 					allowed.push_back({ sec.firstIndex, sec.firstIndex + sec.indexCount });
 			}

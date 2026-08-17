@@ -2,13 +2,9 @@
 // plus a screen-space motion vector and the per-object id. Normal mapping is applied here, as in world.ps.
 // LiveMaterial: g_UVT = (uvTiling.xy; 0,0 = identity, uvOffset.xy + tween scroll);
 // g_UVT2.x = uvRotation rad — the SSR/TAA normals must sample where the color pass does.
-cbuffer MatCB { float4 g_Color; float4 g_Params; float4 g_Params2; float4 g_Emissive2; float4 g_UVT; float4 g_UVT2; float4 g_Disp;
-                float4 g_Ov0;  float4 g_Ov1;  float4 g_Ov2;  float4 g_Ov3;  float4 g_Ov4;  float4 g_Ov5;  float4 g_Ov6;  float4 g_Ov7;
-                float4 g_OvT0; float4 g_OvT1; float4 g_OvT2; float4 g_OvT3; float4 g_OvT4; float4 g_OvT5; float4 g_OvT6; float4 g_OvT7;
-                float4 g_OvP0; float4 g_OvP1; float4 g_OvP2; float4 g_OvP3; float4 g_OvP4; float4 g_OvP5; float4 g_OvP6; float4 g_OvP7;
-                float4 g_OvM0; float4 g_OvM1; float4 g_OvM2; float4 g_OvMQ;
-                float4 g_Det; float4 g_Var;
-                float4 g_Brdf1; float4 g_Brdf2; float4 g_Brdf3; float4 g_Brdf4; };
+cbuffer MatCB {
+#include "matcb_std.hlsli"
+};
 Texture2D    g_MetalRough;   SamplerState g_MetalRough_sampler;   // G = roughness, B = metallic (glTF)
 Texture2D    g_Normal;       SamplerState g_Normal_sampler;       // tangent-space normal map
 Texture2D    g_Tex;          SamplerState g_Tex_sampler;          // base color (alpha for cutout)

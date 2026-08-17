@@ -41,6 +41,47 @@ void Mesh::EnsureBounds() {
 	boundsValid = true;
 }
 
+float Mesh::RaycastUV(const Vector3& ro, const Vector3& rd, float& u, float& v) const
+{
+	u = v = 0.0f;
+	if (!vertexArray || numVerts < 3) return -1.0f;
+	double bestT = 1e30, bu = 0, bv = 0; int bTri = -1;
+	const int tris = TriCount();
+	for (int t = 0; t < tris; ++t)
+	{
+		const uint32_t i0 = TriIndex(t, 0), i1 = TriIndex(t, 1), i2 = TriIndex(t, 2);
+		const float* p0 = vertexArray + (size_t)i0 * 3;
+		const float* p1 = vertexArray + (size_t)i1 * 3;
+		const float* p2 = vertexArray + (size_t)i2 * 3;
+		const double e1[3] = { p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2] };
+		const double e2[3] = { p2[0] - p0[0], p2[1] - p0[1], p2[2] - p0[2] };
+		const double px = rd.y * e2[2] - rd.z * e2[1], py = rd.z * e2[0] - rd.x * e2[2], pz = rd.x * e2[1] - rd.y * e2[0];
+		const double det = e1[0] * px + e1[1] * py + e1[2] * pz;
+		if (std::fabs(det) < 1e-12) continue;
+		const double inv = 1.0 / det;
+		const double tv[3] = { ro.x - p0[0], ro.y - p0[1], ro.z - p0[2] };
+		const double uu = (tv[0] * px + tv[1] * py + tv[2] * pz) * inv;
+		if (uu < 0.0 || uu > 1.0) continue;
+		const double qx = tv[1] * e1[2] - tv[2] * e1[1], qy = tv[2] * e1[0] - tv[0] * e1[2], qz = tv[0] * e1[1] - tv[1] * e1[0];
+		const double vv = (rd.x * qx + rd.y * qy + rd.z * qz) * inv;
+		if (vv < 0.0 || uu + vv > 1.0) continue;
+		const double tt = (e2[0] * qx + e2[1] * qy + e2[2] * qz) * inv;
+		if (tt > 1e-6 && tt < bestT) { bestT = tt; bu = uu; bv = vv; bTri = t; }
+	}
+	if (bTri < 0) return -1.0f;
+	if (uvArray)
+	{
+		const uint32_t i0 = TriIndex(bTri, 0), i1 = TriIndex(bTri, 1), i2 = TriIndex(bTri, 2);
+		const float* t0 = uvArray + (size_t)i0 * 2;
+		const float* t1 = uvArray + (size_t)i1 * 2;
+		const float* t2 = uvArray + (size_t)i2 * 2;
+		const float w0 = (float)(1.0 - bu - bv);
+		u = t0[0] * w0 + t1[0] * (float)bu + t2[0] * (float)bv;
+		v = t0[1] * w0 + t1[1] * (float)bu + t2[1] * (float)bv;
+	}
+	return (float)bestT;
+}
+
 // assimp matrices are ROW-major; glm/our storage is COLUMN-major -> transpose on copy.
 static void AiToCol16(const aiMatrix4x4& m, float out[16])
 {

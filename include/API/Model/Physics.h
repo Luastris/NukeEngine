@@ -50,6 +50,10 @@ public:
 	[[nuke::func]] static Vector3 HitPoint();
 	[[nuke::func]] static Vector3 HitNormal();
 	[[nuke::func]] static double  HitDistance();
+	// Mesh UV under the last hit: the hit atom's render mesh (LOD0; skinned meshes read the
+	// bind pose) probed at the hit point. Zeros when the atom has no readable mesh. Feed it
+	// to Material.TriggerAt for point reactions from gameplay casts.
+	[[nuke::func]] static Vector2 HitUV();
 
 	// OVERLAP queries — live atoms inside the volume (triggers included). Returns the count and
 	// stores the atoms thread-locally; read via OverlapAtom(i) until the next Overlap* call.
@@ -62,6 +66,9 @@ public:
 
 	// C++ convenience: the full last hit of the calling thread.
 	static const RayHit& LastHit();
+	// MESH-space uv of `atom`'s render mesh under a surface point (probed along -normal;
+	// LOD0, skinned = bind pose). False when the atom has no readable mesh/uv.
+	static bool MeshUVAt(Atom* atom, const Vector3& point, const Vector3& normal, float& u, float& v);
 };
 
 }  // namespace nuke
