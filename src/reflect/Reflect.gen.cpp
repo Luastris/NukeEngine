@@ -280,6 +280,9 @@ bool NukeReflectInit() {
 		Reflect_SetMethodDoc("Atom", "SetEnabled", "", "on");
 		t.methods.push_back(MakeMethod("IsEnabled", &Atom::IsEnabled));
 		t.methods.push_back(MakeMethod("IsFolder", &Atom::IsFolder));
+		t.methods.push_back(MakeMethod("SetAlwaysLoaded", &Atom::SetAlwaysLoaded));
+		Reflect_SetMethodDoc("Atom", "SetAlwaysLoaded", "", "on");
+		t.methods.push_back(MakeMethod("IsAlwaysLoaded", &Atom::IsAlwaysLoaded));
 		t.methods.push_back(MakeMethod("SetParent", &Atom::SetParent));
 		Reflect_SetMethodDoc("Atom", "SetParent", "", "newparent");
 		t.methods.push_back(MakeMethod("GetParent", &Atom::GetParent));
@@ -1394,6 +1397,10 @@ bool NukeReflectInit() {
 		Reflect_SetMethodDoc("World", "Reparent", "Move an atom under a new parent (nullptr = world root); detaches from its current location first and ignores cycles (parenting under a descendant).", "a,newParent");
 		t.methods.push_back(MakeMethod("ReparentBefore", &World::ReparentBefore));
 		Reflect_SetMethodDoc("World", "ReparentBefore", "Like Reparent, but insert `a` directly BEFORE `sibling` in `sibling`'s parent. nullptr sibling is ignored.", "a,sibling");
+		t.methods.push_back(MakeMethod("SetStreaming", &World::SetStreaming));
+		Reflect_SetMethodDoc("World", "SetStreaming", "---- World Partition streaming (T2) ---- Configure streaming from scripts (the editor drives settings directly). Takes effect on the next save (split) / tick (runtime).", "enabled,cellSize,range,hlodRange");
+		t.methods.push_back(MakeMethod("StreamCells", &World::StreamCells));
+		t.methods.push_back(MakeMethod("StreamLoaded", &World::StreamLoaded));
 	}
 	{
 		TypeInfo& t = TypeOf<Input>();

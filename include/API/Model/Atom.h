@@ -52,6 +52,11 @@ public:
 	// empty. Appended at the END (cross-DLL layout; part of engine abi 15).
 	bool folder = false;
 
+	// World Partition (T2): a flagged ROOT atom stays in the main world instead of streaming
+	// with its grid cell (managers, global logic, skyboxes). Persistent atoms and folders never
+	// stream either. Appended at the END (cross-DLL layout; engine abi 19).
+	bool alwaysLoaded = false;
+
 	Atom();
 	Atom(const char* name);
 	~Atom();
@@ -68,6 +73,8 @@ public:
 	[[nuke::func]] void SetEnabled(bool on);        // whole-atom switch incl. subtree (see `enabled`)
 	[[nuke::func]] bool IsEnabled();                // this atom's OWN flag (an ancestor may still disable it)
 	[[nuke::func]] bool IsFolder();                 // hierarchy folder node (see `folder`)
+	[[nuke::func]] void SetAlwaysLoaded(bool on);   // opt this ROOT out of world streaming (see `alwaysLoaded`)
+	[[nuke::func]] bool IsAlwaysLoaded();
 	Transform& GetTransform();
 	
 	template<class T>

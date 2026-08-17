@@ -34,6 +34,7 @@
 #include "API/Model/Surface.h"
 #include "interface/WorldHooks.h"
 #include "API/Model/BendVolumes.h"
+#include "API/Model/WorldStream.h"
 #include "interface/Services.h"
 #include "service/iPhysics.h"
 #include "service/iAudio.h"
@@ -235,7 +236,22 @@ World::~World()
 {
 	Surface::ForgetWorld(this);   // drop grown foliage/sound records + queued hit spawns
 	Reflect_DropObject(this);     // invalidate script handles to this world
+	delete stream;
+	stream = nullptr;
 }
+
+// ---- World Partition streaming (T2) ----
+
+void World::SetStreaming(bool enabled, double cellSize, double range, double hlodRange)
+{
+	settings.streamEnabled   = enabled;
+	settings.streamCellSize  = (float)std::max(8.0, cellSize);
+	settings.streamRange     = (float)std::max(16.0, range);
+	settings.streamHlodRange = (float)std::max(0.0, hlodRange);
+}
+
+double World::StreamCells()  { return stream ? (double)stream->CellCount() : 0.0; }
+double World::StreamLoaded() { return stream ? (double)stream->LoadedCount() : 0.0; }
 
 static Atom* FindByName(Atom* node, const std::string& name)
 {
@@ -364,6 +380,13 @@ void World::Update()
 	app->worldTickActive = false;
 	// Flush deferred destruction after the traversal, still under the game lock.
 	FlushDestroyQueue();
+	// World Partition streaming: ring maintenance AFTER the traversal (safe to add/remove
+	// roots), still under the game lock.
+	if (WorldStream::Active(this))
+	{
+		if (!stream) stream = new WorldStream();
+		stream->Tick(this);
+	}
 	// Script-queued world switch, applied at the frame boundary (traversal done, lock held).
 	if (!app->pendingWorldLoad.empty())
 	{
@@ -2532,6 +2555,8 @@ void World::Render(iRender* r)
 			{ Profiler::Scope ps("rnd.cam.opaque"); DrawCollected(items, cp, r, settings.frustumCull); }
 			{ Profiler::Scope ps("rnd.cam.inst");   DrawInstancedMeshes(camInstSets, r, settings.frustumCull); }
 			{ Profiler::Scope ps("rnd.cam.hooks");  DrawComponentHooks(*hierarchy, r, RenderPhase::Opaque, camMask); }
+			// World Partition: baked HLOD proxies stand in for unloaded far cells.
+			if (stream) { Profiler::Scope ps("rnd.cam.hlod"); stream->Render(this, r); }
 			// Transparent AFTER every opaque draw: the refraction snapshot must hold the whole
 			// opaque scene (foliage included), and nothing opaque may land over glass.
 			{ Profiler::Scope ps("rnd.cam.blend");  DrawCollectedTransparent(items, cp, r, settings.frustumCull); }
@@ -2638,6 +2663,7 @@ static void SaveAtom(Atom* atom, json& j)
 	if (atom->persistent) j["persistent"] = true;                    // survives world switches
 	if (!atom->enabled) j["enabled"] = false;
 	if (atom->folder) j["folder"] = true;                            // hierarchy folder node
+	if (atom->alwaysLoaded) j["alwaysLoaded"] = true;                // opted out of streaming
 	Transform& t = atom->GetTransform();
 	if (TypeInfo* tti = t.GetType())
 		SaveObject(*tti, &t, j["transform"]);
@@ -2755,6 +2781,7 @@ static Atom* LoadAtom(const json& j)
 	atom->persistent = j.value("persistent", false);
 	atom->enabled    = j.value("enabled", true);
 	atom->folder     = j.value("folder", false);
+	atom->alwaysLoaded = j.value("alwaysLoaded", false);
 	if (j.contains("transform"))
 	{
 		Transform& t = atom->GetTransform();
@@ -3076,6 +3103,13 @@ std::string World::SaveToString()
 		{"shadowSoftness", settings.shadowSoftness}, {"frustumCull", settings.frustumCull},
 		{"gravity", { settings.gravity[0], settings.gravity[1], settings.gravity[2] }},
 		{"fixedDt", settings.fixedDt} };
+	if (settings.streamEnabled)
+	{
+		j["settings"]["streamEnabled"]   = true;
+		j["settings"]["streamCellSize"]  = settings.streamCellSize;
+		j["settings"]["streamRange"]     = settings.streamRange;
+		j["settings"]["streamHlodRange"] = settings.streamHlodRange;
+	}
 	// Capture the live calendar + pending event schedule so a savegame resumes at the exact
 	// in-game moment. Only the real world owns the clock; auxiliary worlds must not clobber it.
 	if (!auxiliary)
@@ -3095,6 +3129,18 @@ std::string World::SaveToString()
 		json gj;
 		SaveAtom(atom, gj);
 		j["atoms"].push_back(gj);
+	}
+	// Streamed world: unloaded cells (parked subtrees + never-loaded cell files) are still part
+	// of the world — a PIE snapshot or a savegame must be COMPLETE, not just the loaded rings.
+	if (stream)
+	{
+		std::vector<std::string> resident;
+		stream->AppendResident(resident);
+		for (const std::string& s : resident)
+		{
+			json a = json::parse(s, nullptr, false);
+			if (!a.is_discarded()) j["atoms"].push_back(a);
+		}
 	}
 	return j.dump(2);
 }
@@ -3518,6 +3564,45 @@ void World::LoadFromJson(const json& j)
 	if (j.contains("atoms"))
 		for (const json& gj : j["atoms"])
 			Add(LoadAtom(gj));
+	// Streamed world (split file): wire the runtime to the cell index. Editor EDIT MODE loads
+	// every cell inline (the whole world is editable); play/player streams them by distance.
+	if (settings.streamEnabled && j.contains("streamCells") && j["streamCells"].is_array())
+	{
+		AppInstance* app = AppInstance::GetSingleton();
+		const std::string dir = j.value("cellsDir", std::string());
+		std::vector<WorldStream::CellKey> keys;
+		for (const json& c : j["streamCells"])
+			if (c.is_object()) keys.push_back(WorldStream::CellKey{ c.value("x", 0), c.value("z", 0) });
+		if (!auxiliary && app->isEditor() && app->playState == 0)
+		{
+			int loadedCells = 0;
+			for (const WorldStream::CellKey& k : keys)
+			{
+				char nameBuf[64];
+				std::snprintf(nameBuf, sizeof(nameBuf), "%d_%d.nuworld", k.x, k.z);
+				std::string data;
+				if (!app->ReadContent(dir + "/" + nameBuf, data)) continue;
+				json cj = json::parse(data, nullptr, false);
+				if (cj.is_discarded() || !cj.contains("atoms")) continue;
+				for (const json& gj : cj["atoms"]) Add(LoadAtom(gj));
+				++loadedCells;
+			}
+			std::cout << "[World]\t\t\t" << "streamed world: " << loadedCells
+			          << " cells loaded for editing" << std::endl;
+		}
+		else if (!auxiliary)
+		{
+			if (!stream) stream = new WorldStream();
+			stream->Setup(keys, dir);
+		}
+	}
+	else if (settings.streamEnabled && !auxiliary)
+	{
+		// No cell index (PIE snapshot / savegame — a complete document): a memory-only session,
+		// far cells PARK instead of cold-loading.
+		if (!stream) stream = new WorldStream();
+		stream->Setup({}, std::string());
+	}
 	FinalizeIncrementalLoad();
 }
 
@@ -3538,7 +3623,13 @@ void World::LoadHeaderFromJson(const json& j)
 		if (s.contains("gravity") && s["gravity"].is_array() && s["gravity"].size() == 3)
 			for (int i = 0; i < 3; ++i) settings.gravity[i] = s["gravity"][i].get<float>();
 		settings.fixedDt = s.value("fixedDt", settings.fixedDt);
+		settings.streamEnabled   = s.value("streamEnabled", settings.streamEnabled);
+		settings.streamCellSize  = s.value("streamCellSize", settings.streamCellSize);
+		settings.streamRange     = s.value("streamRange", settings.streamRange);
+		settings.streamHlodRange = s.value("streamHlodRange", settings.streamHlodRange);
 	}
+	// A new world means a new streaming session (parked subtrees reference the OLD hierarchy).
+	if (stream) stream->Reset();
 	// Restore the calendar + pending event schedule. Only the real world touches the global
 	// clock. A world without a calendar block resets the schedule rather than inheriting the
 	// previous world's pending incidents.
@@ -3664,10 +3755,93 @@ void World::ReparentBefore(Atom* a, Atom* sibling)
 
 void World::SaveToFile(const std::string& path)
 {
+	// Streamed world: SPLIT — spatial roots go to per-cell files ("<stem>.cells/x_z.nuworld"),
+	// the main file keeps always-loaded roots + the cell index; an HLOD proxy bakes per cell.
+	if (settings.streamEnabled && !auxiliary)
+	{
+		SaveToFileSplit(path);
+		return;
+	}
 	boost::filesystem::path p(path);
 	boost::filesystem::ofstream f(p);
 	if (f) f << SaveToString();
 	std::cout << "[World]\t\t\t" << "Saved to " << path << std::endl;
+}
+
+void World::SaveToFileSplit(const std::string& path)
+{
+	// One complete document first (loaded + parked + cold — SaveToString gathers everything),
+	// then distribute the roots by cell.
+	json full = json::parse(SaveToString(), nullptr, false);
+	if (full.is_discarded()) { std::cout << "[World]\t\t\tsplit save FAILED: bad document" << std::endl; return; }
+
+	const float cs = std::max(8.0f, settings.streamCellSize);
+	boost::filesystem::path p(path);
+	const std::string stem = p.stem().string();
+	boost::filesystem::path cellsAbs = p.parent_path() / (stem + ".cells");
+	boost::system::error_code ec;
+	boost::filesystem::create_directories(cellsAbs, ec);
+	// Content-relative cells dir (runtime reads through ReadContent — raw or pak). Both sides
+	// go ABSOLUTE first: the save path and contentRoot may each be CWD-relative.
+	std::string cellsRel = (stem + ".cells");
+	{
+		const std::string root = AppInstance::GetSingleton()->contentRoot;
+		boost::system::error_code ec2;
+		std::string full2 = boost::filesystem::absolute(p.parent_path()).generic_string();
+		std::string rootG = root.empty() ? std::string()
+		                  : boost::filesystem::absolute(boost::filesystem::path(root)).generic_string();
+		auto lower = [](std::string s) { for (char& c : s) c = (char)tolower((unsigned char)c); return s; };
+		if (!rootG.empty() && lower(full2).rfind(lower(rootG), 0) == 0)
+		{
+			std::string sub = full2.substr(rootG.size());
+			while (!sub.empty() && (sub.front() == '/' || sub.front() == '\\')) sub.erase(sub.begin());
+			cellsRel = sub.empty() ? cellsRel : sub + "/" + cellsRel;
+		}
+		(void)ec2;
+	}
+
+	std::map<std::pair<int, int>, json> cellAtoms;
+	json mainAtoms = json::array();
+	for (json& a : full["atoms"])
+	{
+		const bool pinned = a.value("alwaysLoaded", false) || a.value("persistent", false)
+		                 || a.value("folder", false);
+		double px = 0.0, pz = 0.0;
+		const bool hasPos = a.contains("transform") && a["transform"].is_object()
+		                 && a["transform"].contains("position") && a["transform"]["position"].is_array()
+		                 && a["transform"]["position"].size() == 3;
+		if (hasPos) { px = a["transform"]["position"][0]; pz = a["transform"]["position"][2]; }
+		if (pinned || !hasPos) { mainAtoms.push_back(a); continue; }
+		const int cx = (int)std::floor(px / cs), cz = (int)std::floor(pz / cs);
+		json& arr = cellAtoms[{ cx, cz }];
+		if (!arr.is_array()) arr = json::array();
+		arr.push_back(a);
+	}
+
+	json cellsIdx = json::array();
+	for (auto& kv : cellAtoms)
+	{
+		json c;
+		c["x"] = kv.first.first; c["z"] = kv.first.second;
+		c["count"] = (int)kv.second.size();
+		cellsIdx.push_back(c);
+		json cf;
+		cf["type"] = "WorldCells";
+		cf["atoms"] = kv.second;
+		char nameBuf[64];
+		std::snprintf(nameBuf, sizeof(nameBuf), "%d_%d.nuworld", kv.first.first, kv.first.second);
+		boost::filesystem::ofstream cfs(cellsAbs / nameBuf);
+		if (cfs) cfs << cf.dump(2);
+	}
+	full["atoms"] = mainAtoms;
+	full["streamCells"] = cellsIdx;
+	full["cellsDir"] = cellsRel;
+
+	boost::filesystem::ofstream f(p);
+	if (f) f << full.dump(2);
+	BakeStreamHlod(cellAtoms, (cellsAbs / "hlod.bin").string());
+	std::cout << "[World]\t\t\t" << "Saved streamed world to " << path << ": "
+	          << mainAtoms.size() << " main + " << cellAtoms.size() << " cells -> " << cellsRel << std::endl;
 }
 
 void World::LoadFromFile(const std::string& path)

@@ -59,6 +59,8 @@ bool Atom::IsPersistent()         { return persistent; }
 void Atom::SetEnabled(bool on) { enabled = on; }
 bool Atom::IsEnabled()         { return enabled; }
 bool Atom::IsFolder()          { return folder; }
+void Atom::SetAlwaysLoaded(bool on) { alwaysLoaded = on; }
+bool Atom::IsAlwaysLoaded()         { return alwaysLoaded; }
 
 Transform& Atom::GetTransform()
 {

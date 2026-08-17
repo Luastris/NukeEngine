@@ -240,6 +240,7 @@
     <ClInclude Include="include\API\Model\UnknownComponent.h" />
     <ClInclude Include="include\API\Model\Prefab.h" />
     <ClInclude Include="include\API\Model\World.h" />
+    <ClInclude Include="include\API\Model\WorldStream.h" />
     <ClInclude Include="include\API\Model\Shader.h" />
     <ClInclude Include="include\API\Model\Texture.h" />
     <ClInclude Include="include\API\Model\Time.h" />
@@ -350,6 +351,7 @@
     <ClCompile Include="src\API\Model\resdb.cpp" />
     <ClCompile Include="src\API\Model\UnknownComponent.cpp" />
     <ClCompile Include="src\API\Model\World.cpp" />
+    <ClCompile Include="src\API\Model\WorldStream.cpp" />
     <ClCompile Include="src\API\Model\Shader.cpp" />
     <ClCompile Include="src\API\Model\Texture.cpp" />
     <ClCompile Include="src\API\Model\Time.cpp" />

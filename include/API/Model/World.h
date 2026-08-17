@@ -5,7 +5,9 @@
 #include "Atom.h"
 #include "reflect/Reflect.h"
 #include <boost/thread/recursive_mutex.hpp>
+#include <map>
 #include <memory>
+#include <utility>
 #include <vector>
 #include <nlohmann/json_fwd.hpp>   // LoadFromJson (async load hands over a pre-parsed document)
 
@@ -13,6 +15,7 @@ namespace nuke {
 
 class iRender;
 class Camera;
+class WorldStream;
 
 class NUKEENGINE_API World
 {
@@ -36,6 +39,13 @@ public:
 		// Physics (drives the fixed-step loop; pushed to the physics service).
 		float gravity[3] = { 0.0f, -9.81f, 0.0f };
 		float fixedDt    = 1.0f / 60.0f;  // fixed simulation timestep (seconds)
+		// World Partition streaming (T2): ONE big world streamed by XZ grid cells. Save splits
+		// spatial root atoms into per-cell files; play streams them by camera distance and
+		// renders baked HLOD proxies for unloaded far cells. Edit mode always loads everything.
+		bool  streamEnabled   = false;
+		float streamCellSize  = 128.0f;    // cell edge, world units
+		float streamRange     = 256.0f;    // load radius around the cameras (unload = x1.3)
+		float streamHlodRange = 8192.0f;   // draw HLOD proxies for unloaded cells inside this
 	};
 	Settings settings;
 
@@ -84,6 +94,10 @@ public:
 private:
 	boost::recursive_mutex gameLock;
 	std::vector<long> destroyQueue;   // QueueDestroy ids; flushed at the end of Update (under gameLock)
+	// T2 split save: main file + per-cell files + baked HLOD proxies (WorldStream.cpp).
+	void SaveToFileSplit(const std::string& path);
+	void BakeStreamHlod(const std::map<std::pair<int, int>, nlohmann::json>& cellAtoms,
+	                    const std::string& binPath);
 public:
 
 	// The camera the GAME is viewed through: the one whose Main Camera flag is set, else the
@@ -151,6 +165,15 @@ public:
 	// inert UnknownComponent placeholder (on disable); Restore does the reverse (on enable).
 	void ConvertPluginToUnknown(const std::string& moduleFile);
 	void RestorePluginComponents(const std::string& moduleFile);
+
+	// ---- World Partition streaming (T2) ----
+	// Configure streaming from scripts (the editor drives settings directly). Takes effect on
+	// the next save (split) / tick (runtime).
+	[[nuke::func]] void SetStreaming(bool enabled, double cellSize, double range, double hlodRange);
+	[[nuke::func]] double StreamCells();    // known cells (files + parked); 0 = not streaming
+	[[nuke::func]] double StreamLoaded();   // cells currently loaded
+	// The streaming runtime (owned; created on demand). APPENDED member — cross-DLL layout.
+	WorldStream* stream = nullptr;
 };
 
 }  // namespace nuke
