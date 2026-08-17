@@ -595,6 +595,12 @@ public:
     // passes when a transparent material refracts — snapshot the scene for g_SceneRefr.
     virtual void beginTransparent() {}
 
+    // RT reflections for a custom material shader: register its `Surface()` HLSL body (the
+    // "<name>.surf.hlsl" contract) from CODE — modules embed shaders and have no file in the
+    // shaders directory for the include machinery to find. Re-registering replaces; the RT
+    // pipeline rebuilds with the shader's auto-generated closest-hit. ABI: appended.
+    virtual void registerRTSurface(const char* shaderName, const char* surfHlsl) {}
+
     // ABI: new virtuals are appended at the END of the class, NEVER inserted mid-vtable —
     // plugins are separate DLLs built at different times, and an inserted slot shifts every later one.
 };
