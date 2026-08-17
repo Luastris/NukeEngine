@@ -198,6 +198,26 @@ void Game::SetOpacity(double opacity)
 	ApplyAndSaveWindow();
 }
 
+void Game::SetTextureStreaming(double budgetMB)
+{
+	const int mb = std::max(0, (int)budgetMB);
+	Config::getSingleton()->window.textureStreamMB = mb;
+	SaveGameWindow();
+	if (iRender* r = AppInstance::GetSingleton()->render)
+		r->setTextureStreaming((long long)mb << 20);
+}
+
+std::string Game::TextureStreamInfo()
+{
+	long long resident = 0, saved = 0; int count = 0;
+	if (iRender* r = AppInstance::GetSingleton()->render)
+		r->textureStreamInfo(resident, saved, count);
+	char buf[160];
+	std::snprintf(buf, sizeof(buf), "streamed=%d resident=%.1fMB full=%.1fMB saved=%.1fMB",
+	              count, resident / 1048576.0, (resident + saved) / 1048576.0, saved / 1048576.0);
+	return std::string(buf);
+}
+
 void Game::SetAlwaysOnTop(bool onTop)
 {
 	Config::getSingleton()->window.floating = onTop;

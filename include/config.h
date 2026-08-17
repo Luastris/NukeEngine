@@ -45,6 +45,7 @@ struct NukeWindow{
     bool  vsync       = true;    // cap the main present to the display refresh ("vsync"); live-toggleable
     bool  clickThrough    = false;  // mouse input passes through to windows beneath ("clickThrough")
     bool  hideFromCapture = false;  // invisible to screen capture ("hideFromCapture"; Windows/macOS)
+    int   textureStreamMB = 0;      // T3 mip-streaming VRAM budget, MB ("textureStreamMB"; 0 = off)
 };
 
 // Engine-wide ray-tracing reflection quality, persisted to config/main.json ["raytracing"].

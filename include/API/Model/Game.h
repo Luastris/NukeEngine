@@ -86,6 +86,12 @@ public:
 	// behind it. Windows + macOS; X11/Wayland have no such protocol (ignored with a log).
 	[[nuke::func]] static void SetHideFromCapture(bool hide);
 
+	// T3 texture streaming: mip-pool VRAM budget in MB (0 = off). Live; persisted like the other
+	// window/config settings. Streamed textures keep a low-mip tail and stream detail by distance.
+	[[nuke::func]] static void SetTextureStreaming(double budgetMB);
+	// One stats line: "streamed=N resident=X.XMB full=Y.YMB saved=Z.ZMB" (probes/console).
+	[[nuke::func]] static std::string TextureStreamInfo();
+
 	[[nuke::func]] static int        WindowWidth();
 	[[nuke::func]] static int        WindowHeight();
 	[[nuke::func]] static WindowMode GetWindowMode();

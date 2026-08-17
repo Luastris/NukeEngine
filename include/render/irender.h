@@ -99,6 +99,7 @@ struct WindowDesc
     // ABI: cross-DLL struct — new fields are APPENDED at the END, never inserted mid-struct.
     bool  clickThrough    = false;  // mouse input passes through to the windows beneath (live)
     bool  hideFromCapture = false;  // invisible to screen capture/recording; the user still sees it (live)
+    int   textureStreamMB = 0;      // T3 mip-streaming VRAM budget in MB (0 = off; live via setTextureStreaming)
 };
 
 // One record per instance in an instance buffer. Rows are HLSL-ready: row_i dot (localPos, 1)
@@ -600,6 +601,13 @@ public:
     // shaders directory for the include machinery to find. Re-registering replaces; the RT
     // pipeline rebuilds with the shader's auto-generated closest-hit. ABI: appended.
     virtual void registerRTSurface(const char* shaderName, const char* surfHlsl) {}
+
+    // T3 texture streaming: VRAM budget for the mip pool in BYTES (0 disables; live). Streamed
+    // textures keep a low-mip tail resident and stream higher mips by camera distance.
+    virtual void setTextureStreaming(long long budgetBytes) {}
+    // Stats: bytes resident of streamed textures, bytes saved vs full residency, texture count.
+    virtual void textureStreamInfo(long long& residentBytes, long long& savedBytes, int& streamedCount)
+    { residentBytes = 0; savedBytes = 0; streamedCount = 0; }
 
     // ABI: new virtuals are appended at the END of the class, NEVER inserted mid-vtable —
     // plugins are separate DLLs built at different times, and an inserted slot shifts every later one.

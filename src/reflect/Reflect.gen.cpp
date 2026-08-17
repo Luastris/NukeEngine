@@ -685,6 +685,10 @@ bool NukeReflectInit() {
 		Reflect_SetMethodDoc("Game", "SetClickThrough", "", "through");
 		t.methods.push_back(MakeMethod("SetHideFromCapture", &Game::SetHideFromCapture));
 		Reflect_SetMethodDoc("Game", "SetHideFromCapture", "Invisible to screenshots/recorders — the user still sees the window, capture sees what is behind it. Windows + macOS; X11/Wayland have no such protocol (ignored with a log).", "hide");
+		t.methods.push_back(MakeMethod("SetTextureStreaming", &Game::SetTextureStreaming));
+		Reflect_SetMethodDoc("Game", "SetTextureStreaming", "T3 texture streaming: mip-pool VRAM budget in MB (0 = off). Live; persisted like the other window/config settings. Streamed textures keep a low-mip tail and stream detail by distance.", "budgetMB");
+		t.methods.push_back(MakeMethod("TextureStreamInfo", &Game::TextureStreamInfo));
+		Reflect_SetMethodDoc("Game", "TextureStreamInfo", "One stats line: \"streamed=N resident=X.XMB full=Y.YMB saved=Z.ZMB\" (probes/console).", "");
 		t.methods.push_back(MakeMethod("WindowWidth", &Game::WindowWidth));
 		t.methods.push_back(MakeMethod("WindowHeight", &Game::WindowHeight));
 		t.methods.push_back(MakeMethod("GetWindowMode", &Game::GetWindowMode));
