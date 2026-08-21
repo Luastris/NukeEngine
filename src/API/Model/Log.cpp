@@ -184,27 +184,36 @@ protected:
 	{
 		if (c == EOF) return orig_ ? orig_->pubsync() : 0;
 		if (orig_ && g_consoleEcho.load(std::memory_order_relaxed)) orig_->sputc((char)c);
-		if (c == '\n') { IngestLine(line_, err_); line_.clear(); }
-		else if (line_.size() < 4096) line_ += (char)c;
+		std::string& line = Line();
+		if (c == '\n') { IngestLine(line, err_); line.clear(); }
+		else if (line.size() < 4096) line += (char)c;
 		return c;
 	}
 	std::streamsize xsputn(const char* p, std::streamsize n) override
 	{
 		// One batched console write, then a separate scan to feed the ring line by line.
 		if (orig_ && g_consoleEcho.load(std::memory_order_relaxed)) orig_->sputn(p, n);
+		std::string& line = Line();
 		for (std::streamsize i = 0; i < n; ++i)
 		{
 			const char ch = p[i];
-			if (ch == '\n') { IngestLine(line_, err_); line_.clear(); }
-			else if (line_.size() < 4096) line_ += ch;
+			if (ch == '\n') { IngestLine(line, err_); line.clear(); }
+			else if (line.size() < 4096) line += ch;
 		}
 		return n;
 	}
 	int sync() override { return (orig_ && g_consoleEcho.load(std::memory_order_relaxed)) ? orig_->pubsync() : 0; }
 private:
+	// The line accumulator is PER THREAD: cout is written from the render thread (backend log
+	// callbacks) and the game thread at once, and a shared buffer raced — StripAnsi walked a
+	// string another thread was appending to. Lines interleave per thread, never corrupt.
+	std::string& Line()
+	{
+		static thread_local std::string lines[2];
+		return lines[err_ ? 1 : 0];
+	}
 	std::streambuf* orig_;
 	bool            err_;
-	std::string     line_;
 };
 
 void Log::CaptureStd()

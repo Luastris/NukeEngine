@@ -693,6 +693,11 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("DrawCalls", &Game::DrawCalls));
 		Reflect_SetMethodDoc("Game", "DrawCalls", "Last completed frame's render counters (probes/console).", "");
 		t.methods.push_back(MakeMethod("Triangles", &Game::Triangles));
+		t.methods.push_back(MakeMethod("OcclusionTracked", &Game::OcclusionTracked));
+		Reflect_SetMethodDoc("Game", "OcclusionTracked", "Hi-Z occlusion (R4): draws tagged / held back by the last camera; live on/off toggle.", "");
+		t.methods.push_back(MakeMethod("OcclusionCulled", &Game::OcclusionCulled));
+		t.methods.push_back(MakeMethod("SetOcclusionCulling", &Game::SetOcclusionCulling));
+		Reflect_SetMethodDoc("Game", "SetOcclusionCulling", "", "on");
 		t.methods.push_back(MakeMethod("WindowWidth", &Game::WindowWidth));
 		t.methods.push_back(MakeMethod("WindowHeight", &Game::WindowHeight));
 		t.methods.push_back(MakeMethod("GetWindowMode", &Game::GetWindowMode));

@@ -625,6 +625,20 @@ public:
     // the volume (a point p is visible when dot(n, p) + d >= 0 for all six).
     virtual void getFrustum(float planes[24]) { for (int i = 0; i < 24; ++i) planes[i] = 0; }
 
+    // Hi-Z occlusion culling (R4; abi 25). The engine tags an opaque draw with a stable id and
+    // its world AABB right before submitting it (one tag covers every section of that draw).
+    // The renderer draws ids its visibility history calls visible, defers the rest, and at
+    // endOpaque builds a depth pyramid from what was drawn, tests every tagged box on the GPU,
+    // draws the deferred survivors (indirect, same frame) and feeds the verdicts back into the
+    // history (readback, latency-hidden). Untagged draws are never culled.
+    virtual void setOcclusionId(uint64_t id, const float mn[3], const float mx[3]) {}
+    // End of the camera's opaque scope (before transparents): pyramid + test + deferred draws.
+    virtual void endOpaque() {}
+    // freeze = keep the last verdicts while the camera moves and draw the culled boxes (debug).
+    virtual void setOcclusionCulling(bool enable, bool freeze) {}
+    // Last completed camera: tagged draws, and how many the history held back.
+    virtual void getOcclusionStats(int& tracked, int& culled) { tracked = 0; culled = 0; }
+
     // ABI: new virtuals are appended at the END of the class, NEVER inserted mid-vtable —
     // plugins are separate DLLs built at different times, and an inserted slot shifts every later one.
 };

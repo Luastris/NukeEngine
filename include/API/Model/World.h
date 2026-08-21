@@ -36,6 +36,7 @@ public:
 		float shadowNormalBias = 0.0f;
 		float shadowSoftness   = 1.0f;    // PCF kernel scale
 		bool  frustumCull      = true;    // skip drawing objects outside the camera frustum (toggle)
+		bool  occlusionCull    = true;    // Hi-Z GPU occlusion over meshes + instanced chunks (R4)
 		// Physics (drives the fixed-step loop; pushed to the physics service).
 		float gravity[3] = { 0.0f, -9.81f, 0.0f };
 		float fixedDt    = 1.0f / 60.0f;  // fixed simulation timestep (seconds)

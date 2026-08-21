@@ -95,6 +95,10 @@ public:
 	// Last completed frame's render counters (probes/console).
 	[[nuke::func]] static double DrawCalls();
 	[[nuke::func]] static double Triangles();
+	// Hi-Z occlusion (R4): draws tagged / held back by the last camera; live on/off toggle.
+	[[nuke::func]] static double OcclusionTracked();
+	[[nuke::func]] static double OcclusionCulled();
+	[[nuke::func]] static void   SetOcclusionCulling(bool on);
 
 	[[nuke::func]] static int        WindowWidth();
 	[[nuke::func]] static int        WindowHeight();

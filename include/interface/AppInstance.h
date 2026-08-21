@@ -189,6 +189,10 @@ public:
 	// is over the game viewport or the game owns the cursor (hidden/locked) — so PIE clicks in
 	// the hierarchy/inspector/browser stop reaching gameplay.
 	bool gamePointerActive = true;
+
+	// Editor "freeze culling" debug view (abi 25 append): frustum + occlusion verdicts stay as
+	// they were when the flag went up while the camera moves — what was culled stays culled.
+	bool freezeCulling = false;
 };
 
 }  // namespace nuke

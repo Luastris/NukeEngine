@@ -1112,14 +1112,56 @@ static bool FrustumCull(const DrawItem& it, const float vp[16])
 	return oL == 8 || oR == 8 || oB == 8 || oT == 8 || oN == 8 || oF == 8;
 }
 
+// Editor "freeze culling": while frozen, every cull of a camera keeps the view*proj captured
+// on the first frozen frame, so moving the editor camera reveals what the culling removed.
+struct FrozenVP { float m[16]; };
+static std::map<Camera*, FrozenVP> s_frozenVP;
+static Camera* s_cullCam = nullptr;     // camera whose passes are being culled right now
+static bool    s_cullFrozen = false;
+
 // Combined view*proj for the current camera; the renderer's matrices are row-major.
 static void CameraVP(iRender* r, float vp[16])
 {
+	if (s_cullFrozen && s_cullCam)
+	{
+		auto it = s_frozenVP.find(s_cullCam);
+		if (it != s_frozenVP.end()) { memcpy(vp, it->second.m, sizeof(float) * 16); return; }
+	}
 	float view[16], proj[16];
 	r->getViewProj(view, proj);
 	for (int i = 0; i < 4; ++i)
 		for (int j = 0; j < 4; ++j)
 		{ float s = 0; for (int k = 0; k < 4; ++k) s += view[i*4+k] * proj[k*4+j]; vp[i*4+j] = s; }
+	if (s_cullFrozen && s_cullCam) memcpy(s_frozenVP[s_cullCam].m, vp, sizeof(float) * 16);
+}
+
+// World-space AABB of a draw item (its mesh bounds through the atom transform) for the Hi-Z
+// occlusion tag. False when the mesh has no bounds (such draws are never culled).
+static bool WorldBounds(const DrawItem& it, float wmn[3], float wmx[3])
+{
+	if (!it.mesh) return false;
+	it.mesh->EnsureBounds();
+	if (!it.mesh->boundsValid) return false;
+	const float* mn = it.mesh->aabbMin; const float* mx = it.mesh->aabbMax;
+	glm::quat Q(it.quat[3], it.quat[0], it.quat[1], it.quat[2]);
+	glm::vec3 P(it.pos[0], it.pos[1], it.pos[2]), S(it.scale[0], it.scale[1], it.scale[2]);
+	wmn[0] = wmn[1] = wmn[2] = 1e30f; wmx[0] = wmx[1] = wmx[2] = -1e30f;
+	for (int c = 0; c < 8; ++c)
+	{
+		glm::vec3 lc((c & 1) ? mx[0] : mn[0], (c & 2) ? mx[1] : mn[1], (c & 4) ? mx[2] : mn[2]);
+		glm::vec3 w = P + Q * (lc * S);
+		wmn[0] = std::min(wmn[0], w.x); wmn[1] = std::min(wmn[1], w.y); wmn[2] = std::min(wmn[2], w.z);
+		wmx[0] = std::max(wmx[0], w.x); wmx[1] = std::max(wmx[1], w.y); wmx[2] = std::max(wmx[2], w.z);
+	}
+	return true;
+}
+
+// Stable occlusion id of an instanced chunk: the component's id mixed with the chunk index.
+static uint64_t ChunkOcclId(const InstancedMesh* im, size_t chunk)
+{
+	uint64_t h = 1469598103934665603ull ^ (uint64_t)im->id.id;
+	h *= 1099511628211ull; h ^= (uint64_t)chunk + 1; h *= 1099511628211ull;
+	return h ? h : 1;
 }
 
 // --- GPU instancing: InstancedMesh components draw as chunked instanced ranges ---
@@ -1156,7 +1198,7 @@ static bool CullAABB(const float mn[3], const float mx[3], const float vp[16])
 }
 
 // Camera pass: every visible chunk of every InstancedMesh becomes one instanced draw call.
-static void DrawInstancedMeshes(std::vector<InstancedMesh*>& ims, iRender* r, bool cull)
+static void DrawInstancedMeshes(std::vector<InstancedMesh*>& ims, iRender* r, bool cull, bool occl = false)
 {
 	if (ims.empty()) return;
 	float vp[16]; if (cull) CameraVP(r, vp);
@@ -1166,9 +1208,13 @@ static void DrawInstancedMeshes(std::vector<InstancedMesh*>& ims, iRender* r, bo
 		// Overlay context for the whole set: the source atom's condition values + painted mask
 		// (the CB keeps the patched values across the chunks; the renderer clears the flag).
 		if (im->mat && im->mat->liveOvCount > 0) Surface::PushDrawContext(im->atom, im->mat);
-		for (const InstancedMesh::Chunk& c : im->chunks)
-			if (!(cull && CullAABB(c.mn, c.mx, vp)))
-				r->renderObjectInstanced(im->mesh, im->mat, im->gpuBuf, c.first, c.count);
+		for (size_t ci = 0; ci < im->chunks.size(); ++ci)
+		{
+			const InstancedMesh::Chunk& c = im->chunks[ci];
+			if (cull && CullAABB(c.mn, c.mx, vp)) continue;
+			if (occl) r->setOcclusionId(ChunkOcclId(im, ci), c.mn, c.mx);   // Hi-Z: one tag per chunk
+			r->renderObjectInstanced(im->mesh, im->mat, im->gpuBuf, c.first, c.count);
+		}
 	}
 }
 
@@ -1241,15 +1287,19 @@ static void DrawGBuffer(std::vector<DrawItem>& items, iRender* r, bool cull)
 // Draws the OPAQUE part of a gathered scene. The transparent part runs as its own pass
 // (DrawCollectedTransparent) AFTER every opaque draw — instanced sets included — so the
 // refraction snapshot sees the whole opaque scene and nothing opaque lands over glass.
-static void DrawCollected(std::vector<DrawItem>& items, const Vector3& camPos, iRender* r, bool cull)
+static void DrawCollected(std::vector<DrawItem>& items, const Vector3& camPos, iRender* r, bool cull, bool occl = false)
 {
 	float vp[16]; if (cull) CameraVP(r, vp);
 	for (auto& it : items)
 		if (it.anyOpaque && !(cull && FrustumCull(it, vp)))
 		{
 			PushLiveContext(it);
+			// Hi-Z occlusion tag: the atom's id + world bounds, one tag for the whole object.
+			float wmn[3], wmx[3];
+			if (occl && it.atom && WorldBounds(it, wmn, wmx)) r->setOcclusionId((uint64_t)it.atom->id.id, wmn, wmx);
 			if (it.matCount > 1) r->renderObjectMulti(it.mesh, it.mats, it.matCount, it.pos, it.quat, it.scale, 0);
 			else if (it.blend == 0) r->renderObject(it.mesh, it.mat, it.pos, it.quat, it.scale);
+			else r->setOcclusionId(0, wmn, wmx);   // nothing submitted: disarm
 		}
 }
 
@@ -2451,6 +2501,12 @@ void World::Render(iRender* r)
 	else { float z[3] = { 0, 0, 0 }; r->setReflectionProbe(0, z, 0.0f, 0.0f, z); }
 
 	const bool editor = AppInstance::GetSingleton()->isEditor();
+	// Culling debug freeze (editor toolbar) + the renderer's occlusion state for this world's
+	// cameras. Auxiliary worlds (previews) never take part.
+	s_cullFrozen = !auxiliary && AppInstance::GetSingleton()->freezeCulling;
+	if (!s_cullFrozen) s_frozenVP.clear();
+	r->setOcclusionCulling(settings.occlusionCull && !auxiliary, s_cullFrozen);
+
 	for (Camera* cam : cams)
 	{
 		Profiler::Scope pr("rnd.cameras");
@@ -2550,6 +2606,9 @@ void World::Render(iRender* r)
 
 		// This camera renders only atoms whose layer bit is set.
 		const unsigned int camMask = (unsigned int)cam->layerMask;
+		// Culling context for this camera's passes (frozen view*proj + occlusion tagging).
+		s_cullCam = cam;
+		const bool occl = settings.occlusionCull && !auxiliary;
 
 		// Decals reconstruct surfaces from the depth prepass, so their presence also forces it.
 		std::vector<Decal*> decals;
@@ -2580,11 +2639,13 @@ void World::Render(iRender* r)
 		{
 			std::vector<DrawItem> items;
 			{ Profiler::Scope ps("rnd.cam.collect"); CollectMeshes(*hierarchy, items, camMask); }
-			{ Profiler::Scope ps("rnd.cam.opaque"); DrawCollected(items, cp, r, settings.frustumCull); }
-			{ Profiler::Scope ps("rnd.cam.inst");   DrawInstancedMeshes(camInstSets, r, settings.frustumCull); }
+			{ Profiler::Scope ps("rnd.cam.opaque"); DrawCollected(items, cp, r, settings.frustumCull, occl); }
+			{ Profiler::Scope ps("rnd.cam.inst");   DrawInstancedMeshes(camInstSets, r, settings.frustumCull, occl); }
 			{ Profiler::Scope ps("rnd.cam.hooks");  DrawComponentHooks(*hierarchy, r, RenderPhase::Opaque, camMask); }
 			// World Partition: baked HLOD proxies stand in for unloaded far cells.
 			if (stream) { Profiler::Scope ps("rnd.cam.hlod"); stream->Render(this, r); }
+			// Opaque scope closed: Hi-Z pyramid, GPU box test, deferred survivors (R4).
+			{ Profiler::Scope ps("rnd.cam.occl"); r->endOpaque(); }
 			// Transparent AFTER every opaque draw: the refraction snapshot must hold the whole
 			// opaque scene (foliage included), and nothing opaque may land over glass.
 			{ Profiler::Scope ps("rnd.cam.blend");  DrawCollectedTransparent(items, cp, r, settings.frustumCull); }
@@ -3142,6 +3203,7 @@ std::string World::SaveToString()
 		{"shadowRes", settings.shadowRes}, {"shadowDistance", settings.shadowDistance},
 		{"shadowDepthBias", settings.shadowDepthBias}, {"shadowNormalBias", settings.shadowNormalBias},
 		{"shadowSoftness", settings.shadowSoftness}, {"frustumCull", settings.frustumCull},
+		{"occlusionCull", settings.occlusionCull},
 		{"gravity", { settings.gravity[0], settings.gravity[1], settings.gravity[2] }},
 		{"fixedDt", settings.fixedDt} };
 	if (settings.streamEnabled)
@@ -3667,6 +3729,7 @@ void World::LoadHeaderFromJson(const json& j)
 		settings.shadowNormalBias = s.value("shadowNormalBias", settings.shadowNormalBias);
 		settings.shadowSoftness   = s.value("shadowSoftness", settings.shadowSoftness);
 		settings.frustumCull      = s.value("frustumCull", settings.frustumCull);
+		settings.occlusionCull    = s.value("occlusionCull", settings.occlusionCull);
 		if (s.contains("gravity") && s["gravity"].is_array() && s["gravity"].size() == 3)
 			for (int i = 0; i < 3; ++i) settings.gravity[i] = s["gravity"][i].get<float>();
 		settings.fixedDt = s.value("fixedDt", settings.fixedDt);

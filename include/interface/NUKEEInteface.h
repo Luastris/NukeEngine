@@ -61,7 +61,9 @@ extern "C" { NUKE_ABI_STAMP int nuke_module_abi = NUKE_MODULE_ABI; }
 //  22 — iPhysics gained cookMeshShape/freeCookedBlob/createBodyFromCooked/activateBodies
 //  23 — Mesh gained `pooled`; iRender gained renderObjectRange + getFrustum (cluster cull)
 //  24 — Shader gained hs/ds sources; iRender gained createShaderPipelineTess
-#define NUKE_ENGINE_ABI 24
+//  25 — iRender gained the Hi-Z occlusion seams (setOcclusionId/endOpaque/setOcclusionCulling/
+//       getOcclusionStats); World::Settings gained occlusionCull; AppInstance gained freezeCulling
+#define NUKE_ENGINE_ABI 25
 extern "C" { NUKE_ABI_STAMP int nuke_engine_abi = NUKE_ENGINE_ABI; }
 
 namespace nuke {

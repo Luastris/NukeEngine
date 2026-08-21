@@ -232,6 +232,25 @@ double Game::Triangles()
 	return (double)tris;
 }
 
+double Game::OcclusionTracked()
+{
+	int tracked = 0, culled = 0;
+	if (iRender* r = AppInstance::GetSingleton()->render) r->getOcclusionStats(tracked, culled);
+	return (double)tracked;
+}
+
+double Game::OcclusionCulled()
+{
+	int tracked = 0, culled = 0;
+	if (iRender* r = AppInstance::GetSingleton()->render) r->getOcclusionStats(tracked, culled);
+	return (double)culled;
+}
+
+void Game::SetOcclusionCulling(bool on)
+{
+	if (World* w = AppInstance::GetSingleton()->currentWorld) w->settings.occlusionCull = on;
+}
+
 void Game::SetAlwaysOnTop(bool onTop)
 {
 	Config::getSingleton()->window.floating = onTop;
