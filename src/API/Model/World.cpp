@@ -2023,14 +2023,14 @@ void World::Render(iRender* r)
 			const double gShadow = Profiler::Ms("gpu.shadow"), gScene = Profiler::Ms("gpu.scene");
 			const double gPost = Profiler::Ms("gpu.post"), gTone = Profiler::Ms("gpu.tonemap");
 			const double gUI = Profiler::Ms("gpu.ui");
+			// Short on purpose — the status bar is one line; the breakdown is one click away.
 			if (gShadow + gScene + gPost + gTone + gUI > 0.0)
-				snprintf(buf, sizeof(buf),
-				         "upd %.2f | fix %.2f | rnd %.2f ms   GPU: shadow %.2f | scene %.2f | post %.2f | tone %.2f | ui %.2f ms",
-				         Profiler::Ms("update"), Profiler::Ms("fixed"), Profiler::Ms("render"),
-				         gShadow, gScene, gPost, gTone, gUI);
+				snprintf(buf, sizeof(buf), "cpu %.1f | gpu %.1f ms",
+				         Profiler::Ms("update") + Profiler::Ms("fixed") + Profiler::Ms("render"),
+				         gShadow + gScene + gPost + gTone + gUI);
 			else
-				snprintf(buf, sizeof(buf), "upd %.2f | fix %.2f | rnd %.2f ms",
-				         Profiler::Ms("update"), Profiler::Ms("fixed"), Profiler::Ms("render"));
+				snprintf(buf, sizeof(buf), "cpu %.1f ms",
+				         Profiler::Ms("update") + Profiler::Ms("fixed") + Profiler::Ms("render"));
 			StatusBar::Set("profiler", buf);
 			// A frame this slow is a bug, not a workload: print WHERE it went, at most twice a
 			// second, so the breakdown is in the log without anyone hunting for a profiler.
@@ -3876,6 +3876,7 @@ void World::SaveToFile(const std::string& path)
 	boost::filesystem::ofstream f(p);
 	if (f) f << SaveToString();
 	std::cout << "[World]\t\t\t" << "Saved to " << path << std::endl;
+	StatusBar::Message("save", "Saved to " + path, 50, 4.0);
 }
 
 void World::SaveToFileSplit(const std::string& path)
@@ -3958,6 +3959,7 @@ void World::SaveToFileSplit(const std::string& path)
 	BakeStreamHlod(cellAtoms, (cellsAbs / "hlod.bin").string());
 	std::cout << "[World]\t\t\t" << "Saved streamed world to " << path << ": "
 	          << mainAtoms.size() << " main + " << cellAtoms.size() << " cells -> " << cellsRel << std::endl;
+	StatusBar::Message("save", "Saved to " + path + " (" + std::to_string(cellAtoms.size()) + " cells)", 50, 4.0);
 }
 
 void World::LoadFromFile(const std::string& path)

@@ -24,6 +24,7 @@ struct LogEntry
 	int         line  = 0;
 	int         count = 1;    // consecutive identical messages collapse into one entry
 	uint64_t    id    = 0;    // monotonic (stable ImGui ids across collapses)
+	double      time  = 0.0;  // seconds since process start (Log::Uptime at write)
 };
 
 class NUKEENGINE_API Log
@@ -48,6 +49,9 @@ public:
 
 	static uint64_t Version();                   // bumps on every append (cheap change check)
 	static std::vector<LogEntry> Snapshot();     // copy of the ring, oldest first
+	// Seconds since the PROCESS started (creation time on Windows), millisecond resolution —
+	// the stamp every console line and ring entry carries.
+	[[nuke::func]] static double Uptime();
 	static void Clear();
 	static void Counts(int& info, int& warn, int& error);   // totals currently in the ring
 };

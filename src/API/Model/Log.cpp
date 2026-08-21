@@ -1,16 +1,49 @@
 #include "API/Model/Log.h"
 #include <atomic>
+#include <boost/chrono.hpp>
 #include <boost/thread/mutex.hpp>
 #include <cctype>
+#include <cstdio>
 #include <cstring>
 #include <deque>
 #include <iostream>
 #include <streambuf>
+#ifdef _WIN32
+#  ifndef WIN32_LEAN_AND_MEAN
+#    define WIN32_LEAN_AND_MEAN
+#  endif
+#  ifndef NOMINMAX
+#    define NOMINMAX
+#  endif
+#  include <windows.h>
+#endif
 
 namespace nuke {
 
 static std::atomic<bool> g_consoleEcho{true};   // echo to the OS console; read on the hot path
 static bool              g_captured = false;   // CaptureStd installed the tee (editor)
+
+// Seconds since the process was created: the kernel's creation stamp on Windows (counts the
+// loader + static init too), the first call's steady clock elsewhere.
+double Log::Uptime()
+{
+#ifdef _WIN32
+	static const long long t0 = []() -> long long
+	{
+		FILETIME c, e, k, u;
+		if (GetProcessTimes(GetCurrentProcess(), &c, &e, &k, &u))
+			return ((long long)c.dwHighDateTime << 32) | c.dwLowDateTime;
+		FILETIME now; GetSystemTimeAsFileTime(&now);
+		return ((long long)now.dwHighDateTime << 32) | now.dwLowDateTime;
+	}();
+	FILETIME now; GetSystemTimeAsFileTime(&now);
+	const long long t = ((long long)now.dwHighDateTime << 32) | now.dwLowDateTime;
+	return (double)(t - t0) * 1e-7;   // 100ns ticks
+#else
+	static const boost::chrono::steady_clock::time_point t0 = boost::chrono::steady_clock::now();
+	return boost::chrono::duration<double>(boost::chrono::steady_clock::now() - t0).count();
+#endif
+}
 
 // ---- the ring ---------------------------------------------------------------------------------
 
@@ -38,6 +71,7 @@ void Log::Write(LogLevel level, const std::string& tag, const std::string& text,
 	LogEntry e;
 	e.level = level; e.tag = tag; e.text = text; e.file = file; e.line = line;
 	e.id = gNextId++;
+	e.time = Uptime();
 	gRing.push_back(std::move(e));
 	++gCount[level];
 	if (gRing.size() > kMaxEntries)
@@ -183,23 +217,32 @@ protected:
 	int overflow(int c) override
 	{
 		if (c == EOF) return orig_ ? orig_->pubsync() : 0;
-		if (orig_ && g_consoleEcho.load(std::memory_order_relaxed)) orig_->sputc((char)c);
+		const bool echo = orig_ && g_consoleEcho.load(std::memory_order_relaxed);
 		std::string& line = Line();
+		if (echo) { if (line.empty() && c != '\n') Stamp(); orig_->sputc((char)c); }
 		if (c == '\n') { IngestLine(line, err_); line.clear(); }
 		else if (line.size() < 4096) line += (char)c;
 		return c;
 	}
 	std::streamsize xsputn(const char* p, std::streamsize n) override
 	{
-		// One batched console write, then a separate scan to feed the ring line by line.
-		if (orig_ && g_consoleEcho.load(std::memory_order_relaxed)) orig_->sputn(p, n);
+		// Console write in line-sized pieces (each line start gets its uptime stamp), then the
+		// same scan feeds the ring line by line.
+		const bool echo = orig_ && g_consoleEcho.load(std::memory_order_relaxed);
 		std::string& line = Line();
+		std::streamsize from = 0;
 		for (std::streamsize i = 0; i < n; ++i)
 		{
 			const char ch = p[i];
-			if (ch == '\n') { IngestLine(line, err_); line.clear(); }
+			if (echo && line.empty() && ch != '\n') Stamp();
+			if (ch == '\n')
+			{
+				if (echo) { orig_->sputn(p + from, i + 1 - from); from = i + 1; }
+				IngestLine(line, err_); line.clear();
+			}
 			else if (line.size() < 4096) line += ch;
 		}
+		if (echo && from < n) orig_->sputn(p + from, n - from);
 		return n;
 	}
 	int sync() override { return (orig_ && g_consoleEcho.load(std::memory_order_relaxed)) ? orig_->pubsync() : 0; }
@@ -211,6 +254,13 @@ private:
 	{
 		static thread_local std::string lines[2];
 		return lines[err_ ? 1 : 0];
+	}
+	// "[  12.345] " — seconds since process start, at the start of every console line.
+	void Stamp()
+	{
+		char b[24];
+		const int n = std::snprintf(b, sizeof(b), "[%8.3f] ", Log::Uptime());
+		if (n > 0) orig_->sputn(b, n);
 	}
 	std::streambuf* orig_;
 	bool            err_;

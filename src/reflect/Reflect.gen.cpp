@@ -776,6 +776,8 @@ bool NukeReflectInit() {
 		Reflect_SetMethodDoc("Log", "Warn", "", "tag,text");
 		t.methods.push_back(MakeMethod("Error", &Log::Error));
 		Reflect_SetMethodDoc("Log", "Error", "", "tag,text");
+		t.methods.push_back(MakeMethod("Uptime", &Log::Uptime));
+		Reflect_SetMethodDoc("Log", "Uptime", "Seconds since the PROCESS started (creation time on Windows), millisecond resolution — the stamp every console line and ring entry carries.", "");
 	}
 	{
 		TypeInfo& t = TypeOf<Material>();

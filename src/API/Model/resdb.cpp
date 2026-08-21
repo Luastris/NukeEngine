@@ -284,7 +284,8 @@ static bool RendererInternalShader(const std::string& name)
 	    || name == "skin"                                                  // GPU skinning compute (stage 3)
 	    || name == "grid"                                                  // analytic editor grid pass
 	    || name == "gbuffer"                                               // SSR/TAA prepass
-	    || name.rfind("hiz", 0) == 0 || name == "occl";                    // Hi-Z occlusion (R4)
+	    || name.rfind("hiz", 0) == 0 || name == "occl"                     // Hi-Z occlusion (R4)
+	    || name == "boot";                                                 // startup stand-in world shading
 }
 
 void ResDB::LoadShadersDir(const std::string& dir)
