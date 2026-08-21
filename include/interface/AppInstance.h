@@ -183,6 +183,12 @@ public:
 	boost::function<void(const std::string& label,
 	                     boost::function<void()> undo,
 	                     boost::function<void()> redo)> editorUndoHook;
+
+	// Whether game input may consume POINTER events this frame (abi 20 append). The player
+	// never touches it (always true); the editor sets it per frame — true only while the mouse
+	// is over the game viewport or the game owns the cursor (hidden/locked) — so PIE clicks in
+	// the hierarchy/inspector/browser stop reaching gameplay.
+	bool gamePointerActive = true;
 };
 
 }  // namespace nuke

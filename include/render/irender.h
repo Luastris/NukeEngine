@@ -609,6 +609,22 @@ public:
     virtual void textureStreamInfo(long long& residentBytes, long long& savedBytes, int& streamedCount)
     { residentBytes = 0; savedBytes = 0; streamedCount = 0; }
 
+    // Custom tessellation stages (abi 24): a world pipeline whose shader ships its OWN hull +
+    // domain sources (terrain splat displacement — the shared world.hs/ds pair knows nothing
+    // about vertex colors or per-layer heights). Falls back to the plain pipeline.
+    virtual uint64_t createShaderPipelineTess(const char* name, const char* vs, const char* ps,
+                                              const char* hs, const char* ds)
+    { return createShaderPipeline(name, vs, ps); }
+
+    // Terrain cluster culling (TB-5; abi 23) — draw ONE index range of an indexed mesh with
+    // the full material pipeline (same contract as renderObject otherwise).
+    virtual void renderObjectRange(Mesh* mesh, Material* mat,
+                                   const float pos[3], const float quat[4], const float scale[3],
+                                   uint32_t firstIndex, uint32_t indexCount) {}
+    // Current camera frustum: 6 world-space planes x (nx, ny, nz, d), normals pointing INTO
+    // the volume (a point p is visible when dot(n, p) + d >= 0 for all six).
+    virtual void getFrustum(float planes[24]) { for (int i = 0; i < 24; ++i) planes[i] = 0; }
+
     // ABI: new virtuals are appended at the END of the class, NEVER inserted mid-vtable —
     // plugins are separate DLLs built at different times, and an inserted slot shifts every later one.
 };

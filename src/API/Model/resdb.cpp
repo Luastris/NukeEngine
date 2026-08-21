@@ -207,7 +207,9 @@ void ResDB::BuildShaderPipelines(iRender* r)
 		if (s && s->rendererHandle == 0)
 		{
 			s->rendererHandle = s->isPost ? r->createPostPipeline(s->name.c_str(), s->psSource.c_str())
-			                              : r->createShaderPipeline(s->name.c_str(), s->vsSource.c_str(), s->psSource.c_str());
+			                              : (!s->hsSource.empty() && !s->dsSource.empty()
+			                                 ? r->createShaderPipelineTess(s->name.c_str(), s->vsSource.c_str(), s->psSource.c_str(), s->hsSource.c_str(), s->dsSource.c_str())
+			                                 : r->createShaderPipeline(s->name.c_str(), s->vsSource.c_str(), s->psSource.c_str()));
 			std::cout << "[ResDB]\t" << (s->isPost ? "post" : "shader") << " pipeline '" << s->name
 			          << "' -> handle " << s->rendererHandle << std::endl;
 		}
@@ -222,7 +224,9 @@ int ResDB::BuildShaderPipelinesStep(iRender* r, int maxCount)
 		if (!s || s->rendererHandle != 0) continue;
 		if (built >= maxCount) { ++left; continue; }
 		s->rendererHandle = s->isPost ? r->createPostPipeline(s->name.c_str(), s->psSource.c_str())
-		                              : r->createShaderPipeline(s->name.c_str(), s->vsSource.c_str(), s->psSource.c_str());
+		                              : (!s->hsSource.empty() && !s->dsSource.empty()
+			                                 ? r->createShaderPipelineTess(s->name.c_str(), s->vsSource.c_str(), s->psSource.c_str(), s->hsSource.c_str(), s->dsSource.c_str())
+			                                 : r->createShaderPipeline(s->name.c_str(), s->vsSource.c_str(), s->psSource.c_str()));
 		std::cout << "[ResDB]\t" << (s->isPost ? "post" : "shader") << " pipeline '" << s->name
 		          << "' -> handle " << s->rendererHandle << std::endl;
 		++built;   // count failures too, so a broken shader can't spin the caller forever
@@ -263,7 +267,9 @@ void ResDB::HotReloadShaders(iRender* r)
 		s->props    = fresh->props;    // re-parsed MatCB params (a prop may have been added/removed)
 		s->includeProps = fresh->includeProps;
 		delete fresh;
-		uint64_t h = r->createShaderPipeline(s->name.c_str(), s->vsSource.c_str(), s->psSource.c_str());
+		uint64_t h = (!s->hsSource.empty() && !s->dsSource.empty()
+			                                 ? r->createShaderPipelineTess(s->name.c_str(), s->vsSource.c_str(), s->psSource.c_str(), s->hsSource.c_str(), s->dsSource.c_str())
+			                                 : r->createShaderPipeline(s->name.c_str(), s->vsSource.c_str(), s->psSource.c_str()));
 		if (h) { s->rendererHandle = h; std::cout << "[ResDB]\thot-reloaded shader '" << s->name << "' -> handle " << h << std::endl; }
 	}
 }

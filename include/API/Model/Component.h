@@ -18,7 +18,10 @@ struct TypeInfo;   // reflection
 // Phases the scene-render hook fires during a camera pass (see World::Render); the camera's
 // view/proj is already bound. RTScene fires between beginRTScene/buildRTScene, when RT is
 // available. APPEND-ONLY enum: modules compiled against the old set must keep their values.
-enum class RenderPhase { Opaque = 0, Transparent = 1, Overlay = 2, RTScene = 3 };
+// GBuffer fires inside the depth/normal prepass: hook components that draw world geometry
+// (terrain...) must submit it there too via renderGBufferObject, or screen-space effects that
+// reconstruct surfaces from the prepass (decals, SSR) cannot land on them.
+enum class RenderPhase { Opaque = 0, Transparent = 1, Overlay = 2, RTScene = 3, GBuffer = 4 };
 
 // A dynamic, per-instance property value (e.g. a script's exported var). Pure data.
 // AtomRef references a live atom by STABLE id (never a name), so serialization travels by id.
@@ -98,6 +101,11 @@ public:
 	// lives outside the props re-encode it here. Keep it cheap; runs on every world save.
 	// ABI: appended at the END of the vtable.
 	virtual void OnBeforeSave() {}
+
+	// World streaming: a component whose FOOTPRINT spans far beyond its root position (terrain,
+	// managers) returns true — the atom never streams out by root-cell membership.
+	// ABI: appended at the END of the vtable (engine abi 21).
+	virtual bool StreamGlobal() const { return false; }
 
 	// Derived/generated component (e.g. LiveMaterial auto-foliage): never serialized with the
 	// world or prefabs — its owner recreates it. ABI: data appended at the END (engine abi 18).

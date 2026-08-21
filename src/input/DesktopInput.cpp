@@ -1,5 +1,6 @@
 #include "input/DesktopInput.h"
 #include "input/Input.h"
+#include "interface/AppInstance.h"
 #include "render/irender.h"
 #include <string>
 #include <unordered_map>
@@ -54,7 +55,11 @@ void InstallDesktopInput(iRender* r)
 	};
 	r->_UImouse = [prevMouse](int button, int state, int x, int y) {
 		const char* name = button == 0 ? "Mouse.Left" : button == 1 ? "Mouse.Right" : button == 2 ? "Mouse.Middle" : nullptr;
-		if (name) Input::SetControl(name, state != 0 ? 1.0f : 0.0f);
+		// Presses respect the host's pointer gate (editor: only over the game view); releases
+		// always pass so a press that DID reach the game can never leave the button stuck.
+		AppInstance* app = AppInstance::GetSingleton();
+		if (name && (state == 0 || !app || app->gamePointerActive))
+			Input::SetControl(name, state != 0 ? 1.0f : 0.0f);
 		s_mx = x; s_my = y;
 		if (prevMouse) prevMouse(button, state, x, y);
 	};
@@ -65,7 +70,8 @@ void InstallDesktopInput(iRender* r)
 		if (prevMove) prevMove(x, y);
 	};
 	r->_UImouseWheel = [prevWheel](int button, int dir, int x, int y) {
-		s_scroll += dir;
+		AppInstance* app = AppInstance::GetSingleton();
+		if (!app || app->gamePointerActive) s_scroll += dir;
 		if (prevWheel) prevWheel(button, dir, x, y);
 	};
 

@@ -203,6 +203,21 @@ public:
 	virtual void setJointMotor(uint64_t joint, bool enabled, float frequency, float damping) = 0;
 	// Target rotation of bodyB in bodyA's local frame (x,y,z,w).
 	virtual void setJointTarget(uint64_t joint, const float localQuat[4]) = 0;
+
+	// ---- serialized collision shapes (terrain bake) — ABI: appended at the END --------------
+	// Cook a static triangle soup (3 floats per vertex, 3 vertices per triangle) into the
+	// backend's serialized shape blob. The buffer lives until freeCookedBlob. Blobs are backend-
+	// AND version-specific — a failed restore means "re-cook from source", never an error.
+	// Thread-safe (no world access): bake jobs cook off the game thread.
+	virtual bool cookMeshShape(const float* verts, int vertCount, void** outBlob, int* outSize) = 0;
+	virtual void freeCookedBlob(void* blob) = 0;
+	// Create a STATIC body from a cooked blob at a world pose — pure deserialization, no
+	// triangle processing. Returns 0 when the blob doesn't match the backend/version.
+	virtual uint64_t createBodyFromCooked(const void* blob, int size, const float pos[3],
+	                                      const float quat[4], float friction, float restitution) = 0;
+	// Wake every sleeping body intersecting the world AABB. Terrain edits pull the ground from
+	// under SLEEPING bodies — without a wake they keep floating on the removed surface.
+	virtual void activateBodies(const float mn[3], const float mx[3]) = 0;
 };
 
 }  // namespace nuke

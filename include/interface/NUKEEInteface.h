@@ -51,7 +51,17 @@ extern "C" { NUKE_ABI_STAMP int nuke_module_abi = NUKE_MODULE_ABI; }
 //       vtables have NO per-call guard, so growing one is a layout break like any other.
 //  13 — WindowDesc/NukeWindow gained clickThrough + hideFromCapture (overlay window flags)
 //  14 — reflection Field gained `net` ([[nuke::prop(net)]] replicated-field tag for NukeNet)
-#define NUKE_ENGINE_ABI 19   // 19: T2 World Partition — Atom.alwaysLoaded + World stream settings/WorldStream* (appended)
+//  15 — Atom gained `folder`; AppInstance gained selectedExtra + editor snap settings
+//  16 — AppInstance gained the viewport TOOL FEED block (cursor ray/stroke for module tools)
+//  17 — Material gained the LiveMaterial sections (LiveState/twins/responses)
+//  18 — Component gained `transient` (derived, never serialized); Material BRDF prop block
+//  19 — Atom gained `alwaysLoaded` (world streaming pin)
+//  20 — AppInstance gained the game pointer-consume append (player input vs editor UI)
+//  21 — Component vtable gained StreamGlobal() (footprint components never stream out)
+//  22 — iPhysics gained cookMeshShape/freeCookedBlob/createBodyFromCooked/activateBodies
+//  23 — Mesh gained `pooled`; iRender gained renderObjectRange + getFrustum (cluster cull)
+//  24 — Shader gained hs/ds sources; iRender gained createShaderPipelineTess
+#define NUKE_ENGINE_ABI 24
 extern "C" { NUKE_ABI_STAMP int nuke_engine_abi = NUKE_ENGINE_ABI; }
 
 namespace nuke {

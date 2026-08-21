@@ -92,6 +92,10 @@ public:
 	// One stats line: "streamed=N resident=X.XMB full=Y.YMB saved=Z.ZMB" (probes/console).
 	[[nuke::func]] static std::string TextureStreamInfo();
 
+	// Last completed frame's render counters (probes/console).
+	[[nuke::func]] static double DrawCalls();
+	[[nuke::func]] static double Triangles();
+
 	[[nuke::func]] static int        WindowWidth();
 	[[nuke::func]] static int        WindowHeight();
 	[[nuke::func]] static WindowMode GetWindowMode();

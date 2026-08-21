@@ -37,6 +37,11 @@ struct NUKEENGINE_API LiveState
 	float feather   = 0.25f;           // blend width past the threshold
 	float topOnly   = 0.0f;            // 0 = uniform, 1 = up-facing surfaces only (snow/dust settle)
 	float displace  = 0.0f;            // displacement contribution at full state (world units)
+	// Spatial shaping (terrain today): states never blanket the world uniformly.
+	float hMin = 0.0f, hMax = 0.0f;    // world-Y band the state lives in (hMax <= hMin = whole range)
+	float hFeather = 8.0f;             // band edge softness (world units) — the snowline fades
+	float windward = 0.0f;             // wind-facing bias: >0 = leeward slopes first, <0 = windward; 0 = off
+	std::string couple;                // weight rides ANOTHER state's local weight (mud couples to wet)
 	Texture* albedo = nullptr;         // runtime-resolved (Resolve())
 	Texture* normal = nullptr;
 	Texture* mrTex  = nullptr;
@@ -299,6 +304,10 @@ public:
     // Custom shader-parameter values, keyed by the param name from the shader's MatCB (Shader::props).
     // Only meaningful on a material INSTANCE; the shared asset leaves this empty.
     std::map<std::string, std::array<float, 4>> props;
+
+    // Generic named shader TEXTURES (runtime-only, not serialized): bound by variable name on
+    // pipes whose shader declares a matching g_Layer* SRV (terrain palette normal/MR maps etc.).
+    std::vector<std::pair<std::string, Texture*>> extraTex;
 
     // ---- LiveMaterial (optional; see the section structs above) ----
     std::vector<LiveState> liveStates;    // condition responses (wet/snow/dust/rust/...)

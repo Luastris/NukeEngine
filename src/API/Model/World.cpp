@@ -37,6 +37,7 @@
 #include "API/Model/WorldStream.h"
 #include "interface/Services.h"
 #include "service/iPhysics.h"
+#include "API/Model/Physics.h"
 #include "service/iAudio.h"
 #include "API/Model/Audio.h"
 #include "API/Model/AudioListener.h"
@@ -221,12 +222,24 @@ static void PickRec(bc::list<Atom*>& gos, const glm::vec3& ro, const glm::vec3& 
 	}
 }
 
+// Module world-pickers: hook geometry (terrain...) has no MeshRenderer, so modules register
+// their own ray tests here and compete with the mesh pick by distance.
+static std::vector<WorldPickFn>& PickersVec() { static std::vector<WorldPickFn> v; return v; }
+void RegisterWorldPicker(WorldPickFn fn) { if (fn) PickersVec().push_back(fn); }
+
 Atom* World::PickDist(const Vector3& origin, const Vector3& dir, float& outDist)
 {
 	glm::vec3 ro((float)origin.x, (float)origin.y, (float)origin.z);
 	glm::vec3 rd = glm::normalize(glm::vec3((float)dir.x, (float)dir.y, (float)dir.z));
 	float bestDist = 1e30f; Atom* best = nullptr;
 	if (hierarchy) PickRec(*hierarchy, ro, rd, bestDist, best);
+	const Vector3 nd(rd.x, rd.y, rd.z);
+	for (WorldPickFn fn : PickersVec())
+	{
+		double d = 0.0; unsigned long id = 0;
+		if (!fn(origin, nd, d, id) || d <= 0.0 || d >= bestDist) continue;
+		if (Atom* a = GetById((long)id)) { bestDist = (float)d; best = a; }
+	}
 	outDist = bestDist;
 	return best;
 }
@@ -812,11 +825,15 @@ static void DispatchContacts(iPhysics* p, const std::map<uint64_t, Collider*>& b
 		{
 			auto ia = bodyMap.find(ev[i].bodyA);
 			auto ib = bodyMap.find(ev[i].bodyB);
-			if (ia == bodyMap.end() || ib == bodyMap.end()) continue;   // body died mid-step
-			Collider* ca = ia->second; Collider* cb = ib->second;
-			Atom* aa = ca->atom; Atom* ab = cb->atom;
-			if (!aa || !ab) continue;
-			const bool trigger = ca->isTrigger || cb->isTrigger;
+			Collider* ca = ia != bodyMap.end() ? ia->second : nullptr;
+			Collider* cb = ib != bodyMap.end() ? ib->second : nullptr;
+			// EXTERNAL (module-owned) bodies — terrain ground — carry no Collider component but
+			// still collide: resolve their atom through the registry, or a ball landing on the
+			// terrain never fires the surface's hit reactions (sound/decal/event).
+			Atom* aa = ca ? ca->atom : Physics::ExternalBodyAtom(ev[i].bodyA);
+			Atom* ab = cb ? cb->atom : Physics::ExternalBodyAtom(ev[i].bodyB);
+			if (!aa || !ab) continue;   // body died mid-step / unknown external
+			const bool trigger = (ca && ca->isTrigger) || (cb && cb->isTrigger);
 			const bool enter   = ev[i].phase == 0;
 			// LiveMaterial hit reactions: solid impacts fire the surfaces' own responses.
 			if (enter && !trigger) Surface::ContactHit(aa, ab, ev[i].point, ev[i].normal);
@@ -1681,16 +1698,25 @@ static void DrawComponentHooks(bc::list<Atom*>& gos, iRender* r, RenderPhase pha
 			for (Component* c : atom->components)
 			{
 				if (!c || !c->enabled) continue;
-				// Timed per COMPONENT TYPE: a module drawing itself into a render phase is the
-				// one place the engine hands the frame to foreign code, so the profiler must be
-				// able to name which component ate it ("rnd.hook.<Type>").
-				// Phase names are interned per type: Profiler::Scope keeps the pointer, so a
-				// temporary string would dangle. Render is single-threaded, hence the plain map.
-				static std::map<const TypeInfo*, std::string> hookPhase;
+				// Timed per COMPONENT TYPE and RENDER PHASE: a module drawing itself into a render
+				// phase is the one place the engine hands the frame to foreign code, so the profiler
+				// must be able to name which component ate it — and the same component's phases cost
+				// wildly different amounts (opaque submit vs RT accumulate), so mixing them into one
+				// EMA lies ("rnd.hook.<Type>" opaque, ".t"/".o"/".rt" for the rest).
+				// Names are interned: Profiler::Scope keeps the pointer, so a temporary string
+				// would dangle. Render is single-threaded, hence the plain map.
+				static std::map<std::pair<const TypeInfo*, RenderPhase>, std::string> hookPhase;
 				const TypeInfo* ti = c->GetType();
-				auto hit = hookPhase.find(ti);
+				auto hit = hookPhase.find({ ti, phase });
 				if (hit == hookPhase.end())
-					hit = hookPhase.emplace(ti, "rnd.hook." + (ti ? ti->name : std::string("?"))).first;
+				{
+					std::string nm = "rnd.hook." + (ti ? ti->name : std::string("?"));
+					if (phase == RenderPhase::Transparent) nm += ".t";
+					else if (phase == RenderPhase::Overlay) nm += ".o";
+					else if (phase == RenderPhase::RTScene) nm += ".rt";
+					else if (phase == RenderPhase::GBuffer) nm += ".g";
+					hit = hookPhase.emplace(std::make_pair(ti, phase), std::move(nm)).first;
+				}
 				Profiler::Scope ps(hit->second.c_str());
 				c->OnRender(r, phase);
 			}
@@ -2545,6 +2571,8 @@ void World::Render(iRender* r)
 			std::vector<DrawItem> gitems; CollectMeshes(*hierarchy, gitems, camMask);
 			DrawGBuffer(gitems, r, settings.frustumCull);
 			DrawInstancedGBuffer(camInstSets, r, settings.frustumCull);
+			// Hook geometry (terrain...) must be in the prepass too, or decals/SSR miss it.
+			DrawComponentHooks(*hierarchy, r, RenderPhase::GBuffer, camMask);
 			r->endGBufferPass();
 		}
 
@@ -3065,6 +3093,19 @@ void World::RemoveAtomById(long id)
 {
 	Atom* a = GetById(id);
 	if (!a) return;
+	// The editor selection may point INTO this subtree (stream parking removes atoms mid-PIE
+	// with no editor involvement) — a dangling selection crashes the first dereference.
+	AppInstance* app = AppInstance::GetSingleton();
+	if (app->selectedInHieararchy)
+	{
+		std::function<bool(Atom*)> inTree = [&](Atom* n) -> bool
+		{
+			if (n == app->selectedInHieararchy) return true;
+			for (Atom* c : n->children) if (inTree(c)) return true;
+			return false;
+		};
+		if (inTree(a)) { app->selectedInHieararchy = nullptr; app->ClearExtraSelection(); }
+	}
 	if (a->parent) a->parent->children.remove(a);
 	else           hierarchy->remove(a);
 	DeleteSubtree(a);
@@ -3564,46 +3605,52 @@ void World::LoadFromJson(const json& j)
 	if (j.contains("atoms"))
 		for (const json& gj : j["atoms"])
 			Add(LoadAtom(gj));
-	// Streamed world (split file): wire the runtime to the cell index. Editor EDIT MODE loads
-	// every cell inline (the whole world is editable); play/player streams them by distance.
-	if (settings.streamEnabled && j.contains("streamCells") && j["streamCells"].is_array())
+	// Streamed world (split file): editor EDIT MODE loads every cell inline (the whole world is
+	// editable); play/player wires the stream to the index instead.
+	AppInstance* app = AppInstance::GetSingleton();
+	if (settings.streamEnabled && !auxiliary && j.contains("streamCells") && j["streamCells"].is_array()
+	    && app->isEditor() && app->playState == 0)
 	{
-		AppInstance* app = AppInstance::GetSingleton();
 		const std::string dir = j.value("cellsDir", std::string());
+		int loadedCells = 0;
+		for (const json& c : j["streamCells"])
+		{
+			if (!c.is_object()) continue;
+			char nameBuf[64];
+			std::snprintf(nameBuf, sizeof(nameBuf), "%d_%d.nuworld", c.value("x", 0), c.value("z", 0));
+			std::string data;
+			if (!app->ReadContent(dir + "/" + nameBuf, data)) continue;
+			json cj = json::parse(data, nullptr, false);
+			if (cj.is_discarded() || !cj.contains("atoms")) continue;
+			for (const json& gj : cj["atoms"]) Add(LoadAtom(gj));
+			++loadedCells;
+		}
+		std::cout << "[World]\t\t\t" << "streamed world: " << loadedCells
+		          << " cells loaded for editing" << std::endl;
+	}
+	else
+		SetupStreamFromJson(j);
+	FinalizeIncrementalLoad();
+}
+
+void World::SetupStreamFromJson(const json& j)
+{
+	if (!settings.streamEnabled || auxiliary) return;
+	if (j.contains("streamCells") && j["streamCells"].is_array())
+	{
 		std::vector<WorldStream::CellKey> keys;
 		for (const json& c : j["streamCells"])
 			if (c.is_object()) keys.push_back(WorldStream::CellKey{ c.value("x", 0), c.value("z", 0) });
-		if (!auxiliary && app->isEditor() && app->playState == 0)
-		{
-			int loadedCells = 0;
-			for (const WorldStream::CellKey& k : keys)
-			{
-				char nameBuf[64];
-				std::snprintf(nameBuf, sizeof(nameBuf), "%d_%d.nuworld", k.x, k.z);
-				std::string data;
-				if (!app->ReadContent(dir + "/" + nameBuf, data)) continue;
-				json cj = json::parse(data, nullptr, false);
-				if (cj.is_discarded() || !cj.contains("atoms")) continue;
-				for (const json& gj : cj["atoms"]) Add(LoadAtom(gj));
-				++loadedCells;
-			}
-			std::cout << "[World]\t\t\t" << "streamed world: " << loadedCells
-			          << " cells loaded for editing" << std::endl;
-		}
-		else if (!auxiliary)
-		{
-			if (!stream) stream = new WorldStream();
-			stream->Setup(keys, dir);
-		}
+		if (!stream) stream = new WorldStream();
+		stream->Setup(keys, j.value("cellsDir", std::string()));
 	}
-	else if (settings.streamEnabled && !auxiliary)
+	else
 	{
 		// No cell index (PIE snapshot / savegame — a complete document): a memory-only session,
 		// far cells PARK instead of cold-loading.
 		if (!stream) stream = new WorldStream();
 		stream->Setup({}, std::string());
 	}
-	FinalizeIncrementalLoad();
 }
 
 void World::LoadHeaderFromJson(const json& j)
@@ -3655,7 +3702,7 @@ void World::LoadHeaderFromJson(const json& j)
 	// module-owned resources (e.g. std::functions whose code lives in a module DLL) alive past
 	// the DLL. The lock keeps the fixed thread off a hierarchy that is being torn down.
 	boost::recursive_mutex::scoped_lock fixedGuard(gameLock);
-	if (iPhysics* p = GetService<iPhysics>()) p->reset();
+	if (iPhysics* p = GetService<iPhysics>()) { p->reset(); Physics::BumpResetEpoch(); }
 	if (iAudio* au = GetService<iAudio>()) au->reset();   // silence game voices
 	AppInstance::GetSingleton()->selectedInHieararchy = nullptr;   // would dangle otherwise
 	AppInstance::GetSingleton()->selectedExtra.clear();
@@ -3713,7 +3760,7 @@ void World::FinalizeIncrementalLoad()
 void World::Clear()
 {
 	boost::recursive_mutex::scoped_lock fixedGuard(gameLock);   // don't tear down under the fixed thread
-	if (iPhysics* p = GetService<iPhysics>()) p->reset();   // atoms drop without Destroy: wipe bodies
+	if (iPhysics* p = GetService<iPhysics>()) { p->reset(); Physics::BumpResetEpoch(); }   // atoms drop without Destroy: wipe bodies
 	if (iAudio* au = GetService<iAudio>()) au->reset();     // and their voices
 	Surface::ForgetWorld(this);   // ...and the foliage/sound growth records (components die with atoms)
 	for (auto it = hierarchy->begin(); it != hierarchy->end(); )   // keep editor camera
@@ -3804,8 +3851,14 @@ void World::SaveToFileSplit(const std::string& path)
 	json mainAtoms = json::array();
 	for (json& a : full["atoms"])
 	{
-		const bool pinned = a.value("alwaysLoaded", false) || a.value("persistent", false)
-		                 || a.value("folder", false);
+		bool pinned = a.value("alwaysLoaded", false) || a.value("persistent", false)
+		           || a.value("folder", false);
+		// Map-wide components (terrain) pin their atom into the MAIN file: filed into a cell it
+		// would simply not EXIST until its root cell streams in — ground with no collision.
+		if (!pinned && a.contains("id") && a["id"].is_number())
+			if (Atom* live = GetById((long)a["id"].get<double>()))
+				for (Component* c : live->components)
+					if (c && c->StreamGlobal()) { pinned = true; break; }
 		double px = 0.0, pz = 0.0;
 		const bool hasPos = a.contains("transform") && a["transform"].is_object()
 		                 && a["transform"].contains("position") && a["transform"]["position"].is_array()

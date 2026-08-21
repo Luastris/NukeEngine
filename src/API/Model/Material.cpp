@@ -801,7 +801,9 @@ bool Material::SaveToFile(const std::string& path) const
 			                        {"mr", s.mrGuid}, {"color", {s.color.r, s.color.g, s.color.b, s.color.a}},
 			                        {"metallic", s.metallic}, {"roughness", s.roughness},
 			                        {"threshold", s.threshold}, {"feather", s.feather},
-			                        {"topOnly", s.topOnly}, {"displace", s.displace} });
+			                        {"topOnly", s.topOnly}, {"displace", s.displace},
+			                        {"hMin", s.hMin}, {"hMax", s.hMax}, {"hFeather", s.hFeather},
+			                        {"windward", s.windward}, {"couple", s.couple} });
 		for (const LiveLayer& ly : liveLayers)
 			l["layers"].push_back({ {"albedo", ly.albedoGuid}, {"normal", ly.normalGuid},
 			                        {"mr", ly.mrGuid}, {"mask", ly.maskGuid},
@@ -954,6 +956,11 @@ Material* Material::LoadFromString(const std::string& text)
 				st.feather    = s.value("feather", 0.25f);
 				st.topOnly    = s.value("topOnly", 0.0f);
 				st.displace   = s.value("displace", 0.0f);
+				st.hMin       = s.value("hMin", 0.0f);
+				st.hMax       = s.value("hMax", 0.0f);
+				st.hFeather   = s.value("hFeather", 8.0f);
+				st.windward   = s.value("windward", 0.0f);
+				st.couple     = s.value("couple", std::string());
 				if (s.contains("color") && s["color"].is_array() && s["color"].size() == 4)
 				{
 					st.color.r = s["color"][0]; st.color.g = s["color"][1];

@@ -46,6 +46,10 @@ void Physics::RegisterExternalBody(uint64_t body, Atom* atom)
 }
 void Physics::UnregisterExternalBody(uint64_t body) { g_extBody.erase(body); }
 
+static uint32_t g_resetEpoch = 0;
+uint32_t Physics::ResetEpoch()     { return g_resetEpoch; }
+void     Physics::BumpResetEpoch() { ++g_resetEpoch; g_extBody.clear(); }   // every body is gone with the scene
+
 static Atom* FindAtomById(bc::list<Atom*>& gos, unsigned long id)
 {
 	for (Atom* atom : gos)
@@ -65,6 +69,14 @@ static Atom* AtomOfBody(World* w, uint64_t body)
 	if (Collider* col = FindColliderByBody(w->GetHierarchy(), body)) return col->atom;
 	auto it = g_extBody.find(body);
 	return it == g_extBody.end() ? nullptr : FindAtomById(w->GetHierarchy(), it->second);
+}
+
+Atom* Physics::ExternalBodyAtom(uint64_t body)
+{
+	auto it = g_extBody.find(body);
+	if (it == g_extBody.end()) return nullptr;
+	World* w = AppInstance::GetSingleton()->currentWorld;
+	return w ? FindAtomById(w->GetHierarchy(), it->second) : nullptr;
 }
 
 bool Physics::Available() { return GetService<iPhysics>() != nullptr; }

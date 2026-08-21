@@ -180,6 +180,32 @@ bool AppInstance::StartWorldLoadAsync(const std::string& relPath)
 			std::cout << "[World]\t\t\t" << "async load: '" << relPath << "' is not valid JSON" << std::endl;
 			return;
 		}
+		// Streamed split world in EDIT mode: the whole world is editable, so fold the cell files
+		// into the document HERE (background IO) — the activation queue only ever walks
+		// doc["atoms"], and a split world booted without its cells also LOSES them on the next
+		// save (nothing gathers the cold files). Play keeps the index and streams by distance.
+		if (isEditor() && playState == 0 && doc->contains("streamCells") && (*doc)["streamCells"].is_array())
+		{
+			const std::string dir = doc->value("cellsDir", std::string());
+			nlohmann::json& atoms = (*doc)["atoms"];
+			if (!atoms.is_array()) atoms = nlohmann::json::array();
+			int cellsIn = 0;
+			for (const nlohmann::json& c : (*doc)["streamCells"])
+			{
+				if (!c.is_object()) continue;
+				char nameBuf[64];
+				std::snprintf(nameBuf, sizeof(nameBuf), "%d_%d.nuworld", c.value("x", 0), c.value("z", 0));
+				std::string cdata;
+				if (!ReadContent(dir + "/" + nameBuf, cdata)) continue;
+				nlohmann::json cj = nlohmann::json::parse(cdata, nullptr, false);
+				if (cj.is_discarded() || !cj.contains("atoms")) continue;
+				for (nlohmann::json& gj : cj["atoms"]) atoms.push_back(std::move(gj));
+				++cellsIn;
+			}
+			doc->erase("streamCells");
+			doc->erase("cellsDir");
+			std::cout << "[World]\t\t\t" << "async load: folded " << cellsIn << " cells for editing" << std::endl;
+		}
 		asyncLoadProgress = 0.95f;
 		{
 			boost::mutex::scoped_lock l(asyncLoadLock);
@@ -259,6 +285,9 @@ void AppInstance::ApplyAsyncWorldLoad()
 	// INCREMENTAL activation: swap to the world header now, then let the world GROW — root
 	// atoms instantiate over the next frames within the ms budget, ordered from the origin.
 	currentWorld->LoadHeaderFromJson(*doc);
+	// Streamed world: the queue below only walks doc["atoms"], so the stream must be wired
+	// here (play streams the cell index; edit-mode docs had their cells folded in already).
+	currentWorld->SetupStreamFromJson(*doc);
 	currentWorldPath = path;
 	NameWorldFromPath(path);
 	activationDoc = doc;

@@ -65,6 +65,10 @@ bool WorldStream::Spatial(Atom* root)
 {
 	if (!root || root->alwaysLoaded || root->persistent || root->folder) return false;
 	if (root->name == "Editor Camera") return false;   // editor infra
+	// Components with a world-spanning footprint (terrain) pin the atom: root-cell membership
+	// would unload ground that is physically under a far-away player.
+	for (Component* c : root->components)
+		if (c && c->StreamGlobal()) return false;
 	return true;
 }
 

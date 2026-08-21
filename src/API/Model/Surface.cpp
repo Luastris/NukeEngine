@@ -313,11 +313,26 @@ void Surface::SetCondition(const std::string& state, double value)
 	g_conditions[state] = (float)std::min(value, 1.0);
 }
 
+// Editor preview conditions live in their OWN map: they override reads but never serialize
+// (SaveJson walks g_conditions only), so the simulator can't leak weather into saved worlds.
+static std::map<std::string, float> g_condPreview;
+
 double Surface::Condition(const std::string& state)
 {
+	auto pit = g_condPreview.find(state);
+	if (pit != g_condPreview.end()) return pit->second;
 	auto it = g_conditions.find(state);
 	return it != g_conditions.end() ? it->second : 0.0;
 }
+
+void Surface::SetConditionPreview(const std::string& state, double value)
+{
+	if (state.empty()) return;
+	if (value < 0.0) g_condPreview.erase(state);
+	else             g_condPreview[state] = (float)std::min(value, 1.0);
+}
+
+void Surface::ClearConditionPreviews() { g_condPreview.clear(); }
 
 void Surface::ClearConditions() { g_conditions.clear(); }
 
@@ -367,7 +382,8 @@ void Surface::RefreshInUse()
 
 bool Surface::StateInUse(const std::string& state)
 {
-	return g_conditions.count(state) != 0 || g_statesInUse.count(state) != 0;
+	return g_conditions.count(state) != 0 || g_condPreview.count(state) != 0
+	    || g_statesInUse.count(state) != 0;
 }
 
 void Surface::SaveJson(nlohmann::json& j)
@@ -559,8 +575,24 @@ bool Surface::HitIn(World* target, Atom* atom, const std::string& hitType, const
                     const Vector3& normal, double impulse)
 {
 	Material* m = MaterialOf(atom);
-	if (!m) m = TerrainLayerMaterial(atom, pos);   // terrain: the splat layer under the hit
-	if (!m || m->liveHits.empty()) return false;
+	bool terra = false;
+	if (!m) { m = TerrainLayerMaterial(atom, pos); terra = m != nullptr; }   // terrain: the splat layer under the hit
+	// Silent misses made hit setups undebuggable ("fired but nothing happened"): say WHY a hit
+	// found no reaction, throttled so contact storms can't flood the console.
+	if (!m || m->liveHits.empty())
+	{
+		static double lastWhine = -10.0;
+		const double nowW = Time::getSingleton()->elapsed;
+		if (nowW - lastWhine > 2.0)
+		{
+			lastWhine = nowW;
+			std::cout << "[Surface]\tHit '" << hitType << "' on '" << (atom ? atom->GetName() : "?")
+			          << "': " << (!m ? "no material resolved at the hit point"
+			                          : "material '" + (m->matName.empty() ? m->guid : m->matName) + "' has no Hit reactions")
+			          << std::endl;
+		}
+		return false;
+	}
 	const LiveHit* best = nullptr;
 	for (const LiveHit& h : m->liveHits)
 		if (!h.hitType.empty() && h.hitType == hitType) { best = &h; break; }
@@ -585,6 +617,10 @@ bool Surface::HitIn(World* target, Atom* atom, const std::string& hitType, const
 		float hu = 0, hv = 0;
 		if (Physics::MeshUVAt(atom, pos, normal, hu, hv))
 			m->TriggerAtHit(best->eventName, pos, hu, hv);
+		else if (terra)
+			// Terrain has no mesh uv: its shader reads uv-authored masks as PLANAR WORLD XZ
+			// (meters), so the hit's XZ IS the uv point — uv masks land at the impact.
+			m->TriggerAtHit(best->eventName, pos, pos.x, pos.z);
 		else
 			m->TriggerAtWorld(best->eventName, pos);
 	}
@@ -815,6 +851,11 @@ void Surface::DriveFoliage(World* w)
 							if (rv.type != FT::String || rv.str.empty()) continue;
 							Material* lm = ResDB::getSingleton()->GetMaterial(rv.str);
 							if (!lm) continue;
+							// Layer materials are surfaces without a MeshRenderer: their tweens
+							// must still evaluate here, or the terrain module has nothing live
+							// to mirror into its splat palette (color/uv/emissive animation).
+							if (!lm->liveTweens.empty()) lm->ApplyTweens(now);
+							lm->PushRenderProps();
 							if (!snd && (!lm->liveSound.ambientGuid.empty() || !lm->liveSound.windGuid.empty())) snd = lm;
 							if (lm->liveFoliage.empty()) continue;
 							bool dup = false;

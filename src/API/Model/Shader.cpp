@@ -202,6 +202,15 @@ Shader* Shader::FromSources(const std::string& name, const std::string& vsSrc, c
 	return s;
 }
 
+Shader* Shader::FromSourcesTess(const std::string& name, const std::string& vsSrc,
+                                const std::string& psSrc, const std::string& hsSrc,
+                                const std::string& dsSrc)
+{
+	Shader* s = FromSources(name, vsSrc, psSrc);
+	if (s) { s->hsSource = hsSrc; s->dsSource = dsSrc; }
+	return s;
+}
+
 Shader* Shader::PostFromSource(const std::string& name, const std::string& psSrc)
 {
 	if (psSrc.empty()) return nullptr;

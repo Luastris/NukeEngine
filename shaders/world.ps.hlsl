@@ -343,6 +343,16 @@ float4 main(in PSIn i) : SV_Target
         ovW[N] = OvWeight(g_Ov##N, g_OvP##N, ovF[N], (ovF[N] & 8u) ? g_Ov##N##Mask.Sample(g_Ov0Alb_sampler, i.uv).r : 1.0, i.wpos, ovNg);
     OV_WEIGHT(0) OV_WEIGHT(1) OV_WEIGHT(2) OV_WEIGHT(3)
     OV_WEIGHT(4) OV_WEIGHT(5) OV_WEIGHT(6) OV_WEIGHT(7)
+    // Slots COMBINE: oversubscribed weights share the pixel proportionally instead of the
+    // last slot erasing the earlier ones (wet 1 + snow 1 -> a 50/50 mix, not pure snow).
+    {
+        float ovTot = ovW[0] + ovW[1] + ovW[2] + ovW[3] + ovW[4] + ovW[5] + ovW[6] + ovW[7];
+        if (ovTot > 1.0)
+        {
+            float ovK = 1.0 / ovTot;
+            [unroll] for (int on = 0; on < 8; ++on) ovW[on] *= ovK;
+        }
+    }
 #if NUKE_VCTINT
     // Vertex Color = Overlay Mask: R/G/B/A painted in the DCC drive overlay slots 0-3.
     if ((uint)(g_Var.w + 0.5) & 4u)

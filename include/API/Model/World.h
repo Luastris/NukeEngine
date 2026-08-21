@@ -105,6 +105,7 @@ public:
 	[[nuke::func]] Camera* GetMainCamera();
 
 	// Ray-pick the nearest Atom (with a MeshRenderer) hit by a world-space ray; nullptr on miss.
+	// Module world-pickers (RegisterWorldPicker below) compete with the mesh hits by distance.
 	[[nuke::func]] Atom* Pick(const Vector3& origin, const Vector3& dir);
 	// Same, but also reports the hit distance along `dir` (normalized). NOT an overload of Pick():
 	// that would make &World::Pick ambiguous for the reflection codegen.
@@ -122,6 +123,10 @@ public:
 	void  LoadHeaderFromJson(const nlohmann::json& j);    // name/settings/calendar + teardown
 	Atom* AddAtomFromJson(const nlohmann::json& atomJ);   // instantiate ONE root atom (its subtree)
 	void  FinalizeIncrementalLoad();                      // duplicate-id heal + AtomRef resolve
+	// Streamed world: wire the runtime to the document's cell index (or a memory-only stream when
+	// the document is complete). The incremental path must call this too — a split world booted
+	// without it drops every cell AND loses them on the next save (nothing gathers cold files).
+	void  SetupStreamFromJson(const nlohmann::json& j);
 	// One-shot: the NEXT load must NOT carry persistent atoms (the savegame snapshot already
 	// contains them). Consumed by the teardown.
 	bool suppressPersistOnce = false;
@@ -175,6 +180,13 @@ public:
 	// The streaming runtime (owned; created on demand). APPENDED member — cross-DLL layout.
 	WorldStream* stream = nullptr;
 };
+
+// Module world-pickers: hook geometry without MeshRenderers (terrain...) registers a ray test
+// — (origin, NORMALIZED dir) -> hit distance + owning atom id — and competes with the mesh
+// pick by distance in World::Pick (editor click-selection, asset drops, script Pick).
+using WorldPickFn = bool(*)(const Vector3& origin, const Vector3& dir,
+                            double& outDist, unsigned long& outAtomId);
+NUKEENGINE_API void RegisterWorldPicker(WorldPickFn fn);
 
 }  // namespace nuke
 

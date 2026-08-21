@@ -218,6 +218,20 @@ std::string Game::TextureStreamInfo()
 	return std::string(buf);
 }
 
+double Game::DrawCalls()
+{
+	int draws = 0, tris = 0;
+	if (iRender* r = AppInstance::GetSingleton()->render) r->getFrameStats(draws, tris);
+	return (double)draws;
+}
+
+double Game::Triangles()
+{
+	int draws = 0, tris = 0;
+	if (iRender* r = AppInstance::GetSingleton()->render) r->getFrameStats(draws, tris);
+	return (double)tris;
+}
+
 void Game::SetAlwaysOnTop(bool onTop)
 {
 	Config::getSingleton()->window.floating = onTop;

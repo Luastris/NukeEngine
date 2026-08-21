@@ -689,6 +689,9 @@ bool NukeReflectInit() {
 		Reflect_SetMethodDoc("Game", "SetTextureStreaming", "T3 texture streaming: mip-pool VRAM budget in MB (0 = off). Live; persisted like the other window/config settings. Streamed textures keep a low-mip tail and stream detail by distance.", "budgetMB");
 		t.methods.push_back(MakeMethod("TextureStreamInfo", &Game::TextureStreamInfo));
 		Reflect_SetMethodDoc("Game", "TextureStreamInfo", "One stats line: \"streamed=N resident=X.XMB full=Y.YMB saved=Z.ZMB\" (probes/console).", "");
+		t.methods.push_back(MakeMethod("DrawCalls", &Game::DrawCalls));
+		Reflect_SetMethodDoc("Game", "DrawCalls", "Last completed frame's render counters (probes/console).", "");
+		t.methods.push_back(MakeMethod("Triangles", &Game::Triangles));
 		t.methods.push_back(MakeMethod("WindowWidth", &Game::WindowWidth));
 		t.methods.push_back(MakeMethod("WindowHeight", &Game::WindowHeight));
 		t.methods.push_back(MakeMethod("GetWindowMode", &Game::GetWindowMode));
@@ -1387,7 +1390,7 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("GetMainCamera", &World::GetMainCamera));
 		Reflect_SetMethodDoc("World", "GetMainCamera", "The camera the GAME is viewed through: the one whose Main Camera flag is set, else the world's FIRST camera in hierarchy order. Editor cameras (Camera::editorCamera) never count.", "");
 		t.methods.push_back(MakeMethod("Pick", &World::Pick));
-		Reflect_SetMethodDoc("World", "Pick", "Ray-pick the nearest Atom (with a MeshRenderer) hit by a world-space ray; nullptr on miss.", "origin,dir");
+		Reflect_SetMethodDoc("World", "Pick", "Ray-pick the nearest Atom (with a MeshRenderer) hit by a world-space ray; nullptr on miss. Module world-pickers (RegisterWorldPicker below) compete with the mesh hits by distance.", "origin,dir");
 		t.methods.push_back(MakeMethod("SaveToString", &World::SaveToString));
 		Reflect_SetMethodDoc("World", "SaveToString", "Text (.nuworld JSON) serialization via reflection. The editor camera is excluded from save and preserved across load.", "");
 		t.methods.push_back(MakeMethod("LoadFromString", &World::LoadFromString));

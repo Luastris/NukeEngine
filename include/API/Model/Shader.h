@@ -58,6 +58,16 @@ public:
 	std::vector<std::string> includeProps;
 	bool FromInclude(const std::string& propName) const
 	{ for (const std::string& n : includeProps) if (n == propName) return true; return false; }
+
+	// APPEND-ONLY (abi 24): optional CUSTOM tessellation stages. A shader whose vertex layout
+	// or displacement differs from the world defaults (terrain splats) ships its own hull +
+	// domain sources; empty = the shared world.hs/world.ds pair when the shader opts into
+	// NUKE_TESS at all.
+	std::string hsSource, dsSource;
+	// FromSources + custom tessellation stages (module-embedded shaders).
+	static Shader* FromSourcesTess(const std::string& name, const std::string& vsSrc,
+	                               const std::string& psSrc, const std::string& hsSrc,
+	                               const std::string& dsSrc);
 };
 }  // namespace nuke
 

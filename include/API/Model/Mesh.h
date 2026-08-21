@@ -74,6 +74,12 @@ public:
 	float* uv2Array     = nullptr;   // 2/vert: second UV set (lightmaps/detail)
 	float* colorArray   = nullptr;   // 4/vert: vertex color RGBA
 
+	// Pooled residency hint (abi 23): a CHURNING indexed mesh (terrain nodes and the like) asks
+	// the renderer to place its streams inside shared suballocated buffers instead of dedicated
+	// per-mesh ones — re-serving/freeing such meshes then never creates or destroys GPU objects.
+	// Only plain static geometry qualifies (no skinning, no wind bend, no morphs).
+	bool pooled = false;
+
 	// Skeleton ASSET reference (v5): the shared .nuskel this mesh's boneIndex stream points
 	// into. Empty = legacy embedded skeleton (`bones` below) or a rigid mesh.
 	std::string skelGuid;

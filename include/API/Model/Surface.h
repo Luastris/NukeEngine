@@ -101,6 +101,10 @@ public:
 	[[nuke::func]] static void   SetCondition(const std::string& state, double value);   // 0 removes
 	[[nuke::func]] static double Condition(const std::string& state);
 	[[nuke::func]] static void   ClearConditions();
+	// EDITOR PREVIEW conditions: override Condition() for live preview but are NEVER
+	// serialized — the material editor's simulator must not leak weather into saved worlds.
+	static void SetConditionPreview(const std::string& state, double value);   // < 0 clears the key
+	static void ClearConditionPreviews();
 	// Effective value for an atom at a world point: nearest-ancestor SurfaceState override
 	// (else the global), maxed with every SurfaceMask along the ancestor chain.
 	[[nuke::func]] static double ValueAt(Atom* atom, const std::string& state, const Vector3& worldPos);

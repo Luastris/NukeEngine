@@ -75,6 +75,15 @@ public:
 	// the current world — a stale entry answers null, never a recycled pointer.
 	static void RegisterExternalBody(uint64_t body, Atom* atom);
 	static void UnregisterExternalBody(uint64_t body);
+	// The atom behind an external body (null when unknown) — contact dispatch resolves terrain
+	// ground through this, since external bodies carry no Collider component.
+	static Atom* ExternalBodyAtom(uint64_t body);
+
+	// Scene-reset epoch: bumped whenever iPhysics::reset() wipes EVERY body (world switch/PIE).
+	// Modules owning bodies (terrain chunks) compare epochs to drop dead handles and recook
+	// instead of destroying recycled ids.
+	static uint32_t ResetEpoch();
+	static void     BumpResetEpoch();
 };
 
 }  // namespace nuke
