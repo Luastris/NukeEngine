@@ -67,6 +67,7 @@ ReflectValue Reflect_GetField(void* obj, const Field& f)
 		case FT::Vec4:  { Vector4& v = *(Vector4*)p; out.v[0] = v.x; out.v[1] = v.y; out.v[2] = v.z; out.v[3] = v.w; break; }
 		case FT::Quat:  { Quaternion& q = *(Quaternion*)p; out.v[0] = q.x; out.v[1] = q.y; out.v[2] = q.z; out.v[3] = q.w; break; }
 		case FT::Color: { Color& c = *(Color*)p; out.v[0] = c.r; out.v[1] = c.g; out.v[2] = c.b; out.v[3] = c.a; break; }
+		case FT::AtomRef: out.atom = Reflect_AtomId(*(Atom**)p); break;
 		default: out.type = FT::Unknown; break;
 	}
 	return out;
@@ -88,6 +89,8 @@ bool Reflect_SetField(void* obj, const Field& f, const ReflectValue& v)
 		case FT::Vec4:  { Vector4& d = *(Vector4*)p; d.x = v.v[0]; d.y = v.v[1]; d.z = v.v[2]; d.w = v.v[3]; return true; }
 		case FT::Quat:  { Quaternion& q = *(Quaternion*)p; q.x = v.v[0]; q.y = v.v[1]; q.z = v.v[2]; q.w = v.v[3]; return true; }
 		case FT::Color: { Color& c = *(Color*)p; c.r = v.v[0]; c.g = v.v[1]; c.b = v.v[2]; c.a = v.v[3]; return true; }
+		// Live atom reference by stable id (0 = null); a dead id resolves to null, never dangles.
+		case FT::AtomRef: *(Atom**)p = Reflect_AtomById((unsigned long)v.atom); return true;
 		default: return false;
 	}
 }

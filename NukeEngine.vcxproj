@@ -219,6 +219,7 @@
     <ClInclude Include="include\API\Model\MeshRenderer.h" />
     <ClInclude Include="include\API\Model\Wind.h" />
     <ClInclude Include="include\API\Model\Surface.h" />
+    <ClInclude Include="include\API\Model\Spline.h" />
     <ClInclude Include="include\interface\WorldHooks.h" />
     <ClInclude Include="include\interface\AtomCreators.h" />
     <ClInclude Include="include\interface\ComponentIcons.h" />
@@ -331,6 +332,7 @@
     <ClCompile Include="src\API\Model\MeshRenderer.cpp" />
     <ClCompile Include="src\API\Model\Wind.cpp" />
     <ClCompile Include="src\API\Model\Surface.cpp" />
+    <ClCompile Include="src\API\Model\Spline.cpp" />
     <ClCompile Include="src\interface\WorldHooks.cpp" />
     <ClCompile Include="src\interface\AtomCreators.cpp" />
     <ClCompile Include="src\interface\ComponentIcons.cpp" />

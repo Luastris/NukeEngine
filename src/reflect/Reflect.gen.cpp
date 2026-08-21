@@ -47,6 +47,7 @@
 #include "API/Model/Shader.h"
 #include "API/Model/Skeleton.h"
 #include "API/Model/SkinnedMeshRenderer.h"
+#include "API/Model/Spline.h"
 #include "API/Model/Sprite.h"
 #include "API/Model/SpriteAnimator.h"
 #include "API/Model/Surface.h"
@@ -1161,6 +1162,103 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("socket", &SocketAttachment::socket, "", "Socket"));
 		t.fields.back().tip = "Socket (or bare bone) name on the ancestor SkinnedMeshRenderer's skeleton.";
 		t.create = []() -> void* { return new SocketAttachment(); };
+	}
+	{
+		TypeInfo& t = TypeOf<Spline>();
+		t.base = "Component";
+		t.category = "World";
+		t.fields.push_back(MakeField("points", &Spline::points, "", "Points"));
+		t.fields.back().tip = "Control points, atom-local x,y,z per point. Drag them in the viewport while selected; Ctrl+Click a point deletes it, Ctrl+Click near the curve appends one.";
+		t.fields.push_back(MakeField("type", &Spline::type, "", "Type", 0.0f, 0.0f, "Catmull-Rom,Bezier"));
+		t.fields.back().tip = "Catmull-Rom passes through every point; Bezier reads anchor,handle,handle,anchor,... and the handles shape each span.";
+		t.fields.push_back(MakeField("closed", &Spline::closed, "", "Closed"));
+		t.fields.back().tip = "Join the last point back to the first.";
+		t.methods.push_back(MakeMethod("Length", &Spline::Length));
+		Reflect_SetMethodDoc("Spline", "Length", "---- world-space queries (distances in meters along the curve) ----", "");
+		t.methods.push_back(MakeMethod("PositionAt", &Spline::PositionAt));
+		Reflect_SetMethodDoc("Spline", "PositionAt", "", "dist");
+		t.methods.push_back(MakeMethod("TangentAt", &Spline::TangentAt));
+		Reflect_SetMethodDoc("Spline", "TangentAt", "", "dist");
+		t.methods.push_back(MakeMethod("NormalAt", &Spline::NormalAt));
+		Reflect_SetMethodDoc("Spline", "NormalAt", "", "dist");
+		t.methods.push_back(MakeMethod("ClosestDistance", &Spline::ClosestDistance));
+		Reflect_SetMethodDoc("Spline", "ClosestDistance", "", "worldPos");
+		t.methods.push_back(MakeMethod("PointCount", &Spline::PointCount));
+		Reflect_SetMethodDoc("Spline", "PointCount", "---- point editing (atom-local; in Bezier mode AddPoint appends handle,handle,anchor) ----", "");
+		t.methods.push_back(MakeMethod("GetPoint", &Spline::GetPoint));
+		Reflect_SetMethodDoc("Spline", "GetPoint", "", "index");
+		t.methods.push_back(MakeMethod("SetPoint", &Spline::SetPoint));
+		Reflect_SetMethodDoc("Spline", "SetPoint", "", "index,localPos");
+		t.methods.push_back(MakeMethod("AddPoint", &Spline::AddPoint));
+		Reflect_SetMethodDoc("Spline", "AddPoint", "", "localPos");
+		t.methods.push_back(MakeMethod("RemovePoint", &Spline::RemovePoint));
+		Reflect_SetMethodDoc("Spline", "RemovePoint", "", "index");
+		t.create = []() -> void* { return new Spline(); };
+	}
+	{
+		TypeInfo& t = TypeOf<SplineMesh>();
+		t.base = "Component";
+		t.category = "World";
+		t.fields.push_back(MakeField("meshGuid", &SplineMesh::meshGuid, "mesh", "Mesh"));
+		t.fields.back().tip = "Source segment; its extent along Forward Axis is the tile length.";
+		t.fields.push_back(MakeField("matGuid", &SplineMesh::matGuid, "material", "Material"));
+		t.fields.push_back(MakeField("mode", &SplineMesh::mode, "", "Mode", 0.0f, 0.0f, "Deform,Repeat"));
+		t.fields.back().tip = "Deform bends stretched copies into a continuous strip; Repeat places rigid copies every tile length + Spacing.";
+		t.fields.push_back(MakeField("axis", &SplineMesh::axis, "", "Forward Axis", 0.0f, 0.0f, "X,Y,Z"));
+		t.fields.back().tip = "Source-mesh axis that runs along the curve.";
+		t.fields.push_back(MakeField("scale", &SplineMesh::scale, "", "Scale"));
+		t.fields.back().tip = "Uniform scale of the source profile.";
+		t.fields.push_back(MakeField("spacing", &SplineMesh::spacing, "", "Spacing"));
+		t.fields.back().tip = "Repeat only: extra gap between copies, meters.";
+		t.fields.push_back(MakeField("offset", &SplineMesh::offset, "", "Offset"));
+		t.fields.back().tip = "Profile offset in the curve frame: x = right, y = up, z = along the curve.";
+		t.methods.push_back(MakeMethod("Rebuild", &SplineMesh::Rebuild));
+		t.create = []() -> void* { return new SplineMesh(); };
+	}
+	{
+		TypeInfo& t = TypeOf<SplineScatter>();
+		t.base = "InstancedMesh";
+		t.category = "World";
+		t.fields.push_back(MakeField("spacing", &SplineScatter::spacing, "", "Spacing"));
+		t.fields.back().tip = "Meters between instances along the curve.";
+		t.fields.push_back(MakeField("jitter", &SplineScatter::jitter, "", "Jitter", 0.0f, 1.0f));
+		t.fields.back().tip = "Random slide along the curve, fraction of Spacing.";
+		t.fields.push_back(MakeField("lateralSpread", &SplineScatter::lateralSpread, "", "Lateral Spread"));
+		t.fields.back().tip = "Random offset to the sides of the curve, meters.";
+		t.fields.push_back(MakeField("offset", &SplineScatter::offset, "", "Offset"));
+		t.fields.back().tip = "Constant offset in the curve frame: x = right, y = up, z = along.";
+		t.fields.push_back(MakeField("seed", &SplineScatter::seed, "", "Seed"));
+		t.fields.back().tip = "Same seed + same rules = the same scatter.";
+		t.fields.push_back(MakeField("scaleMin", &SplineScatter::scaleMin, "", "Scale Min"));
+		t.fields.push_back(MakeField("scaleMax", &SplineScatter::scaleMax, "", "Scale Max"));
+		t.fields.push_back(MakeField("randomYaw", &SplineScatter::randomYaw, "", "Random Yaw"));
+		t.fields.back().tip = "Random rotation around the up axis.";
+		t.fields.push_back(MakeField("alignToCurve", &SplineScatter::alignToCurve, "", "Align To Curve", 0.0f, 1.0f));
+		t.fields.back().tip = "0 = instances stand world-up, 1 = they bank and pitch with the curve.";
+		t.methods.push_back(MakeMethod("Rebuild", &SplineScatter::Rebuild));
+		t.create = []() -> void* { return new SplineScatter(); };
+	}
+	{
+		TypeInfo& t = TypeOf<SplineMover>();
+		t.base = "Component";
+		t.category = "World";
+		t.fields.push_back(MakeField("splineAtom", &SplineMover::splineAtom, "", "Spline"));
+		t.fields.back().tip = "Atom carrying the Spline to follow; empty = this atom's own Spline.";
+		t.fields.push_back(MakeField("speed", &SplineMover::speed, "", "Speed"));
+		t.fields.back().tip = "Meters per second along the curve.";
+		t.fields.push_back(MakeField("speedCurve", &SplineMover::speedCurve, "", "Speed Over Path"));
+		t.fields.back().tip = "Speed multiplier over the normalized position 0..1 — ease in/out lives here. Empty = constant speed.";
+		t.fields.back().widget = "curve";
+		t.fields.push_back(MakeField("mode", &SplineMover::mode, "", "Mode", 0.0f, 0.0f, "Loop,Ping-Pong,Once"));
+		t.fields.push_back(MakeField("align", &SplineMover::align, "", "Align To Curve"));
+		t.fields.back().tip = "Rotate the atom to face along the curve while moving.";
+		t.fields.push_back(MakeField("playOnStart", &SplineMover::playOnStart, "", "Play On Start"));
+		t.methods.push_back(MakeMethod("Play", &SplineMover::Play));
+		t.methods.push_back(MakeMethod("Stop", &SplineMover::Stop));
+		t.methods.push_back(MakeMethod("SetProgress", &SplineMover::SetProgress));
+		Reflect_SetMethodDoc("SplineMover", "SetProgress", "", "t01");
+		t.methods.push_back(MakeMethod("GetProgress", &SplineMover::GetProgress));
+		t.create = []() -> void* { return new SplineMover(); };
 	}
 	{
 		TypeInfo& t = TypeOf<Sprite>();
