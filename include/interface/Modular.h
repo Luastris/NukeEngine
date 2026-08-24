@@ -84,6 +84,24 @@ NUKEENGINE_API const char* EngineVersion();
 // Same module file across platforms? Compares by lowercase stem ("NukeRenderDiligent.dll" ==
 // "NukeRenderDiligent.so") — project files written on one OS keep working on another.
 NUKEENGINE_API bool ModuleFileMatches(const std::string& a, const std::string& b);
+// The platform-neutral module NAME: file name minus extension minus the Unix "lib" prefix
+// ("NukeVFX.dll", "libNukeVFX.so", "NukeVFX" -> "NukeVFX"). Project manifests store THIS.
+NUKEENGINE_API std::string ModuleName(const std::string& fileOrPath);
+// The name as a module file of THIS platform ("NukeVFX" -> "NukeVFX.dll" / "libNukeVFX.so" /
+// "libNukeVFX.dylib"). A name that already carries an extension passes through unchanged.
+NUKEENGINE_API std::string ModuleFileName(const std::string& name);
+// The platform-neutral module NAME: file name minus extension minus the Unix "lib" prefix
+// ("NukeVFX.dll", "libNukeVFX.so", "NukeVFX" -> "NukeVFX"). Project manifests store THIS.
+NUKEENGINE_API std::string ModuleName(const std::string& fileOrPath);
+// The name as a module file of THIS platform ("NukeVFX" -> "NukeVFX.dll" / "libNukeVFX.so" /
+// "libNukeVFX.dylib"). A name that already carries an extension passes through unchanged.
+NUKEENGINE_API std::string ModuleFileName(const std::string& name);
+// The platform-neutral module NAME: file name minus extension minus the Unix "lib" prefix
+// ("NukeVFX.dll", "libNukeVFX.so", "NukeVFX" -> "NukeVFX"). Project manifests store THIS.
+NUKEENGINE_API std::string ModuleName(const std::string& fileOrPath);
+// The name as a module file of THIS platform ("NukeVFX" -> "NukeVFX.dll" / "libNukeVFX.so" /
+// "libNukeVFX.dylib"). A name that already carries an extension passes through unchanged.
+NUKEENGINE_API std::string ModuleFileName(const std::string& name);
 
 // Pick a provider of `service` from the discovered pool: the one whose moduleFile equals
 // preferredFile if present (cross-platform stem match), else the first provider found.

@@ -29,6 +29,14 @@
 
 #define NUKE_MODULE_ABI 4
 extern "C" { NUKE_ABI_STAMP int nuke_module_abi = NUKE_MODULE_ABI; }
+// Build flavor of THIS binary. Same-source Debug and Release builds share the engine ABI
+// stamp, but mixing them corrupts memory (CRT/iterator-debug/layout differences) — module
+// discovery reads this out of the FILE and refuses a mismatch before any code runs.
+#ifdef _DEBUG
+extern "C" { NUKE_ABI_STAMP int nuke_build_debug = 1; }
+#else
+extern "C" { NUKE_ABI_STAMP int nuke_build_debug = 0; }
+#endif
 
 // ---- Engine BINARY-COMPATIBILITY generation -------------------------------------------------
 // Tracks the whole engine ABI a module was compiled against (exported class layouts, signatures);

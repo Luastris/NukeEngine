@@ -128,11 +128,11 @@ bool ModuleInstalled(const std::string& name, bool* outLoaded)
 	if (outLoaded) *outLoaded = false;
 	if (name.empty()) return true;
 	auto low = [](std::string s) { for (char& c : s) c = (char)tolower((unsigned char)c); return s; };
-	const std::string want = low(bfs::path(name).stem().string());
+	const std::string want = low(ModuleName(name));
 	for (auto& m : g_modules)
 	{
 		if (!m) continue;
-		if (low(bfs::path(m->moduleFile).stem().string()) == want || low(m->title) == want)
+		if (low(ModuleName(m->moduleFile)) == want || low(m->title) == want)
 		{
 			if (outLoaded) *outLoaded = m->loaded;
 			return true;
@@ -150,21 +150,48 @@ const char* EngineVersion() { return NUKE_ENGINE_VERSION; }
 // Same module file across platforms? Project files record the AUTHORING platform's file name
 // ("NukeRenderDiligent.dll"); the pool on this machine holds the native one (".so"/".dylib").
 // The stem is the identity, the extension is an implementation detail — compare accordingly.
+std::string ModuleName(const std::string& fileOrPath)
+{
+	const bfs::path p(fileOrPath);
+	std::string ext = p.extension().string();
+	for (char& c : ext) c = (char)tolower((unsigned char)c);
+	std::string stem = (ext == ".dll" || ext == ".so" || ext == ".dylib") ? p.stem().string()
+	                                                                     : p.filename().string();
+	// The Unix toolchains prefix shared libraries with "lib"; the prefix is packaging, not
+	// identity — "libNukeVFX.so" and "NukeVFX.dll" are the same module.
+	if ((ext == ".so" || ext == ".dylib") && stem.size() > 3 && stem.compare(0, 3, "lib") == 0)
+		stem.erase(0, 3);
+	return stem;
+}
+
+std::string ModuleFileName(const std::string& name)
+{
+	const std::string ext = bfs::path(name).extension().string();
+	if (ext == ".dll" || ext == ".so" || ext == ".dylib") return name;   // already a file name
+#ifdef _WIN32
+	return name + ".dll";
+#elif defined(__APPLE__)
+	return "lib" + name + ".dylib";
+#else
+	return "lib" + name + ".so";
+#endif
+}
+
 bool ModuleFileMatches(const std::string& a, const std::string& b)
 {
 	if (a == b) return true;
 	if (a.empty() || b.empty()) return false;
 	auto low = [](std::string s) { for (char& c : s) c = (char)tolower((unsigned char)c); return s; };
-	return low(bfs::path(a).stem().string()) == low(bfs::path(b).stem().string());
+	return low(ModuleName(a)) == low(ModuleName(b));
 }
 
 #ifdef _WIN32
 // Read two exports out of a DLL's PE export table by parsing the file — no LoadLibrary.
 // `hasPlugin` = an exported "plugin" symbol exists; `engineAbi` = the exported
 // nuke_engine_abi int (1 when absent). Returns false when the file isn't a parseable PE32+.
-static bool PreflightPeExports(const std::string& path, bool& hasPlugin, int& engineAbi)
+static bool PreflightPeExports(const std::string& path, bool& hasPlugin, int& engineAbi, bool& debugCrt)
 {
-	hasPlugin = false; engineAbi = 1;
+	hasPlugin = false; engineAbi = 1; debugCrt = false;
 	bfs::ifstream f(bfs::path(path), std::ios::binary);
 	if (!f) return false;
 	auto rd = [&](long long off, void* dst, size_t n) -> bool
@@ -182,7 +209,6 @@ static bool PreflightPeExports(const std::string& path, bool& hasPlugin, int& en
 	IMAGE_OPTIONAL_HEADER64 oh;
 	if (!rd(dos.e_lfanew + 4 + sizeof(fh), &oh, sizeof(oh)) || oh.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC) return false;
 	const IMAGE_DATA_DIRECTORY& expDir = oh.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
-	if (!expDir.VirtualAddress) return true;   // valid PE that exports nothing
 	std::vector<IMAGE_SECTION_HEADER> secs(fh.NumberOfSections);
 	if (secs.empty() || !rd(dos.e_lfanew + 4 + sizeof(fh) + fh.SizeOfOptionalHeader,
 	                        secs.data(), secs.size() * sizeof(IMAGE_SECTION_HEADER))) return false;
@@ -196,6 +222,30 @@ static bool PreflightPeExports(const std::string& path, bool& hasPlugin, int& en
 		}
 		return -1;
 	};
+	// CRT flavor from the IMPORT table: a module linked against the debug CRT (ucrtbased.dll)
+	// must never run inside a release host and vice versa — same-source builds share the ABI
+	// stamp, so the stamp alone cannot tell them apart.
+	{
+		const IMAGE_DATA_DIRECTORY& impDir = oh.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+		if (impDir.VirtualAddress)
+		{
+			for (DWORD i = 0; ; ++i)
+			{
+				IMAGE_IMPORT_DESCRIPTOR id;
+				const long long io = off(impDir.VirtualAddress + i * sizeof(IMAGE_IMPORT_DESCRIPTOR));
+				if (io < 0 || !rd(io, &id, sizeof(id)) || !id.Name) break;
+				const long long so = off(id.Name);
+				if (so < 0) continue;
+				char nm[64] = {};
+				f.clear(); f.seekg((std::streamoff)so);
+				f.read(nm, sizeof(nm) - 1);
+				nm[f.gcount() > 0 ? f.gcount() : 0] = 0;
+				for (char* c = nm; *c; ++c) *c = (char)tolower((unsigned char)*c);
+				if (strcmp(nm, "ucrtbased.dll") == 0) { debugCrt = true; break; }
+			}
+		}
+	}
+	if (!expDir.VirtualAddress) return true;   // valid PE that exports nothing
 	IMAGE_EXPORT_DIRECTORY ed;
 	const long long edOff = off(expDir.VirtualAddress);
 	if (edOff < 0 || !rd(edOff, &ed, sizeof(ed))) return false;
@@ -232,9 +282,9 @@ static bool PreflightPeExports(const std::string& path, bool& hasPlugin, int& en
 // .dynsym by parsing the FILE — a stale module is refused before dlopen can run its static
 // initializers. Returns false when the file isn't parseable ELF64 (or is section-stripped):
 // the post-dlopen check in DiscoverModuleFileBody then stays the judge, exactly as before.
-static bool PreflightElfExports(const std::string& path, bool& hasPlugin, int& engineAbi)
+static bool PreflightElfExports(const std::string& path, bool& hasPlugin, int& engineAbi, int& buildDebug)
 {
-	hasPlugin = false; engineAbi = 1;
+	hasPlugin = false; engineAbi = 1; buildDebug = -1;
 	bfs::ifstream f(bfs::path(path), std::ios::binary);
 	if (!f) return false;
 	auto rd = [&](long long off, void* dst, size_t n) -> bool
@@ -283,6 +333,114 @@ static bool PreflightElfExports(const std::string& path, bool& hasPlugin, int& e
 			const long long vo = voff(sym.st_value);
 			int v = 0;
 			if (vo >= 0 && rd(vo, &v, sizeof(v))) engineAbi = v;
+		}
+		else if (strcmp(nm, "nuke_build_debug") == 0)
+		{
+			const long long vo = voff(sym.st_value);
+			int v = 0;
+			if (vo >= 0 && rd(vo, &v, sizeof(v))) buildDebug = v;
+		}
+	}
+	return true;
+}
+
+#elif defined(__APPLE__)
+// The Mach-O mirror: read `_plugin` + the stamps out of the FILE (thin or fat), before dlopen
+// can run a mismatched module's static initializers. Returns false when unparseable — the
+// post-dlopen ABI check then stays the judge, exactly as before this preflight existed.
+static bool PreflightMachOExports(const std::string& path, bool& hasPlugin, int& engineAbi, int& buildDebug)
+{
+	hasPlugin = false; engineAbi = 1; buildDebug = -1;
+	bfs::ifstream f(bfs::path(path), std::ios::binary);
+	if (!f) return false;
+	auto rd = [&](long long off, void* dst, size_t n) -> bool
+	{
+		f.clear(); f.seekg((std::streamoff)off);
+		f.read((char*)dst, (std::streamsize)n);
+		return (bool)f;
+	};
+	auto bswap32 = [](uint32_t v) -> uint32_t
+	{ return (v >> 24) | ((v >> 8) & 0xFF00u) | ((v << 8) & 0xFF0000u) | (v << 24); };
+#if defined(__aarch64__) || defined(__arm64__)
+	const uint32_t wantCpu = 0x0100000Cu;   // CPU_TYPE_ARM64
+#else
+	const uint32_t wantCpu = 0x01000007u;   // CPU_TYPE_X86_64
+#endif
+	// Fat binaries: pick the slice of THIS host's architecture.
+	long long base = 0;
+	{
+		uint32_t magic = 0;
+		if (!rd(0, &magic, 4)) return false;
+		if (magic == 0xBEBAFECAu || magic == 0xCAFEBABEu)   // FAT_MAGIC (big-endian on disk)
+		{
+			uint32_t nfat = 0;
+			if (!rd(4, &nfat, 4)) return false;
+			nfat = bswap32(nfat);
+			if (nfat > 16) return false;
+			bool found = false;
+			for (uint32_t i = 0; i < nfat && !found; ++i)
+			{
+				uint32_t arch[5];   // cputype, cpusubtype, offset, size, align
+				if (!rd(8 + (long long)i * 20, arch, sizeof(arch))) return false;
+				if (bswap32(arch[0]) == wantCpu) { base = (long long)bswap32(arch[2]); found = true; }
+			}
+			if (!found) return false;
+		}
+	}
+	struct { uint32_t magic, cputype, cpusubtype, filetype, ncmds, sizeofcmds, flags, reserved; } mh;
+	if (!rd(base, &mh, sizeof(mh)) || mh.magic != 0xFEEDFACFu) return false;   // MH_MAGIC_64 only
+	if (mh.ncmds > 4096) return false;
+	// Walk the load commands: LC_SEGMENT_64 (vmaddr -> file offset) + LC_SYMTAB.
+	struct Seg { uint64_t vmaddr, vmsize, fileoff; };
+	std::vector<Seg> segs;
+	uint32_t symoff = 0, nsyms = 0, stroff = 0, strsize = 0;
+	long long lc = base + 32;
+	for (uint32_t i = 0; i < mh.ncmds; ++i)
+	{
+		uint32_t cmd[2];   // cmd, cmdsize
+		if (!rd(lc, cmd, sizeof(cmd)) || cmd[1] < 8) return false;
+		if (cmd[0] == 0x19u)   // LC_SEGMENT_64
+		{
+			struct { char segname[16]; uint64_t vmaddr, vmsize, fileoff, filesize; } sc;
+			if (!rd(lc + 8, &sc, sizeof(sc))) return false;
+			segs.push_back({ sc.vmaddr, sc.vmsize, sc.fileoff });
+		}
+		else if (cmd[0] == 0x2u)   // LC_SYMTAB
+		{
+			uint32_t st[4];
+			if (!rd(lc + 8, st, sizeof(st))) return false;
+			symoff = st[0]; nsyms = st[1]; stroff = st[2]; strsize = st[3];
+		}
+		lc += cmd[1];
+	}
+	if (!symoff || !nsyms || !stroff || nsyms > (16u << 20) || strsize > (256u << 20)) return false;
+	std::vector<char> strtab(strsize);
+	if (!rd(base + stroff, strtab.data(), strtab.size())) return false;
+	auto voff = [&](uint64_t va) -> long long
+	{
+		for (const Seg& s : segs)
+			if (s.vmsize && va >= s.vmaddr && va < s.vmaddr + s.vmsize)
+				return base + (long long)(s.fileoff + (va - s.vmaddr));
+		return -1;
+	};
+	for (uint32_t i = 0; i < nsyms; ++i)
+	{
+		struct { uint32_t n_strx; uint8_t n_type, n_sect; uint16_t n_desc; uint64_t n_value; } sym;
+		if (!rd(base + symoff + (long long)i * 16, &sym, sizeof(sym))) return false;
+		if (!(sym.n_type & 0x0Eu) || sym.n_strx >= strtab.size()) continue;   // defined symbols only
+		const char* nm = strtab.data() + sym.n_strx;
+		if (strcmp(nm, "_plugin") == 0) hasPlugin = true;
+		else if (strcmp(nm, "_nuke_engine_abi") == 0)
+		{
+			const long long vo = voff(sym.n_value);
+			int v = 0;
+			if (vo >= 0 && rd(vo, &v, sizeof(v))) engineAbi = v;
+		}
+		else if (strcmp(nm, "_nuke_build_debug") == 0)
+		{
+			const long long vo = voff(sym.n_value);
+			int v = 0;
+			if (vo >= 0 && rd(vo, &v, sizeof(v))) buildDebug = v;
 		}
 	}
 	return true;
@@ -643,17 +801,22 @@ static NUKEModule* DiscoverModuleFileBody(const std::string& absPath)
 	g_refused.erase(p.generic_string());   // re-discovery re-judges this file
 	try
 	{
-#if defined(_WIN32) || defined(__linux__)
-		// ABI gate BEFORE the DLL's code can run. Windows: not LoadLibraryEx(DONT_RESOLVE_
-		// DLL_REFERENCES) — that plants an uninitialized image the later real LoadLibrary can
-		// be handed back. Linux: the same read-the-file gate keeps a stale .so's static
-		// initializers from ever running (macOS still relies on the post-dlopen check).
+		// ABI gate BEFORE the DLL's code can run, on every platform. Windows: not
+		// LoadLibraryEx(DONT_RESOLVE_DLL_REFERENCES) — that plants an uninitialized image the
+		// later real LoadLibrary can be handed back; the file is parsed instead (PE / ELF /
+		// Mach-O). A same-source Debug/Release mismatch shares the ABI stamp yet corrupts
+		// memory in its STATIC INITIALIZERS (that is how binary garbage once reached a
+		// .nuproj plugin list) — it is refused here too, before any code runs.
 		{
-			bool hasPlugin = false; int engineAbi = 1;
+			bool hasPlugin = false; int engineAbi = 1; int buildDebug = -1;
 #ifdef _WIN32
-			const bool preflighted = PreflightPeExports(p.string(), hasPlugin, engineAbi);
+			bool debugCrt = false;
+			const bool preflighted = PreflightPeExports(p.string(), hasPlugin, engineAbi, debugCrt);
+			if (preflighted) buildDebug = debugCrt ? 1 : 0;   // the import table always tells
+#elif defined(__linux__)
+			const bool preflighted = PreflightElfExports(p.string(), hasPlugin, engineAbi, buildDebug);
 #else
-			const bool preflighted = PreflightElfExports(p.string(), hasPlugin, engineAbi);
+			const bool preflighted = PreflightMachOExports(p.string(), hasPlugin, engineAbi, buildDebug);
 #endif
 			if (preflighted)
 			{
@@ -666,9 +829,22 @@ static NUKEModule* DiscoverModuleFileBody(const std::string& absPath)
 					     << " — rebuild the module (game modules: File -> Build & Reload Game Modules)" << endl;
 					return nullptr;
 				}
+#ifdef _DEBUG
+				const int hostDebug = 1;
+#else
+				const int hostDebug = 0;
+#endif
+				// buildDebug -1 = a module from before the flavor stamp (non-Windows only):
+				// nothing to compare against, the old behavior stands.
+				if (buildDebug >= 0 && buildDebug != hostDebug)
+				{
+					cout << "[Modular]\t" << file << " REFUSED: a " << (buildDebug ? "Debug" : "Release")
+					     << " build in a " << (hostDebug ? "Debug" : "Release")
+					     << " host (mixed configs corrupt memory) — build the matching config" << endl;
+					return nullptr;
+				}
 			}
 		}
-#endif
 		// Plugins export an unmangled "plugin" symbol. ALTERED SEARCH PATH: a module's DLL
 		// dependencies resolve from the MODULE'S OWN dir first, not only next to the EXE.
 		boost::dll::shared_library lib(p.string(), boost::dll::load_mode::load_with_altered_search_path);
