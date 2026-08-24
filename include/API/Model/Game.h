@@ -95,7 +95,7 @@ public:
 	// behind it. Windows + macOS; X11/Wayland have no such protocol (ignored with a log).
 	[[nuke::func]] static void SetHideFromCapture(bool hide);
 
-	// T3 texture streaming: mip-pool VRAM budget in MB (0 = off). Live; persisted like the other
+	// Texture streaming: mip-pool VRAM budget in MB (0 = off). Live; persisted like the other
 	// window/config settings. Streamed textures keep a low-mip tail and stream detail by distance.
 	[[nuke::func]] static void SetTextureStreaming(double budgetMB);
 	// One stats line: "streamed=N resident=X.XMB full=Y.YMB saved=Z.ZMB" (probes/console).
@@ -115,7 +115,7 @@ public:
 	[[nuke::func]] static bool PackDirectory(const std::string& root, const std::string& outPak, int method, int level, int blockMB);
 	// Direct IO (Fast loading 4): the provider in use and what it served so far, one line.
 	[[nuke::func]] static std::string StorageInfo();
-	// Hi-Z occlusion (R4): draws tagged / held back by the last camera; live on/off toggle.
+	// Hi-Z occlusion: draws tagged / held back by the last camera; live on/off toggle.
 	[[nuke::func]] static double OcclusionTracked();
 	[[nuke::func]] static double OcclusionCulled();
 	[[nuke::func]] static void   SetOcclusionCulling(bool on);
@@ -134,7 +134,7 @@ public:
 	// Queue a capture of the current game image; it happens at the end of this frame's render.
 	// Format by extension (.png/.bmp/.tga, default png). Slow — GPU flush + readback.
 	[[nuke::func]] static bool Screenshot(const std::string& file);
-	static void FlushScreenshot();   // host-side: World::Render calls it once per frame
+	static void FlushScreenshot();   // host-side: the renderer calls it at end of frame (pre-Present)
 };
 
 }  // namespace nuke

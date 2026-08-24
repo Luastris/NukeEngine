@@ -91,6 +91,16 @@ public:
 	// Play a clip from memory; the backend copies and owns the bytes for the voice's lifetime.
 	// 0 on failure.
 	virtual uint64_t playData(const void* bytes, uint64_t size, const NukeVoiceDesc& desc) { return 0; }
+
+	// ---- PCM stream voices ----------------------------------------------------------------
+	// Interleaved float32, push from any ONE thread; underrun plays silence (never self-ends).
+	// Regular voice calls work on the returned id. 0 = failure.
+	virtual uint64_t openStream(int channels, int sampleRate, int bus) { return 0; }
+	virtual bool     pushStream(uint64_t voice, const float* interleaved, uint64_t frameCount) { return false; }
+	// Frames pushed but not yet consumed by the mixer — pushedTotal minus this, over the
+	// sample rate, is the stream's PLAYBACK CLOCK (video sync).
+	virtual uint64_t streamQueued(uint64_t voice) { return 0; }
+	virtual void     closeStream(uint64_t voice) { stop(voice); }
 };
 
 }  // namespace nuke

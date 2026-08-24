@@ -74,6 +74,7 @@ public:
 
     Texture* GetTexture(const std::string& guid);     // nullptr if unknown
     void     RegisterTexture(Texture* t);             // add to textures + index by t->guid
+    void     UnregisterTexture(Texture* t);           // remove BEFORE deleting an owner-managed texture (video)
 
     Shader*  GetShader(const std::string& guid);      // nullptr if unknown
     void     RegisterShader(Shader* s);               // add to shaders + index by s->guid

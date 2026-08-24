@@ -7,7 +7,7 @@
 #include "interface/AppInstance.h"
 #include "config.h"
 #include <boost/chrono.hpp>
-#include <boost/thread/thread.hpp>   // sleep_for: the J2 FPS-cap pacer
+#include <boost/thread/thread.hpp>   // sleep_for: the FPS-cap pacer
 #include <iostream>
 #ifdef _WIN32
 #include <windows.h>

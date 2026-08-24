@@ -52,7 +52,7 @@ public:
 	// empty. Appended at the END (cross-DLL layout; part of engine abi 15).
 	bool folder = false;
 
-	// World Partition (T2): a flagged ROOT atom stays in the main world instead of streaming
+	// World Partition: a flagged ROOT atom stays in the main world instead of streaming
 	// with its grid cell (managers, global logic, skyboxes). Persistent atoms and folders never
 	// stream either. Appended at the END (cross-DLL layout; engine abi 19).
 	bool alwaysLoaded = false;

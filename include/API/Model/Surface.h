@@ -123,7 +123,7 @@ public:
 	// transform into the material's liveDraw* fields right before its draw is submitted.
 	static void PushDrawContext(Atom* atom, class Material* m);
 
-	// ---- LM-4 surface responses -------------------------------------------------------------
+	// ---- surface responses -------------------------------------------------------------
 	// Footstep for `self` (a character): raycasts down from its position (ignoring its own
 	// body), picks the ground material's round-robin step clip and plays it 3D with a slight
 	// pitch variation. Returns false when nothing is underfoot or the surface has no steps.

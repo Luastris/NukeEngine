@@ -76,12 +76,15 @@ extern "C" { NUKE_ABI_STAMP int nuke_build_debug = 0; }
 //  27 — Fast loading 4: Texture gained the pak-resident source (pakSource shared_ptr) and
 //       Config the io.* block (directStorage/stagingMB/gpuDecompression); Package::Entry
 //       carries the block table (layout + blocks) — every module that includes them relinks.
-//  28 — J1/J2: NukeWindow gained fpsLimit (its growth shifts every Config member after
+//  28 — NukeWindow gained fpsLimit (its growth shifts every Config member after
 //       `window`) and Config gained jobCoreBudget — old binaries would read garbage offsets
 //       (a stale dist player hung allocating 20 GB before the first frame).
-//  29 — E9 custom cursors: iRender gained setCursorImage (appended vtable slot; the renderer
-//       must implement the same layout the engine calls).
-#define NUKE_ENGINE_ABI 29
+//  29 — custom cursors: iRender gained setCursorImage (appended vtable slot; the renderer
+//       must implement the same layout the engine calls). Decal target filter appended
+//       drawDecalMesh in the same batch.
+//  30 — Texture gained the dynamic block (dynamic + dynamicVersion — sizeof grew),
+//       iAudio gained the PCM stream API (openStream/pushStream/streamQueued/closeStream).
+#define NUKE_ENGINE_ABI 30
 extern "C" { NUKE_ABI_STAMP int nuke_engine_abi = NUKE_ENGINE_ABI; }
 
 namespace nuke {

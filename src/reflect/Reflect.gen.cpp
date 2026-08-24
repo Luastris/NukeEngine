@@ -703,7 +703,7 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("SetHideFromCapture", &Game::SetHideFromCapture));
 		Reflect_SetMethodDoc("Game", "SetHideFromCapture", "Invisible to screenshots/recorders — the user still sees the window, capture sees what is behind it. Windows + macOS; X11/Wayland have no such protocol (ignored with a log).", "hide");
 		t.methods.push_back(MakeMethod("SetTextureStreaming", &Game::SetTextureStreaming));
-		Reflect_SetMethodDoc("Game", "SetTextureStreaming", "T3 texture streaming: mip-pool VRAM budget in MB (0 = off). Live; persisted like the other window/config settings. Streamed textures keep a low-mip tail and stream detail by distance.", "budgetMB");
+		Reflect_SetMethodDoc("Game", "SetTextureStreaming", "Texture streaming: mip-pool VRAM budget in MB (0 = off). Live; persisted like the other window/config settings. Streamed textures keep a low-mip tail and stream detail by distance.", "budgetMB");
 		t.methods.push_back(MakeMethod("TextureStreamInfo", &Game::TextureStreamInfo));
 		Reflect_SetMethodDoc("Game", "TextureStreamInfo", "One stats line: \"streamed=N resident=X.XMB full=Y.YMB saved=Z.ZMB\" (probes/console).", "");
 		t.methods.push_back(MakeMethod("DrawCalls", &Game::DrawCalls));
@@ -718,7 +718,7 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("StorageInfo", &Game::StorageInfo));
 		Reflect_SetMethodDoc("Game", "StorageInfo", "Direct IO (Fast loading 4): the provider in use and what it served so far, one line.", "");
 		t.methods.push_back(MakeMethod("OcclusionTracked", &Game::OcclusionTracked));
-		Reflect_SetMethodDoc("Game", "OcclusionTracked", "Hi-Z occlusion (R4): draws tagged / held back by the last camera; live on/off toggle.", "");
+		Reflect_SetMethodDoc("Game", "OcclusionTracked", "Hi-Z occlusion: draws tagged / held back by the last camera; live on/off toggle.", "");
 		t.methods.push_back(MakeMethod("OcclusionCulled", &Game::OcclusionCulled));
 		t.methods.push_back(MakeMethod("SetOcclusionCulling", &Game::SetOcclusionCulling));
 		Reflect_SetMethodDoc("Game", "SetOcclusionCulling", "", "on");
@@ -1378,7 +1378,7 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("ValueAt", &Surface::ValueAt));
 		Reflect_SetMethodDoc("Surface", "ValueAt", "Effective value for an atom at a world point: nearest-ancestor SurfaceState override (else the global), maxed with every SurfaceMask along the ancestor chain.", "atom,state,worldPos");
 		t.methods.push_back(MakeMethod("Footstep", &Surface::Footstep));
-		Reflect_SetMethodDoc("Surface", "Footstep", "---- LM-4 surface responses ------------------------------------------------------------- Footstep for `self` (a character): raycasts down from its position (ignoring its own body), picks the ground material's round-robin step clip and plays it 3D with a slight pitch variation. Returns false when nothing is underfoot or the surface has no steps.", "self,volume");
+		Reflect_SetMethodDoc("Surface", "Footstep", "---- surface responses ------------------------------------------------------------- Footstep for `self` (a character): raycasts down from its position (ignoring its own body), picks the ground material's round-robin step clip and plays it 3D with a slight pitch variation. Returns false when nothing is underfoot or the surface has no steps.", "self,volume");
 		t.methods.push_back(MakeMethod("Hit", &Surface::Hit));
 		Reflect_SetMethodDoc("Surface", "Hit", "Typed hit on an atom's surface (\"bullet\"/\"blunt\"/...; empty matches the material's any-hit entry): plays the reaction sound now and queues the prefab/decal spawn for the next frame (outside the physics step). `impulse` gates entries by their Min Impulse.", "atom,hitType,pos,normal,impulse");
 		t.methods.push_back(MakeMethod("TagAt", &Surface::TagAt));
@@ -1534,7 +1534,7 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("ReparentBefore", &World::ReparentBefore));
 		Reflect_SetMethodDoc("World", "ReparentBefore", "Like Reparent, but insert `a` directly BEFORE `sibling` in `sibling`'s parent. nullptr sibling is ignored.", "a,sibling");
 		t.methods.push_back(MakeMethod("SetStreaming", &World::SetStreaming));
-		Reflect_SetMethodDoc("World", "SetStreaming", "---- World Partition streaming (T2) ---- Configure streaming from scripts (the editor drives settings directly). Takes effect on the next save (split) / tick (runtime).", "enabled,cellSize,range,hlodRange");
+		Reflect_SetMethodDoc("World", "SetStreaming", "---- World Partition streaming ---- Configure streaming from scripts (the editor drives settings directly). Takes effect on the next save (split) / tick (runtime).", "enabled,cellSize,range,hlodRange");
 		t.methods.push_back(MakeMethod("StreamCells", &World::StreamCells));
 		t.methods.push_back(MakeMethod("StreamLoaded", &World::StreamLoaded));
 	}

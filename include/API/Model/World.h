@@ -36,11 +36,11 @@ public:
 		float shadowNormalBias = 0.0f;
 		float shadowSoftness   = 1.0f;    // PCF kernel scale
 		bool  frustumCull      = true;    // skip drawing objects outside the camera frustum (toggle)
-		bool  occlusionCull    = true;    // Hi-Z GPU occlusion over meshes + instanced chunks (R4)
+		bool  occlusionCull    = true;    // Hi-Z GPU occlusion over meshes + instanced chunks
 		// Physics (drives the fixed-step loop; pushed to the physics service).
 		float gravity[3] = { 0.0f, -9.81f, 0.0f };
 		float fixedDt    = 1.0f / 60.0f;  // fixed simulation timestep (seconds)
-		// World Partition streaming (T2): ONE big world streamed by XZ grid cells. Save splits
+		// World Partition streaming: ONE big world streamed by XZ grid cells. Save splits
 		// spatial root atoms into per-cell files; play streams them by camera distance and
 		// renders baked HLOD proxies for unloaded far cells. Edit mode always loads everything.
 		bool  streamEnabled   = false;
@@ -95,7 +95,7 @@ public:
 private:
 	boost::recursive_mutex gameLock;
 	std::vector<long> destroyQueue;   // QueueDestroy ids; flushed at the end of Update (under gameLock)
-	// T2 split save: main file + per-cell files + baked HLOD proxies (WorldStream.cpp).
+	// Split save: main file + per-cell files + baked HLOD proxies (WorldStream.cpp).
 	void SaveToFileSplit(const std::string& path);
 	void BakeStreamHlod(const std::map<std::pair<int, int>, nlohmann::json>& cellAtoms,
 	                    const std::string& binPath);
@@ -175,7 +175,7 @@ public:
 	void ConvertPluginToUnknown(const std::string& moduleFile);
 	void RestorePluginComponents(const std::string& moduleFile);
 
-	// ---- World Partition streaming (T2) ----
+	// ---- World Partition streaming ----
 	// Configure streaming from scripts (the editor drives settings directly). Takes effect on
 	// the next save (split) / tick (runtime).
 	[[nuke::func]] void SetStreaming(bool enabled, double cellSize, double range, double hlodRange);

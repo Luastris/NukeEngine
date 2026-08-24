@@ -1,7 +1,7 @@
 #pragma once
 #ifndef NUKEE_WORLDSTREAM_H
 #define NUKEE_WORLDSTREAM_H
-// T2 World Partition: ONE big world streamed by XZ grid cells over the existing atom
+// World Partition: ONE big world streamed by XZ grid cells over the existing atom
 // (de)serialization. Membership is DYNAMIC — a spatial root atom belongs to the cell under its
 // current position — so the same runtime serves a cold player boot (cells read from files), a
 // PIE session (everything starts in memory and far cells PARK), and live gameplay (spawned or
@@ -52,7 +52,7 @@ public:
 		uint64_t fileBytes = ~0ull;        // cell file size on disk (~0 = not measured yet)
 	};
 
-	// ST-viz: one cell's live state, snapshotted for the editor overlay (DebugCells).
+	// One cell's live state, snapshotted for the editor overlay (DebugCells).
 	struct CellInfo
 	{
 		CellKey key;
@@ -95,7 +95,7 @@ public:
 
 	int CellCount() const { return (int)cells.size(); }
 	int LoadedCount() const;
-	// ST-viz snapshot for the editor overlay (game thread; file sizes measured once and cached).
+	// Snapshot for the editor overlay (game thread; file sizes measured once and cached).
 	void DebugCells(std::vector<CellInfo>& out);
 
 private:

@@ -45,7 +45,7 @@ struct NukeWindow{
     bool  vsync       = true;    // cap the main present to the display refresh ("vsync"); live-toggleable
     bool  clickThrough    = false;  // mouse input passes through to windows beneath ("clickThrough")
     bool  hideFromCapture = false;  // invisible to screen capture ("hideFromCapture"; Windows/macOS)
-    int   textureStreamMB = 0;      // T3 mip-streaming VRAM budget, MB ("textureStreamMB"; 0 = off)
+    int   textureStreamMB = 0;      // mip-streaming VRAM budget, MB ("textureStreamMB"; 0 = off)
     int   fpsLimit        = 0;      // frame cap ("fpsLimit"; 0 = uncapped; vsync applies on top)
 };
 
@@ -159,10 +159,9 @@ public:
     // Cores the whole engine may occupy ("jobs": {"coreBudget": N}; 0 = the machine).
     // ABI: Config is cross-DLL — new fields go LAST, and any growth bumps NUKE_ENGINE_ABI.
     int  jobCoreBudget = 0;
+    std::string splashVideo;     // splash .nuvid, content-relative ("splashVideo"; "" = none)
 	void reload(Config* instance);
-	// The core the fixed-update (physics) thread pins to, after auto-resolution: -2 = don't
-	// pin; explicit value passes through; -1 auto = the LAST core inside the jobs core budget
-	// (or the machine when no budget is set).
+	// Physics-thread core after auto-resolution: -2 don't pin, -1 auto = last budget core.
 	int effectivePhysicsCore() const;
 	// Show/hide the process's OWN OS console window. No-op if the console is SHARED with a
 	// launching terminal (>1 attached process), and no-op off Windows.

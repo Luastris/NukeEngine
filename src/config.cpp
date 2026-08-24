@@ -258,6 +258,7 @@ void Config::reload(Config* instance)
     instance->logToConsole = root.value("logToConsole", instance->logToConsole);
     instance->gpuValidation = root.value("gpuValidation", instance->gpuValidation);
     instance->devConsole = root.value("devConsole", instance->devConsole);
+    instance->splashVideo = root.value("splashVideo", instance->splashVideo);
 
     if (root.contains("jobs") && root["jobs"].is_object())
     {

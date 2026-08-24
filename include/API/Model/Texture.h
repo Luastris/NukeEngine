@@ -103,6 +103,12 @@ public:
     int    curFrame   = 0;                  // runtime: current frame, advanced by World (time-based)
     double animTimeMs = 0.0;                // runtime: time accumulator within the current frame
 
+    // ---- dynamic textures (CPU-generated pixels) ----
+    // Owner rewrites `pixels` in place (RGBA8, mip0, no resize) and bumps dynamicVersion
+    // AFTER the write; the renderer re-uploads on the next bind. ABI: appended (30).
+    bool dynamic = false;
+    int  dynamicVersion = 0;
+
     // RenderTexture: a GPU render target a Camera draws into + materials sample. No CPU pixels.
     bool     renderTexture = false;        // serialized in the .nutex
     uint64_t rtId = 0;                      // runtime iRender render-target id (created on load)

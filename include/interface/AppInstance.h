@@ -151,7 +151,7 @@ public:
 	void   ContinueWorldActivation(bool ignoreBudget = false); // frame boundary: next budget slice
 	void   FlushWorldActivation();                          // finish instantly
 
-	// --- EDITOR MULTI-SELECTION (Q3/Q4). `selectedInHieararchy` stays the PRIMARY selection —
+	// --- EDITOR MULTI-SELECTION. `selectedInHieararchy` stays the PRIMARY selection —
 	// everything existing (modules included) keeps reading it; these are the ADDITIONAL members,
 	// stored as stable ids so a deleted atom can never dangle. Editor-maintained; the outline
 	// pass and the gizmo read them. ABI: appended at the END (engine abi 15).

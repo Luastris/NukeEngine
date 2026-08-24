@@ -88,6 +88,17 @@ void ResDB::RegisterTexture(Texture* t)
 	if (!t->guid.empty()) texByGuid[t->guid] = t;
 }
 
+void ResDB::UnregisterTexture(Texture* t)
+{
+	if (!t) return;
+	textures.erase(std::remove(textures.begin(), textures.end(), t), textures.end());
+	if (!t->guid.empty())
+	{
+		auto it = texByGuid.find(t->guid);
+		if (it != texByGuid.end() && it->second == t) texByGuid.erase(it);
+	}
+}
+
 Texture* ResDB::GetTexture(const std::string& guid)
 {
 	auto it = texByGuid.find(guid);
@@ -290,7 +301,7 @@ static bool RendererInternalShader(const std::string& name)
 	    || name == "grid"                                                  // analytic editor grid pass
 	    || name == "cursor"                                                // software cursor pass
 	    || name == "gbuffer"                                               // SSR/TAA prepass
-	    || name.rfind("hiz", 0) == 0 || name == "occl"                     // Hi-Z occlusion (R4)
+	    || name.rfind("hiz", 0) == 0 || name == "occl"                     // Hi-Z occlusion
 	    || name == "boot";                                                 // startup stand-in world shading
 }
 
@@ -911,7 +922,7 @@ void ResDB::LoadContentFile(const std::string& path)
 	}
 	else if (ext == ".nuinput")   // input map -> Input system, not a GUID'd asset
 	{
-		// Q6: the project may pin an EXPLICIT map list (.nuproj "inputMaps"); default = all.
+		// the project may pin an EXPLICIT map list (.nuproj "inputMaps"); default = all.
 		std::string rel = p.generic_string();
 		const std::string& root = AppInstance::GetSingleton()->contentRoot;
 		if (!root.empty() && rel.rfind(boost::filesystem::path(root).generic_string(), 0) == 0)

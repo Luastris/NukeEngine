@@ -331,9 +331,9 @@ static InputBinding bindingFromJson(const json& j)
 	return b;
 }
 
-// Q6 provenance: while a .nuinput applies, everything it defines is stamped with its name.
+// provenance: while a .nuinput applies, everything it defines is stamped with its name.
 static std::string g_curSource;
-// Q6 explicit map list: content-relative paths allowed to load; empty = auto (all).
+// explicit map list: content-relative paths allowed to load; empty = auto (all).
 static std::vector<std::string> g_enabledMaps;
 
 static std::string NormMapPath(const std::string& p)
@@ -403,7 +403,7 @@ bool Input::LoadAssetFromString(const std::string& text)
 void Input::Rebind(const std::string& context, const InputBinding& b)
 {
 	InputBinding ub = b;
-	ub.source = "user";   // Q6: user layer beats assets in the provenance view
+	ub.source = "user";   // user layer beats assets in the provenance view
 	ClearUserBindings(context, ub.action);
 	g_userBindings.push_back({ context, ub });
 	AddBinding(context, ub);
@@ -429,7 +429,7 @@ void Input::SetUserContext(const std::string& context, const std::vector<InputBi
 	for (const InputBinding& b : bindings)
 	{
 		InputBinding ub = b;
-		ub.source = "user";   // Q6: whole-context user replace
+		ub.source = "user";   // whole-context user replace
 		c->bindings.push_back({ ub, {} });
 	}
 }

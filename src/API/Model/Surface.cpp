@@ -490,7 +490,7 @@ void Surface::PushDrawContext(Atom* a, Material* m)
 	}
 }
 
-// ---- LM-4 surface responses ---------------------------------------------------------------
+// ---- surface responses ---------------------------------------------------------------
 
 // The material an atom's surface presents (first MeshRenderer/SkinnedMeshRenderer with one).
 static Material* MaterialOf(Atom* a)
@@ -722,7 +722,7 @@ static void DropGrown(Atom* a, DrivenFoliage& d)
 void Surface::DrainHits(World* w)
 {
 	if (!w) return;
-	// LM-4: spawn queued hit reactions (outside the physics step) and expire their lifetimes.
+	// spawn queued hit reactions (outside the physics step) and expire their lifetimes.
 	const double nowT = Time::getSingleton()->elapsed;
 	for (size_t phi = 0; phi < g_pendingHits.size(); )
 	{

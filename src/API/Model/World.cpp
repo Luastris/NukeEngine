@@ -1,4 +1,4 @@
-﻿// Header-only boost.chrono must come BEFORE any boost include: the lib flavor double-defines
+// Header-only boost.chrono must come BEFORE any boost include: the lib flavor double-defines
 // steady_clock::now inside the engine DLL.
 #define BOOST_CHRONO_HEADER_ONLY
 #include <boost/chrono.hpp>
@@ -293,7 +293,7 @@ World::~World()
 	stream = nullptr;
 }
 
-// ---- World Partition streaming (T2) ----
+// ---- World Partition streaming ----
 
 void World::SetStreaming(bool enabled, double cellSize, double range, double hlodRange)
 {
@@ -2711,7 +2711,7 @@ void World::Render(iRender* r)
 			{ Profiler::Scope ps("rnd.cam.hooks");  DrawComponentHooks(*hierarchy, r, RenderPhase::Opaque, camMask); }
 			// World Partition: baked HLOD proxies stand in for unloaded far cells.
 			if (stream) { Profiler::Scope ps("rnd.cam.hlod"); stream->Render(this, r); }
-			// Opaque scope closed: Hi-Z pyramid, GPU box test, deferred survivors (R4).
+			// Opaque scope closed: Hi-Z pyramid, GPU box test, deferred survivors.
 			{ Profiler::Scope ps("rnd.cam.occl"); r->endOpaque(); }
 			// Transparent AFTER every opaque draw: the refraction snapshot must hold the whole
 			// opaque scene (foliage included), and nothing opaque may land over glass.
@@ -2765,13 +2765,13 @@ void World::Render(iRender* r)
 		Profiler::Scope ps("rnd.postframe");
 		UpdatePrevTransforms(*hierarchy);   // snapshot transforms for next frame's TAA motion vectors
 		if (!auxiliary) Cursor::Tick(r);    // custom cursor: advance the flipbook, push changes
-		Game::FlushScreenshot();            // queued Game.Screenshot: the frame is complete here
+		// Game.Screenshot flushes in the renderer at end of frame (after overlay/cursor passes).
 	}
 }
 
 // --- world serialization (.nuworld JSON via reflection) ---
 
-// E5 prefab-in-prefab: while a PREFAB saves, a nested prefab INSTANCE serializes as a
+// Prefab-in-prefab: while a PREFAB saves, a nested prefab INSTANCE serializes as a
 // REFERENCE node — { prefabRef, basis, state } — instead of a flattened copy. `basis` is the
 // child prefab's document as the author saw it, `state` the instance's full snapshot; loading
 // three-way-merges state onto the CURRENT child file (the mod machinery), so child-prefab
@@ -2791,7 +2791,7 @@ static bool ReadPrefabByGuid(const std::string& guid, std::string& out)
 
 static void SaveAtom(Atom* atom, json& j)
 {
-	// E5: reference-ize nested instances (never the root of the save itself).
+	// reference-ize nested instances (never the root of the save itself).
 	if (g_prefabSave > 0 && atom != g_prefabSaveRoot && !atom->prefabGuid.empty())
 	{
 		std::string src;
@@ -2911,7 +2911,7 @@ static std::string ResolveComponentType(const std::string& saved)
 	return type;
 }
 
-// E5: expand a { prefabRef, basis, state } node into a plain atom document by three-way
+// expand a { prefabRef, basis, state } node into a plain atom document by three-way
 // merging the instance's state onto the CURRENT child prefab (basis = what the author saw).
 // Children match cur<->basis by id (same file lineage) and basis<->state by name/order (ids
 // regenerate per instance). Missing/broken source falls back to the recorded state snapshot.
@@ -3076,7 +3076,7 @@ bool SavePrefab(Atom* root, const std::string& path)
 {
 	if (!root) return false;
 	json j;
-	// E5: nested prefab instances save as references (+ diffs via basis), never flattened.
+	// nested prefab instances save as references (+ diffs via basis), never flattened.
 	++g_prefabSave;
 	Atom* prevRoot = g_prefabSaveRoot;
 	g_prefabSaveRoot = root;

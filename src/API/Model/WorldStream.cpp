@@ -1,4 +1,4 @@
-// T2 World Partition streaming (see WorldStream.h). Also implements World::BakeStreamHlod —
+// World Partition streaming (see WorldStream.h). Also implements World::BakeStreamHlod —
 // the split save's per-cell HLOD proxy bake (merged, grid-decimated, shading pre-baked into
 // vertex color).
 #include "API/Model/WorldStream.h"

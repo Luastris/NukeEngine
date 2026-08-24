@@ -99,7 +99,7 @@ struct WindowDesc
     // ABI: cross-DLL struct — new fields are APPENDED at the END, never inserted mid-struct.
     bool  clickThrough    = false;  // mouse input passes through to the windows beneath (live)
     bool  hideFromCapture = false;  // invisible to screen capture/recording; the user still sees it (live)
-    int   textureStreamMB = 0;      // T3 mip-streaming VRAM budget in MB (0 = off; live via setTextureStreaming)
+    int   textureStreamMB = 0;      // mip-streaming VRAM budget in MB (0 = off; live via setTextureStreaming)
 };
 
 // One record per instance in an instance buffer. Rows are HLSL-ready: row_i dot (localPos, 1)
@@ -592,7 +592,7 @@ public:
     // hands the snap step over once per frame.
     virtual void drawEditorGrid(float step) {}
 
-    // LiveMaterial background refraction (LM-6): called between the opaque and transparent
+    // LiveMaterial background refraction: called between the opaque and transparent
     // passes when a transparent material refracts — snapshot the scene for g_SceneRefr.
     virtual void beginTransparent() {}
 
@@ -602,7 +602,7 @@ public:
     // pipeline rebuilds with the shader's auto-generated closest-hit. ABI: appended.
     virtual void registerRTSurface(const char* shaderName, const char* surfHlsl) {}
 
-    // T3 texture streaming: VRAM budget for the mip pool in BYTES (0 disables; live). Streamed
+    // Texture streaming: VRAM budget for the mip pool in BYTES (0 disables; live). Streamed
     // textures keep a low-mip tail resident and stream higher mips by camera distance.
     virtual void setTextureStreaming(long long budgetBytes) {}
     // Stats: bytes resident of streamed textures, bytes saved vs full residency, texture count.
@@ -616,7 +616,7 @@ public:
                                               const char* hs, const char* ds)
     { return createShaderPipeline(name, vs, ps); }
 
-    // Terrain cluster culling (TB-5; abi 23) — draw ONE index range of an indexed mesh with
+    // Terrain cluster culling (abi 23) — draw ONE index range of an indexed mesh with
     // the full material pipeline (same contract as renderObject otherwise).
     virtual void renderObjectRange(Mesh* mesh, Material* mat,
                                    const float pos[3], const float quat[4], const float scale[3],
@@ -625,7 +625,7 @@ public:
     // the volume (a point p is visible when dot(n, p) + d >= 0 for all six).
     virtual void getFrustum(float planes[24]) { for (int i = 0; i < 24; ++i) planes[i] = 0; }
 
-    // Hi-Z occlusion culling (R4; abi 25). The engine tags an opaque draw with a stable id and
+    // Hi-Z occlusion culling (abi 25). The engine tags an opaque draw with a stable id and
     // its world AABB right before submitting it (one tag covers every section of that draw).
     // The renderer draws ids its visibility history calls visible, defers the rest, and at
     // endOpaque builds a depth pyramid from what was drawn, tests every tagged box on the GPU,
@@ -645,9 +645,12 @@ public:
     virtual bool setCursorImage(uint64_t id, const unsigned char* rgba, int w, int h,
                                 int hotX, int hotY, int mode) { (void)id; (void)rgba; (void)w; (void)h; (void)hotX; (void)hotY; (void)mode; return false; }
 
-    // Target-filtered decal (abi 29; same box/params as drawDecal): re-renders ONE mesh with
-    // the box projection, so ONLY that surface can catch the stain — a bystander inside the
-    // box stays clean. pos/quat/scale = the decal box, tPos/tQuat/tScale = the mesh transform.
+    // Fullscreen overlay (abi 30): `tex` letterboxed over the finished frame (under the
+    // software cursor), sampled every frame; null clears. Lives in the renderer across world swaps.
+    virtual void setScreenOverlay(Texture* tex) { (void)tex; }
+
+    // Target-filtered decal (abi 29): re-render ONE mesh with the box projection so only that
+    // surface catches it. pos/quat/scale = the decal box, tPos/tQuat/tScale = the mesh transform.
     virtual void drawDecalMesh(Texture* tex, const float pos[3], const float quat[4], const float scale[3],
                                const float tint[4], float intensity, float angleFade, int mode,
                                float appear, int appearMode, Mesh* target,
