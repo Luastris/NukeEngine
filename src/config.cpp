@@ -254,6 +254,13 @@ void Config::reload(Config* instance)
         instance->jobWorkers  = j.value("workers",  instance->jobWorkers);
         instance->jobPinCores = j.value("pinCores", instance->jobPinCores);
     }
+    if (root.contains("io") && root["io"].is_object())
+    {
+        const json& io = root["io"];
+        instance->ioDirectStorage = io.value("directStorage", instance->ioDirectStorage);
+        instance->ioStagingMB     = io.value("stagingMB",     instance->ioStagingMB);
+        instance->ioGpuDecompression = io.value("gpuDecompression", instance->ioGpuDecompression);
+    }
 
     if (root.contains("raytracing") && root["raytracing"].is_object())
     {

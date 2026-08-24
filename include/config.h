@@ -140,6 +140,12 @@ public:
     // Job workers (-1 = auto: one per core, minus core 0 and the physics core) + per-core pinning.
     int  jobWorkers  = -1;
     bool jobPinCores = true;
+    // Direct IO (Fast loading 4): "io": { "directStorage": true, "stagingMB": 32 }.
+    // directStorage = let the D3D12 runtime serve pak reads through DirectStorage (GPU GDeflate
+    // decompression, straight into VRAM); stagingMB = its staging buffer (caps one request).
+    bool ioDirectStorage   = true;
+    int  ioStagingMB       = 32;
+    bool ioGpuDecompression = true;   // false = DirectStorage inflates GDeflate on its CPU threads (the init self-test may also decide this)
     // Echo logs to the OS console. Windows console writes are slow enough to cost frame time under
     // heavy logging; false stops the echo (the editor's in-app Console panel is unaffected).
     bool logToConsole = true;

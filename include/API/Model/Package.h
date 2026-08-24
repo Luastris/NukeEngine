@@ -4,6 +4,7 @@
 #include "NukeAPI.h"
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <string>
 #include <utility>
 #include <vector>
@@ -19,16 +20,59 @@ namespace nuke {
 class NUKEENGINE_API Package
 {
 public:
-	// Entry compression method (per entry; a pak may mix them).
-	enum Method { M_Store = 0, M_Zlib = 1, M_Zstd = 2 };
+	// Entry compression method (per entry; a pak may mix them). GDeflate = the DirectStorage
+	// GPU-decompressible stream (CPU fallback decoder everywhere else).
+	enum Method { M_Store = 0, M_Zlib = 1, M_Zstd = 2, M_GDeflate = 3 };
+
+	// ---- blocks + layouts ----
+	// Every entry is a run of independently compressed BLOCKS (pak format v2): a reader can
+	// inflate them in parallel, and DirectStorage streams each one as its own request straight
+	// into its destination. `meta` is owned by the entry's layout (see RegisterLayout).
+	struct Block
+	{
+		uint32_t rawSize = 0, packSize = 0;
+		uint32_t meta[3] = { 0, 0, 0 };
+		uint8_t  method = 0;   // Method of THIS block (a block that would not shrink is stored)
+	};
+	// A COOK rewrites a file into blocks with a layout tag (e.g. a texture: tight header block +
+	// GPU-ready mip blocks). Layout 0 = the file's bytes split at blockBytes boundaries.
+	struct CookedBlock { uint64_t offset = 0, size = 0; uint32_t meta[3] = { 0, 0, 0 }; };
+	struct Cooked
+	{
+		uint8_t layout = 0;
+		std::string bytes;                  // the cooked payload; blocks reference ranges of it
+		std::vector<CookedBlock> blocks;
+	};
+	// raw file bytes -> cooked form, blocks no bigger than blockCap. False = keep layout 0.
+	typedef std::function<bool(const std::string& raw, uint32_t blockCap, Cooked& out)> CookFn;
+	// Inverse: the entry's inflated blocks -> the original file bytes (the CPU read path).
+	typedef std::function<bool(const std::vector<Block>& blocks, std::vector<std::string>& inflated,
+	                           std::string& out)> UncookFn;
+	// Layouts and cooks are owned by the asset types that define them (Texture registers its
+	// own for ".nutex"); Create() cooks every file whose extension has one.
+	static void RegisterLayout(uint8_t layout, const UncookFn& uncook);
+	static void RegisterCook(const std::string& extension, const CookFn& cook);   // ".nutex" (lower-case)
+	struct CreateOptions
+	{
+		uint32_t blockBytes = 8u << 20;    // layout-0 split size AND the cap a cook must respect
+		bool     cook = true;              // run the registered cooks
+	};
 
 	// ---- writer ----
 	// Pack `files` (projectRelativePath -> source disk file) into `outPak`. `level`: zlib 1..9,
-	// zstd 1..22, ignored for store; entries that don't shrink are stored raw. `progress` gets
-	// (done, total). False on any IO error (partial output is deleted).
+	// zstd 1..22, gdeflate 1..12, ignored for store; blocks that don't shrink are stored raw.
+	// Blocks compress on the Jobs pool. `progress` gets (done, total). False on any IO error
+	// (partial output is deleted).
 	static bool Create(const std::vector<std::pair<std::string, std::string>>& files,
 	                   const std::string& outPak, int method, int level,
-	                   const std::function<void(int, int)>& progress = nullptr);
+	                   const std::function<void(int, int)>& progress = nullptr,
+	                   const CreateOptions* options = nullptr);
+	// Highest valid `level` for a method (1 when the method has no levels).
+	static int MaxLevel(int method);
+	// Inflate ONE block (any method) — `packed` -> `rawSize` bytes.
+	static bool Inflate(uint8_t method, const char* packed, size_t packSize, uint64_t rawSize, std::string& out);
+	// Compress one block with `method`/`level`; false (and empty `out`) when it would not shrink.
+	static bool Compress(uint8_t method, int level, const char* raw, size_t rawSize, std::string& out);
 
 	// ---- standalone pak handle (editor tooling) ----
 	struct Entry
@@ -38,7 +82,9 @@ public:
 		uint64_t    rawSize = 0;
 		uint64_t    packSize = 0;
 		uint32_t    crc = 0;      // crc32 of the RAW bytes
-		uint8_t     method = 0;   // Method
+		uint8_t     method = 0;   // Method the pak was written with (v2: see each block's own)
+		uint8_t     layout = 0;   // 0 = file bytes; else a registered cook layout
+		std::vector<Block> blocks;   // empty = one block spanning the payload (pak format v1)
 	};
 	class NUKEENGINE_API File
 	{
@@ -142,6 +188,21 @@ public:
 	// Resolve project-relative -> content. Read() returns bytes from the TOP layer;
 	// ResolveRead() returns a disk path from the RAW layer only ("" for pak-only entries).
 	static bool        Read(const std::string& rel, std::string& out);
+	// Where the TOP layer's copy of `rel` physically lives when it is a pak entry: the pak file
+	// and the entry (with its block table). False when `rel` is a raw-layer file or unknown —
+	// the direct-IO (DirectStorage) path falls back to Read() then.
+	struct Location
+	{
+		std::string pakPath;
+		Entry       entry;
+	};
+	static bool        Locate(const std::string& rel, Location& out);
+	// Inflate every block of a located entry (in block order) — the CPU side of a cooked entry.
+	static bool        ReadBlocks(const Location& loc, std::vector<std::string>& blocks);
+	// Inflate ONE block of a located entry (header-only loads read block 0 alone).
+	static bool        ReadBlock(const Location& loc, size_t index, std::string& out);
+	// Original file bytes from already-inflated blocks (runs the layout's uncook).
+	static bool        Uncook(const Entry& e, std::vector<std::string>& blocks, std::string& out);
 	// EVERY layer's copy of `rel`, BOTTOM-UP (base pak, mods by ascending priority, raw overlay
 	// last). Returns the count; feeds World::MergeWorldLayers.
 	static int         ReadAll(const std::string& rel, std::vector<std::string>& out);

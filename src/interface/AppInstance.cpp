@@ -3,6 +3,7 @@
 #include "interface/AppInstance.h"
 #include "interface/AssetCreators.h"
 #include "API/Model/World.h"
+#include "API/Model/JsonDoc.h"
 #include "API/Model/Time.h"      // fixed-thread cadence scales with Game.SetTimeScale
 #include "API/Model/Package.h"   // packed-content resolve (3.2)
 #include "API/Model/Jobs.h"      // async world load runs on the engine pool
@@ -172,7 +173,7 @@ bool AppInstance::StartWorldLoadAsync(const std::string& relPath)
 			return;
 		}
 		asyncLoadProgress = 0.35f;
-		auto doc = std::make_shared<nlohmann::json>(nlohmann::json::parse(data, nullptr, false));
+		auto doc = std::make_shared<nlohmann::json>(ParseDoc(data));
 		if (asyncLoadGen != my) return;
 		if (doc->is_discarded())
 		{
@@ -197,7 +198,7 @@ bool AppInstance::StartWorldLoadAsync(const std::string& relPath)
 				std::snprintf(nameBuf, sizeof(nameBuf), "%d_%d.nuworld", c.value("x", 0), c.value("z", 0));
 				std::string cdata;
 				if (!ReadContent(dir + "/" + nameBuf, cdata)) continue;
-				nlohmann::json cj = nlohmann::json::parse(cdata, nullptr, false);
+				nlohmann::json cj = ParseDoc(cdata);
 				if (cj.is_discarded() || !cj.contains("atoms")) continue;
 				for (nlohmann::json& gj : cj["atoms"]) atoms.push_back(std::move(gj));
 				++cellsIn;
@@ -296,9 +297,36 @@ void AppInstance::ApplyAsyncWorldLoad()
 	if (doc->contains("atoms"))
 		for (const nlohmann::json& gj : (*doc)["atoms"])
 			activationQueue.push_back(&gj);
-	if (activationOriginSet)
+	// Streaming boot: no explicit origin -> the main camera's position in the document is the
+	// point the world grows from (the first frame then shows what the player actually sees).
+	float ox = activationOrigin[0], oy = activationOrigin[1], oz = activationOrigin[2];
+	bool haveOrigin = activationOriginSet;
+	if (!haveOrigin)
 	{
-		const float ox = activationOrigin[0], oy = activationOrigin[1], oz = activationOrigin[2];
+		auto camPos = [](const nlohmann::json& aj, float* out) -> bool
+		{
+			if (!aj.contains("components") || !aj["components"].is_array()) return false;
+			bool cam = false;
+			for (const nlohmann::json& c : aj["components"])
+				if (c.is_object() && c.value("type", std::string()) == "Camera")
+				{
+					cam = true;
+					if (c.contains("props") && c["props"].is_object() && c["props"].value("mainCamera", false)) { cam = true; break; }
+				}
+			if (!cam || !aj.contains("transform")) return false;
+			const nlohmann::json& tr = aj["transform"];
+			if (!tr.contains("position") || !tr["position"].is_array() || tr["position"].size() < 3) return false;
+			out[0] = tr["position"][0].get<float>(); out[1] = tr["position"][1].get<float>(); out[2] = tr["position"][2].get<float>();
+			return true;
+		};
+		float p[3];
+		for (const nlohmann::json* aj : activationQueue)
+			if (camPos(*aj, p)) { ox = p[0]; oy = p[1]; oz = p[2]; haveOrigin = true; break; }
+	}
+	activationStartZone = 0;
+	activationStartZoneFired = false;
+	if (haveOrigin)
+	{
 		auto dist2 = [&](const nlohmann::json* aj) -> double
 		{
 			if (!aj->contains("transform")) return 1e30;
@@ -311,12 +339,23 @@ void AppInstance::ApplyAsyncWorldLoad()
 		};
 		std::stable_sort(activationQueue.begin(), activationQueue.end(),
 		                 [&](const nlohmann::json* a, const nlohmann::json* b) { return dist2(a) < dist2(b); });
+		// The start zone = every root within the radius (positionless roots sort last and are
+		// outside it). Streamed worlds widen it to one cell so the first visible ring is whole.
+		float radius = activationStartZoneRadius;
+		if (currentWorld->settings.streamEnabled && currentWorld->settings.streamCellSize > radius)
+			radius = currentWorld->settings.streamCellSize;
+		const double r2 = (double)radius * radius;
+		int n = 0;
+		for (const nlohmann::json* aj : activationQueue) { if (dist2(aj) > r2) break; ++n; }
+		activationStartZone = n;
 	}
 	activationTotal = (int)activationQueue.size();
 	activationDone = 0;
 	activationActive = true;
 	std::cout << "[World]\t\t\t" << "async world activating incrementally: '" << path << "' ("
-	          << activationTotal << " root atoms, " << activationBudgetMs << " ms/frame)" << std::endl;
+	          << activationTotal << " root atoms, " << activationBudgetMs << " ms/frame"
+	          << (haveOrigin ? ", start zone " + std::to_string(activationStartZone) + " roots around the camera" : std::string(", no origin"))
+	          << ")" << std::endl;
 	ContinueWorldActivation();   // first slice runs THIS frame
 }
 
@@ -363,6 +402,14 @@ void AppInstance::ContinueWorldActivation(bool ignoreBudget)
 	}
 	// Refs to atoms that exist RESOLVE progressively; the rest hook up as their targets appear.
 	Reflect_ResolveAtomRefs();
+	if (!activationStartZoneFired && activationStartZone > 0 && activationDone >= activationStartZone)
+	{
+		activationStartZoneFired = true;
+		nlohmann::json p{ { "path", activationPath }, { "roots", activationStartZone } };
+		Events::Emit("world.startZoneActive", p.dump());
+		std::cout << "[World]\t\t\t" << "start zone active: " << activationStartZone << " of " << activationTotal
+		          << " roots in — the rest keeps growing" << std::endl;
+	}
 	if (activationDone >= activationTotal)
 	{
 		activationActive = false;
@@ -376,6 +423,15 @@ void AppInstance::ContinueWorldActivation(bool ignoreBudget)
 }
 
 void AppInstance::FlushWorldActivation() { ContinueWorldActivation(true); }
+
+// True when the start zone is in: the origin ring activated, or there is no zone (no origin /
+// no activation running — nothing to wait for).
+bool AppInstance::WorldStartZoneReady()
+{
+	if (!activationActive) return true;
+	if (activationStartZone <= 0) return false;   // no origin: the whole world is the zone
+	return activationDone >= activationStartZone;
+}
 
 void AppInstance::NameWorldFromPath(const std::string& relPath)
 {

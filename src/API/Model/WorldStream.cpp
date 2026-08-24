@@ -3,6 +3,7 @@
 // vertex color).
 #include "API/Model/WorldStream.h"
 #include "API/Model/World.h"
+#include "API/Model/JsonDoc.h"
 #include "API/Model/Atom.h"
 #include "API/Model/Camera.h"
 #include "API/Model/Mesh.h"
@@ -244,7 +245,7 @@ void WorldStream::Tick(World* w)
 				coldReady.erase(coldReady.begin());
 				continue;
 			}
-			json cj = json::parse(*in.data, nullptr, false);
+			json cj = ParseDoc(*in.data);
 			if (cj.is_discarded() || !cj.contains("atoms") || !cj["atoms"].is_array())
 			{
 				std::cout << "[World]\t\t\t" << "stream: cell " << in.key.x << "_" << in.key.z
@@ -301,7 +302,7 @@ void WorldStream::AppendResident(std::vector<std::string>& out)
 			std::snprintf(nameBuf, sizeof(nameBuf), "%d_%d.nuworld", kv.first.x, kv.first.z);
 			std::string data;
 			if (!app->ReadContent(cellsDir + "/" + nameBuf, data)) continue;
-			json cj = json::parse(data, nullptr, false);
+			json cj = ParseDoc(data);
 			if (cj.is_discarded() || !cj.contains("atoms")) continue;
 			for (const json& aj : cj["atoms"]) out.push_back(aj.dump());
 		}

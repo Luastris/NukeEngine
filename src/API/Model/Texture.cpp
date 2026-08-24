@@ -1,6 +1,10 @@
 #include "API/Model/Texture.h"
 #include <sstream>
+#include <iostream>
+#include <memory>
+#include <algorithm>
 #include <boost/filesystem/fstream.hpp>
+#include <boost/thread/mutex.hpp>
 #include <cstdint>
 #include <cstring>
 #include <cctype>
@@ -132,12 +136,14 @@ int encodeBC(std::vector<uint8_t>& bytes, std::vector<uint8_t> cur, int w, int h
 
 std::vector<unsigned char> Texture::DecodeRGBA() const
 {
+	const_cast<Texture*>(this)->EnsurePixels();
 	if (renderTexture || width <= 0 || height <= 0) return {};
 	return decodeMip0(this);   // RGBA8 passthrough (frame 0) or BC decode
 }
 
 bool Texture::Recompress(int targetFormat)
 {
+	EnsurePixels();
 	if (renderTexture || frameCount > 1 || width <= 0 || height <= 0) return false;
 	if (targetFormat != FMT_BC1 && targetFormat != FMT_BC3 && targetFormat != FMT_BC5) return false;
 	if (targetFormat == format) return false;
@@ -151,6 +157,7 @@ bool Texture::Recompress(int targetFormat)
 
 bool Texture::ApplyChromaKey(int kr, int kg, int kb, int tol, bool outsideOnly)
 {
+	EnsurePixels();
 	if (renderTexture || frameCount > 1 || width <= 0 || height <= 0) return false;
 	std::vector<uint8_t> rgba = decodeMip0(this);
 	if (rgba.empty()) return false;
@@ -267,6 +274,7 @@ namespace {
 
 bool Texture::SaveToFile(const std::string& path) const
 {
+	const_cast<Texture*>(this)->EnsurePixels();
 	bfs::path p(path);
 	bfs::ofstream o(p, std::ios::binary);
 	if (!o) return false;
@@ -305,7 +313,7 @@ Texture* Texture::LoadFromMemory(const std::string& data)
 	return LoadFromStream(i);
 }
 
-Texture* Texture::LoadFromStream(std::istream& i)
+Texture* Texture::LoadFromStream(std::istream& i, bool headerOnly)
 {
 	char magic[8]; i.read(magic, 8);
 	if (memcmp(magic, kMagic, 8) != 0) return nullptr;
@@ -336,6 +344,7 @@ Texture* Texture::LoadFromStream(std::istream& i)
 		t->sliceLeft = v9[6]; t->sliceRight = v9[7]; t->sliceTop = v9[8]; t->sliceBottom = v9[9]; }
 	if (version >= 10) { uint8_t ns = 0; i.read((char*)&ns, 1); t->nineSlice = (ns != 0); }   // v10
 	uint32_t bytes = 0; i.read((char*)&bytes, 4);
+	if (headerOnly) { if (!i) { delete t; return nullptr; } return t; }
 	if (bytes) { t->pixels.resize(bytes); i.read((char*)t->pixels.data(), bytes); }
 	if (!i && !i.eof()) { delete t; return nullptr; }
 	// v11 HEAL: pre-v11 BC3 mips were box-filtered WITHOUT alpha weighting — rebuild the chain
@@ -349,8 +358,224 @@ Texture* Texture::LoadFromStream(std::istream& i)
 			std::vector<uint8_t> enc;
 			t->mipCount = encodeBC(enc, std::move(rgba), t->width, t->height, FMT_BC3);
 			t->pixels.swap(enc);
+			t->healedOnLoad = true;   // the owner re-saves it as v11 so this never runs again
 		}
 	}
 	return t;
 }
+
+// ---- pak cook layout (Fast loading 4) ----------------------------------------------------------
+// The .nutex pixel chain is tight (mip0..N back to back). The cook re-lays every mip in the
+// D3D12 placed-footprint form DirectStorage writes into a texture, so a block = one request.
+
+static inline uint64_t AlignUp(uint64_t v, uint64_t a) { return (v + a - 1) / a * a; }
+
+Texture::MipGeom Texture::MipGeometry(int mip) const
+{
+	MipGeom g;
+	g.w = std::max(1, width >> mip); g.h = std::max(1, height >> mip);
+	if (format == FMT_BC1 || format == FMT_BC3 || format == FMT_BC5)
+	{
+		const uint32_t bb = (format == FMT_BC1) ? 8 : 16;
+		g.rowBytes = (uint32_t)((g.w + 3) / 4) * bb; g.rows = (uint32_t)((g.h + 3) / 4);
+	}
+	else { g.rowBytes = (uint32_t)g.w * 4; g.rows = (uint32_t)g.h; }
+	return g;
+}
+
+uint64_t Texture::MipOffset(int mip) const
+{
+	uint64_t off = 0;
+	for (int m = 0; m < mip; ++m) { MipGeom g = MipGeometry(m); off += (uint64_t)g.rowBytes * g.rows; }
+	return off;
+}
+
+uint64_t Texture::PakBlockPitchedSize(const Package::Block& b) const
+{
+	if (b.meta[0] == 0xFFFFFFFFu) return b.rawSize;
+	if (b.meta[1] == 0)   // row range
+	{
+		MipGeom g = MipGeometry((int)b.meta[0]);
+		const uint32_t rows = b.meta[2] & 0xFFFFu;
+		return rows ? AlignUp(g.rowBytes, kPitchAlign) * (rows - 1) + g.rowBytes : 0;
+	}
+	uint64_t off = 0;
+	for (uint32_t m = b.meta[0]; m < b.meta[0] + b.meta[1]; ++m)
+	{
+		MipGeom g = MipGeometry((int)m);
+		off = AlignUp(off, kPlaceAlign);
+		off += AlignUp(g.rowBytes, kPitchAlign) * (g.rows - 1) + g.rowBytes;
+	}
+	return off;
+}
+
+bool Texture::CookPak(const std::string& raw, uint32_t blockCap, Package::Cooked& out)
+{
+	// Header-only parse decides eligibility: plain 2D textures with a BC chain or a single RGBA8
+	// level. Animated sheets, render textures and files the loader would HEAL (pre-v11 BC3
+	// chains re-encode on load — the header-only path cannot) stay layout 0.
+	std::istringstream hs(raw, std::ios::binary);
+	Texture* t = LoadFromStream(hs, true);
+	if (!t) return false;
+	std::unique_ptr<Texture> guard(t);
+	const uint64_t headerBytes = (uint64_t)hs.tellg();
+	uint32_t version = 0; memcpy(&version, raw.data() + 8, 4);
+	if (t->renderTexture || t->frameCount != 1 || t->width <= 0 || t->height <= 0) return false;
+	if (version < 11 && t->format == FMT_BC3 && t->mipCount > 1) return false;
+	const bool bc = (t->format == FMT_BC1 || t->format == FMT_BC3 || t->format == FMT_BC5);
+	if (!bc && t->format != FMT_RGBA8) return false;
+	const int mips = bc ? std::max(1, t->mipCount) : 1;
+	uint32_t pixBytes = 0; memcpy(&pixBytes, raw.data() + headerBytes - 4, 4);
+	if (headerBytes + pixBytes != raw.size()) return false;
+	uint64_t need = 0;
+	for (int m = 0; m < mips; ++m) { MipGeom g = t->MipGeometry(m); need += (uint64_t)g.rowBytes * g.rows; }
+	if (need != pixBytes) return false;   // chain does not match the header: leave it alone
+
+	out = Package::Cooked();
+	out.layout = (uint8_t)kPakLayout;
+	out.bytes.reserve(raw.size() + (size_t)mips * kPlaceAlign + (size_t)t->height * kPitchAlign);
+	// Block 0: the header as it lies (a CPU read).
+	out.bytes.append(raw.data(), (size_t)headerBytes);
+	{ Package::CookedBlock cb; cb.offset = 0; cb.size = headerBytes; cb.meta[0] = 0xFFFFFFFFu; out.blocks.push_back(cb); }
+
+	const char* pix = raw.data() + headerBytes;
+	// Big mips (>= one DirectStorage tile) get their own block — texture streaming drops leading
+	// mips, and a block that starts at the mip it wants streams without a CPU detour. Smaller
+	// mips bundle into one tail block.
+	const uint64_t kOwnBlock = 64 * 1024;
+	int m = 0;
+	while (m < mips)
+	{
+		MipGeom g = t->MipGeometry(m);
+		const uint64_t tight = (uint64_t)g.rowBytes * g.rows;
+		const uint64_t pitch = AlignUp(g.rowBytes, kPitchAlign);
+		const uint64_t pitched = pitch * (g.rows - 1) + g.rowBytes;
+		if (pitched > blockCap)
+		{
+			// Row ranges of one mip, each under the cap.
+			uint32_t rowsPer = (uint32_t)std::max<uint64_t>(1, blockCap / pitch);
+			for (uint32_t r0 = 0; r0 < g.rows; r0 += rowsPer)
+			{
+				const uint32_t rows = std::min(rowsPer, g.rows - r0);
+				Package::CookedBlock cb; cb.offset = out.bytes.size();
+				for (uint32_t r = 0; r < rows; ++r)
+				{
+					out.bytes.append(pix + t->MipOffset(m) + (uint64_t)(r0 + r) * g.rowBytes, g.rowBytes);
+					if (r + 1 < rows) out.bytes.append((size_t)(pitch - g.rowBytes), '\0');
+				}
+				cb.size = out.bytes.size() - cb.offset;
+				cb.meta[0] = (uint32_t)m; cb.meta[1] = 0; cb.meta[2] = (r0 << 16) | rows;
+				out.blocks.push_back(cb);
+			}
+			++m;
+			continue;
+		}
+		// Whole mips: this one alone when it is tile-sized or bigger, else everything that
+		// follows (the tail) as one block, capped.
+		int last = m;
+		uint64_t total = pitched;
+		if (tight < kOwnBlock)
+			while (last + 1 < mips)
+			{
+				MipGeom n = t->MipGeometry(last + 1);
+				const uint64_t np = AlignUp(n.rowBytes, kPitchAlign) * (n.rows - 1) + n.rowBytes;
+				if (AlignUp(total, kPlaceAlign) + np > blockCap) break;
+				total = AlignUp(total, kPlaceAlign) + np;
+				++last;
+			}
+		Package::CookedBlock cb; cb.offset = out.bytes.size();
+		for (int k = m; k <= last; ++k)
+		{
+			MipGeom kg = t->MipGeometry(k);
+			const uint64_t kp = AlignUp(kg.rowBytes, kPitchAlign);
+			const uint64_t rel = out.bytes.size() - cb.offset;
+			out.bytes.append((size_t)(AlignUp(rel, kPlaceAlign) - rel), '\0');
+			for (uint32_t r = 0; r < kg.rows; ++r)
+			{
+				out.bytes.append(pix + t->MipOffset(k) + (uint64_t)r * kg.rowBytes, kg.rowBytes);
+				if (r + 1 < kg.rows) out.bytes.append((size_t)(kp - kg.rowBytes), '\0');
+			}
+		}
+		cb.size = out.bytes.size() - cb.offset;
+		cb.meta[0] = (uint32_t)m; cb.meta[1] = (uint32_t)(last - m + 1); cb.meta[2] = 0;
+		out.blocks.push_back(cb);
+		m = last + 1;
+	}
+	return true;
+}
+
+bool Texture::UncookPak(const std::vector<Package::Block>& blocks, std::vector<std::string>& inflated, std::string& out)
+{
+	if (blocks.empty() || inflated.size() != blocks.size() || blocks[0].meta[0] != 0xFFFFFFFFu) return false;
+	std::istringstream hs(inflated[0], std::ios::binary);
+	Texture* t = LoadFromStream(hs, true);
+	if (!t) return false;
+	std::unique_ptr<Texture> guard(t);
+	out.clear();
+	out.reserve(inflated[0].size() + (size_t)t->MipOffset(std::max(1, t->mipCount)));
+	out += inflated[0];
+	for (size_t b = 1; b < blocks.size(); ++b)
+	{
+		const Package::Block& blk = blocks[b];
+		const std::string& data = inflated[b];
+		if (data.size() < t->PakBlockPitchedSize(blk)) return false;
+		if (blk.meta[1] == 0)
+		{
+			MipGeom g = t->MipGeometry((int)blk.meta[0]);
+			const uint32_t rows = blk.meta[2] & 0xFFFFu;
+			const uint64_t pitch = AlignUp(g.rowBytes, kPitchAlign);
+			for (uint32_t r = 0; r < rows; ++r) out.append(data.data() + r * pitch, g.rowBytes);
+			continue;
+		}
+		uint64_t off = 0;
+		for (uint32_t m = blk.meta[0]; m < blk.meta[0] + blk.meta[1]; ++m)
+		{
+			MipGeom g = t->MipGeometry((int)m);
+			const uint64_t pitch = AlignUp(g.rowBytes, kPitchAlign);
+			off = AlignUp(off, kPlaceAlign);
+			for (uint32_t r = 0; r < g.rows; ++r) out.append(data.data() + off + r * pitch, g.rowBytes);
+			off += pitch * (g.rows - 1) + g.rowBytes;
+		}
+	}
+	return true;
+}
+
+Texture* Texture::LoadFromPak(const Package::Location& loc)
+{
+	if (loc.entry.layout != kPakLayout || loc.entry.blocks.empty()) return nullptr;
+	std::string header;
+	if (!Package::ReadBlock(loc, 0, header)) return nullptr;
+	std::istringstream hs(header, std::ios::binary);
+	Texture* t = LoadFromStream(hs, true);
+	if (!t) return nullptr;
+	auto src = std::make_shared<PakSource>();
+	src->pakPath = loc.pakPath; src->entry = loc.entry;
+	t->pakSource = src;
+	return t;
+}
+
+bool Texture::EnsurePixels()
+{
+	if (!pixels.empty() || !pakSource) return true;
+	static boost::mutex s_lock;   // the on-demand CPU path is rare: one at a time is fine
+	boost::mutex::scoped_lock l(s_lock);
+	if (!pixels.empty()) return true;
+	Package::Location loc; loc.pakPath = pakSource->pakPath; loc.entry = pakSource->entry;
+	std::vector<std::string> blocks;
+	std::string file;
+	if (!Package::ReadBlocks(loc, blocks) || !Package::Uncook(loc.entry, blocks, file))
+	{
+		std::cout << "[Texture]\tpak pixels unreadable for '" << guid << "' (" << loc.entry.path << ")" << std::endl;
+		return false;
+	}
+	std::istringstream is(file, std::ios::binary);
+	Texture* full = LoadFromStream(is, false);
+	if (!full) return false;
+	pixels.swap(full->pixels);
+	delete full;
+	return !pixels.empty();
+}
+
+// Register the layout with the pak reader (the CPU/uncook side of the cook).
+namespace { struct PakLayoutReg { PakLayoutReg() { Package::RegisterLayout((uint8_t)Texture::kPakLayout, &Texture::UncookPak); Package::RegisterCook(".nutex", &Texture::CookPak); } } s_pakLayoutReg; }
 }  // namespace nuke

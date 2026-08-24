@@ -49,6 +49,7 @@ find_package(meshoptimizer CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(zstd CONFIG REQUIRED)
 find_package(ZLIB REQUIRED)
+find_package(gdeflate CONFIG REQUIRED)   # overlay port (vcpkg-overlays/gdeflate): pak GDeflate codec
 find_path(STB_INCLUDE_DIRS "stb_image.h" REQUIRED)
 
 target_include_directories(NukeEngine PRIVATE ${STB_INCLUDE_DIRS})
@@ -63,6 +64,7 @@ target_link_libraries(NukeEngine PUBLIC
     meshoptimizer::meshoptimizer
     $<IF:$<TARGET_EXISTS:zstd::libzstd_shared>,zstd::libzstd_shared,zstd::libzstd_static>
     ZLIB::ZLIB
+    gdeflate::gdeflate
     ${CMAKE_DL_LIBS})
 
 # Same run-dir layout as Windows (x64/<Config>): the editor, player and every module's

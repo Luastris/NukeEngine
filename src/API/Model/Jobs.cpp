@@ -4,6 +4,7 @@
 #include <boost/thread.hpp>
 #include <boost/thread/mutex.hpp>
 #include <boost/thread/condition_variable.hpp>
+#include <boost/date_time/posix_time/posix_time_types.hpp>   // helping waits: timed cv waits
 #include <deque>
 #include <vector>
 #include <iostream>
@@ -45,10 +46,20 @@ JobHandle& JobHandle::Then(const boost::function<void()>& onMain)
 
 namespace {
 
+struct QueuedJob
+{
+	std::shared_ptr<JobState> state;
+	boost::function<void()>   fn;
+	bool helpable = false;   // a ParallelFor chunk runner: a waiting caller may run it in place
+	int  level = 0;          // ParallelFor nesting level of that runner (outermost = 1)
+};
+// Nesting level of the ParallelFor chunk runner executing on this thread (0 = none).
+thread_local int t_pfLevel = 0;
+
 struct Pool
 {
 	std::vector<boost::thread*> workers;
-	std::deque<std::pair<std::shared_ptr<JobState>, boost::function<void()>>> queue;
+	std::deque<QueuedJob> queue;
 	boost::mutex              qm;
 	boost::condition_variable qcv;
 	boost::atomic<bool> stop{ false };   // atomic: Stopping() polls it lock-free from jobs
@@ -65,6 +76,40 @@ struct Pool
 };
 Pool g_pool;
 
+// Run one dequeued job to completion (worker threads and helping waiters share this).
+void RunJob(QueuedJob& job)
+{
+	++g_pool.busy;
+	try { if (job.fn) job.fn(); }
+	catch (const std::exception& e) { std::cout << "[Jobs]\t\tjob threw: " << e.what() << std::endl; }
+	catch (...)                     { std::cout << "[Jobs]\t\tjob threw (unknown)" << std::endl; }
+	--g_pool.busy;
+	if (job.state)
+	{
+		boost::mutex::scoped_lock l(job.state->m);
+		job.state->done = true;
+		job.state->cv.notify_all();
+	}
+}
+
+// A waiter that would otherwise block runs one queued HELPABLE job instead. False = none queued.
+// This is what keeps nested ParallelFor (chunks that fan out again) from deadlocking: every
+// worker blocked in an inner wait would otherwise leave the inner chunk jobs unclaimed forever.
+// Only runners at a DEEPER level than the waiter qualify — taking an outer runner from an inner
+// wait would recurse without bound (outer chunk -> inner fan-out -> outer chunk -> ...).
+bool HelpOne(int minLevel)
+{
+	QueuedJob job;
+	{
+		boost::mutex::scoped_lock l(g_pool.qm);
+		for (auto it = g_pool.queue.begin(); it != g_pool.queue.end(); ++it)
+			if (it->helpable && it->level >= minLevel) { job = *it; g_pool.queue.erase(it); break; }
+		if (!job.fn) return false;
+	}
+	RunJob(job);
+	return true;
+}
+
 void WorkerLoop(int core)
 {
 #ifdef _WIN32
@@ -75,7 +120,7 @@ void WorkerLoop(int core)
 #endif
 	for (;;)
 	{
-		std::pair<std::shared_ptr<JobState>, boost::function<void()>> job;
+		QueuedJob job;
 		{
 			boost::mutex::scoped_lock l(g_pool.qm);
 			while (!g_pool.stop && g_pool.queue.empty()) g_pool.qcv.wait(l);
@@ -83,17 +128,7 @@ void WorkerLoop(int core)
 			job = g_pool.queue.front();
 			g_pool.queue.pop_front();
 		}
-		++g_pool.busy;
-		try { if (job.second) job.second(); }
-		catch (const std::exception& e) { std::cout << "[Jobs]\t\tjob threw: " << e.what() << std::endl; }
-		catch (...)                     { std::cout << "[Jobs]\t\tjob threw (unknown)" << std::endl; }
-		--g_pool.busy;
-		if (job.first)
-		{
-			boost::mutex::scoped_lock l(job.first->m);
-			job.first->done = true;
-			job.first->cv.notify_all();
-		}
+		RunJob(job);
 	}
 }
 
@@ -194,7 +229,8 @@ JobHandle Jobs::Schedule(const boost::function<void()>& fn)
 	h.state = std::make_shared<JobState>();
 	{
 		boost::mutex::scoped_lock l(g_pool.qm);
-		g_pool.queue.emplace_back(h.state, fn);
+		QueuedJob q; q.state = h.state; q.fn = fn;
+		g_pool.queue.push_back(q);
 		g_pool.qcv.notify_one();
 	}
 	return h;
@@ -221,8 +257,12 @@ void Jobs::ParallelFor(int begin, int end, int grain, const boost::function<void
 	};
 	auto sh = std::make_shared<Shared>();
 	sh->next = begin;
-	auto runChunks = [sh, begin, end, grain, fn]()
+	const int level = t_pfLevel + 1;
+	auto runChunks = [sh, begin, end, grain, fn, level]()
 	{
+		const int outer = t_pfLevel;
+		t_pfLevel = level;
+		struct Restore { int v; ~Restore() { t_pfLevel = v; } } restore{ outer };
 		for (;;)
 		{
 			int s;
@@ -242,9 +282,32 @@ void Jobs::ParallelFor(int begin, int end, int grain, const boost::function<void
 	std::vector<JobHandle> handles;
 	handles.reserve(fanout);
 	for (int i = 0; i < fanout; ++i)
-		handles.push_back(Schedule(runChunks));
+	{
+		JobHandle h;
+		h.state = std::make_shared<JobState>();
+		boost::mutex::scoped_lock l(g_pool.qm);
+		QueuedJob q; q.state = h.state; q.fn = runChunks; q.helpable = true; q.level = level;
+		g_pool.queue.push_back(q);
+		g_pool.qcv.notify_one();
+		handles.push_back(h);
+	}
 	runChunks();                       // the caller crunches too
-	for (JobHandle& h : handles) h.Wait();
+	// Wait by HELPING: while a chunk runner is still queued or running, run other queued chunk
+	// runners (ours or a nested ParallelFor's) instead of sleeping — nested fan-out from inside
+	// a worker would otherwise starve with every worker parked in a wait.
+	for (JobHandle& h : handles)
+	{
+		for (;;)
+		{
+			{
+				boost::mutex::scoped_lock l(h.state->m);
+				if (h.state->done) break;
+			}
+			if (HelpOne(level)) continue;
+			boost::mutex::scoped_lock l(h.state->m);
+			if (!h.state->done) h.state->cv.timed_wait(l, boost::posix_time::milliseconds(1));
+		}
+	}
 }
 
 void Jobs::RunOnMain(const boost::function<void()>& fn)

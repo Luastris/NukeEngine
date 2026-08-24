@@ -193,6 +193,16 @@ public:
 	// Editor "freeze culling" debug view (abi 25 append): frustum + occlusion verdicts stay as
 	// they were when the flag went up while the camera moves — what was culled stays culled.
 	bool freezeCulling = false;
+
+	// Streaming boot (abi 26 append). With no explicit activation origin the loader takes the
+	// main camera's position from the document, grows the world outward from it, and declares
+	// the START ZONE active once every root within `activationStartZoneRadius` is in — the
+	// player/game drops its loading screen there while the rest keeps growing. Event:
+	// "world.startZoneActive" {"path"}.
+	float activationStartZoneRadius = 96.0f;   // meters; streamed worlds use max(this, cell size)
+	int   activationStartZone = 0;             // queue index where the start zone ends (0 = whole world)
+	bool  activationStartZoneFired = false;
+	bool  WorldStartZoneReady();               // start zone in (or no activation running)
 };
 
 }  // namespace nuke

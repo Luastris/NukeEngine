@@ -1,7 +1,11 @@
 // On-disk layout (little-endian): magic[6]="NUPAK1", uint16 flags, uint64 tocOffset, payloads, then
 // TOC = uint32 count + per entry uint16 pathLen, path (utf8 '/'), uint8 method,
 // uint64 offset/rawSize/packSize, uint32 crc32(raw).
+// flags bit 0 (format v2): each entry continues with uint8 layout, uint32 blockCount and per
+// block uint32 rawSize/packSize/meta[3] + uint8 method — the payload is those blocks back to
+// back, each compressed on its own (GDeflate streams are DirectStorage requests as they lie).
 #include "API/Model/Package.h"
+#include "API/Model/Jobs.h"      // block compression fans out on the pool
 #include "interface/Modular.h"   // module dependency check on mount
 #include "config.h"              // writableDir: mod cache + user mods.json live there
 #include <boost/filesystem.hpp>
@@ -9,8 +13,10 @@
 #include <boost/thread/mutex.hpp>
 #include <zlib.h>
 #include <zstd.h>
+#include <gdeflate/GDeflate.h>
 #include <nlohmann/json.hpp>   // config/mods.json + per-mod "mod.json" manifests (deps)
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cstring>
 #include <iostream>
@@ -24,6 +30,20 @@ using std::endl;
 namespace nuke {
 
 static const char kMagic[6] = { 'N', 'U', 'P', 'A', 'K', '1' };
+static const uint16_t kFlagBlocks = 1;   // format v2: block tables in the TOC
+
+static std::map<uint8_t, Package::UncookFn>& Layouts() { static std::map<uint8_t, Package::UncookFn> m; return m; }
+static std::map<std::string, Package::CookFn>& Cooks() { static std::map<std::string, Package::CookFn> m; return m; }
+void Package::RegisterLayout(uint8_t layout, const UncookFn& uncook) { Layouts()[layout] = uncook; }
+void Package::RegisterCook(const std::string& extension, const CookFn& cook) { Cooks()[extension] = cook; }
+
+int Package::MaxLevel(int method)
+{
+	if (method == M_Zlib) return 9;
+	if (method == M_Zstd) return ZSTD_maxCLevel();
+	if (method == M_GDeflate) return (int)GDeflate::MaximumCompressionLevel;
+	return 1;
+}
 
 // ---- helpers ---------------------------------------------------------------------------
 
@@ -51,23 +71,65 @@ static bool ReadWhole(const std::string& path, std::string& out)
 	return (bool)f;
 }
 
-static bool Decompress(uint8_t method, const std::string& packed, uint64_t rawSize, std::string& out)
+bool Package::Inflate(uint8_t method, const char* packed, size_t packSize, uint64_t rawSize, std::string& out)
 {
-	if (method == Package::M_Store) { out = packed; return true; }
+	if (method == M_Store) { out.assign(packed, packSize); return true; }
 	out.resize((size_t)rawSize);
-	if (method == Package::M_Zlib)
+	if (rawSize == 0) return true;
+	if (method == M_Zlib)
 	{
 		uLongf dst = (uLongf)rawSize;
-		if (::uncompress((Bytef*)&out[0], &dst, (const Bytef*)packed.data(), (uLong)packed.size()) != Z_OK) return false;
+		if (::uncompress((Bytef*)&out[0], &dst, (const Bytef*)packed, (uLong)packSize) != Z_OK) return false;
 		return dst == rawSize;
 	}
-	if (method == Package::M_Zstd)
+	if (method == M_Zstd)
 	{
-		size_t r = ZSTD_decompress(rawSize ? &out[0] : (char*)nullptr, (size_t)rawSize,
-		                           packed.data(), packed.size());
+		size_t r = ZSTD_decompress(&out[0], (size_t)rawSize, packed, packSize);
 		return !ZSTD_isError(r) && r == rawSize;
 	}
+	if (method == M_GDeflate)
+		return GDeflate::Decompress((uint8_t*)&out[0], (size_t)rawSize, (const uint8_t*)packed, packSize, 1);
 	return false;
+}
+
+// Compress one block with `method`; empty result = keep it stored.
+static void Deflate(int method, int level, const char* raw, size_t rawSize, std::string& packed)
+{
+	packed.clear();
+	if (rawSize == 0) return;
+	if (method == Package::M_Zlib)
+	{
+		uLongf cap = compressBound((uLong)rawSize);
+		packed.resize(cap);
+		int lv = level < 1 ? 1 : (level > 9 ? 9 : level);
+		if (::compress2((Bytef*)&packed[0], &cap, (const Bytef*)raw, (uLong)rawSize, lv) == Z_OK) packed.resize(cap);
+		else packed.clear();
+	}
+	else if (method == Package::M_Zstd)
+	{
+		size_t cap = ZSTD_compressBound(rawSize);
+		packed.resize(cap);
+		int lv = level < 1 ? 1 : (level > ZSTD_maxCLevel() ? ZSTD_maxCLevel() : level);
+		size_t r = ZSTD_compress(&packed[0], cap, raw, rawSize, lv);
+		if (!ZSTD_isError(r)) packed.resize(r); else packed.clear();
+	}
+	else if (method == Package::M_GDeflate)
+	{
+		size_t cap = GDeflate::CompressBound(rawSize);
+		packed.resize(cap);
+		uint32_t lv = (uint32_t)(level < 1 ? 1 : (level > (int)GDeflate::MaximumCompressionLevel ? (int)GDeflate::MaximumCompressionLevel : level));
+		// Single-threaded per block: the blocks themselves fan out on the Jobs pool.
+		if (GDeflate::Compress((uint8_t*)&packed[0], &cap, (const uint8_t*)raw, rawSize, lv, GDeflate::COMPRESS_SINGLE_THREAD))
+			packed.resize(cap);
+		else packed.clear();
+	}
+	if (packed.size() >= rawSize) packed.clear();   // didn't shrink: store
+}
+
+bool Package::Compress(uint8_t method, int level, const char* raw, size_t rawSize, std::string& out)
+{
+	Deflate(method, level, raw, rawSize, out);
+	return !out.empty();
 }
 
 // ---- TOC parse (shared by File and the mount layer) --------------------------------------
@@ -80,6 +142,7 @@ static bool ParseToc(const std::string& pakPath, std::vector<Package::Entry>& ou
 	char magic[6]; uint16_t flags = 0; uint64_t tocOff = 0;
 	f.read(magic, 6); f.read((char*)&flags, 2); f.read((char*)&tocOff, 8);
 	if (!f || memcmp(magic, kMagic, 6) != 0) return false;
+	const bool blocked = (flags & kFlagBlocks) != 0;
 	f.seekg((std::streamoff)tocOff, std::ios::beg);
 	uint32_t count = 0;
 	f.read((char*)&count, 4);
@@ -98,13 +161,29 @@ static bool ParseToc(const std::string& pakPath, std::vector<Package::Entry>& ou
 		f.read((char*)&e.rawSize, 8);
 		f.read((char*)&e.packSize, 8);
 		f.read((char*)&e.crc, 4);
+		if (blocked)
+		{
+			uint32_t nb = 0;
+			f.read((char*)&e.layout, 1);
+			f.read((char*)&nb, 4);
+			if (!f || nb > 16u * 1024 * 1024) return false;
+			e.blocks.resize(nb);
+			for (uint32_t b = 0; b < nb; ++b)
+			{
+				Package::Block& blk = e.blocks[b];
+				f.read((char*)&blk.rawSize, 4); f.read((char*)&blk.packSize, 4);
+				f.read((char*)blk.meta, 12);
+				f.read((char*)&blk.method, 1);
+			}
+		}
 		if (!f) return false;
 		out.push_back(std::move(e));
 	}
 	return true;
 }
 
-static bool ReadEntry(const std::string& pakPath, const Package::Entry& e, std::string& out)
+// The inflated blocks of an entry, in order (a v1 entry = its single payload).
+static bool ReadEntryBlocks(const std::string& pakPath, const Package::Entry& e, std::vector<std::string>& blocks)
 {
 	bfs::ifstream f(bfs::path(pakPath), std::ios::binary);
 	if (!f) return false;
@@ -113,7 +192,49 @@ static bool ReadEntry(const std::string& pakPath, const Package::Entry& e, std::
 	packed.resize((size_t)e.packSize);
 	if (e.packSize) f.read(&packed[0], (std::streamsize)e.packSize);
 	if (!f) return false;
-	if (!Decompress(e.method, packed, e.rawSize, out)) return false;
+	if (e.blocks.empty())
+	{
+		blocks.resize(1);
+		return Package::Inflate(e.method, packed.data(), packed.size(), e.rawSize, blocks[0]);
+	}
+	blocks.resize(e.blocks.size());
+	std::vector<uint64_t> at(e.blocks.size());
+	uint64_t off = 0;
+	for (size_t b = 0; b < e.blocks.size(); ++b) { at[b] = off; off += e.blocks[b].packSize; }
+	if (off != e.packSize) return false;
+	std::atomic<bool> ok(true);
+	// Serial below a handful of blocks; the calling worker would otherwise just wait on itself.
+	Jobs::ParallelFor(0, (int)e.blocks.size(), e.blocks.size() < 4 ? (int)e.blocks.size() : 1, [&](int b)
+	{
+		const Package::Block& blk = e.blocks[b];
+		if (!Package::Inflate(blk.method, packed.data() + at[b], blk.packSize, blk.rawSize, blocks[b])) ok = false;
+	});
+	return ok;
+}
+
+bool Package::Uncook(const Entry& e, std::vector<std::string>& blocks, std::string& out)
+{
+	if (e.layout != 0)
+	{
+		auto it = Layouts().find(e.layout);
+		if (it == Layouts().end())
+		{
+			cout << "[Package]\t'" << e.path << "': unknown layout " << (int)e.layout << " (module missing?)" << endl;
+			return false;
+		}
+		return it->second(e.blocks, blocks, out);
+	}
+	if (blocks.size() == 1) { out.swap(blocks[0]); return true; }
+	out.clear(); out.reserve((size_t)e.rawSize);
+	for (std::string& b : blocks) out += b;
+	return true;
+}
+
+static bool ReadEntry(const std::string& pakPath, const Package::Entry& e, std::string& out)
+{
+	std::vector<std::string> blocks;
+	if (!ReadEntryBlocks(pakPath, e, blocks)) return false;
+	if (!Package::Uncook(e, blocks, out)) return false;
 	return Package::Crc32(out.data(), out.size()) == e.crc;
 }
 
@@ -121,62 +242,109 @@ static bool ReadEntry(const std::string& pakPath, const Package::Entry& e, std::
 
 bool Package::Create(const std::vector<std::pair<std::string, std::string>>& files,
                      const std::string& outPak, int method, int level,
-                     const std::function<void(int, int)>& progress)
+                     const std::function<void(int, int)>& progress, const CreateOptions* options)
 {
 	boost::system::error_code ec;
 	if (bfs::path(outPak).has_parent_path()) bfs::create_directories(bfs::path(outPak).parent_path(), ec);
 	bfs::ofstream o(bfs::path(outPak), std::ios::binary | std::ios::trunc);
 	if (!o) { cout << "[Package]\tcan't write " << outPak << endl; return false; }
 
-	uint16_t flags = 0; uint64_t tocOff = 0;
+	const CreateOptions defaults;
+	const CreateOptions& opt = options ? *options : defaults;
+	const uint32_t blockBytes = opt.blockBytes < 65536 ? 65536 : opt.blockBytes;
+
+	uint16_t flags = kFlagBlocks; uint64_t tocOff = 0;
 	o.write(kMagic, 6); o.write((const char*)&flags, 2); o.write((const char*)&tocOff, 8);
 
 	std::vector<Entry> toc;
 	toc.reserve(files.size());
 	const int total = (int)files.size();
 	int done = 0;
-	for (const auto& fp : files)
+
+	// One file, cooked and compressed: the TOC entry + its packed payload.
+	struct Packed { Entry e; std::string payload; bool ok = false; };
+	auto packOne = [&](const std::pair<std::string, std::string>& fp, Packed& out)
 	{
 		std::string raw;
-		if (!ReadWhole(fp.second, raw))
-		{
-			cout << "[Package]\tcan't read " << fp.second << endl;
-			o.close(); bfs::remove(bfs::path(outPak), ec);
-			return false;
-		}
-		Entry e;
+		if (!ReadWhole(fp.second, raw)) { cout << "[Package]\tcan't read " << fp.second << endl; return; }
+		Entry& e = out.e;
 		e.path = fp.first;
 		for (char& c : e.path) if (c == '\\') c = '/';
 		e.rawSize = raw.size();
 		e.crc = Crc32(raw.data(), raw.size());
+
+		// Cook (layout > 0) or split the bytes at blockBytes (layout 0).
+		Cooked cooked;
+		bool cookedOk = false;
+		if (opt.cook)
+		{
+			std::string ext = bfs::path(e.path).extension().string();
+			for (char& c : ext) c = (char)std::tolower((unsigned char)c);
+			auto ck = Cooks().find(ext);
+			if (ck != Cooks().end()) cookedOk = ck->second(raw, blockBytes, cooked) && !cooked.blocks.empty();
+		}
+		if (!cookedOk)
+		{
+			cooked = Cooked();
+			cooked.bytes.swap(raw);
+			uint64_t off = 0;
+			do
+			{
+				CookedBlock cb; cb.offset = off;
+				cb.size = std::min<uint64_t>(blockBytes, cooked.bytes.size() - off);
+				cooked.blocks.push_back(cb);
+				off += cb.size;
+			} while (off < cooked.bytes.size());
+		}
+		e.layout = cooked.layout;
+		for (const CookedBlock& cb : cooked.blocks)
+			if (cb.size > 0xFFFFFFFFull || cb.offset + cb.size > cooked.bytes.size())
+			{ cout << "[Package]\tcook of '" << e.path << "' produced an invalid block" << endl; return; }
+
+		// Every block compresses on its own (the pool works the blocks of one file; the
+		// caller already fans files out).
+		std::vector<std::string> packed(cooked.blocks.size());
+		std::vector<uint8_t>     methods(cooked.blocks.size(), (uint8_t)method);
+		Jobs::ParallelFor(0, (int)cooked.blocks.size(), 1, [&](int b)
+		{
+			const CookedBlock& cb = cooked.blocks[b];
+			if (method != M_Store) Deflate(method, level, cooked.bytes.data() + cb.offset, (size_t)cb.size, packed[b]);
+			if (packed[b].empty()) { packed[b].assign(cooked.bytes.data() + cb.offset, (size_t)cb.size); methods[b] = M_Store; }
+		});
 		e.method = (uint8_t)method;
-
-		std::string packed;
-		if (method == M_Zlib && !raw.empty())
+		e.blocks.resize(cooked.blocks.size());
+		uint64_t packTotal = 0;
+		for (size_t b = 0; b < packed.size(); ++b)
 		{
-			uLongf cap = compressBound((uLong)raw.size());
-			packed.resize(cap);
-			int lv = level < 1 ? 1 : (level > 9 ? 9 : level);
-			if (::compress2((Bytef*)&packed[0], &cap, (const Bytef*)raw.data(), (uLong)raw.size(), lv) == Z_OK)
-				packed.resize(cap);
-			else packed.clear();
+			Block& blk = e.blocks[b];
+			blk.rawSize = (uint32_t)cooked.blocks[b].size; blk.packSize = (uint32_t)packed[b].size();
+			blk.method = methods[b];
+			memcpy(blk.meta, cooked.blocks[b].meta, sizeof(blk.meta));
+			packTotal += packed[b].size();
 		}
-		else if (method == M_Zstd && !raw.empty())
-		{
-			size_t cap = ZSTD_compressBound(raw.size());
-			packed.resize(cap);
-			int lv = level < 1 ? 1 : (level > ZSTD_maxCLevel() ? ZSTD_maxCLevel() : level);
-			size_t r = ZSTD_compress(&packed[0], cap, raw.data(), raw.size(), lv);
-			if (!ZSTD_isError(r)) packed.resize(r); else packed.clear();
-		}
-		// Store when requested, when compression failed, or when it didn't shrink.
-		if (packed.empty() || packed.size() >= raw.size()) { packed = raw; e.method = M_Store; }
+		out.payload.reserve((size_t)packTotal);
+		for (std::string& p : packed) out.payload += p;
+		e.packSize = packTotal;
+		out.ok = true;
+	};
 
-		e.offset = (uint64_t)o.tellp();
-		e.packSize = packed.size();
-		if (!packed.empty()) o.write(packed.data(), (std::streamsize)packed.size());
-		toc.push_back(std::move(e));
-		if (progress) progress(++done, total);
+	// Files go through in windows: a window packs in parallel, then streams out in order
+	// (bounded memory — a window holds a few files' worth of raw + packed bytes at most).
+	const int window = std::max(2, Jobs::WorkerCount() * 2);
+	for (int base = 0; base < total; base += window)
+	{
+		const int n = std::min(window, total - base);
+		std::vector<Packed> batch(n);
+		Jobs::ParallelFor(0, n, 1, [&](int i) { packOne(files[base + i], batch[i]); });
+		for (int i = 0; i < n; ++i)
+		{
+			Packed& p = batch[i];
+			if (!p.ok) { o.close(); bfs::remove(bfs::path(outPak), ec); return false; }
+			p.e.offset = (uint64_t)o.tellp();
+			if (!p.payload.empty()) o.write(p.payload.data(), (std::streamsize)p.payload.size());
+			toc.push_back(std::move(p.e));
+			if (progress) progress(++done, total);
+		}
 	}
 
 	tocOff = (uint64_t)o.tellp();
@@ -192,6 +360,15 @@ bool Package::Create(const std::vector<std::pair<std::string, std::string>>& fil
 		o.write((const char*)&e.rawSize, 8);
 		o.write((const char*)&e.packSize, 8);
 		o.write((const char*)&e.crc, 4);
+		uint32_t nb = (uint32_t)e.blocks.size();
+		o.write((const char*)&e.layout, 1);
+		o.write((const char*)&nb, 4);
+		for (const Block& blk : e.blocks)
+		{
+			o.write((const char*)&blk.rawSize, 4); o.write((const char*)&blk.packSize, 4);
+			o.write((const char*)blk.meta, 12);
+			o.write((const char*)&blk.method, 1);
+		}
 	}
 	o.seekp(8, std::ios::beg);           // patch the header's tocOffset
 	o.write((const char*)&tocOff, 8);
@@ -332,6 +509,55 @@ bool Package::Read(const std::string& rel, std::string& out)
 		}
 	}
 	return false;
+}
+
+bool Package::Locate(const std::string& rel, Location& out)
+{
+	if (!gRawRoot.empty())
+	{
+		boost::system::error_code ec;
+		if (bfs::exists(bfs::path(gRawRoot) / rel, ec)) return false;   // raw overlay wins: a disk file
+	}
+	const std::string k = LowerKey(rel);
+	boost::mutex::scoped_lock l(gPakLock);
+	for (const MountLayer& m : gMounts)
+	{
+		auto it = m.byKey.find(k);
+		if (it == m.byKey.end()) continue;
+		out.pakPath = m.pakPath;
+		out.entry   = it->second;
+		return true;
+	}
+	return false;
+}
+
+bool Package::ReadBlocks(const Location& loc, std::vector<std::string>& blocks)
+{
+	return ReadEntryBlocks(loc.pakPath, loc.entry, blocks);
+}
+
+bool Package::ReadBlock(const Location& loc, size_t index, std::string& out)
+{
+	const Entry& e = loc.entry;
+	if (e.blocks.empty())
+	{
+		if (index != 0) return false;
+		std::vector<std::string> one;
+		if (!ReadEntryBlocks(loc.pakPath, e, one)) return false;
+		out.swap(one[0]);
+		return true;
+	}
+	if (index >= e.blocks.size()) return false;
+	uint64_t off = e.offset;
+	for (size_t b = 0; b < index; ++b) off += e.blocks[b].packSize;
+	const Block& blk = e.blocks[index];
+	bfs::ifstream f(bfs::path(loc.pakPath), std::ios::binary);
+	if (!f) return false;
+	f.seekg((std::streamoff)off, std::ios::beg);
+	std::string packed((size_t)blk.packSize, '\0');
+	if (blk.packSize) f.read(&packed[0], (std::streamsize)blk.packSize);
+	if (!f) return false;
+	return Inflate(blk.method, packed.data(), packed.size(), blk.rawSize, out);
 }
 
 // ---- mods with dependencies (mods-on-mods) ----------------------------------------------------

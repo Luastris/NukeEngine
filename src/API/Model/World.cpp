@@ -3,6 +3,7 @@
 #define BOOST_CHRONO_HEADER_ONLY
 #include <boost/chrono.hpp>
 #include "API/Model/World.h"
+#include "API/Model/JsonDoc.h"
 #include <memory>
 #include <functional>
 #include "render/irender.h"
@@ -2729,7 +2730,7 @@ static void SaveAtom(Atom* atom, json& j)
 		std::string src;
 		json basis;
 		if (ReadPrefabByGuid(atom->prefabGuid, src))
-			basis = json::parse(src, nullptr, false);
+			basis = ParseDoc(src);
 		if (basis.is_object())   // no readable source -> fall through to a plain flattened save
 		{
 			j["prefabRef"] = atom->prefabGuid;
@@ -3045,7 +3046,7 @@ Atom* LoadPrefab(const std::string& path)
 
 Atom* LoadPrefabFromString(const std::string& text)
 {
-	json j = json::parse(text, nullptr, false);
+	json j = ParseDoc(text);
 	if (j.is_discarded()) return nullptr;
 	Atom* a = LoadAtom(j);
 	std::map<unsigned long, unsigned long> ids;
@@ -3067,7 +3068,7 @@ std::string PrefabGuid(const std::string& path)
 
 std::string PrefabGuidFromString(const std::string& text)
 {
-	json j = json::parse(text, nullptr, false);
+	json j = ParseDoc(text);
 	if (j.is_discarded()) return std::string();
 	return j.value("prefab", std::string());
 }
@@ -3113,7 +3114,7 @@ std::string SaveAtomToString(Atom* root)
 Atom* LoadAtomFromString(const std::string& data)
 {
 	if (data.empty()) return nullptr;
-	json j = json::parse(data, nullptr, false);
+	json j = ParseDoc(data);
 	if (j.is_discarded()) return nullptr;
 	Atom* a = LoadAtom(j);
 	Reflect_ResolveAtomRefs();   // AtomRef props in the restored subtree
@@ -3125,7 +3126,7 @@ Atom* LoadAtomFromString(const std::string& data)
 Atom* CloneAtomFromString(const std::string& data)
 {
 	if (data.empty()) return nullptr;
-	json j = json::parse(data, nullptr, false);
+	json j = ParseDoc(data);
 	if (j.is_discarded()) return nullptr;
 	Atom* a = LoadAtom(j);
 	if (!a) return nullptr;
@@ -3509,7 +3510,7 @@ static json ExpandPrefabRef(const json& node)
 		std::cout << "[Prefab]\t\treferenced prefab missing — using the saved snapshot" << std::endl;
 		return state;
 	}
-	json cur = json::parse(src, nullptr, false);
+	json cur = ParseDoc(src);
 	if (!cur.is_object()) return state;
 	const json basis = node.contains("basis") ? node["basis"] : json::object();
 	return MergePrefabTree(basis, cur, state);
@@ -3541,7 +3542,7 @@ std::string World::MergeWorldLayers(const std::vector<std::string>& layers,
 {
 	if (layers.empty())     return std::string();
 	if (layers.size() == 1) return layers[0];
-	json base = json::parse(layers[0], nullptr, false);
+	json base = ParseDoc(layers[0]);
 	if (base.is_discarded() || !base.is_object()) return layers.back();   // unmergeable base: top wins
 
 	// Parse + flatten every layer once. A layer's additions take order slots after the base
@@ -3555,7 +3556,7 @@ std::string World::MergeWorldLayers(const std::vector<std::string>& layers,
 	}
 	for (size_t i = 1; i < layers.size(); ++i)
 	{
-		P[i].doc = json::parse(layers[i], nullptr, false);
+		P[i].doc = ParseDoc(layers[i]);
 		P[i].ok = !P[i].doc.is_discarded() && P[i].doc.is_object();
 		if (!P[i].ok) continue;   // corrupt layer: skipped, the rest still merges
 		int c = counter;
@@ -3568,7 +3569,7 @@ std::string World::MergeWorldLayers(const std::vector<std::string>& layers,
 	for (size_t i = 1; i < layers.size() && i < basis.size(); ++i)
 	{
 		if (basis[i].empty()) continue;
-		B[i].doc = json::parse(basis[i], nullptr, false);
+		B[i].doc = ParseDoc(basis[i]);
 		B[i].ok = !B[i].doc.is_discarded() && B[i].doc.is_object();
 		if (!B[i].ok) continue;
 		int c = counter;
@@ -3656,7 +3657,7 @@ std::string World::MergeWorldLayers(const std::vector<std::string>& layers,
 
 void World::LoadFromString(const std::string& data)
 {
-	json j = json::parse(data, nullptr, false);
+	json j = ParseDoc(data);
 	if (j.is_discarded()) { std::cout << "[World]\t\t\t" << "LoadFromString: bad JSON" << std::endl; return; }
 	LoadFromJson(j);
 }
@@ -3682,7 +3683,7 @@ void World::LoadFromJson(const json& j)
 			std::snprintf(nameBuf, sizeof(nameBuf), "%d_%d.nuworld", c.value("x", 0), c.value("z", 0));
 			std::string data;
 			if (!app->ReadContent(dir + "/" + nameBuf, data)) continue;
-			json cj = json::parse(data, nullptr, false);
+			json cj = ParseDoc(data);
 			if (cj.is_discarded() || !cj.contains("atoms")) continue;
 			for (const json& gj : cj["atoms"]) Add(LoadAtom(gj));
 			++loadedCells;

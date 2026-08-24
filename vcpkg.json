@@ -16,6 +16,7 @@
     "boost-thread",
     "boost-tokenizer",
     "boost-tuple",
+    "gdeflate",
     "glfw3",
     "glm",
     "lua",

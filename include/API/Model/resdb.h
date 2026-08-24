@@ -116,6 +116,9 @@ public:
     // Same, over the PACKAGE layer stack: raw overlay files load from disk, pak entries from
     // MEMORY (packed content never touches the disk).
     void  LoadContentPackaged();
+    // Register a list of (pakRel, diskPath) items: heavy binaries decode on the Jobs pool, the
+    // registration runs here in order. diskPath empty = a pak entry read by pakRel.
+    void  LoadContentItems(const std::vector<std::pair<std::string, std::string>>& items);
     // Load ONE content file by disk path (the shared per-extension dispatch of the scans).
     void  LoadContentFile(const std::string& path);
     // Load ONE packed entry from bytes (project-relative path decides the type).

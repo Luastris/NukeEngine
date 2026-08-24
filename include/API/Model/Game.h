@@ -95,6 +95,17 @@ public:
 	// Last completed frame's render counters (probes/console).
 	[[nuke::func]] static double DrawCalls();
 	[[nuke::func]] static double Triangles();
+	// Streaming boot: true once the atoms around the activation origin (the main camera) are in —
+	// the moment a loading screen may drop while the rest of the world keeps growing.
+	[[nuke::func]] static bool WorldStartZoneReady();
+	// Cook a JSON document (world / cell / prefab) into the binary form Package Project ships
+	// ("NCBR" + CBOR); every loader reads both. dst may equal src.
+	[[nuke::func]] static bool CookDocument(const std::string& src, const std::string& dst);
+	// Pack a directory into a NUPAK (entries project-relative to `root`, the registered asset
+	// cooks applied): method 0 store / 1 zlib / 2 zstd / 3 gdeflate. Mod tools and probes.
+	[[nuke::func]] static bool PackDirectory(const std::string& root, const std::string& outPak, int method, int level, int blockMB);
+	// Direct IO (Fast loading 4): the provider in use and what it served so far, one line.
+	[[nuke::func]] static std::string StorageInfo();
 	// Hi-Z occlusion (R4): draws tagged / held back by the last camera; live on/off toggle.
 	[[nuke::func]] static double OcclusionTracked();
 	[[nuke::func]] static double OcclusionCulled();

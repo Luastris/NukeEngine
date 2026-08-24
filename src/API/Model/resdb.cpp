@@ -1,10 +1,15 @@
 #include "API/Model/resdb.h"
+#include <cstdlib>   // getenv (NUKE_UPGRADE_ASSETS)
 #include <cstring>
 #include <functional>
 #include "API/Model/Atom.h"          // live-world clone refresh on material hot reload
 #include "API/Model/World.h"
 #include "API/Model/MeshRenderer.h"
 #include "API/Model/Package.h"   // packed-content scan (3.2)
+#include "API/Model/Storage.h"   // the scan's pak reads ride the IO provider (Fast loading 4)
+#include "API/Model/Texture.h"
+#include <boost/thread/mutex.hpp>
+#include <boost/thread/condition_variable.hpp>
 #include "API/Model/Jobs.h"      // Stopping(): background scans bail on shutdown
 #include "API/Model/Prefab.h"   // PrefabGuid (register prefab guid<->path)
 #include "render/irender.h"
@@ -547,31 +552,173 @@ std::string ResDB::NewGuid()
 	return bfs::unique_path("%%%%%%%%-%%%%-%%%%-%%%%-%%%%%%%%%%%%").string();
 }
 
+// ---- parallel content scan --------------------------------------------------------------------
+// The heavy binary assets (textures, meshes, clips, skeletons) decode on the Jobs pool — file
+// read / pak inflate / BC heal / float blobs all scale per core — and only the REGISTRATION
+// (the maps, the logs) runs on the scanning thread, in scan order. Everything else keeps the
+// serial per-type ladders below.
+namespace {
+struct ScanItem { std::string rel, disk; };   // disk set = a file on disk; else a pak entry read by rel
+struct ScanDecoded { Mesh* mesh = nullptr; Texture* tex = nullptr; AnimClip* clip = nullptr; Skeleton* skel = nullptr; bool heavy = false; };
+bool HeavyExt(const std::string& ext) { return ext == ".nutex" || ext == ".numesh" || ext == ".nuanim" || ext == ".nuskel"; }
+// Everything LoadContentEntry registers. Other pak entries (terrain bakes, audio, scripts,
+// worlds) are read by their own systems on demand — inflating them here would only cost boot time.
+bool EntryExt(const std::string& ext)
+{
+	static const char* kExts[] = { ".numesh", ".numat", ".nutex", ".nuinput", ".nuanim", ".nuskel",
+	                               ".nubonemap", ".nusm", ".nublend", ".nuseq", ".nurag", ".nuprefab" };
+	for (const char* e : kExts) if (ext == e) return true;
+	return false;
+}
+}
+
+void ResDB::LoadContentItems(const std::vector<std::pair<std::string, std::string>>& items)
+{
+	const int n = (int)items.size();
+	std::vector<ScanDecoded> dec(n);
+
+	// Phase 1 — bytes of the packed heavy entries through the Storage provider (DirectStorage:
+	// the whole scan becomes one NVMe request queue with GPU inflate). Cooked textures skip it:
+	// with a GPU-texture provider they load header-only and their mips stream into VRAM later.
+	std::vector<std::string> bytes(n);
+	std::vector<char> served(n, 0), okRead(n, 0), headerOnly(n, 0);
+	std::vector<Package::Location> locs(n);
+	const bool gpuTex = Storage::GpuTextures();
+	boost::mutex waitLock; boost::condition_variable waitCv; int pending = 0;
+	for (int i = 0; i < n; ++i)
+	{
+		const std::string& rel = items[i].first; const std::string& disk = items[i].second;
+		if (!disk.empty()) continue;
+		const std::string ext = bfs::path(rel).extension().string();
+		if (!HeavyExt(ext)) continue;
+		if (ext == ".nutex" && gpuTex && Package::Locate(rel, locs[i]) && locs[i].entry.layout == Texture::kPakLayout)
+		{ headerOnly[i] = 1; continue; }
+		{ boost::mutex::scoped_lock l(waitLock); ++pending; }
+		if (!Storage::TryProvider(rel, Storage::Normal, [&, i](bool ok, std::string& b)
+			{
+				bytes[i].swap(b); okRead[i] = ok ? 1 : 0;
+				boost::mutex::scoped_lock l(waitLock); --pending; waitCv.notify_all();
+			}))
+		{ boost::mutex::scoped_lock l(waitLock); --pending; continue; }
+		served[i] = 1;
+	}
+	Storage::Flush();
+	{
+		boost::mutex::scoped_lock l(waitLock);
+		while (pending > 0) waitCv.wait(l);   // the provider completes on its own thread
+	}
+
+	// Phase 2 — decode on the pool (disk files and unserved pak entries read right here).
+	Jobs::ParallelFor(0, n, 1, [&](int i)
+	{
+		if (Jobs::Stopping()) return;
+		const std::string& rel = items[i].first; const std::string& disk = items[i].second;
+		const std::string ext = bfs::path(disk.empty() ? rel : disk).extension().string();
+		if (!HeavyExt(ext)) return;
+		ScanDecoded& d = dec[i]; d.heavy = true;
+		if (headerOnly[i]) { d.tex = Texture::LoadFromPak(locs[i]); return; }
+		if (disk.empty())
+		{
+			if (served[i] ? !okRead[i] : !Package::Read(rel, bytes[i])) return;
+		}
+		if (ext == ".nutex")       d.tex  = disk.empty() ? Texture::LoadFromMemory(bytes[i])  : Texture::LoadFromFile(disk);
+		else if (ext == ".numesh") d.mesh = disk.empty() ? Mesh::LoadFromMemory(bytes[i])     : Mesh::LoadFromFile(disk);
+		else if (ext == ".nuanim") d.clip = disk.empty() ? AnimClip::LoadFromMemory(bytes[i]) : AnimClip::LoadFromFile(disk);
+		else if (ext == ".nuskel") d.skel = disk.empty() ? Skeleton::LoadFromMemory(bytes[i]) : Skeleton::LoadFromFile(disk);
+		std::string().swap(bytes[i]);
+	});
+	for (int i = 0; i < n; ++i)
+	{
+		if (Jobs::Stopping()) return;   // let Shutdown's join return
+		const std::string& rel = items[i].first; const std::string& disk = items[i].second;
+		ScanDecoded& d = dec[i];
+		if (!d.heavy)
+		{
+			if (!disk.empty()) { LoadContentFile(disk); continue; }
+			if (!EntryExt(bfs::path(rel).extension().string())) continue;
+			std::string bytes;
+			if (Package::Read(rel, bytes)) LoadContentEntry(rel, bytes);
+			continue;
+		}
+		const std::string shown = disk.empty() ? rel : bfs::path(disk).filename().string();
+		if (d.mesh)
+		{
+			if (d.mesh->guid.empty() || meshByGuid.count(d.mesh->guid)) { delete d.mesh; continue; }
+			RegisterMesh(d.mesh);
+			if (!disk.empty()) SetAssetPath(d.mesh->guid, disk);
+			std::cout << "[ResDB]	loaded mesh '" << d.mesh->name << "' (" << (disk.empty() ? "pak" : d.mesh->guid) << ")" << std::endl;
+		}
+		else if (d.tex)
+		{
+			if (d.tex->guid.empty()) { delete d.tex; continue; }
+			if (texByGuid.count(d.tex->guid))
+			{
+				// A silently skipped duplicate never registers, so anything referencing it by path
+				// stays invisible with no error: log loudly.
+				std::cout << "[ResDB]	DUPLICATE GUID '" << d.tex->guid << "': '" << shown
+				          << "' collides with '" << PathForGuid(d.tex->guid) << "' - file SKIPPED (re-import or re-save one of them)" << std::endl;
+				delete d.tex; continue;
+			}
+			RegisterTexture(d.tex);
+			if (!disk.empty()) SetAssetPath(d.tex->guid, disk);
+			std::cout << "[ResDB]	loaded texture '" << d.tex->guid << "' (" << d.tex->width << "x" << d.tex->height
+			          << (disk.empty() ? (d.tex->pakSource ? ", pak, VRAM-direct" : ", pak") : "") << ")" << std::endl;
+			if (d.tex->pakSource)
+				if (Storage::Provider* p = Storage::GetProvider()) p->PrefetchTexture(d.tex);
+			// A pre-v11 file was HEALED in memory (a BC re-encode, the slowest thing in the scan):
+			// write the healed v11 back so the next boot reads it as is. Editor, or a dev player
+			// run with NUKE_UPGRADE_ASSETS=1 — a shipped game never writes into its content.
+			if (d.tex->healedOnLoad && !disk.empty()
+			    && (AppInstance::GetSingleton()->isEditor() || std::getenv("NUKE_UPGRADE_ASSETS")))
+			{
+				if (d.tex->SaveToFile(disk)) std::cout << "[ResDB]	upgraded '" << shown << "' to texture v11 (healed mips saved)" << std::endl;
+			}
+		}
+		else if (d.clip)
+		{
+			if (d.clip->guid.empty() || clipByGuid.count(d.clip->guid)) { delete d.clip; continue; }
+			RegisterClip(d.clip);
+			if (!disk.empty()) SetAssetPath(d.clip->guid, disk);
+			std::cout << "[ResDB]	loaded clip '" << d.clip->name << "' (" << d.clip->duration << " s)" << std::endl;
+		}
+		else if (d.skel)
+		{
+			if (d.skel->guid.empty() || skelByGuid.count(d.skel->guid)) { delete d.skel; continue; }
+			RegisterSkeleton(d.skel);
+			if (!disk.empty()) SetAssetPath(d.skel->guid, disk);
+			std::cout << "[ResDB]	loaded skeleton '" << d.skel->name << "' (" << d.skel->bones.size() << " bones)" << std::endl;
+		}
+		else
+			std::cout << "[ResDB]	failed to load " << shown << std::endl;
+	}
+}
+
 void ResDB::LoadContentDir(const std::string& dir)
 {
 	boost::system::error_code ec;
 	if (!bfs::exists(dir, ec)) return;
+	std::vector<std::pair<std::string, std::string>> items;
 	for (bfs::recursive_directory_iterator it(dir, ec), end; it != end; it.increment(ec))
 	{
 		if (ec) break;
 		if (Jobs::Stopping()) return;   // let Shutdown's join return
 		if (bfs::is_directory(it->path())) continue;
-		LoadContentFile(it->path().string());
+		items.push_back({ std::string(), it->path().string() });
 	}
+	LoadContentItems(items);
 }
 
 // Packed runtime: the same registration pass over the Package layer stack. Raw overlay files
 // load from disk; pak entries load from MEMORY (no SetAssetPath: there is no file to locate).
 void ResDB::LoadContentPackaged()
 {
+	std::vector<std::pair<std::string, std::string>> items;
 	for (const std::string& rel : Package::List("content/"))
 	{
 		if (Jobs::Stopping()) return;   // let Shutdown's join return
-		std::string disk = Package::ResolveRead(rel);   // raw overlay only
-		if (!disk.empty()) { LoadContentFile(disk); continue; }
-		std::string bytes;
-		if (Package::Read(rel, bytes)) LoadContentEntry(rel, bytes);
+		items.push_back({ rel, Package::ResolveRead(rel) });   // raw overlay wins, else the pak entry
 	}
+	LoadContentItems(items);
 }
 
 // ONE packed entry (project-relative path + raw bytes) -> the DB, from memory.

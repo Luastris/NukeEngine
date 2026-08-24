@@ -1,7 +1,9 @@
 #include "API/Model/Game.h"
+#include "API/Model/JsonDoc.h"
 #include "API/Model/World.h"
 #include "API/Model/Time.h"
 #include "API/Model/Package.h"       // packed vs raw decides the save dir
+#include "API/Model/Storage.h"       // StorageInfo (Fast loading 4)
 #include "config.h"                  // userDataDir: per-user save root for packaged games
 #include "interface/AppInstance.h"
 #include <boost/dll.hpp>             // program_location (the dist exe carries the game name)
@@ -231,6 +233,31 @@ double Game::Triangles()
 	if (iRender* r = AppInstance::GetSingleton()->render) r->getFrameStats(draws, tris);
 	return (double)tris;
 }
+
+bool Game::WorldStartZoneReady() { return AppInstance::GetSingleton()->WorldStartZoneReady(); }
+
+bool Game::CookDocument(const std::string& src, const std::string& dst) { return CookDocFile(src, dst); }
+
+bool Game::PackDirectory(const std::string& root, const std::string& outPak, int method, int level, int blockMB)
+{
+	namespace bfs = boost::filesystem;
+	boost::system::error_code ec;
+	const bfs::path r = bfs::absolute(bfs::path(root), ec);
+	if (!bfs::is_directory(r, ec)) return false;
+	std::vector<std::pair<std::string, std::string>> files;
+	for (bfs::recursive_directory_iterator it(r, ec), end; it != end && !ec; it.increment(ec))
+	{
+		if (bfs::is_directory(it->path())) continue;
+		std::string rel = bfs::relative(it->path(), r, ec).generic_string();
+		files.push_back({ rel, it->path().string() });
+	}
+	std::sort(files.begin(), files.end());
+	Package::CreateOptions opt;
+	if (blockMB > 0) opt.blockBytes = (uint32_t)blockMB << 20;
+	return Package::Create(files, outPak, method, level, nullptr, &opt);
+}
+
+std::string Game::StorageInfo() { return Storage::Describe(); }
 
 double Game::OcclusionTracked()
 {

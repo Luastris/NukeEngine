@@ -693,6 +693,14 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("DrawCalls", &Game::DrawCalls));
 		Reflect_SetMethodDoc("Game", "DrawCalls", "Last completed frame's render counters (probes/console).", "");
 		t.methods.push_back(MakeMethod("Triangles", &Game::Triangles));
+		t.methods.push_back(MakeMethod("WorldStartZoneReady", &Game::WorldStartZoneReady));
+		Reflect_SetMethodDoc("Game", "WorldStartZoneReady", "Streaming boot: true once the atoms around the activation origin (the main camera) are in — the moment a loading screen may drop while the rest of the world keeps growing.", "");
+		t.methods.push_back(MakeMethod("CookDocument", &Game::CookDocument));
+		Reflect_SetMethodDoc("Game", "CookDocument", "Cook a JSON document (world / cell / prefab) into the binary form Package Project ships (\"NCBR\" + CBOR); every loader reads both. dst may equal src.", "src,dst");
+		t.methods.push_back(MakeMethod("PackDirectory", &Game::PackDirectory));
+		Reflect_SetMethodDoc("Game", "PackDirectory", "Pack a directory into a NUPAK (entries project-relative to `root`, the registered asset cooks applied): method 0 store / 1 zlib / 2 zstd / 3 gdeflate. Mod tools and probes.", "root,outPak,method,level,blockMB");
+		t.methods.push_back(MakeMethod("StorageInfo", &Game::StorageInfo));
+		Reflect_SetMethodDoc("Game", "StorageInfo", "Direct IO (Fast loading 4): the provider in use and what it served so far, one line.", "");
 		t.methods.push_back(MakeMethod("OcclusionTracked", &Game::OcclusionTracked));
 		Reflect_SetMethodDoc("Game", "OcclusionTracked", "Hi-Z occlusion (R4): draws tagged / held back by the last camera; live on/off toggle.", "");
 		t.methods.push_back(MakeMethod("OcclusionCulled", &Game::OcclusionCulled));
