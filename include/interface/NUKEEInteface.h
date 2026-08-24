@@ -76,7 +76,10 @@ extern "C" { NUKE_ABI_STAMP int nuke_build_debug = 0; }
 //  27 — Fast loading 4: Texture gained the pak-resident source (pakSource shared_ptr) and
 //       Config the io.* block (directStorage/stagingMB/gpuDecompression); Package::Entry
 //       carries the block table (layout + blocks) — every module that includes them relinks.
-#define NUKE_ENGINE_ABI 27
+//  28 — J1/J2: NukeWindow gained fpsLimit (its growth shifts every Config member after
+//       `window`) and Config gained jobCoreBudget — old binaries would read garbage offsets
+//       (a stale dist player hung allocating 20 GB before the first frame).
+#define NUKE_ENGINE_ABI 28
 extern "C" { NUKE_ABI_STAMP int nuke_engine_abi = NUKE_ENGINE_ABI; }
 
 namespace nuke {

@@ -46,6 +46,9 @@ struct NukeWindow{
     bool  clickThrough    = false;  // mouse input passes through to windows beneath ("clickThrough")
     bool  hideFromCapture = false;  // invisible to screen capture ("hideFromCapture"; Windows/macOS)
     int   textureStreamMB = 0;      // T3 mip-streaming VRAM budget, MB ("textureStreamMB"; 0 = off)
+    // J2: manual frame cap ("fpsLimit"; 0 = uncapped). Paces the whole frame loop (Time::NewFrame);
+    // vsync still applies on top — whichever is slower wins. Game.SetFpsLimit overrides live.
+    int   fpsLimit        = 0;
 };
 
 // Engine-wide ray-tracing reflection quality, persisted to config/main.json ["raytracing"].
@@ -155,7 +158,17 @@ public:
     // The in-game developer console (grave key) in a PACKAGED game ("devConsole"; the Game Build
     // checkbox writes it). Dev sessions always have the console; Console::SetEnabled overrides live.
     bool devConsole = false;
+    // J1: total cores the ENGINE may occupy — main/render + physics + workers ("jobs":
+    // {"coreBudget": N}; 0 = the whole machine). N below the core count leaves the rest to the
+    // OS and other apps; the physics core and the workers pin INSIDE the budget when it is set.
+    // ABI: Config is cross-DLL — new fields go at the END of the data members, and any growth
+    // (this field, a NukeWindow append) is a LAYOUT BREAK: bump NUKE_ENGINE_ABI with it.
+    int  jobCoreBudget = 0;
 	void reload(Config* instance);
+	// The core the fixed-update (physics) thread pins to, after auto-resolution: -2 = don't
+	// pin; explicit value passes through; -1 auto = the LAST core inside the jobs core budget
+	// (or the machine when no budget is set).
+	int effectivePhysicsCore() const;
 	// Show/hide the process's OWN OS console window. No-op if the console is SHARED with a
 	// launching terminal (>1 attached process), and no-op off Windows.
 	static void SetConsoleWindowVisible(bool visible);

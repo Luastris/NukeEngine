@@ -521,10 +521,10 @@ void AppInstance::FixedThread()
 	namespace bch = boost::chrono;
 
 #ifdef _WIN32
-	// Pin the sim to its own core (config physicsCore: -1 = auto/last core, -2 = don't pin)
-	// and raise priority so a busy render loop can't starve the cadence.
+	// Pin the sim to its own core (config physicsCore: -1 = auto = last core INSIDE the jobs
+	// core budget, -2 = don't pin) and raise priority so a busy render loop can't starve it.
 	{
-		int core = config ? config->physicsCore : -1;
+		int core = config ? config->effectivePhysicsCore() : -1;
 		if (core == -1)
 			core = (int)boost::thread::hardware_concurrency() - 1;
 		if (core >= 0 && core < 64)
@@ -537,7 +537,7 @@ void AppInstance::FixedThread()
 	// Same contract with POSIX plumbing. Priority: plain nice() — SCHED_FIFO/RR needs
 	// CAP_SYS_NICE and games shouldn't ask for privileges.
 	{
-		int core = config ? config->physicsCore : -1;
+		int core = config ? config->effectivePhysicsCore() : -1;
 		if (core == -1)
 			core = (int)boost::thread::hardware_concurrency() - 1;
 		if (core >= 0 && core < CPU_SETSIZE)

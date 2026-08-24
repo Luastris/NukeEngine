@@ -3,6 +3,7 @@
 
 #include <nlohmann/json.hpp>
 #include <boost/filesystem.hpp>
+#include <boost/thread/thread.hpp>   // hardware_concurrency: effectivePhysicsCore
 #include <boost/dll/runtime_symbol_info.hpp>
 #include <boost/filesystem/fstream.hpp>
 #include <iostream>
@@ -177,6 +178,14 @@ bfs::path Config::baseDir()
     return root;
 }
 
+int Config::effectivePhysicsCore() const
+{
+    if (physicsCore != -1) return physicsCore;   // explicit core or -2 (don't pin)
+    int cores = (int)boost::thread::hardware_concurrency();
+    if (jobCoreBudget > 0 && jobCoreBudget < cores) cores = jobCoreBudget;
+    return cores > 0 ? cores - 1 : -2;
+}
+
 void Config::reload(Config* instance)
 {
     boost::system::error_code ec;
@@ -236,6 +245,7 @@ void Config::reload(Config* instance)
         win.clickThrough    = w.value("clickThrough",    win.clickThrough);
         win.hideFromCapture = w.value("hideFromCapture", win.hideFromCapture);
         win.textureStreamMB = w.value("textureStreamMB", win.textureStreamMB);
+        win.fpsLimit        = w.value("fpsLimit",        win.fpsLimit);
         cout << PREFIX_CONF << "Window size = [" << win.w << "x" << win.h << "]  backend="
              << (win.backend == 1 ? "D3D12" : win.backend == 2 ? "Vulkan" : "D3D11") << endl;
         cout << PREFIX_CONF << "FONT IS " << win.mainFont << endl;
@@ -254,6 +264,7 @@ void Config::reload(Config* instance)
         const json& j = root["jobs"];
         instance->jobWorkers  = j.value("workers",  instance->jobWorkers);
         instance->jobPinCores = j.value("pinCores", instance->jobPinCores);
+        instance->jobCoreBudget = j.value("coreBudget", instance->jobCoreBudget);
     }
     if (root.contains("io") && root["io"].is_object())
     {
@@ -319,6 +330,7 @@ void Config::saveWindowTo(const std::string& path)
     w["clickThrough"]    = window.clickThrough;
     w["hideFromCapture"] = window.hideFromCapture;
     w["textureStreamMB"] = window.textureStreamMB;
+    w["fpsLimit"]        = window.fpsLimit;
 
     bfs::ofstream out(cfg, std::ios::trunc);
     if (!out) { cout << PREFIX_CONF << "saveWindow: cannot write " << path << endl; return; }

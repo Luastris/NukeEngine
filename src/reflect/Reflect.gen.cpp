@@ -662,6 +662,9 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("SetTimeScale", &Game::SetTimeScale));
 		Reflect_SetMethodDoc("Game", "SetTimeScale", "Game speed: scales Time.Delta(), the game calendar and the fixed physics cadence. 0 = frozen but Update still runs (unlike SetPaused), 1 = normal. Clamped to [0..8]; edit mode ignores the scale.", "scale");
 		t.methods.push_back(MakeMethod("GetTimeScale", &Game::GetTimeScale));
+		t.methods.push_back(MakeMethod("SetFpsLimit", &Game::SetFpsLimit));
+		Reflect_SetMethodDoc("Game", "SetFpsLimit", "J2: manual frame-rate cap for the whole frame loop (render + logic), live. 0 = uncapped; vsync still applies on top — whichever is slower wins. Config default: window.fpsLimit.", "fps");
+		t.methods.push_back(MakeMethod("GetFpsLimit", &Game::GetFpsLimit));
 		t.methods.push_back(MakeMethod("Quit", &Game::Quit));
 		t.methods.push_back(MakeMethod("SaveGame", &Game::SaveGame));
 		Reflect_SetMethodDoc("Game", "SaveGame", "--- SAVEGAMES: runtime snapshots, distinct from world assets ---- SaveGame writes the running world (atoms, script state, tilemaps, calendar, event schedule) to `<slot>.nusave` in the save dir. LoadGame applies at the frame boundary. ListSaves returns newline-separated slot names, newest first.", "slot");

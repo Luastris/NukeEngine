@@ -121,6 +121,15 @@ void Game::SetTimeScale(double scale)
 
 double Game::GetTimeScale() { return Time::getSingleton()->scale; }
 
+void Game::SetFpsLimit(double fps)
+{
+	if (fps < 0.0) fps = 0.0;
+	if (fps > 0.0 && fps < 10.0) fps = 10.0;   // a sub-10 cap is a frozen-looking game, not a setting
+	Time::SetFpsCap(fps);
+}
+
+double Game::GetFpsLimit() { return Time::FpsCap(); }
+
 void Game::Quit()
 {
 	AppInstance* app = AppInstance::GetSingleton();

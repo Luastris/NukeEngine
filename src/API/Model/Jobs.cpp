@@ -148,36 +148,45 @@ void Jobs::Init(int workers, bool pinCores)
 
 	const int cores = (int)boost::thread::hardware_concurrency();
 
-	// Core 0 (OS + main/render) and the physics core (config "physicsCore") are reserved.
-	int physCore = -1;
+	// J1 core budget ("jobs": {"coreBudget": N}): the ENGINE confines itself to the first N
+	// cores — main/render on 0, physics on the budget's last, workers on what remains; the
+	// cores above the budget stay free for the OS and other apps. 0 = the whole machine.
+	// Core 0 (OS + main/render) and the physics core are reserved either way.
+	int physCore = -1, budget = 0;
 	if (Config* cfg = Config::getSingleton())
 	{
-		physCore = cfg->physicsCore;
-		if (physCore == -1) physCore = cores - 1;   // its auto rule: the last core
+		physCore = cfg->effectivePhysicsCore();   // -1 auto resolves INSIDE the budget
+		budget   = cfg->jobCoreBudget;
 	}
+	if (budget > cores) budget = cores;
+	const int top = budget > 0 ? budget : cores;   // worker-eligible cores live below this
+	if (physCore == -1) physCore = top - 1;        // no config at all: mirror the auto rule
 
 	// The allowed core set for workers, round-robined when workers > set size.
 	std::vector<int> allowed;
-	for (int c = 1; c < cores; ++c)
+	for (int c = 1; c < top; ++c)
 		if (c != physCore) allowed.push_back(c);
-	if (allowed.empty()) allowed.push_back(cores > 1 ? 1 : 0);
+	if (allowed.empty()) allowed.push_back(top > 1 ? 1 : 0);
 
 	int n = workers;
-	if (n <= 0) n = (int)allowed.size();   // auto: one worker per free core
+	if (n <= 0) n = (int)allowed.size();   // auto: one worker per free core (inside the budget)
 	if (n < 1) n = 1;
 
+	// A budget is only real when the workers actually stay inside it: pin whenever it is set.
+	const bool pin = pinCores || budget > 0;
 	for (int i = 0; i < n; ++i)
 	{
-		const int core = pinCores ? allowed[i % allowed.size()] : -1;
+		const int core = pin ? allowed[i % allowed.size()] : -1;
 		g_pool.workers.push_back(new boost::thread(boost::bind(&WorkerLoop, core)));
 	}
 	std::cout << "[Jobs]\t\t" << n << " worker(s)";
-	if (pinCores)
+	if (pin)
 	{
 		std::cout << " spread over cores [";
 		for (int i = 0; i < n; ++i) std::cout << (i ? "," : "") << allowed[i % allowed.size()];
 		std::cout << "]";
 	}
+	if (budget > 0) std::cout << ", core budget " << budget << "/" << cores;
 	std::cout << " (physics core " << physCore << " reserved)" << std::endl;
 }
 

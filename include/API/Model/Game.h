@@ -57,6 +57,10 @@ public:
 	// edit mode ignores the scale.
 	[[nuke::func]] static void   SetTimeScale(double scale);
 	[[nuke::func]] static double GetTimeScale();
+	// J2: manual frame-rate cap for the whole frame loop (render + logic), live. 0 = uncapped;
+	// vsync still applies on top — whichever is slower wins. Config default: window.fpsLimit.
+	[[nuke::func]] static void   SetFpsLimit(double fps);
+	[[nuke::func]] static double GetFpsLimit();
 
 	[[nuke::func]] static void Quit();   // closes the Player window; ignored in the editor
 

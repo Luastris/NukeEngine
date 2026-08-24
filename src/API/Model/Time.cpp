@@ -5,7 +5,15 @@
 #include "API/Model/Time.h"
 #include "API/Model/Events.h"
 #include "interface/AppInstance.h"
+#include "config.h"
 #include <boost/chrono.hpp>
+#include <boost/thread/thread.hpp>   // sleep_for: the J2 FPS-cap pacer
+#include <iostream>
+#ifdef _WIN32
+#include <windows.h>
+#include <timeapi.h>                 // timeBeginPeriod: 1ms sleep granularity for the pacer
+#pragma comment(lib, "winmm.lib")
+#endif
 
 namespace nuke {
 
@@ -40,12 +48,70 @@ void Time::SetDate(int year, int month, int day, int hour, int minute)
 	t->secCarry = 0.0;
 }
 
+// J2 FPS cap: -1 = unresolved (read config window.fpsLimit on first use), 0 = uncapped.
+static double g_fpsCap = -1.0;
+
+void Time::SetFpsCap(double fps) { g_fpsCap = fps > 0.0 ? fps : 0.0; }
+
+double Time::FpsCap()
+{
+	if (g_fpsCap < 0.0)
+	{
+		const Config* cfg = Config::getSingleton();
+		g_fpsCap = (cfg && cfg->window.fpsLimit > 0) ? (double)cfg->window.fpsLimit : 0.0;
+		if (g_fpsCap > 0.0)
+			std::cout << "[Time]\t\tfps cap " << (int)g_fpsCap << " (config window.fpsLimit)" << std::endl;
+	}
+	return g_fpsCap;
+}
+
 void Time::NewFrame()
 {
 	using clock = boost::chrono::steady_clock;
 	static clock::time_point last;
 	static bool have = false;
+	// J2 FPS cap: every host calls NewFrame at the top of its frame, so waiting out the
+	// remainder of the frame period HERE caps the whole loop without touching any render
+	// seam. Sleep to ~2ms short of the deadline, then spin — raw OS sleep granularity would
+	// wobble the cadence (timeBeginPeriod(1) tightens it on Windows, armed once on demand).
+	const double cap = FpsCap();
+	if (have && cap > 0.0)
+	{
+#ifdef _WIN32
+		static bool period = false;
+		if (!period) { timeBeginPeriod(1); period = true; }
+#endif
+		const clock::time_point target = last
+			+ boost::chrono::duration_cast<clock::duration>(boost::chrono::duration<double>(1.0 / cap));
+		for (;;)
+		{
+			const clock::time_point t = clock::now();
+			if (t >= target) break;
+			const double rem = boost::chrono::duration<double>(target - t).count();
+			if (rem > 0.0025)
+				boost::this_thread::sleep_for(boost::chrono::milliseconds((long long)((rem - 0.002) * 1000.0)));
+			// else: spin out the tail for a steady cadence
+		}
+	}
 	clock::time_point now = clock::now();
+	// Dev hook: NUKE_TIME_DEBUG=1 — print the measured frame rate every ~2s (frame-pacing probes).
+	{
+		static int dbg = -1;
+		if (dbg < 0) { const char* e = std::getenv("NUKE_TIME_DEBUG"); dbg = (e && *e == '1') ? 1 : 0; }
+		if (dbg)
+		{
+			static clock::time_point t0 = now;
+			static int frames = 0;
+			++frames;
+			const double span = boost::chrono::duration<double>(now - t0).count();
+			if (span >= 2.0)
+			{
+				std::cout << "[Time]\t\tfps ~" << (int)(frames / span + 0.5)
+				          << " (cap " << (int)FpsCap() << ")" << std::endl;
+				t0 = now; frames = 0;
+			}
+		}
+	}
 	if (have)
 	{
 		delta = boost::chrono::duration<double>(now - last).count();
