@@ -22,6 +22,12 @@ namespace nuke {
 
 namespace bc = boost::container;
 
+// The loaded project manifest (.nuproj JSON), shared pool for modules: the host (editor on
+// project load/save, player at boot) publishes it; modules read their "moduleSettings" keys
+// from it anywhere (import, cook, runtime). Thread-safe; "" until published.
+NUKEENGINE_API void        SetProjectManifest(const std::string& json);
+NUKEENGINE_API std::string ProjectManifest();
+
 class NUKEENGINE_API AppInstance
 {
 protected:

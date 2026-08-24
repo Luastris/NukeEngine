@@ -24,6 +24,20 @@
 
 namespace nuke {
 
+static std::string    gProjManifest;
+static boost::mutex   gProjManifestMx;
+
+void SetProjectManifest(const std::string& json)
+{
+	boost::mutex::scoped_lock l(gProjManifestMx);
+	gProjManifest = json;
+}
+std::string ProjectManifest()
+{
+	boost::mutex::scoped_lock l(gProjManifestMx);
+	return gProjManifest;
+}
+
 std::string AppInstance::ResolveContent(const std::string& path) const
 {
 	if (path.empty()) return path;

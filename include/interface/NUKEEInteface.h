@@ -19,6 +19,7 @@
 //   3 — companionOf
 //   4 — (reserved; the iScript::ModuleDeps/PlatformOf growth is gated by nuke_engine_abi 12 —
 //        service vtables have no per-call guard, so the discovery gate is the one that counts)
+//   5 — cookTransform/projectSettings
 // One-definition-per-image data export: dllexport+selectany on MSVC, default-visibility weak
 // everywhere else (Mach-O/ELF) — every module stamps its own copy, the loader reads it per image.
 #ifdef _WIN32
@@ -27,7 +28,19 @@
   #define NUKE_ABI_STAMP __attribute__((visibility("default"), weak))
 #endif
 
-#define NUKE_MODULE_ABI 4
+#define NUKE_MODULE_ABI 5
+
+// One project-level setting a module contributes (data only — the editor renders the widget).
+struct NukeModuleSetting
+{
+	std::string key;            // "moduleSettings" key in the .nuproj, e.g. "audioOggQ"
+	std::string label;          // Project Settings row label
+	std::string tip;            // tooltip ("" = none)
+	int         type = 0;       // 0 bool, 1 int, 2 float, 3 string
+	double      defVal = 0.0;   // bool/int/float default
+	std::string defStr;         // string default
+	double      minV = 0.0, maxV = 0.0;   // int/float range (min == max = unbounded)
+};
 extern "C" { NUKE_ABI_STAMP int nuke_module_abi = NUKE_MODULE_ABI; }
 // Build flavor of THIS binary. Same-source Debug and Release builds share the engine ABI
 // stamp, but mixing them corrupts memory (CRT/iterator-debug/layout differences) — module
@@ -194,6 +207,21 @@ public:
 	// off too. ABI level 3: callers MUST guard with ModuleAbi(m) >= 3 — a module built against
 	// an older header has no such slot, and the call would land on whatever follows the vtable.
 	virtual const char* companionOf() { return ""; }
+
+	// Packaging hook: offer to REWRITE a shipping file (transcode/optimize). `srcPath` = the
+	// on-disk source, `projectJson` = the project manifest (module settings live under its
+	// "moduleSettings" object). Fill `out` with the replacement bytes — and `outRel` with the
+	// new pak name when the format changes (e.g. beep.wav -> beep.ogg; "" = keep the name) —
+	// and return true; false = ships unchanged. Worker thread, PURE like cookContent.
+	// ABI level 5: callers MUST guard with ModuleAbi(m) >= 5.
+	virtual bool cookTransform(const char* contentRel, const char* srcPath,
+	                           const char* projectJson, std::string& outRel, std::string& out) { return false; }
+
+	// Project-level settings this module contributes while it is in the project: data-only
+	// descriptors the EDITOR renders in Project Settings; values persist under the .nuproj
+	// "moduleSettings" object (modules read them back from the manifest, e.g. in cookTransform).
+	// ABI level 5: callers MUST guard with ModuleAbi(m) >= 5.
+	virtual void projectSettings(std::vector<NukeModuleSetting>& out) {}
 };
 
 }  // namespace nuke

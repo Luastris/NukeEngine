@@ -4,6 +4,7 @@
 #include "interface/Services.h"
 #include "interface/AppInstance.h"
 #include <boost/filesystem.hpp>
+#include <cctype>
 
 namespace nuke {
 
@@ -18,19 +19,37 @@ std::string Audio::ResolveClip(const std::string& clip)
 }
 
 // Start a voice: a real file plays by path (streamed); a pak-only clip is decoded from memory.
+// A missing path retries sibling audio extensions — packaging ships transcoded clips under
+// their own extension (beep.wav -> beep.ogg) while references keep the authored name.
 uint64_t Audio::PlayDesc(const std::string& clip, const NukeVoiceDesc& d)
 {
 	iAudio* a = GetService<iAudio>();
 	if (!a || clip.empty()) return 0;
 	// Init on demand (idempotent): the first World::Update runs before the first Render pump.
 	if (!a->init()) return 0;
-	std::string full = ResolveClip(clip);
-	boost::system::error_code ec;
-	if (!full.empty() && boost::filesystem::exists(boost::filesystem::path(full), ec))
-		return a->play(full.c_str(), d);
-	std::string bytes;
-	if (AppInstance::GetSingleton()->ReadContent(clip, bytes) && !bytes.empty())
-		return a->playData(bytes.data(), bytes.size(), d);
+	auto tryOne = [&](const std::string& rel) -> uint64_t
+	{
+		std::string full = ResolveClip(rel);
+		boost::system::error_code ec;
+		if (!full.empty() && boost::filesystem::exists(boost::filesystem::path(full), ec))
+			return a->play(full.c_str(), d);
+		std::string bytes;
+		if (AppInstance::GetSingleton()->ReadContent(rel, bytes) && !bytes.empty())
+			return a->playData(bytes.data(), bytes.size(), d);
+		return 0;
+	};
+	if (uint64_t v = tryOne(clip)) return v;
+	const size_t dot = clip.find_last_of('.');
+	if (dot == std::string::npos) return 0;
+	std::string ext = clip.substr(dot);
+	for (char& c : ext) c = (char)std::tolower((unsigned char)c);
+	static const char* kExts[] = { ".ogg", ".wav", ".flac", ".mp3" };
+	bool audio = false;
+	for (const char* e : kExts) audio = audio || ext == e;
+	if (!audio) return 0;
+	for (const char* e : kExts)
+		if (ext != e)
+			if (uint64_t v = tryOne(clip.substr(0, dot) + e)) return v;
 	return 0;
 }
 
