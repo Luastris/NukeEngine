@@ -15,4 +15,8 @@ void main(uint vid : SV_VertexID, out PSIn o)
     float2 c = kCorners[vid];
     o.wpos = float3(g_CamStep.x + c.x * R, 0.0, g_CamStep.z + c.y * R);
     o.pos  = mul(g_VP, float4(o.wpos, 1.0));
+    // Depth nudge toward the camera: geometry lying EXACTLY in the y=0 plane (a floor slab)
+    // otherwise z-fights the grid — the grid must win and draw on top of coplanar surfaces,
+    // while anything meaningfully above it still occludes normally.
+    o.pos.z -= 1e-4 * o.pos.w;
 }

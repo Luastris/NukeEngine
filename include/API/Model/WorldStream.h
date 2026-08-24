@@ -49,6 +49,21 @@ public:
 		bool loading = false;              // async read+parse in flight
 		std::vector<std::string> parked;   // unloaded root subtrees (full atom JSON, live state)
 		Proxy hlod;
+		uint64_t fileBytes = ~0ull;        // cell file size on disk (~0 = not measured yet)
+	};
+
+	// ST-viz: one cell's live state, snapshotted for the editor overlay (DebugCells).
+	struct CellInfo
+	{
+		CellKey key;
+		bool loaded = false;               // inside the sticky active set
+		bool fromFile = false;             // has a cold file in the cell index
+		bool coldLoaded = false;           // that file was pulled this session
+		bool loading = false;              // async read in flight
+		bool hlodDraw = false;             // HLOD proxy drawn this frame
+		int  parked = 0;                   // parked root subtrees
+		uint64_t parkedBytes = 0;          // memory the parked JSON holds
+		uint64_t fileBytes = 0;            // cell file size on disk (0 = none/unknown)
 	};
 
 	~WorldStream();
@@ -80,6 +95,8 @@ public:
 
 	int CellCount() const { return (int)cells.size(); }
 	int LoadedCount() const;
+	// ST-viz snapshot for the editor overlay (game thread; file sizes measured once and cached).
+	void DebugCells(std::vector<CellInfo>& out);
 
 private:
 	std::map<CellKey, Cell> cells;

@@ -111,6 +111,51 @@ int WorldStream::LoadedCount() const
 	return n;
 }
 
+void WorldStream::DebugCells(std::vector<CellInfo>& out)
+{
+	AppInstance* app = AppInstance::GetSingleton();
+	out.clear();
+	out.reserve(cells.size() + loadedSet.size());
+	for (auto& kv : cells)
+	{
+		Cell& c = kv.second;
+		CellInfo ci;
+		ci.key        = kv.first;
+		ci.loaded     = loadedSet.count(kv.first) != 0;
+		ci.fromFile   = c.fromFile;
+		ci.coldLoaded = c.coldLoaded;
+		ci.loading    = c.loading;
+		ci.hlodDraw   = c.hlod.draw;
+		ci.parked     = (int)c.parked.size();
+		for (const std::string& s : c.parked) ci.parkedBytes += s.size();
+		// Disk size once per session (raw project path; inside a pak the stat just yields 0).
+		if (c.fileBytes == ~0ull)
+		{
+			c.fileBytes = 0;
+			if (c.fromFile && !cellsDir.empty())
+			{
+				char nameBuf[64];
+				std::snprintf(nameBuf, sizeof(nameBuf), "%d_%d.nuworld", kv.first.x, kv.first.z);
+				boost::system::error_code ec;
+				const uint64_t sz = (uint64_t)boost::filesystem::file_size(
+					boost::filesystem::path(app->ResolveContent(cellsDir + "/" + nameBuf)), ec);
+				if (!ec) c.fileBytes = sz;
+			}
+		}
+		ci.fileBytes = c.fileBytes;
+		out.push_back(ci);
+	}
+	// Active-set cells with nothing parked and no file never enter the map — still worth showing.
+	for (const CellKey& k : loadedSet)
+		if (!cells.count(k))
+		{
+			CellInfo ci;
+			ci.key = k;
+			ci.loaded = true;
+			out.push_back(ci);
+		}
+}
+
 // ---- streaming tick -----------------------------------------------------------------------------
 
 // Streaming anchors in WORLD space: the game's main camera and (in the editor) the atom named
