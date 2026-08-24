@@ -1,6 +1,7 @@
 #include "API/Model/DevConsole.h"
 #include "API/Model/Log.h"
 #include "API/Model/Package.h"
+#include "config.h"
 #include "input/Input.h"
 #include "interface/iGUI.h"
 #include "interface/AppInstance.h"
@@ -18,7 +19,8 @@ namespace nuke {
 
 namespace {
 
-// -1 = unresolved: dev sessions (editor/raw player) default ON, packaged (pak mounted) OFF.
+// -1 = unresolved: dev sessions (editor/raw player) default ON; a packaged game (pak mounted)
+// follows config "devConsole" (the Game Build checkbox). Console::SetEnabled overrides live.
 int  g_enabled = -1;
 bool g_open = false;
 bool g_wantFocus = false;
@@ -29,7 +31,8 @@ std::vector<const char*> g_historyPtrs;     // stable c_str view handed to the w
 
 bool ResolveEnabled()
 {
-	if (g_enabled < 0) g_enabled = Package::MountedCount() > 0 ? 0 : 1;
+	if (g_enabled < 0)
+		g_enabled = Package::MountedCount() > 0 ? (Config::getSingleton()->devConsole ? 1 : 0) : 1;
 	return g_enabled != 0;
 }
 

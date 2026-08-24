@@ -152,6 +152,9 @@ public:
     // D3D12 GPU validation layer + DRED breadcrumbs (Debug builds only; heavy per-command cost).
     // Enabled by either this flag or the NUKE_GPU_VALIDATION env var.
     bool gpuValidation = false;
+    // The in-game developer console (grave key) in a PACKAGED game ("devConsole"; the Game Build
+    // checkbox writes it). Dev sessions always have the console; Console::SetEnabled overrides live.
+    bool devConsole = false;
 	void reload(Config* instance);
 	// Show/hide the process's OWN OS console window. No-op if the console is SHARED with a
 	// launching terminal (>1 attached process), and no-op off Windows.

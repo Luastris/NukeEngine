@@ -208,7 +208,12 @@ static void IngestLine(const std::string& raw, bool fromErr)
 	Log::Write(lv, tag, s, file, line);
 }
 
-// Tee streambuf: forwards to the original buffer and ingests completed lines into the ring.
+// Tee streambuf: echoes to the OS stream and ingests completed lines into the ring.
+// The echo goes through C stdio (fwrite/fputc — LOCKED per call), NOT through the captured
+// filebuf: once this tee is cout's rdbuf, the ostream sentry locks the TEE, while the MSVC
+// filebuf underneath writes with the no-lock primitives assuming callers hold ITS lock — a
+// concurrent direct-stdout writer (printf, a hosted runtime like the CLR) then corrupts the
+// FILE state (Debug CRT: "Inconsistent Stream Count", garbled interleaved lines).
 class TeeBuf : public std::streambuf
 {
 public:
@@ -216,10 +221,10 @@ public:
 protected:
 	int overflow(int c) override
 	{
-		if (c == EOF) return orig_ ? orig_->pubsync() : 0;
-		const bool echo = orig_ && g_consoleEcho.load(std::memory_order_relaxed);
+		if (c == EOF) return Echoing() ? std::fflush(Os()) : 0;
+		const bool echo = Echoing();
 		std::string& line = Line();
-		if (echo) { if (line.empty() && c != '\n') Stamp(); orig_->sputc((char)c); }
+		if (echo) { if (line.empty() && c != '\n') Stamp(); std::fputc(c, Os()); }
 		if (c == '\n') { IngestLine(line, err_); line.clear(); }
 		else if (line.size() < 4096) line += (char)c;
 		return c;
@@ -228,7 +233,7 @@ protected:
 	{
 		// Console write in line-sized pieces (each line start gets its uptime stamp), then the
 		// same scan feeds the ring line by line.
-		const bool echo = orig_ && g_consoleEcho.load(std::memory_order_relaxed);
+		const bool echo = Echoing();
 		std::string& line = Line();
 		std::streamsize from = 0;
 		for (std::streamsize i = 0; i < n; ++i)
@@ -237,16 +242,18 @@ protected:
 			if (echo && line.empty() && ch != '\n') Stamp();
 			if (ch == '\n')
 			{
-				if (echo) { orig_->sputn(p + from, i + 1 - from); from = i + 1; }
+				if (echo) { std::fwrite(p + from, 1, (size_t)(i + 1 - from), Os()); from = i + 1; }
 				IngestLine(line, err_); line.clear();
 			}
 			else if (line.size() < 4096) line += ch;
 		}
-		if (echo && from < n) orig_->sputn(p + from, n - from);
+		if (echo && from < n) std::fwrite(p + from, 1, (size_t)(n - from), Os());
 		return n;
 	}
-	int sync() override { return (orig_ && g_consoleEcho.load(std::memory_order_relaxed)) ? orig_->pubsync() : 0; }
+	int sync() override { return Echoing() ? std::fflush(Os()) : 0; }
 private:
+	FILE* Os() const { return err_ ? stderr : stdout; }
+	bool  Echoing() const { return orig_ && g_consoleEcho.load(std::memory_order_relaxed); }
 	// The line accumulator is PER THREAD: cout is written from the render thread (backend log
 	// callbacks) and the game thread at once, and a shared buffer raced — StripAnsi walked a
 	// string another thread was appending to. Lines interleave per thread, never corrupt.
@@ -260,9 +267,9 @@ private:
 	{
 		char b[24];
 		const int n = std::snprintf(b, sizeof(b), "[%8.3f] ", Log::Uptime());
-		if (n > 0) orig_->sputn(b, n);
+		if (n > 0) std::fwrite(b, 1, (size_t)n, Os());
 	}
-	std::streambuf* orig_;
+	std::streambuf* orig_;   // kept: capture stays reversible / non-null marks "echo possible"
 	bool            err_;
 };
 

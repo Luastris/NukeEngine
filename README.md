@@ -24,12 +24,13 @@ it with submodules and build everything with one command via the superbuild.
 
 ## Building
 
-Preferred: the superbuild at the ecosystem root (`cmake -S . -B build` there) — it drives
-this repo's `NukeEngine.sln` plus every present module in dependency order.
+Preferred: the superbuild at the ecosystem root (`cmake -S . -B build` there) — it builds
+this repo's `CMakeLists.txt` plus every present module in dependency order.
 
-Standalone: `NukeEngine.sln` builds the engine + the editor (VS2022, v143, x64, C++20).
-The engine is vcpkg MANIFEST mode (`vcpkg.json` → `vcpkg_installed/`); `VCPKG_ROOT` must
-be set. Reflection codegen (`NukeUtils/nukegen.py` in the eco root) needs Python on PATH.
+Standalone: `CMakeLists.txt` builds the engine as a shared library (C++20; MSVC v143 on
+Windows). Dependencies come from the SHARED classic vcpkg pool via `CMAKE_PREFIX_PATH`
+(`VCPKG_ROOT` must be set; no per-project manifests). Reflection codegen runs as a
+prebuild through the deployed `NukeUtils/bin/NukeGen`.
 Run dir = `x64/<Config>` — the editor, player, `modules/` and `shaders/` all land there.
 
 **ABI rule:** new virtuals go at the END of seam vtables (`iRender`, `iAudio`,
