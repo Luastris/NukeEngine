@@ -4,6 +4,7 @@
 #include "API/Model/Time.h"
 #include "API/Model/Package.h"       // packed vs raw decides the save dir
 #include "API/Model/Storage.h"       // StorageInfo (Fast loading 4)
+#include "API/Model/Cursor.h"
 #include "config.h"                  // userDataDir: per-user save root for packaged games
 #include "interface/AppInstance.h"
 #include <boost/dll.hpp>             // program_location (the dist exe carries the game name)
@@ -129,6 +130,17 @@ void Game::SetFpsLimit(double fps)
 }
 
 double Game::GetFpsLimit() { return Time::FpsCap(); }
+
+bool Game::SetCursor(const std::string& contentRel)
+{
+	if (!Cursor::Bind("default", contentRel)) return false;
+	Cursor::SetState("default");
+	return true;
+}
+bool Game::BindCursor(const std::string& state, const std::string& contentRel) { return Cursor::Bind(state, contentRel); }
+void Game::SetCursorState(const std::string& state) { Cursor::SetState(state); }
+void Game::SetCursorSoftware(bool on) { Cursor::SetSoftware(on); }
+void Game::ResetCursor() { Cursor::Reset(); }
 
 void Game::Quit()
 {

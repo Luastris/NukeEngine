@@ -148,10 +148,8 @@ void Jobs::Init(int workers, bool pinCores)
 
 	const int cores = (int)boost::thread::hardware_concurrency();
 
-	// J1 core budget ("jobs": {"coreBudget": N}): the ENGINE confines itself to the first N
-	// cores — main/render on 0, physics on the budget's last, workers on what remains; the
-	// cores above the budget stay free for the OS and other apps. 0 = the whole machine.
-	// Core 0 (OS + main/render) and the physics core are reserved either way.
+	// Core budget: the engine confines itself to the first N cores (main on 0, physics on
+	// the budget's last, workers on the rest); 0 = the whole machine.
 	int physCore = -1, budget = 0;
 	if (Config* cfg = Config::getSingleton())
 	{

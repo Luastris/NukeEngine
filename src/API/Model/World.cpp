@@ -20,6 +20,7 @@
 #include "API/Model/Events.h"
 #include "API/Model/Profiler.h"
 #include "API/Model/Game.h"
+#include "API/Model/Cursor.h"
 #include "API/Model/StatusBar.h"
 #include "API/Model/Sprite.h"
 #include "API/Model/Canvas.h"
@@ -2698,6 +2699,7 @@ void World::Render(iRender* r)
 	{
 		Profiler::Scope ps("rnd.postframe");
 		UpdatePrevTransforms(*hierarchy);   // snapshot transforms for next frame's TAA motion vectors
+		if (!auxiliary) Cursor::Tick(r);    // custom cursor: advance the flipbook, push changes
 		Game::FlushScreenshot();            // queued Game.Screenshot: the frame is complete here
 	}
 }

@@ -639,6 +639,12 @@ public:
     // Last completed camera: tagged draws, and how many the history held back.
     virtual void getOcclusionStats(int& tracked, int& culled) { tracked = 0; culled = 0; }
 
+    // Custom cursor image (abi 29). mode: 0 = OS arrow, 1 = hardware cursor from the RGBA
+    // pixels (`id` caches it — animation swaps are cheap), 2 = software (renderer draws the
+    // image topmost at the cursor position). False = platform refused.
+    virtual bool setCursorImage(uint64_t id, const unsigned char* rgba, int w, int h,
+                                int hotX, int hotY, int mode) { (void)id; (void)rgba; (void)w; (void)h; (void)hotX; (void)hotY; (void)mode; return false; }
+
     // ABI: new virtuals are appended at the END of the class, NEVER inserted mid-vtable —
     // plugins are separate DLLs built at different times, and an inserted slot shifts every later one.
 };

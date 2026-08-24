@@ -663,8 +663,17 @@ bool NukeReflectInit() {
 		Reflect_SetMethodDoc("Game", "SetTimeScale", "Game speed: scales Time.Delta(), the game calendar and the fixed physics cadence. 0 = frozen but Update still runs (unlike SetPaused), 1 = normal. Clamped to [0..8]; edit mode ignores the scale.", "scale");
 		t.methods.push_back(MakeMethod("GetTimeScale", &Game::GetTimeScale));
 		t.methods.push_back(MakeMethod("SetFpsLimit", &Game::SetFpsLimit));
-		Reflect_SetMethodDoc("Game", "SetFpsLimit", "J2: manual frame-rate cap for the whole frame loop (render + logic), live. 0 = uncapped; vsync still applies on top — whichever is slower wins. Config default: window.fpsLimit.", "fps");
+		Reflect_SetMethodDoc("Game", "SetFpsLimit", "Frame-rate cap, live. 0 = uncapped; vsync applies on top. Config: window.fpsLimit.", "fps");
 		t.methods.push_back(MakeMethod("GetFpsLimit", &Game::GetFpsLimit));
+		t.methods.push_back(MakeMethod("SetCursor", &Game::SetCursor));
+		Reflect_SetMethodDoc("Game", "SetCursor", "Custom cursors (.nucursor flipbook assets bound to named states).", "contentRel");
+		t.methods.push_back(MakeMethod("BindCursor", &Game::BindCursor));
+		Reflect_SetMethodDoc("Game", "BindCursor", "", "state,contentRel");
+		t.methods.push_back(MakeMethod("SetCursorState", &Game::SetCursorState));
+		Reflect_SetMethodDoc("Game", "SetCursorState", "", "state");
+		t.methods.push_back(MakeMethod("SetCursorSoftware", &Game::SetCursorSoftware));
+		Reflect_SetMethodDoc("Game", "SetCursorSoftware", "", "on");
+		t.methods.push_back(MakeMethod("ResetCursor", &Game::ResetCursor));
 		t.methods.push_back(MakeMethod("Quit", &Game::Quit));
 		t.methods.push_back(MakeMethod("SaveGame", &Game::SaveGame));
 		Reflect_SetMethodDoc("Game", "SaveGame", "--- SAVEGAMES: runtime snapshots, distinct from world assets ---- SaveGame writes the running world (atoms, script state, tilemaps, calendar, event schedule) to `<slot>.nusave` in the save dir. LoadGame applies at the frame boundary. ListSaves returns newline-separated slot names, newest first.", "slot");

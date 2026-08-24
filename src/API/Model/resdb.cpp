@@ -288,6 +288,7 @@ static bool RendererInternalShader(const std::string& name)
 	    || name.rfind("outline", 0) == 0 || name.rfind("water", 0) == 0    // water* = 7.5 surface/sim/FFT passes
 	    || name == "skin"                                                  // GPU skinning compute (stage 3)
 	    || name == "grid"                                                  // analytic editor grid pass
+	    || name == "cursor"                                                // software cursor pass
 	    || name == "gbuffer"                                               // SSR/TAA prepass
 	    || name.rfind("hiz", 0) == 0 || name == "occl"                     // Hi-Z occlusion (R4)
 	    || name == "boot";                                                 // startup stand-in world shading

@@ -40,9 +40,8 @@ public:
 	// Set the calendar date/time (mapgen/scenario start). Resets TotalGameSeconds to 0.
 	[[nuke::func]] static void   SetDate(int year, int month, int day, int hour, int minute);
 
-	// J2 FPS cap: NewFrame paces the frame loop to this rate (0 = uncapped; vsync still
-	// applies on top). Resolved from config window.fpsLimit on first use; the Game facade
-	// (Game.SetFpsLimit) overrides live.
+	// Frame cap (0 = uncapped): NewFrame paces the loop to this rate. Config window.fpsLimit
+	// is the default; Game.SetFpsLimit overrides live.
 	static void   SetFpsCap(double fps);
 	static double FpsCap();
 

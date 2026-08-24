@@ -48,7 +48,7 @@ void Time::SetDate(int year, int month, int day, int hour, int minute)
 	t->secCarry = 0.0;
 }
 
-// J2 FPS cap: -1 = unresolved (read config window.fpsLimit on first use), 0 = uncapped.
+// -1 = unresolved (config window.fpsLimit on first use), 0 = uncapped.
 static double g_fpsCap = -1.0;
 
 void Time::SetFpsCap(double fps) { g_fpsCap = fps > 0.0 ? fps : 0.0; }
@@ -70,10 +70,8 @@ void Time::NewFrame()
 	using clock = boost::chrono::steady_clock;
 	static clock::time_point last;
 	static bool have = false;
-	// J2 FPS cap: every host calls NewFrame at the top of its frame, so waiting out the
-	// remainder of the frame period HERE caps the whole loop without touching any render
-	// seam. Sleep to ~2ms short of the deadline, then spin — raw OS sleep granularity would
-	// wobble the cadence (timeBeginPeriod(1) tightens it on Windows, armed once on demand).
+	// Frame cap: wait out the remainder of the frame period. Sleep to ~2ms short of the
+	// deadline, then spin (raw OS sleep granularity would wobble the cadence).
 	const double cap = FpsCap();
 	if (have && cap > 0.0)
 	{

@@ -79,7 +79,9 @@ extern "C" { NUKE_ABI_STAMP int nuke_build_debug = 0; }
 //  28 — J1/J2: NukeWindow gained fpsLimit (its growth shifts every Config member after
 //       `window`) and Config gained jobCoreBudget — old binaries would read garbage offsets
 //       (a stale dist player hung allocating 20 GB before the first frame).
-#define NUKE_ENGINE_ABI 28
+//  29 — E9 custom cursors: iRender gained setCursorImage (appended vtable slot; the renderer
+//       must implement the same layout the engine calls).
+#define NUKE_ENGINE_ABI 29
 extern "C" { NUKE_ABI_STAMP int nuke_engine_abi = NUKE_ENGINE_ABI; }
 
 namespace nuke {

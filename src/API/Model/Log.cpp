@@ -208,12 +208,9 @@ static void IngestLine(const std::string& raw, bool fromErr)
 	Log::Write(lv, tag, s, file, line);
 }
 
-// Tee streambuf: echoes to the OS stream and ingests completed lines into the ring.
-// The echo goes through C stdio (fwrite/fputc — LOCKED per call), NOT through the captured
-// filebuf: once this tee is cout's rdbuf, the ostream sentry locks the TEE, while the MSVC
-// filebuf underneath writes with the no-lock primitives assuming callers hold ITS lock — a
-// concurrent direct-stdout writer (printf, a hosted runtime like the CLR) then corrupts the
-// FILE state (Debug CRT: "Inconsistent Stream Count", garbled interleaved lines).
+// Tee streambuf: echoes to the OS stream and ingests completed lines into the ring. The echo
+// uses C stdio (locked per call) — writing through the captured filebuf races concurrent
+// direct-stdout writers (printf, a hosted CLR) and corrupts the FILE state.
 class TeeBuf : public std::streambuf
 {
 public:

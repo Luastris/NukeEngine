@@ -57,10 +57,15 @@ public:
 	// edit mode ignores the scale.
 	[[nuke::func]] static void   SetTimeScale(double scale);
 	[[nuke::func]] static double GetTimeScale();
-	// J2: manual frame-rate cap for the whole frame loop (render + logic), live. 0 = uncapped;
-	// vsync still applies on top — whichever is slower wins. Config default: window.fpsLimit.
+	// Frame-rate cap, live. 0 = uncapped; vsync applies on top. Config: window.fpsLimit.
 	[[nuke::func]] static void   SetFpsLimit(double fps);
 	[[nuke::func]] static double GetFpsLimit();
+	// Custom cursors (.nucursor flipbook assets bound to named states).
+	[[nuke::func]] static bool SetCursor(const std::string& contentRel);   // bind + select "default"
+	[[nuke::func]] static bool BindCursor(const std::string& state, const std::string& contentRel);
+	[[nuke::func]] static void SetCursorState(const std::string& state);
+	[[nuke::func]] static void SetCursorSoftware(bool on);
+	[[nuke::func]] static void ResetCursor();
 
 	[[nuke::func]] static void Quit();   // closes the Player window; ignored in the editor
 

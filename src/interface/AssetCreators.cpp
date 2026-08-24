@@ -70,6 +70,7 @@ void RegisterBuiltinFileIcons()
 		{ ".nurag",     ICON_FT_RAGDOLL },     { ".nuworld",   ICON_FT_WORLD },
 		{ ".nushader",  ICON_FT_SHADER },      { ".hlsl",      ICON_FT_SHADER },
 		{ ".nuinput",   ICON_FT_INPUT },       { ".nupak",     ICON_FT_PACKAGE },
+		{ ".nucursor",  ICON_FT_IMAGE },
 		{ ".numod",     ICON_FT_MOD },         { ".nusave",    ICON_FT_SAVE },
 		{ ".nuproj",    ICON_FT_PROJECT },
 		// media the engine imports natively
@@ -79,6 +80,26 @@ void RegisterBuiltinFileIcons()
 		{ ".flac", ICON_FT_AUDIO },
 	};
 	for (const auto& b : kBuiltin) RegisterFileIcon(b.ext, b.icon);
+
+	// Built-in creator: cursor flipbook asset.
+	{
+		AssetCreator c;
+		c.label = "Cursor";
+		c.ext = ".nucursor";
+		c.baseName = "NewCursor";
+		c.category = "UI";
+		c.icon = ICON_FT_IMAGE;
+		c.textEditable = true;
+		c.content =
+			"{\n"
+			"  \"frames\": [\n"
+			"    { \"image\": \"\", \"hotX\": 0, \"hotY\": 0 }\n"
+			"  ],\n"
+			"  \"fps\": 12,\n"
+			"  \"loop\": true\n"
+			"}\n";
+		RegisterAssetCreator(c);
+	}
 }
 
 // ---- module-supplied asset editors (the type's owner brings the tooling) ---------------
