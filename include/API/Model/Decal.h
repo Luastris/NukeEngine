@@ -37,6 +37,11 @@ public:
 	[[nuke::prop(label="Fade In", min=0, tip="Seconds to appear after spawn; 0 = instant")]] float fadeIn = 0.0f;
 	[[nuke::prop(label="Appear", enum="Fade,Spread", tip="Fade: alpha ramp; Spread: reveal by the texture's density — dense core first, thin edges last (blood creep)")]] int appear = 1;
 	[[nuke::prop(label="Fade Out", min=0, tip="Seconds to dissolve before a timed death (hit decal Lifetime); 0 = instant cut")]] float fadeOut = 0.0f;
+	// Target filter. Everything = the classic projector: whatever enters the box gets stained
+	// (a character walking up to a wall decal catches it too). Parent / Atom re-render ONLY the
+	// target's meshes with the projection — nothing else can ever catch the stain.
+	[[nuke::prop(label="Target", enum="Everything,Parent,Atom", tip="Everything: classic projector — stains whatever enters the box;\nParent: only the surface of this atom's PARENT;\nAtom: only the specified atom (its whole subtree)")]] int target = 0;
+	[[nuke::prop(label="Target Atom", tip="The atom whose meshes catch this decal (Target = Atom)")]] Atom* targetAtom = nullptr;
 
 	Texture* tex = nullptr;   // resolved from textureGuid by World::Render
 	double spawnTime = -1.0;  // runtime: Time at Init/Reset — drives the appear envelope

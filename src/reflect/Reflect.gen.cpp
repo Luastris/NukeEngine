@@ -543,6 +543,10 @@ bool NukeReflectInit() {
 		t.fields.back().tip = "Fade: alpha ramp; Spread: reveal by the texture's density — dense core first, thin edges last (blood creep)";
 		t.fields.push_back(MakeField("fadeOut", &Decal::fadeOut, "", "Fade Out"));
 		t.fields.back().tip = "Seconds to dissolve before a timed death (hit decal Lifetime); 0 = instant cut";
+		t.fields.push_back(MakeField("target", &Decal::target, "", "Target", 0.0f, 0.0f, "Everything,Parent,Atom"));
+		t.fields.back().tip = "Everything: classic projector — stains whatever enters the box;\\nParent: only the surface of this atom's PARENT;\\nAtom: only the specified atom (its whole subtree)";
+		t.fields.push_back(MakeField("targetAtom", &Decal::targetAtom, "", "Target Atom"));
+		t.fields.back().tip = "The atom whose meshes catch this decal (Target = Atom)";
 		t.create = []() -> void* { return new Decal(); };
 	}
 	{

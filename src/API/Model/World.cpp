@@ -117,11 +117,32 @@ static bool RayQuad(const glm::vec3& ro, const glm::vec3& rd, const glm::vec3& q
 }
 
 static void PickRec(bc::list<Atom*>& gos, const glm::vec3& ro, const glm::vec3& rd, float& bestDist, Atom*& best,
-                    Canvas* ctx = nullptr)
+                    Canvas* ctx = nullptr, bool editorVolumes = false)
 {
 	for (auto atom : gos)
 	{
 		if (!atom || !atom->enabled) continue;   // not rendered -> clicks pass through
+		// Editor picks also hit invisible VOLUMES: a decal is its projector box (unit cube
+		// [-0.5,0.5] scaled by the transform — the same box the renderer rasterizes).
+		if (editorVolumes)
+			if (Decal* dc = atom->GetComponent<Decal>(); dc && dc->enabled)
+			{
+				Transform& t = atom->GetTransform();
+				Vector3 p = t.globalPosition(); Quaternion q = t.globalRotation(); Vector3 s = t.globalScale();
+				glm::mat4 world = glm::translate(glm::mat4(1.0f), glm::vec3((float)p.x, (float)p.y, (float)p.z))
+				                * glm::mat4_cast(ToGlmQ(q))
+				                * glm::scale(glm::mat4(1.0f), glm::vec3((float)s.x, (float)s.y, (float)s.z));
+				glm::mat4 inv = glm::inverse(world);
+				glm::vec3 lo = glm::vec3(inv * glm::vec4(ro, 1.0f));
+				glm::vec3 ld = glm::vec3(inv * glm::vec4(rd, 0.0f));
+				float tLocal;
+				if (RayAABB(lo, ld, glm::vec3(-0.5f), glm::vec3(0.5f), tLocal))
+				{
+					glm::vec3 worldHit = glm::vec3(world * glm::vec4(lo + tLocal * ld, 1.0f));
+					float dist = glm::length(worldHit - ro);
+					if (dist < bestDist) { bestDist = dist; best = atom; }
+				}
+			}
 		// A canvas re-parents the coordinate space for its subtree (same rule as rendering).
 		Canvas* here = atom->GetComponent<Canvas>();
 		Canvas* cur  = here ? here : ctx;
@@ -220,7 +241,7 @@ static void PickRec(bc::list<Atom*>& gos, const glm::vec3& ro, const glm::vec3& 
 				{ bestDist = tHit; best = atom; }
 			}
 		}
-		if (atom->children.size() > 0) PickRec(atom->children, ro, rd, bestDist, best, cur);
+		if (atom->children.size() > 0) PickRec(atom->children, ro, rd, bestDist, best, cur, editorVolumes);
 	}
 }
 
@@ -246,6 +267,23 @@ Atom* World::PickDist(const Vector3& origin, const Vector3& dir, float& outDist)
 	return best;
 }
 Atom* World::Pick(const Vector3& origin, const Vector3& dir) { float d; return PickDist(origin, dir, d); }
+
+Atom* World::PickEditor(const Vector3& origin, const Vector3& dir, float& outDist)
+{
+	glm::vec3 ro((float)origin.x, (float)origin.y, (float)origin.z);
+	glm::vec3 rd = glm::normalize(glm::vec3((float)dir.x, (float)dir.y, (float)dir.z));
+	float bestDist = 1e30f; Atom* best = nullptr;
+	if (hierarchy) PickRec(*hierarchy, ro, rd, bestDist, best, nullptr, true);
+	const Vector3 nd(rd.x, rd.y, rd.z);
+	for (WorldPickFn fn : PickersVec())
+	{
+		double d = 0.0; unsigned long id = 0;
+		if (!fn(origin, nd, d, id) || d <= 0.0 || d >= bestDist) continue;
+		if (Atom* a = GetById((long)id)) { bestDist = (float)d; best = a; }
+	}
+	outDist = bestDist;
+	return best;
+}
 
 World::~World()
 {
@@ -1700,6 +1738,33 @@ static void DrawDecals(std::vector<Decal*>& decals, iRender* r)
 		if (dc->dieTime > 0.0 && dc->fadeOut > 1e-4f)
 			appear = std::min(appear, (float)std::min(1.0, std::max(0.0, (dc->dieTime - now) / (double)dc->fadeOut)));
 		if (appear <= 0.0f) continue;
+		// Target filter: Parent/Atom decals re-render ONLY the target's meshes with the
+		// projection — a bystander walking into the box can never catch the stain.
+		if (dc->target != 0)
+		{
+			Atom* tgt = dc->target == 2 ? dc->targetAtom
+			          : (dc->atom ? dc->atom->parent : nullptr);
+			if (!tgt) continue;
+			std::vector<Atom*> stack{ tgt };
+			while (!stack.empty())
+			{
+				Atom* a = stack.back();
+				stack.pop_back();
+				if (!a || !a->enabled) continue;
+				if (MeshRenderer* mr = a->GetComponent<MeshRenderer>(); mr && mr->enabled && mr->mesh)
+				{
+					Transform& tt = a->GetTransform();
+					Vector3 tp = tt.globalPosition(); Quaternion tq = tt.globalRotation(); Vector3 ts = tt.globalScale();
+					float tpos[3]  = { (float)tp.x, (float)tp.y, (float)tp.z };
+					float tquat[4] = { (float)tq.x, (float)tq.y, (float)tq.z, (float)tq.w };
+					float tsc[3]   = { (float)ts.x, (float)ts.y, (float)ts.z };
+					r->drawDecalMesh(dc->tex, pos, quat, scale, tn, dc->intensity, dc->angleFade,
+					                 (int)dc->mode, appear, dc->appear, mr->mesh, tpos, tquat, tsc);
+				}
+				for (Atom* c : a->children) stack.push_back(c);
+			}
+			continue;
+		}
 		r->drawDecal(dc->tex, pos, quat, scale, tn, dc->intensity, dc->angleFade, (int)dc->mode,
 		             appear, dc->appear);
 	}

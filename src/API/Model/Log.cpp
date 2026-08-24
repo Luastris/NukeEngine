@@ -142,6 +142,29 @@ static bool ContainsCI(const std::string& hay, const char* needle)
 	return false;
 }
 
+// ContainsCI minus ZERO COUNTS: "0 Error(s)" / "no errors" is a success report, not an error
+// — every match must NOT be preceded by a zero/none counter for the word to signal.
+static bool SignalsCI(const std::string& hay, const char* needle)
+{
+	const size_t n = strlen(needle);
+	if (hay.size() < n) return false;
+	for (size_t i = 0; i + n <= hay.size(); ++i)
+	{
+		size_t j = 0;
+		while (j < n && tolower((unsigned char)hay[i + j]) == tolower((unsigned char)needle[j])) ++j;
+		if (j != n) continue;
+		// Look left past whitespace for "0" (a bare zero count) or "no".
+		size_t p = i;
+		while (p > 0 && (hay[p - 1] == ' ' || hay[p - 1] == '\t')) --p;
+		const bool zero = p >= 1 && hay[p - 1] == '0' && (p < 2 || !isdigit((unsigned char)hay[p - 2]));
+		const bool none = p >= 2 && tolower((unsigned char)hay[p - 2]) == 'n'
+		               && tolower((unsigned char)hay[p - 1]) == 'o'
+		               && (p < 3 || !isalpha((unsigned char)hay[p - 3]));
+		if (!zero && !none) return true;
+	}
+	return false;
+}
+
 // Find a "path.ext:123" fragment in `s` and return it as file + line.
 static void FindSource(const std::string& s, std::string& file, int& line)
 {
@@ -196,10 +219,10 @@ static void IngestLine(const std::string& raw, bool fromErr)
 	if (s.empty() && tag.empty()) return;
 
 	LogLevel lv = fromErr ? LOG_ERROR : LOG_INFO;
-	if (ContainsCI(s, "error") || ContainsCI(s, "failed") || ContainsCI(s, "exception")
+	if (SignalsCI(s, "error") || ContainsCI(s, "failed") || ContainsCI(s, "exception")
 	 || ContainsCI(s, "panic") || ContainsCI(s, "corrupt") || ContainsCI(s, "refused"))
 		lv = LOG_ERROR;
-	else if (ContainsCI(s, "warn") || ContainsCI(s, "deprecated") || ContainsCI(s, "skipped")
+	else if (SignalsCI(s, "warn") || ContainsCI(s, "deprecated") || ContainsCI(s, "skipped")
 	      || ContainsCI(s, "missing") || ContainsCI(s, "not found") || ContainsCI(s, "stale"))
 		lv = (lv == LOG_ERROR) ? lv : LOG_WARN;
 

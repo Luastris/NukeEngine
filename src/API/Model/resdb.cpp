@@ -284,7 +284,7 @@ void ResDB::HotReloadShaders(iRender* r)
 static bool RendererInternalShader(const std::string& name)
 {
 	return name == "ui" || name == "shadow" || name == "sky" || name == "post" || name == "debug"
-	    || name == "sprite" || name == "sprite_lit" || name == "decal"
+	    || name == "sprite" || name == "sprite_lit" || name.rfind("decal", 0) == 0
 	    || name.rfind("outline", 0) == 0 || name.rfind("water", 0) == 0    // water* = 7.5 surface/sim/FFT passes
 	    || name == "skin"                                                  // GPU skinning compute (stage 3)
 	    || name == "grid"                                                  // analytic editor grid pass

@@ -645,6 +645,14 @@ public:
     virtual bool setCursorImage(uint64_t id, const unsigned char* rgba, int w, int h,
                                 int hotX, int hotY, int mode) { (void)id; (void)rgba; (void)w; (void)h; (void)hotX; (void)hotY; (void)mode; return false; }
 
+    // Target-filtered decal (abi 29; same box/params as drawDecal): re-renders ONE mesh with
+    // the box projection, so ONLY that surface can catch the stain — a bystander inside the
+    // box stays clean. pos/quat/scale = the decal box, tPos/tQuat/tScale = the mesh transform.
+    virtual void drawDecalMesh(Texture* tex, const float pos[3], const float quat[4], const float scale[3],
+                               const float tint[4], float intensity, float angleFade, int mode,
+                               float appear, int appearMode, Mesh* target,
+                               const float tPos[3], const float tQuat[4], const float tScale[3]) {}
+
     // ABI: new virtuals are appended at the END of the class, NEVER inserted mid-vtable —
     // plugins are separate DLLs built at different times, and an inserted slot shifts every later one.
 };

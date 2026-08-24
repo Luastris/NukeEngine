@@ -111,6 +111,9 @@ public:
 	// Same, but also reports the hit distance along `dir` (normalized). NOT an overload of Pick():
 	// that would make &World::Pick ambiguous for the reflection codegen.
 	Atom* PickDist(const Vector3& origin, const Vector3& dir, float& outDist);
+	// Editor picking: additionally hits INVISIBLE volumes (a decal's projector box) so they
+	// are selectable in the viewport. Gameplay picks (Pick/PickDist above) never see them.
+	Atom* PickEditor(const Vector3& origin, const Vector3& dir, float& outDist);
 
 	// Text (.nuworld JSON) serialization via reflection. The editor camera is excluded from save
 	// and preserved across load.
