@@ -2817,6 +2817,7 @@ static void SaveAtom(Atom* atom, json& j)
 	j["id"]   = atom->id.id;   // stable identity across rebuilds
 	if (!atom->prefabGuid.empty()) j["prefab"] = atom->prefabGuid;   // instance link to a .nuprefab
 	if (atom->layer != 0) j["layer"] = atom->layer;                  // 0 = Default, omitted
+	if (!atom->tag.empty() && atom->tag != "Untagged") j["tag"] = atom->tag;
 	if (atom->persistent) j["persistent"] = true;                    // survives world switches
 	if (!atom->enabled) j["enabled"] = false;
 	if (atom->folder) j["folder"] = true;                            // hierarchy folder node
@@ -2935,6 +2936,7 @@ static Atom* LoadAtom(const json& j)
 	atom->prefabGuid = j.value("prefab", std::string());
 	atom->modOrigin  = j.value("__mod", std::string());        // merge provenance, runtime only
 	atom->layer      = std::max(0, std::min(31, j.value("layer", 0)));
+	atom->tag        = j.value("tag", std::string("Untagged"));
 	atom->persistent = j.value("persistent", false);
 	atom->enabled    = j.value("enabled", true);
 	atom->folder     = j.value("folder", false);
