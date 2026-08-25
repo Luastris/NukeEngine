@@ -18,6 +18,7 @@
 #include "API/Model/ReflectionProbe.h"
 #include "API/Model/Time.h"
 #include "API/Model/Events.h"
+#include "API/Model/PairedAnim.h"
 #include "API/Model/Profiler.h"
 #include "API/Model/Game.h"
 #include "API/Model/Cursor.h"
@@ -433,6 +434,7 @@ void World::Update()
 	app->worldTickActive = false;
 	// Flush deferred destruction after the traversal, still under the game lock.
 	FlushDestroyQueue();
+	PairedAnim::Tick(this);   // paired-animation sessions: drift sync + lifetime, post-traversal
 	// World Partition streaming: ring maintenance AFTER the traversal (safe to add/remove
 	// roots), still under the game lock.
 	if (WorldStream::Active(this))

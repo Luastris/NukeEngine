@@ -70,7 +70,7 @@ void RegisterBuiltinFileIcons()
 		{ ".nurag",     ICON_FT_RAGDOLL },     { ".nuworld",   ICON_FT_WORLD },
 		{ ".nushader",  ICON_FT_SHADER },      { ".hlsl",      ICON_FT_SHADER },
 		{ ".nuinput",   ICON_FT_INPUT },       { ".nupak",     ICON_FT_PACKAGE },
-		{ ".nucursor",  ICON_FT_IMAGE },
+		{ ".nucursor",  ICON_FT_IMAGE },       { ".nupair",    ICON_FT_ANIM },
 		{ ".numod",     ICON_FT_MOD },         { ".nusave",    ICON_FT_SAVE },
 		{ ".nuproj",    ICON_FT_PROJECT },
 		// media the engine imports natively
@@ -97,6 +97,28 @@ void RegisterBuiltinFileIcons()
 			"  ],\n"
 			"  \"fps\": 12,\n"
 			"  \"loop\": true\n"
+			"}\n";
+		RegisterAssetCreator(c);
+	}
+	// Built-in creator: paired-animation asset (two roles in one synchronized interaction).
+	{
+		AssetCreator c;
+		c.label = "Paired Animation";
+		c.ext = ".nupair";
+		c.baseName = "NewPair";
+		c.category = "Animation";
+		c.icon = ICON_FT_ANIM;
+		c.textEditable = true;
+		c.content =
+			"{\n"
+			"  \"type\": \"PairedAnimation\",\n"
+			"  \"version\": 1,\n"
+			"  \"loop\": false,\n"
+			"  \"speed\": 1.0,\n"
+			"  \"roles\": [\n"
+			"    { \"clip\": \"\", \"align\": true,  \"pos\": [0, 0, 0], \"yaw\": 0 },\n"
+			"    { \"clip\": \"\", \"align\": false, \"pos\": [0, 0, 0], \"yaw\": 0 }\n"
+			"  ]\n"
 			"}\n";
 		RegisterAssetCreator(c);
 	}

@@ -52,6 +52,8 @@ public:
 	// --- script surface (auto-bound) ---
 	[[nuke::func]] void Play(const std::string& clip);                    // guid OR clip name
 	[[nuke::func]] void CrossFade(const std::string& clip, double fade);  // fade seconds
+	// Play with explicit loop/speed (the component props stay untouched).
+	[[nuke::func]] void PlayClip(const std::string& clip, bool clipLoop, double clipSpeed, double fade);
 	[[nuke::func]] void Stop();
 	[[nuke::func]] bool IsPlaying();
 	[[nuke::func]] std::string CurrentClip();                             // playing clip's NAME ("" = none)

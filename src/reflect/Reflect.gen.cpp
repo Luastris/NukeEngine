@@ -31,6 +31,7 @@
 #include "API/Model/MeshRenderer.h"
 #include "API/Model/MotionMatcher.h"
 #include "API/Model/Noise.h"
+#include "API/Model/PairedAnim.h"
 #include "API/Model/Physics.h"
 #include "API/Model/PostProcess.h"
 #include "API/Model/Prefab.h"
@@ -133,6 +134,8 @@ bool NukeReflectInit() {
 		Reflect_SetMethodDoc("Animator", "Play", "--- script surface (auto-bound) ---", "clip");
 		t.methods.push_back(MakeMethod("CrossFade", &Animator::CrossFade));
 		Reflect_SetMethodDoc("Animator", "CrossFade", "", "clip,fade");
+		t.methods.push_back(MakeMethod("PlayClip", &Animator::PlayClip));
+		Reflect_SetMethodDoc("Animator", "PlayClip", "Play with explicit loop/speed (the component props stay untouched).", "clip,clipLoop,clipSpeed,fade");
 		t.methods.push_back(MakeMethod("Stop", &Animator::Stop));
 		t.methods.push_back(MakeMethod("IsPlaying", &Animator::IsPlaying));
 		t.methods.push_back(MakeMethod("CurrentClip", &Animator::CurrentClip));
@@ -952,6 +955,20 @@ bool NukeReflectInit() {
 		Reflect_SetMethodDoc("Noise", "WarpX", "Domain warp: returns the sample position offset by `amp` — call per axis.", "seed,x,y,amp");
 		t.methods.push_back(MakeMethod("WarpY", &Noise::WarpY));
 		Reflect_SetMethodDoc("Noise", "WarpY", "", "seed,x,y,amp");
+	}
+	{
+		TypeInfo& t = TypeOf<PairedAnim>();
+		t.base = "Object";
+		t.methods.push_back(MakeMethod("Start", &PairedAnim::Start));
+		Reflect_SetMethodDoc("PairedAnim", "Start", "`pair` = content-relative .nupair path. The anchor is `b`'s transform.", "pair,a,b");
+		t.methods.push_back(MakeMethod("StartAt", &PairedAnim::StartAt));
+		Reflect_SetMethodDoc("PairedAnim", "StartAt", "Explicit anchor atom (an interaction slot: its transform IS the entry pose).", "pair,a,b,anchor");
+		t.methods.push_back(MakeMethod("Stop", &PairedAnim::Stop));
+		Reflect_SetMethodDoc("PairedAnim", "Stop", "", "any");
+		t.methods.push_back(MakeMethod("Active", &PairedAnim::Active));
+		Reflect_SetMethodDoc("PairedAnim", "Active", "", "any");
+		t.methods.push_back(MakeMethod("PairTime", &PairedAnim::PairTime));
+		Reflect_SetMethodDoc("PairedAnim", "PairTime", "", "any");
 	}
 	{
 		TypeInfo& t = TypeOf<Physics>();

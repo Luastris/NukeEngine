@@ -273,6 +273,8 @@ void Animator::StartClip(AnimClip* c, bool clipLoop, double clipSpeed, double fa
 // A mesh is optional (transform-only animation) — EnsureTargets just resolves it when present.
 void Animator::Play(const std::string& clip)                   { EnsureTargets(); StartClip(ResolveClip(clip), loop, speed, 0.0); }
 void Animator::CrossFade(const std::string& clip, double fade) { EnsureTargets(); StartClip(ResolveClip(clip), loop, speed, fade); }
+void Animator::PlayClip(const std::string& clip, bool clipLoop, double clipSpeed, double fade)
+{ EnsureTargets(); StartClip(ResolveClip(clip), clipLoop, clipSpeed, fade); }
 void Animator::Stop()        { playing = false; }
 bool Animator::IsPlaying()   { return playing; }
 std::string Animator::CurrentClip() { return cur.clip ? cur.clip->name : std::string(); }
