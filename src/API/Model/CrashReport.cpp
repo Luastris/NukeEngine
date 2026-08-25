@@ -77,10 +77,10 @@ void WriteInfoAndMarker()
 // for SEH, the current thread for abort/assert — the handler runs on the aborting thread).
 // Best effort: dbghelp may be unusable in a crashed process; the minidump (written first)
 // stays the authoritative record. POD locals only — the caller wraps this in __try.
-void WriteStackTrace(std::FILE* f, CONTEXT* ctx)
+void WriteStackTrace(std::FILE* f, CONTEXT* ctx, HANDLE walkThread = nullptr)
 {
 #if defined(_M_X64)
-	HANDLE proc = GetCurrentProcess(), thread = GetCurrentThread();
+	HANDLE proc = GetCurrentProcess(), thread = walkThread ? walkThread : GetCurrentThread();
 	SymSetOptions(SYMOPT_LOAD_LINES | SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS);
 	SymInitialize(proc, nullptr, TRUE);
 	CONTEXT local;
@@ -313,6 +313,14 @@ void CrashReport::PrintBacktrace()
 {
 #ifdef _WIN32
 	WriteStackTrace(stderr, nullptr);
+	std::fflush(stderr);
+#endif
+}
+
+void CrashReport::PrintThreadBacktrace(void* threadHandle, void* ctx)
+{
+#ifdef _WIN32
+	WriteStackTrace(stderr, (CONTEXT*)ctx, (HANDLE)threadHandle);
 	std::fflush(stderr);
 #endif
 }

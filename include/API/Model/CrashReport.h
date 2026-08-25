@@ -27,6 +27,8 @@ public:
 	static std::string PendingBundle();             // absolute bundle dir, "" when none
 	static void        ClearPending();              // acknowledge (removes the marker only)
 	static void        PrintBacktrace();            // symbolized stack of the CALLING thread -> stderr
+	// Symbolized stack of ANOTHER (suspended) thread -> stderr; ctx = its CONTEXT*.
+	static void        PrintThreadBacktrace(void* threadHandle, void* ctx);
 };
 
 }  // namespace nuke
