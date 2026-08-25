@@ -308,3 +308,11 @@ void CrashReport::ClearPending()
 	boost::system::error_code ec;
 	bfs::remove(Config::writableDir() / "config" / "crash" / "pending", ec);
 }
+
+void CrashReport::PrintBacktrace()
+{
+#ifdef _WIN32
+	WriteStackTrace(stderr, nullptr);
+	std::fflush(stderr);
+#endif
+}

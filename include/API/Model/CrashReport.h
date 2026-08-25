@@ -26,6 +26,7 @@ public:
 	static void        WriteBundle(void* sehPointers, int sig, const char* what);
 	static std::string PendingBundle();             // absolute bundle dir, "" when none
 	static void        ClearPending();              // acknowledge (removes the marker only)
+	static void        PrintBacktrace();            // symbolized stack of the CALLING thread -> stderr
 };
 
 }  // namespace nuke

@@ -656,6 +656,11 @@ public:
                                float appear, int appearMode, Mesh* target,
                                const float tPos[3], const float tQuat[4], const float tScale[3]) {}
 
+    // Debug view over the camera passes (abi 31): 0 = off, 1 = mesh cost — every world mesh
+    // draw renders flat-colored by its triangle load (tris x instances, log scale) with a dark
+    // wireframe on top; materials are skipped.
+    virtual void setDebugView(int mode) { (void)mode; }
+
     // ABI: new virtuals are appended at the END of the class, NEVER inserted mid-vtable —
     // plugins are separate DLLs built at different times, and an inserted slot shifts every later one.
 };

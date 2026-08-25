@@ -95,12 +95,14 @@ void InstancedMesh::OnBeforeSave()
 {
 	EnsureDecoded();
 	static_assert(sizeof(Inst) == 18 * sizeof(float), "Inst must stay tightly packed (the blob is its raw bytes)");
+	boost::mutex::scoped_lock l(instLock);
 	data = instances.empty() ? std::string()
 	                         : B64Encode((const unsigned char*)instances.data(), instances.size() * sizeof(Inst));
 }
 
 void InstancedMesh::EnsureDecoded()
 {
+	boost::mutex::scoped_lock l(instLock);
 	if (decoded) return;
 	decoded = true;
 	if (data.empty() || !instances.empty()) return;   // fresh component or already authored live
@@ -124,6 +126,7 @@ int InstancedMesh::AddInstance(const Vector3& pos, const Vector3& eulerDeg, cons
 	in.scale[0] = (float)scale.x; in.scale[1] = (float)scale.y; in.scale[2] = (float)scale.z;
 	in.color[0] = in.color[1] = in.color[2] = in.color[3] = 1.0f;
 	in.custom[0] = in.custom[1] = in.custom[2] = in.custom[3] = 0.0f;
+	boost::mutex::scoped_lock l(instLock);
 	instances.push_back(in);
 	MarkDirty();
 	return (int)instances.size() - 1;
@@ -132,6 +135,7 @@ int InstancedMesh::AddInstance(const Vector3& pos, const Vector3& eulerDeg, cons
 void InstancedMesh::SetInstancePos(int index, const Vector3& pos)
 {
 	EnsureDecoded();
+	boost::mutex::scoped_lock l(instLock);
 	if (index < 0 || index >= (int)instances.size()) return;
 	instances[index].pos[0] = (float)pos.x; instances[index].pos[1] = (float)pos.y; instances[index].pos[2] = (float)pos.z;
 	MarkDirty();
@@ -140,6 +144,7 @@ void InstancedMesh::SetInstancePos(int index, const Vector3& pos)
 void InstancedMesh::SetInstanceTint(int index, double r, double g, double b, double a)
 {
 	EnsureDecoded();
+	boost::mutex::scoped_lock l(instLock);
 	if (index < 0 || index >= (int)instances.size()) return;
 	Inst& in = instances[index];
 	in.color[0] = (float)r; in.color[1] = (float)g; in.color[2] = (float)b; in.color[3] = (float)a;
@@ -149,6 +154,7 @@ void InstancedMesh::SetInstanceTint(int index, double r, double g, double b, dou
 void InstancedMesh::SetInstanceCustom(int index, double x, double y, double z, double w)
 {
 	EnsureDecoded();
+	boost::mutex::scoped_lock l(instLock);
 	if (index < 0 || index >= (int)instances.size()) return;
 	Inst& in = instances[index];
 	in.custom[0] = (float)x; in.custom[1] = (float)y; in.custom[2] = (float)z; in.custom[3] = (float)w;
@@ -158,6 +164,7 @@ void InstancedMesh::SetInstanceCustom(int index, double x, double y, double z, d
 void InstancedMesh::RemoveInstance(int index)
 {
 	EnsureDecoded();
+	boost::mutex::scoped_lock l(instLock);
 	if (index < 0 || index >= (int)instances.size()) return;
 	instances.erase(instances.begin() + index);
 	MarkDirty();
@@ -166,12 +173,18 @@ void InstancedMesh::RemoveInstance(int index)
 void InstancedMesh::ClearInstances()
 {
 	EnsureDecoded();
+	boost::mutex::scoped_lock l(instLock);
 	instances.clear();
 	data.clear();
 	MarkDirty();
 }
 
-int InstancedMesh::InstanceCount() { EnsureDecoded(); return (int)instances.size(); }
+int InstancedMesh::InstanceCount()
+{
+	EnsureDecoded();
+	boost::mutex::scoped_lock l(instLock);
+	return (int)instances.size();
+}
 
 // ---- render sync --------------------------------------------------------------------------
 
@@ -199,6 +212,7 @@ bool InstancedMesh::EnsureRenderReady(iRender* r)
 	EnsureDecoded();
 	if (mat) mat->receiveShadows = receiveShadows;   // component checkbox drives its OWNED clone
 	if (cellSize != cellSizeRes) { cellSizeRes = cellSize; dirty = true; }   // live re-chunk on edit
+	boost::mutex::scoped_lock il(instLock);   // script mutators may run off this thread
 	if (!mesh || instances.empty()) return false;
 
 	// Atom world matrix (glm column-major; v' = M*v); compared against the snapshot to detect movement.

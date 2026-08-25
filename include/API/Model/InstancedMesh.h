@@ -6,6 +6,7 @@
 #include "reflect/Reflect.h"
 #include <vector>
 #include <string>
+#include <boost/thread/mutex.hpp>
 
 namespace nuke {
 
@@ -42,6 +43,9 @@ public:
 
 	// ---- runtime (not serialized) ----
 	struct Inst { float pos[3]; float quat[4]; float scale[3]; float color[4]; float custom[4]; };
+	// Guards `instances`: script mutators may run off the render thread while EnsureRenderReady
+	// walks the list (a mid-walk realloc is UB). Held by the mutators and the chunk rebuild.
+	boost::mutex instLock;
 	std::vector<Inst> instances;
 	bool     dirty = true;        // instances/props changed -> re-chunk + re-upload
 	bool     decoded = false;     // `data` blob decoded into `instances`

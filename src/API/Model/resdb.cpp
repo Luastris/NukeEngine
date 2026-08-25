@@ -302,6 +302,7 @@ static bool RendererInternalShader(const std::string& name)
 	    || name == "cursor"                                                // software cursor pass
 	    || name == "gbuffer"                                               // SSR/TAA prepass
 	    || name.rfind("hiz", 0) == 0 || name == "occl"                     // Hi-Z occlusion
+	    || name == "meshcost"                                              // mesh-cost debug view
 	    || name == "boot";                                                 // startup stand-in world shading
 }
 

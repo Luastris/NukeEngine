@@ -97,7 +97,8 @@ extern "C" { NUKE_ABI_STAMP int nuke_build_debug = 0; }
 //       drawDecalMesh in the same batch.
 //  30 — Texture gained the dynamic block (dynamic + dynamicVersion — sizeof grew),
 //       iAudio gained the PCM stream API (openStream/pushStream/streamQueued/closeStream).
-#define NUKE_ENGINE_ABI 30
+//  31 — iRender gained setDebugView (appended vtable slot; mesh-cost view).
+#define NUKE_ENGINE_ABI 31
 extern "C" { NUKE_ABI_STAMP int nuke_engine_abi = NUKE_ENGINE_ABI; }
 
 namespace nuke {
