@@ -23,6 +23,7 @@
 #include "API/Model/Foliage.h"
 #include "API/Model/Game.h"
 #include "API/Model/InstancedMesh.h"
+#include "API/Model/Joints.h"
 #include "API/Model/Layers.h"
 #include "API/Model/Light.h"
 #include "API/Model/Log.h"
@@ -42,6 +43,7 @@
 #include "API/Model/ReflectionProbe.h"
 #include "API/Model/Retarget.h"
 #include "API/Model/Rigidbody.h"
+#include "API/Model/Rope.h"
 #include "API/Model/Screen.h"
 #include "API/Model/Sequence.h"
 #include "API/Model/SequencePlayer.h"
@@ -770,6 +772,78 @@ bool NukeReflectInit() {
 		t.create = []() -> void* { return new InstancedMesh(); };
 	}
 	{
+		TypeInfo& t = TypeOf<JointBase>();
+		t.base = "Component";
+		t.fields.push_back(MakeField("connectedBody", &JointBase::connectedBody, "", "Connected Body"));
+		t.fields.back().tip = "Atom with a Collider this joint attaches to (null = the world)";
+		t.fields.push_back(MakeField("anchor", &JointBase::anchor, "", "Anchor"));
+		t.fields.back().tip = "Atom giving pivot + axes (Z = axis, X = reference); null = this atom";
+		t.fields.push_back(MakeField("breakForce", &JointBase::breakForce, "", "Break Force"));
+		t.fields.back().tip = "Reaction force (N) that snaps the joint; 0 = unbreakable";
+		t.methods.push_back(MakeMethod("Attached", &JointBase::Attached));
+		t.methods.push_back(MakeMethod("Broken", &JointBase::Broken));
+		t.methods.push_back(MakeMethod("Break", &JointBase::Break));
+	}
+	{
+		TypeInfo& t = TypeOf<HingeJoint>();
+		t.base = "JointBase";
+		t.category = "Physics";
+		t.fields.push_back(MakeField("useLimits", &HingeJoint::useLimits, "", "Use Limits"));
+		t.fields.push_back(MakeField("minAngle", &HingeJoint::minAngle, "", "Min Angle", -180.0f, 180.0f));
+		t.fields.push_back(MakeField("maxAngle", &HingeJoint::maxAngle, "", "Max Angle", -180.0f, 180.0f));
+		t.fields.push_back(MakeField("motor", &HingeJoint::motor, "", "Motor", 0.0f, 0.0f, "Off,Velocity,Position"));
+		t.fields.push_back(MakeField("motorTarget", &HingeJoint::motorTarget, "", "Motor Target"));
+		t.fields.back().tip = "Velocity: deg/s; Position: degrees";
+		t.fields.push_back(MakeField("motorMax", &HingeJoint::motorMax, "", "Motor Max Torque"));
+		t.fields.back().tip = "0 = unlimited";
+		t.create = []() -> void* { return new HingeJoint(); };
+	}
+	{
+		TypeInfo& t = TypeOf<SliderJoint>();
+		t.base = "JointBase";
+		t.category = "Physics";
+		t.fields.push_back(MakeField("useLimits", &SliderJoint::useLimits, "", "Use Limits"));
+		t.fields.push_back(MakeField("minDist", &SliderJoint::minDist, "", "Min"));
+		t.fields.back().tip = "Travel limit along the axis, units";
+		t.fields.push_back(MakeField("maxDist", &SliderJoint::maxDist, "", "Max"));
+		t.fields.push_back(MakeField("motor", &SliderJoint::motor, "", "Motor", 0.0f, 0.0f, "Off,Velocity,Position"));
+		t.fields.push_back(MakeField("motorTarget", &SliderJoint::motorTarget, "", "Motor Target"));
+		t.fields.back().tip = "Velocity: units/s; Position: units";
+		t.fields.push_back(MakeField("motorMax", &SliderJoint::motorMax, "", "Motor Max Force"));
+		t.fields.back().tip = "0 = unlimited";
+		t.create = []() -> void* { return new SliderJoint(); };
+	}
+	{
+		TypeInfo& t = TypeOf<DistanceJoint>();
+		t.base = "JointBase";
+		t.category = "Physics";
+		t.fields.push_back(MakeField("useLimits", &DistanceJoint::useLimits, "", "Use Limits"));
+		t.fields.push_back(MakeField("minDistance", &DistanceJoint::minDistance, "", "Min Distance"));
+		t.fields.push_back(MakeField("maxDistance", &DistanceJoint::maxDistance, "", "Max Distance"));
+		t.fields.push_back(MakeField("frequency", &DistanceJoint::frequency, "", "Frequency"));
+		t.fields.back().tip = "Soft limit spring, Hz (0 = rigid)";
+		t.fields.push_back(MakeField("damping", &DistanceJoint::damping, "", "Damping", 0.0f, 5.0f));
+		t.create = []() -> void* { return new DistanceJoint(); };
+	}
+	{
+		TypeInfo& t = TypeOf<SpringJoint>();
+		t.base = "JointBase";
+		t.category = "Physics";
+		t.fields.push_back(MakeField("restLength", &SpringJoint::restLength, "", "Rest Length"));
+		t.fields.back().tip = "0 = the distance at attach time";
+		t.fields.push_back(MakeField("frequency", &SpringJoint::frequency, "", "Frequency"));
+		t.fields.back().tip = "Spring stiffness, Hz";
+		t.fields.push_back(MakeField("damping", &SpringJoint::damping, "", "Damping", 0.0f, 5.0f));
+		t.create = []() -> void* { return new SpringJoint(); };
+	}
+	{
+		TypeInfo& t = TypeOf<ConeJoint>();
+		t.base = "JointBase";
+		t.category = "Physics";
+		t.fields.push_back(MakeField("halfAngle", &ConeJoint::halfAngle, "", "Half Angle", 1.0f, 179.0f));
+		t.create = []() -> void* { return new ConeJoint(); };
+	}
+	{
 		TypeInfo& t = TypeOf<Layers>();
 		t.base = "Object";
 		t.methods.push_back(MakeMethod("Name", &Layers::Name));
@@ -1128,6 +1202,56 @@ bool NukeReflectInit() {
 		Reflect_SetMethodDoc("Rigidbody", "SetAngularVelocity", "", "v");
 		t.methods.push_back(MakeMethod("AngularVelocity", &Rigidbody::AngularVelocity));
 		t.create = []() -> void* { return new Rigidbody(); };
+	}
+	{
+		TypeInfo& t = TypeOf<Rope>();
+		t.base = "Component";
+		t.category = "Physics";
+		t.fields.push_back(MakeField("points", &Rope::points, "", "Points"));
+		t.fields.back().tip = "Rope path, atom-local x,y,z per point; drag the points in the viewport while selected.";
+		t.fields.push_back(MakeField("segmentLength", &Rope::segmentLength, "", "Segment Length"));
+		t.fields.back().tip = "Simulation resolution: shorter = smoother + heavier";
+		t.fields.push_back(MakeField("radius", &Rope::radius, "", "Radius"));
+		t.fields.push_back(MakeField("totalMass", &Rope::totalMass, "", "Total Mass"));
+		t.fields.push_back(MakeField("bendLimit", &Rope::bendLimit, "", "Bend Limit", 1.0f, 90.0f));
+		t.fields.back().tip = "Max bend per link, degrees";
+		t.fields.push_back(MakeField("twistLimit", &Rope::twistLimit, "", "Twist Limit", 0.0f, 180.0f));
+		t.fields.back().tip = "Max twist per link, degrees";
+		t.fields.push_back(MakeField("pinStart", &Rope::pinStart, "", "Pin Start"));
+		t.fields.back().tip = "Pin the rope start to the world (ignored when Attach Start is set)";
+		t.fields.push_back(MakeField("pinEnd", &Rope::pinEnd, "", "Pin End"));
+		t.fields.push_back(MakeField("attachStart", &Rope::attachStart, "", "Attach Start"));
+		t.fields.back().tip = "Atom with a Collider the rope start ties to";
+		t.fields.push_back(MakeField("attachEnd", &Rope::attachEnd, "", "Attach End"));
+		t.fields.push_back(MakeField("visual", &Rope::visual, "", "Visual", 0.0f, 0.0f, "Tube,Links,Mesh,None"));
+		t.fields.back().tip = "Tube = smooth cable; Links = Link Mesh repeated per segment (chains); Mesh = the source mesh auto-rigged along the rope";
+		t.fields.push_back(MakeField("meshGuid", &Rope::meshGuid, "mesh", "Link/Source Mesh"));
+		t.fields.back().tip = "Links: one chain link. Mesh: any mesh to bend along the rope.";
+		t.fields.push_back(MakeField("matGuid", &Rope::matGuid, "material", "Material"));
+		t.fields.push_back(MakeField("tubeSides", &Rope::tubeSides, "", "Tube Sides", 3.0f, 24.0f));
+		t.fields.push_back(MakeField("smoothing", &Rope::smoothing, "", "Smoothing", 0.0f, 8.0f));
+		t.fields.back().tip = "Catmull-Rom subdivisions per segment for the Tube/Mesh visuals — hides the simulation segments (0 = raw chain)";
+		t.fields.push_back(MakeField("linkTwist", &Rope::linkTwist, "", "Link Twist", 0.0f, 180.0f));
+		t.fields.back().tip = "Links: extra twist per link, degrees (chains read 90)";
+		t.fields.push_back(MakeField("meshAxis", &Rope::meshAxis, "", "Mesh Axis", 0.0f, 0.0f, "X,Y,Z"));
+		t.fields.back().tip = "Links/Mesh: source-mesh axis that runs along the rope";
+		t.methods.push_back(MakeMethod("Built", &Rope::Built));
+		t.methods.push_back(MakeMethod("SegmentCount", &Rope::SegmentCount));
+		t.methods.push_back(MakeMethod("SegmentPos", &Rope::SegmentPos));
+		Reflect_SetMethodDoc("Rope", "SegmentPos", "", "i");
+		t.methods.push_back(MakeMethod("EndPos", &Rope::EndPos));
+		t.methods.push_back(MakeMethod("Length", &Rope::Length));
+		t.methods.push_back(MakeMethod("Cut", &Rope::Cut));
+		Reflect_SetMethodDoc("Rope", "Cut", "", "worldPos");
+		t.methods.push_back(MakeMethod("Pull", &Rope::Pull));
+		Reflect_SetMethodDoc("Rope", "Pull", "", "impulse");
+		t.methods.push_back(MakeMethod("PullAt", &Rope::PullAt));
+		Reflect_SetMethodDoc("Rope", "PullAt", "", "seg,impulse");
+		t.methods.push_back(MakeMethod("AttachStartTo", &Rope::AttachStartTo));
+		Reflect_SetMethodDoc("Rope", "AttachStartTo", "", "a");
+		t.methods.push_back(MakeMethod("AttachEndTo", &Rope::AttachEndTo));
+		Reflect_SetMethodDoc("Rope", "AttachEndTo", "", "a");
+		t.create = []() -> void* { return new Rope(); };
 	}
 	{
 		TypeInfo& t = TypeOf<Screen>();

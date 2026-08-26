@@ -93,6 +93,23 @@ enum NukeGroundState
 	NUKE_GROUND_AIR       = 3,   // airborne
 };
 
+// A generic two-body constraint (see createConstraint). All positions/axes in WORLD space at
+// creation time; the backend converts to body-local frames.
+struct NukeConstraintDesc
+{
+	int type = 0;                       // 0 Hinge, 1 Slider, 2 Distance, 3 Spring, 4 Cone
+	uint64_t bodyA = 0;                 // 0 = pinned to the world
+	uint64_t bodyB = 0;                 // required
+	float pivot[3]  = { 0, 0, 0 };      // anchor point (distance/spring: the end on bodyA)
+	float pivotB[3] = { 0, 0, 0 };      // distance/spring: the end on bodyB (others: same as pivot)
+	float axis[3]   = { 0, 0, 1 };      // hinge rotation axis / slider travel axis / cone twist axis
+	float normal[3] = { 1, 0, 0 };      // hinge zero-angle reference, perpendicular to axis
+	bool  limit = false;
+	float min = 0.0f, max = 0.0f;       // hinge: radians; slider: units; distance: length range
+	float frequency = 0.0f, damping = 0.0f;   // distance/spring softness (0 = rigid); Spring REQUIRES > 0
+	float halfCone = 0.5f;              // cone half-angle, radians
+};
+
 // The physics service contract: the active backend implements it and hands it to the loader
 // via NUKEModule::queryService(). Bodies are opaque uint64 handles (0 = invalid).
 // Threading: called only from the game update thread; backends may parallelize internally.
@@ -218,6 +235,16 @@ public:
 	// Wake every sleeping body intersecting the world AABB. Terrain edits pull the ground from
 	// under SLEEPING bodies — without a wake they keep floating on the removed surface.
 	virtual void activateBodies(const float mn[3], const float mx[3]) = 0;
+
+	// ---- generic constraints — ABI: appended at the END -------------------------------------
+	// Hinge/Slider/Distance/Spring/Cone between two bodies (bodyA 0 = the world). Freed with
+	// destroyJoint (constraints and ragdoll joints share the handle space).
+	virtual uint64_t createConstraint(const NukeConstraintDesc& d) = 0;   // 0 on failure
+	// mode: 0 = off, 1 = velocity (hinge rad/s, slider units/s), 2 = position (hinge radians,
+	// slider units). maxForce > 0 caps the motor's torque/force.
+	virtual void setConstraintMotor(uint64_t c, int mode, float target, float maxForce) = 0;
+	// |total position impulse| of the last step (N*s) — break-threshold checks (force = /dt).
+	virtual float constraintImpulse(uint64_t c) = 0;
 };
 
 }  // namespace nuke
