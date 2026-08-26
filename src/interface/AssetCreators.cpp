@@ -100,6 +100,29 @@ void RegisterBuiltinFileIcons()
 			"}\n";
 		RegisterAssetCreator(c);
 	}
+	// Built-in creator: vehicle input-map preset (the Vehicle component's default action names).
+	{
+		AssetCreator c;
+		c.label = "Vehicle Input";
+		c.ext = ".nuinput";
+		c.baseName = "VehicleInput";
+		c.category = "Input";
+		c.textEditable = true;
+		c.content =
+			"{\n  \"actions\": [\n"
+			"    { \"name\": \"Throttle\", \"type\": 1 },\n"
+			"    { \"name\": \"Steer\", \"type\": 1 },\n"
+			"    { \"name\": \"Brake\", \"type\": 1 },\n"
+			"    { \"name\": \"Handbrake\", \"type\": 1 }\n  ],\n"
+			"  \"contexts\": [\n    { \"name\": \"Driving\", \"priority\": 0, \"active\": true, \"bindings\": [\n"
+			"      { \"action\": \"Throttle\", \"controls\": [\"Key.W\"], \"scale\": 1,  \"phase\": 1 },\n"
+			"      { \"action\": \"Throttle\", \"controls\": [\"Key.S\"], \"scale\": -1, \"phase\": 1 },\n"
+			"      { \"action\": \"Steer\", \"controls\": [\"Key.D\"], \"scale\": 1,  \"phase\": 1 },\n"
+			"      { \"action\": \"Steer\", \"controls\": [\"Key.A\"], \"scale\": -1, \"phase\": 1 },\n"
+			"      { \"action\": \"Brake\", \"controls\": [\"Key.Space\"], \"scale\": 1, \"phase\": 1 },\n"
+			"      { \"action\": \"Handbrake\", \"controls\": [\"Key.C\"], \"scale\": 1, \"phase\": 1 }\n    ] }\n  ]\n}\n";
+		RegisterAssetCreator(c);
+	}
 	// Built-in creator: paired-animation asset (two roles in one synchronized interaction).
 	{
 		AssetCreator c;

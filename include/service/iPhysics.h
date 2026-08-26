@@ -35,6 +35,10 @@ struct NukeBodyDesc
 
 	float pos[3]  = { 0, 0, 0 };                    // initial WORLD pose
 	float quat[4] = { 0, 0, 0, 1 };                 // (x, y, z, w)
+
+	// ABI: appended fields only (the engine is the sole producer of this struct).
+	// Center-of-mass shift in shape-local units (vehicles/boats: lower = stabler).
+	float comOffset[3] = { 0, 0, 0 };
 };
 
 // A query shape (shape casts / overlaps) — the primitive subset of NukeBodyDesc.
@@ -108,6 +112,43 @@ struct NukeConstraintDesc
 	float min = 0.0f, max = 0.0f;       // hinge: radians; slider: units; distance: length range
 	float frequency = 0.0f, damping = 0.0f;   // distance/spring softness (0 = rigid); Spring REQUIRES > 0
 	float halfCone = 0.5f;              // cone half-angle, radians
+};
+
+// One wheel of a vehicle (see createVehicle). Suspension hangs DOWN from the chassis-local
+// attachment point.
+struct NukeWheelDesc
+{
+	float pos[3] = { 0, 0, 0 };        // chassis-local suspension attachment
+	float radius = 0.3f;
+	float width = 0.2f;
+	float suspensionMin = 0.2f, suspensionMax = 0.5f;
+	float frequency = 1.5f, damping = 0.5f;   // suspension spring
+	float maxSteerDeg = 0.0f;          // 0 = fixed
+	bool  driven = false;              // receives engine torque
+	float maxBrakeTorque = 1500.0f;
+	float maxHandBrakeTorque = 0.0f;   // usually the rear wheels
+};
+
+// A wheeled vehicle over an existing chassis body. Driven wheels pair into differentials in
+// declaration order.
+struct NukeVehicleDesc
+{
+	uint64_t chassis = 0;
+	const NukeWheelDesc* wheels = nullptr;   // read only DURING createVehicle
+	int   wheelCount = 0;
+	float maxTorque = 500.0f;          // engine Nm
+	float maxRPM = 6000.0f;
+};
+
+// Per-wheel state after a step.
+struct NukeWheelState
+{
+	float pos[3] = { 0, 0, 0 };        // world wheel center
+	float quat[4] = { 0, 0, 0, 1 };    // world wheel orientation (spin + steer)
+	float suspension = 0.0f;           // current suspension length
+	int   contact = 0;                 // touching ground
+	float longSlip = 0.0f;             // longitudinal slip (velocity ratio)
+	float latSlip = 0.0f;              // lateral slip (radians)
 };
 
 // The physics service contract: the active backend implements it and hands it to the loader
@@ -245,6 +286,15 @@ public:
 	virtual void setConstraintMotor(uint64_t c, int mode, float target, float maxForce) = 0;
 	// |total position impulse| of the last step (N*s) — break-threshold checks (force = /dt).
 	virtual float constraintImpulse(uint64_t c) = 0;
+
+	// ---- wheeled vehicles — ABI: appended at the END ----------------------------------------
+	virtual uint64_t createVehicle(const NukeVehicleDesc& d) = 0;   // 0 on failure
+	virtual void     destroyVehicle(uint64_t v) = 0;
+	// forward/right in -1..1, brake/handBrake in 0..1; any input wakes the chassis.
+	virtual void  setVehicleInput(uint64_t v, float forward, float right, float brake, float handBrake) = 0;
+	virtual bool  getWheelState(uint64_t v, int wheel, NukeWheelState& out) = 0;
+	virtual float vehicleRPM(uint64_t v) = 0;      // engine RPM (audio hooks)
+	virtual float vehicleSpeed(uint64_t v) = 0;    // signed forward speed, m/s
 };
 
 }  // namespace nuke

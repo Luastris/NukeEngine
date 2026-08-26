@@ -20,6 +20,8 @@ public:
 	[[nuke::prop(label="Kinematic")]]   bool  isKinematic = false;
 	[[nuke::prop(label="Linear Damping",  min=0, max=1)]] float linearDamping = 0.05f;
 	[[nuke::prop(label="Angular Damping", min=0, max=1)]] float angularDamping = 0.05f;
+	// Applied at body creation (vehicles/boats: lower = stabler; set before play).
+	[[nuke::prop(label="COM Offset", tip="Center-of-mass shift in local units")]] Vector3 comOffset = Vector3(0, 0, 0);
 
 	// Gameplay API acting on the sibling Collider's body; no-ops until the body exists
 	// (first fixed step of play mode).

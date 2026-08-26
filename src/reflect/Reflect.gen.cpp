@@ -57,6 +57,7 @@
 #include "API/Model/Texture.h"
 #include "API/Model/Time.h"
 #include "API/Model/Transform.h"
+#include "API/Model/Vehicle.h"
 #include "API/Model/Wind.h"
 #include "API/Model/World.h"
 #include "input/Input.h"
@@ -1191,6 +1192,8 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("isKinematic", &Rigidbody::isKinematic, "", "Kinematic"));
 		t.fields.push_back(MakeField("linearDamping", &Rigidbody::linearDamping, "", "Linear Damping", 0.0f, 1.0f));
 		t.fields.push_back(MakeField("angularDamping", &Rigidbody::angularDamping, "", "Angular Damping", 0.0f, 1.0f));
+		t.fields.push_back(MakeField("comOffset", &Rigidbody::comOffset, "", "COM Offset"));
+		t.fields.back().tip = "Center-of-mass shift in local units";
 		t.methods.push_back(MakeMethod("AddForce", &Rigidbody::AddForce));
 		Reflect_SetMethodDoc("Rigidbody", "AddForce", "Gameplay API acting on the sibling Collider's body; no-ops until the body exists (first fixed step of play mode).", "force");
 		t.methods.push_back(MakeMethod("AddImpulse", &Rigidbody::AddImpulse));
@@ -1601,6 +1604,53 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("setEuler", &Transform::setEuler));
 		Reflect_SetMethodDoc("Transform", "setEuler", "Legacy SCRIPT-facing aliases, reflected on purpose (real methods, not binder shims, so the script surface stays 100% reflection-driven).", "x,y,z");
 		t.methods.push_back(MakeMethod("euler", &Transform::euler));
+	}
+	{
+		TypeInfo& t = TypeOf<Wheel>();
+		t.base = "Component";
+		t.category = "Physics";
+		t.fields.push_back(MakeField("radius", &Wheel::radius, "", "Radius"));
+		t.fields.push_back(MakeField("width", &Wheel::width, "", "Width"));
+		t.fields.push_back(MakeField("suspensionMin", &Wheel::suspensionMin, "", "Suspension Min"));
+		t.fields.push_back(MakeField("suspensionMax", &Wheel::suspensionMax, "", "Suspension Max"));
+		t.fields.push_back(MakeField("frequency", &Wheel::frequency, "", "Frequency"));
+		t.fields.back().tip = "Suspension spring stiffness, Hz";
+		t.fields.push_back(MakeField("damping", &Wheel::damping, "", "Damping", 0.0f, 5.0f));
+		t.fields.push_back(MakeField("maxSteerDeg", &Wheel::maxSteerDeg, "", "Max Steer", 0.0f, 80.0f));
+		t.fields.back().tip = "Degrees; 0 = fixed wheel";
+		t.fields.push_back(MakeField("driven", &Wheel::driven, "", "Driven"));
+		t.fields.back().tip = "Receives engine torque";
+		t.fields.push_back(MakeField("maxBrakeTorque", &Wheel::maxBrakeTorque, "", "Brake Torque"));
+		t.fields.push_back(MakeField("maxHandBrakeTorque", &Wheel::maxHandBrakeTorque, "", "Handbrake Torque"));
+		t.fields.back().tip = "Usually the rear wheels";
+		t.create = []() -> void* { return new Wheel(); };
+	}
+	{
+		TypeInfo& t = TypeOf<Vehicle>();
+		t.base = "Component";
+		t.category = "Physics";
+		t.fields.push_back(MakeField("maxTorque", &Vehicle::maxTorque, "", "Max Torque"));
+		t.fields.back().tip = "Engine torque, Nm";
+		t.fields.push_back(MakeField("maxRPM", &Vehicle::maxRPM, "", "Max RPM"));
+		t.fields.push_back(MakeField("readInput", &Vehicle::readInput, "", "Read Input"));
+		t.fields.back().tip = "Poll the input actions below every step (off = scripts drive SetInput)";
+		t.fields.push_back(MakeField("throttleAction", &Vehicle::throttleAction, "", "Throttle Action"));
+		t.fields.push_back(MakeField("steerAction", &Vehicle::steerAction, "", "Steer Action"));
+		t.fields.push_back(MakeField("brakeAction", &Vehicle::brakeAction, "", "Brake Action"));
+		t.fields.push_back(MakeField("handbrakeAction", &Vehicle::handbrakeAction, "", "Handbrake Action"));
+		t.fields.push_back(MakeField("skidSlip", &Vehicle::skidSlip, "", "Skid Slip", 0.05f, 3.0f));
+		t.fields.back().tip = "Slip that fires \\";
+		t.methods.push_back(MakeMethod("SetInput", &Vehicle::SetInput));
+		Reflect_SetMethodDoc("Vehicle", "SetInput", "", "forward,right,brake,handBrake");
+		t.methods.push_back(MakeMethod("Built", &Vehicle::Built));
+		t.methods.push_back(MakeMethod("RPM", &Vehicle::RPM));
+		t.methods.push_back(MakeMethod("SpeedKmh", &Vehicle::SpeedKmh));
+		t.methods.push_back(MakeMethod("WheelCount", &Vehicle::WheelCount));
+		t.methods.push_back(MakeMethod("WheelContact", &Vehicle::WheelContact));
+		Reflect_SetMethodDoc("Vehicle", "WheelContact", "", "i");
+		t.methods.push_back(MakeMethod("WheelSlip", &Vehicle::WheelSlip));
+		Reflect_SetMethodDoc("Vehicle", "WheelSlip", "", "i");
+		t.create = []() -> void* { return new Vehicle(); };
 	}
 	{
 		TypeInfo& t = TypeOf<WindZone>();

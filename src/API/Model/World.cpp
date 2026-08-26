@@ -553,6 +553,9 @@ static void SyncBodies(bc::list<Atom*>& gos, iPhysics* p, std::map<uint64_t, Col
 					d.useGravity     = rb->useGravity;
 					d.linearDamping  = rb->linearDamping;
 					d.angularDamping = rb->angularDamping;
+					d.comOffset[0] = (float)rb->comOffset.x;
+					d.comOffset[1] = (float)rb->comOffset.y;
+					d.comOffset[2] = (float)rb->comOffset.z;
 				}
 				d.pos[0] = (float)pos.x; d.pos[1] = (float)pos.y; d.pos[2] = (float)pos.z;
 				d.quat[0] = (float)rot.x; d.quat[1] = (float)rot.y; d.quat[2] = (float)rot.z; d.quat[3] = (float)rot.w;
