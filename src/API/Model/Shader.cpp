@@ -1,4 +1,5 @@
 #include "API/Model/Shader.h"
+#include "API/Model/Package.h"   // packaged runs: includes live in the pak, not on disk
 #include <boost/filesystem.hpp>
 #include <boost/filesystem/fstream.hpp>
 #include <iterator>
@@ -51,8 +52,13 @@ static std::string ExpandIncludes(const std::string& text, const std::string& se
 		{
 			const std::string name = line.substr(q1 + 1, q2 - q1 - 1);
 			std::string inc;
-			if (!selfDir.empty()) inc = ReadAll(selfDir + "/" + name);
+			if (!selfDir.empty())
+			{
+				inc = ReadAll(selfDir + "/" + name);
+				if (inc.empty()) Package::Read(selfDir + "/" + name, inc);   // pak layer
+			}
 			if (inc.empty())      inc = ReadAll("shaders/" + name);
+			if (inc.empty())      Package::Read("shaders/" + name, inc);    // packaged built-ins
 			if (!inc.empty()) { out += inc; out += '\n'; s_includedText += inc; s_includedText += '\n'; continue; }
 		}
 		out += line; out += '\n';
@@ -190,13 +196,17 @@ Shader* Shader::LoadPostShader(const std::string& name, const std::string& psPat
 }
 
 // Build a shader from source text (packed content); empty paths disable hot-reload.
-Shader* Shader::FromSources(const std::string& name, const std::string& vsSrc, const std::string& psSrc)
+// srcDir = the source's own directory (pak-relative) so sibling includes resolve too.
+Shader* Shader::FromSources(const std::string& name, const std::string& vsSrc,
+                            const std::string& psSrc, const std::string& srcDir)
 {
 	if (vsSrc.empty() || psSrc.empty()) return nullptr;
 	Shader* s = new Shader();
 	s->guid = name; s->name = name;
 	s->vsSource = vsSrc; s->psSource = psSrc;
+	s_parseDir = srcDir;
 	ParseMatCBProps(s->psSource, s->props);
+	s_parseDir.clear();
 	for (const ShaderProp& p : s->props)
 		if (DeclaredInIncludes(p.name)) s->includeProps.push_back(p.name);
 	return s;

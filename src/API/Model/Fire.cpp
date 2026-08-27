@@ -282,10 +282,16 @@ void PaintCharFront(Atom* a, FireState* st, float progress, float dt)
 	SurfaceMask* mk = EnsureBurnMask(a);
 	const int slot = mk->StateSlot("burn");
 	if (slot < 0) return;
+	// Reach in WORLD meters: the mask box is local halfExtents x the atom's scale.
 	Vector3 he = mk->halfExtents;
+	Vector3 gs = a->GetTransform().globalScale();
+	he = Vector3(he.x * std::abs(gs.x), he.y * std::abs(gs.y), he.z * std::abs(gs.z));
 	const double maxReach = 2.2 * std::sqrt(he.x * he.x + he.y * he.y + he.z * he.z);
 	const double radius = 0.15 + (double)progress * maxReach;
-	mk->Paint(st->ignitePos, radius, slot, dt * 2.5);
+	// The brush falls off linearly to ZERO at its edge, so painting the bare front radius
+	// leaves the rim unpainted forever — overshoot the brush and pump the amount: the
+	// interior saturates fast, the rim keeps a moving char gradient.
+	mk->Paint(st->ignitePos, radius * 1.35, slot, dt * 4.0);
 }
 
 }  // namespace

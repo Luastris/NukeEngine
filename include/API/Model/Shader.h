@@ -45,7 +45,9 @@ public:
 	// post.vs); params come from its `cbuffer PostParams`.
 	static Shader* LoadPostShader(const std::string& name, const std::string& psPath);
 	// Packed content (3.2): construct from source text (pak entries; no hot-reload paths).
-	static Shader* FromSources(const std::string& name, const std::string& vsSrc, const std::string& psSrc);
+	// srcDir = the source's own directory (pak-relative) so the prop parser resolves includes.
+	static Shader* FromSources(const std::string& name, const std::string& vsSrc,
+	                           const std::string& psSrc, const std::string& srcDir = std::string());
 	static Shader* PostFromSource(const std::string& name, const std::string& psSrc);
 	// Parse a named `cbuffer` block of a pixel shader into ShaderProp entries. For MatCB the
 	// standard lit fields (g_Color/g_Params/...) are excluded.

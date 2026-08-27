@@ -869,7 +869,8 @@ static void ScanPakShaders(ResDB* db, const std::string& prefix, bool builtins)
 		if (builtins && RendererInternalShader(kv.first)) continue;
 		std::string vs, ps;
 		if (Package::Read(kv.second.first, vs) && Package::Read(kv.second.second, ps))
-			if (Shader* sh = Shader::FromSources(kv.first, vs, ps))
+			if (Shader* sh = Shader::FromSources(kv.first, vs, ps,
+			                                     bfs::path(kv.second.second).parent_path().generic_string()))
 			{ db->RegisterShader(sh); std::cout << "[ResDB]	loaded shader '" << kv.first << "' (pak)" << std::endl; }
 	}
 }
