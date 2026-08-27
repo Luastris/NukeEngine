@@ -99,6 +99,9 @@ public:
 	void BlendInto(SkinnedMeshRenderer* smr, bool apply = true);
 	bool Active() const { return active; }
 
+	// The resolved .nurag ("" = not resolved yet); SpringBones borrows its capsules (C4).
+	RagdollDef* Def() const { return def; }
+
 private:
 	struct BodyRt { int bone = -1; uint64_t body = 0; float invOffRot[4]; };
 	std::vector<BodyRt> bodiesRt;

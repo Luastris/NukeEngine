@@ -7,6 +7,7 @@
 #include "API/Model/Audio.h"
 #include "API/Model/BlendSpace.h"
 #include "API/Model/BoneMap.h"
+#include "API/Model/SpringBones.h"   // C4: spring chains ride CommitPose
 #include "API/Model/Camera.h"
 #include "API/Model/Mesh.h"
 #include "API/Model/MeshRenderer.h"
@@ -1639,6 +1640,50 @@ struct Animator::AnimGraph
 		{
 			const double d = Time::getSingleton()->delta;
 			if (d > 0.0) commitDt = d;
+		}
+
+		// C4: spring-bone chains (jiggle/tails/wings) ride the FINISHED pose - after IK and
+		// the history snapshot (inertialized jumps must not capture jiggle), before the skin.
+		if (a->atom)
+		{
+			bool sprung = false;
+			std::vector<SpringPose> sp;
+			const Skeleton* sk = nullptr;
+			for (SkinnedMeshRenderer* s2 : a->smrs) if (s2 && s2->skeleton) { sk = s2->skeleton; break; }
+			for (Component* c : a->atom->components)
+			{
+				if (!c || !c->enabled || std::strcmp(c->name, "SpringBones") != 0) continue;
+				SpringBones* sb = (SpringBones*)c;
+				if (sp.empty())
+				{
+					sp.resize(nb);
+					for (size_t i = 0; i < nb; ++i)
+					{
+						sp[i].p[0] = pose[i].p.x; sp[i].p[1] = pose[i].p.y; sp[i].p[2] = pose[i].p.z;
+						sp[i].s[0] = pose[i].s.x; sp[i].s[1] = pose[i].s.y; sp[i].s[2] = pose[i].s.z;
+						sp[i].r[0] = pose[i].r.x; sp[i].r[1] = pose[i].r.y;
+						sp[i].r[2] = pose[i].r.z; sp[i].r[3] = pose[i].r.w;
+					}
+				}
+				float M[16];
+				{
+					Vector3 gp = a->transform->globalPosition();
+					Quaternion gq = a->transform->globalRotation();
+					Vector3 gs = a->transform->globalScale();
+					glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3((float)gp.x, (float)gp.y, (float)gp.z))
+					                * glm::mat4_cast(glm::quat((float)gq.w, (float)gq.x, (float)gq.y, (float)gq.z))
+					                * glm::scale(glm::mat4(1.0f), glm::vec3((float)gs.x, (float)gs.y, (float)gs.z));
+					memcpy(M, &model[0][0], sizeof(M));
+				}
+				sprung |= sb->Apply(bones, sk, sp.data(), (int)nb, M, a->atom,
+				                    Time::getSingleton()->delta);
+			}
+			if (sprung)
+			{
+				for (size_t i = 0; i < nb; ++i)
+					pose[i].r = glm::quat(sp[i].r[3], sp[i].r[0], sp[i].r[1], sp[i].r[2]);
+				forwardPass();
+			}
 		}
 
 		// hand the finished pose over: every subtree SMR shares the ONE skeleton pose

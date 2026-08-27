@@ -52,6 +52,7 @@
 #include "API/Model/Skeleton.h"
 #include "API/Model/SkinnedMeshRenderer.h"
 #include "API/Model/Spline.h"
+#include "API/Model/SpringBones.h"
 #include "API/Model/Sprite.h"
 #include "API/Model/SpriteAnimator.h"
 #include "API/Model/Surface.h"
@@ -1504,6 +1505,32 @@ bool NukeReflectInit() {
 		Reflect_SetMethodDoc("SplineMover", "SetProgress", "", "t01");
 		t.methods.push_back(MakeMethod("GetProgress", &SplineMover::GetProgress));
 		t.create = []() -> void* { return new SplineMover(); };
+	}
+	{
+		TypeInfo& t = TypeOf<SpringBones>();
+		t.base = "Component";
+		t.category = "Animation";
+		t.fields.push_back(MakeField("chain", &SpringBones::chain, "", "Chain"));
+		t.fields.back().tip = "Rig chain name on the skeleton (Tail/LeftArm/...), or a bone name - the chain then follows first children down to the leaf";
+		t.fields.push_back(MakeField("stiffness", &SpringBones::stiffness, "", "Stiffness", 0.0f, 1.0f));
+		t.fields.back().tip = "Pull back toward the animated pose per second-ish; low = floppy";
+		t.fields.push_back(MakeField("damping", &SpringBones::damping, "", "Damping", 0.0f, 1.0f));
+		t.fields.back().tip = "Velocity kill per step; low = bouncy";
+		t.fields.push_back(MakeField("gravity", &SpringBones::gravity, "", "Gravity"));
+		t.fields.back().tip = "m/s^2 downward on the chain tails (droop)";
+		t.fields.push_back(MakeField("collision", &SpringBones::collision, "", "Collision"));
+		t.fields.back().tip = "Push the chain out of the atom's ragdoll (.nurag) capsules";
+		t.fields.push_back(MakeField("radius", &SpringBones::radius, "", "Radius"));
+		t.fields.back().tip = "Chain thickness for the capsule collision";
+		t.fields.push_back(MakeField("waveDeg", &SpringBones::waveDeg, "", "Wave Amplitude"));
+		t.fields.back().tip = "Procedural wag/flap/sway on top of the clip, degrees; 0 = off";
+		t.fields.push_back(MakeField("waveHz", &SpringBones::waveHz, "", "Wave Hz"));
+		t.fields.push_back(MakeField("waveAxis", &SpringBones::waveAxis, "", "Wave Axis", 0.0f, 0.0f, "Yaw,Pitch,Roll"));
+		t.fields.back().tip = "Local bone axis the wave rotates around (Yaw = wag, Pitch = flap)";
+		t.fields.push_back(MakeField("waveTravel", &SpringBones::waveTravel, "", "Wave Travel"));
+		t.fields.back().tip = "Degrees of phase per joint - the wave RUNS along the chain";
+		t.methods.push_back(MakeMethod("Reset", &SpringBones::Reset));
+		t.create = []() -> void* { return new SpringBones(); };
 	}
 	{
 		TypeInfo& t = TypeOf<Sprite>();
