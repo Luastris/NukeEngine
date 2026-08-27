@@ -100,6 +100,11 @@ void Animator::BindLayer(Layer& l) const
 		const std::string want = MapName(l.clip->channels[c].bone);
 		for (size_t b = 0; b < bonesRef->size(); ++b)
 			if ((*bonesRef)[b].name == want) { l.boneMap[c] = (int)b; break; }
+		// A rename that misses the palette must not unbind the channel: a bone map covers
+		// the FOREIGN library's names, the rig's own clips still bind by their raw names.
+		if (l.boneMap[c] < 0 && want != l.clip->channels[c].bone)
+			for (size_t b = 0; b < bonesRef->size(); ++b)
+				if ((*bonesRef)[b].name == l.clip->channels[c].bone) { l.boneMap[c] = (int)b; break; }
 	}
 }
 

@@ -7,6 +7,7 @@
 #include "API/Model/Animator.h"
 #include "API/Model/SkinnedMeshRenderer.h"
 #include "API/Model/Skeleton.h"
+#include "API/Model/NukeRig.h"
 #include "API/Model/Ragdoll.h"
 #include <boost/filesystem.hpp>
 #include <vector>
@@ -282,7 +283,25 @@ struct NodeMeshOut
 	std::vector<unsigned int> slotMats;  // material SLOT -> aiScene material index
 	bool skinned = false;
 	std::string skelGuid;                // the file's shared .nuskel (skinned nodes)
+	std::string morphMap;                // morph name map (CC characters: ARKit-52 aliases)
 };
+
+// Authored LOD node convention: "<base>_LOD<N>" (case-insensitive). True fills base + level.
+static bool ParseLodSuffix(const std::string& name, std::string& base, int& level)
+{
+	size_t p = name.rfind("_LOD");
+	if (p == std::string::npos) p = name.rfind("_lod");
+	if (p == std::string::npos || p + 4 >= name.size()) return false;
+	int lv = 0;
+	for (size_t i = p + 4; i < name.size(); ++i)
+	{
+		if (!isdigit((unsigned char)name[i])) return false;
+		lv = lv * 10 + (name[i] - '0');
+	}
+	base = name.substr(0, p);
+	level = lv;
+	return true;
+}
 
 static std::string NodeKey(const aiNode* n)
 {
@@ -311,6 +330,7 @@ static Atom* BuildPrefabNode(aiNode* node, const aiScene* sc,
                              const std::map<std::string, NodeMeshOut>& nodeMeshes,
                              const std::vector<std::string>& matGuids,
                              const std::set<std::string>& boneNames,
+                             const std::set<std::string>& lodFolded,
                              const std::string& firstClipGuid = std::string())
 {
 	Atom* atom = new Atom(node->mName.C_Str());
@@ -332,6 +352,7 @@ static Atom* BuildPrefabNode(aiNode* node, const aiScene* sc,
 			{
 				SkinnedMeshRenderer* sm = new SkinnedMeshRenderer();
 				sm->skelGuid = it->second.skelGuid;   // the file's shared .nuskel
+				sm->morphMapGuid = it->second.morphMap;
 				mr = sm;
 			}
 			else mr = new MeshRenderer();
@@ -349,7 +370,9 @@ static Atom* BuildPrefabNode(aiNode* node, const aiScene* sc,
 		aiNode* ch = node->mChildren[i];
 		if (boneNames.count(ch->mName.C_Str()) && !SubtreeHasMesh(ch))
 			continue;   // joint-only subtree: it lives in the .nuskel, not the prefab
-		atom->AddChild(BuildPrefabNode(ch, sc, nodeMeshes, matGuids, boneNames, firstClipGuid));
+		if (lodFolded.count(ch->mName.C_Str()))
+			continue;   // authored LOD level folded into the base mesh's LOD chain
+		atom->AddChild(BuildPrefabNode(ch, sc, nodeMeshes, matGuids, boneNames, lodFolded, firstClipGuid));
 	}
 	return atom;
 }
@@ -491,6 +514,12 @@ int AssImporter::ImportToContent(const char* srcPath, const char* destDir)
 	ResDB* res = ResDB::getSingleton();
 
 	bfs::path modelDir = bfs::path(srcPath).parent_path();
+	// The scene's bone palette + naming scheme, up front: the material tuning (CC) and the
+	// skeleton block below both key off it.
+	std::vector<MeshBone> sceneBones;
+	Mesh::ImportAISkeleton(sc, sceneBones);
+	NukeRig::Scheme rigScheme = sceneBones.empty() ? NukeRig::None : NukeRig::Detect(sceneBones);
+
 	std::map<std::string, std::string> texCache;   // source ref -> texture GUID (dedupe)
 	std::vector<std::string> matGuids(sc->mNumMaterials);
 	for (unsigned int i = 0; i < sc->mNumMaterials; ++i)
@@ -522,6 +551,9 @@ int AssImporter::ImportToContent(const char* srcPath, const char* destDir)
 		tp.Clear();
 		if (am->GetTexture(aiTextureType_EMISSIVE, 0, &tp) == AI_SUCCESS)
 			mt->emissiveGuid = ConvertTexture(sc, tp.C_Str(), modelDir, destDir, texCache, Texture::UsageEmissive);
+		// C2: a CC character's conventional slots get sensible engine materials.
+		if (rigScheme == NukeRig::CC && NukeRig::TuneCCMaterial(mt))
+			cout << "[Import]	tuned CC material '" << mt->matName << "'" << endl;
 		std::string mstem = SafeStem(mt->matName.empty() ? "material" : mt->matName.c_str());
 		bfs::path mout = bfs::path(destDir) / (mstem + ".numat");
 		for (int n = 1; bfs::exists(mout, ec); ++n)
@@ -543,8 +575,6 @@ int AssImporter::ImportToContent(const char* srcPath, const char* destDir)
 
 	// ONE skeleton per FILE (.nuskel): the merged palette every skinned node-mesh indexes
 	// into. Modular characters from several files each carry their own skeleton asset.
-	std::vector<MeshBone> sceneBones;
-	Mesh::ImportAISkeleton(sc, sceneBones);
 	std::set<std::string> boneNames;   // prefab builder skips joint-only subtrees by these
 	for (const MeshBone& b : sceneBones) boneNames.insert(b.name);
 	std::string skelGuid;
@@ -556,6 +586,14 @@ int AssImporter::ImportToContent(const char* srcPath, const char* destDir)
 		sk->guid  = ResDB::NewGuid();
 		sk->name  = SafeStem(bfs::path(srcPath).stem().string().c_str());
 		sk->bones = sceneBones;
+		// C1: a recognized humanoid naming scheme gets the canonical rig chains stamped on,
+		// so the auto-retargeter pairs this skeleton with any other chained rig.
+		if (rigScheme != NukeRig::None)
+		{
+			NukeRig::StampChains(sk, rigScheme);
+			cout << "[Import]	recognized " << NukeRig::SchemeName(rigScheme)
+			     << " rig -> NukeRig chains (" << sk->chains.size() << ")" << endl;
+		}
 		bfs::path sout = bfs::path(destDir) / (sk->name + ".nuskel");
 		for (int n = 1; bfs::exists(sout, ec); ++n)
 			sout = bfs::path(destDir) / (sk->name + "_" + std::to_string(n) + ".nuskel");
@@ -578,11 +616,12 @@ int AssImporter::ImportToContent(const char* srcPath, const char* destDir)
 	// One .numesh per NODE: the node's meshes merge into a sectioned, indexed, auto-LOD'd v4
 	// mesh; nodes sharing a mesh set share the asset.
 	std::map<std::string, NodeMeshOut> nodeMeshes;
+	std::set<std::string> lodFolded;   // "<base>_LOD1.." node names folded into the base mesh
 	Mesh* ragMesh = nullptr;   // biggest skinned mesh: the auto-.nurag fit source
 	int count = 0, meshOrd = 0;
 	std::function<void(aiNode*)> writeNodeMeshes = [&](aiNode* node)
 	{
-		if (node->mNumMeshes > 0)
+		if (node->mNumMeshes > 0 && !lodFolded.count(node->mName.C_Str()))
 		{
 			const std::string key = NodeKey(node);
 			if (!nodeMeshes.count(key))
@@ -595,10 +634,40 @@ int AssImporter::ImportToContent(const char* srcPath, const char* destDir)
 					src.push_back(sc->mMeshes[node->mMeshes[i]]);
 					rec.skinned = rec.skinned || src.back()->HasBones();
 				}
+				// C2: authored LOD levels — "<base>_LOD0" absorbs its "<base>_LOD<N>"
+				// siblings as the mesh's LOD chain; those nodes vanish from the prefab.
+				std::vector<int> lodOf(src.size(), 0);
+				bool authoredLods = false;
+				{
+					std::string base;
+					int level = 0;
+					if (ParseLodSuffix(node->mName.C_Str(), base, level) && level == 0)
+						for (int lv = 1; ; ++lv)
+						{
+							const aiNode* ln = sc->mRootNode->FindNode((base + "_LOD" + std::to_string(lv)).c_str());
+							if (!ln) ln = sc->mRootNode->FindNode((base + "_lod" + std::to_string(lv)).c_str());
+							if (!ln || ln->mNumMeshes == 0) break;
+							for (unsigned int i = 0; i < ln->mNumMeshes; ++i)
+							{
+								src.push_back(sc->mMeshes[ln->mMeshes[i]]);
+								lodOf.push_back(lv);
+								rec.skinned = rec.skinned || src.back()->HasBones();
+							}
+							lodFolded.insert(ln->mName.C_Str());
+							authoredLods = true;
+						}
+				}
 				const bool useShared = rec.skinned && !skelGuid.empty();
-				Mesh* m = Mesh::ImportAIMeshes(src, sc, &rec.slotMats, useShared ? &sceneBones : nullptr);
+				Mesh* m = Mesh::ImportAIMeshes(src, sc, &rec.slotMats, useShared ? &sceneBones : nullptr,
+				                               authoredLods ? &lodOf : nullptr);
 				m->guid = ResDB::NewGuid();
+				if (authoredLods)
+					cout << "[Import]	kept " << m->LodCount() << " authored LOD level(s) for '"
+					     << node->mName.C_Str() << "'" << endl;
 				if (useShared) { m->skelGuid = skelGuid; rec.skelGuid = skelGuid; }
+				// C2: CC characters drive their blendshapes by ARKit-52 names out of the box.
+				if (rigScheme == NukeRig::CC && !m->morphs.empty())
+					rec.morphMap = NukeRig::MorphPresetGuid();
 				// the mesh remembers the materials it came with (v7) — every "show this mesh"
 				// path (previews, editor rigs, bare drops) then looks right without a prefab
 				for (unsigned int mi : rec.slotMats)
@@ -781,13 +850,16 @@ int AssImporter::ImportToContent(const char* srcPath, const char* destDir)
 	ProgStage("prefab");
 	if (count > 0)
 	{
-		Atom* root = BuildPrefabNode(sc->mRootNode, sc, nodeMeshes, matGuids, boneNames, firstClipGuid);
+		Atom* root = BuildPrefabNode(sc->mRootNode, sc, nodeMeshes, matGuids, boneNames, lodFolded, firstClipGuid);
 		// Skinned file: ONE Animator on the ROOT — it drives every subtree
 		// SkinnedMeshRenderer through the shared skeleton.
 		if (!skelGuid.empty())
 		{
 			Animator* an = new Animator();
 			an->clipGuid = firstClipGuid;   // "" when the file carries no clips
+			// C1: no bone map here — the stamped rig chains + the clips' skelGuid already
+			// retarget both ways; the builtin presets serve LOOSE clip libraries (a bonemap
+			// renames every clip channel, which would unbind this rig's own clips).
 			root->AddComponent(an);
 		}
 		std::string base = SafeStem(bfs::path(srcPath).stem().string().c_str());

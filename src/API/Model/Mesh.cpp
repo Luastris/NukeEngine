@@ -154,9 +154,12 @@ void Mesh::ImportAISkeleton(const aiScene* scene, std::vector<MeshBone>& outBone
 }
 
 // The shared indexed builder behind ImportAIMesh/ImportAIMeshes (see Mesh.h for the contract).
+// srcLodOf: authored LOD level per source mesh (sorted, level-contiguous) - the levels become
+// the mesh's LOD chain verbatim and the auto-simplify chain is skipped.
 static void BuildMeshInto(Mesh* m, const std::vector<aiMesh*>& meshes, const aiScene* sc,
                           std::vector<unsigned int>* outSlotMats,
-                          const std::vector<MeshBone>* sharedSkeleton)
+                          const std::vector<MeshBone>* sharedSkeleton,
+                          const std::vector<int>* srcLodOf = nullptr)
 {
 	// Material SLOTS: dedup aiMaterial indices in first-seen order.
 	std::vector<unsigned int> slotMat;
@@ -316,7 +319,41 @@ static void BuildMeshInto(Mesh* m, const std::vector<aiMesh*>& meshes, const aiS
 	for (const MeshSection& s : m->sections)
 		meshopt_optimizeVertexCache(idx.data() + s.firstIndex, idx.data() + s.firstIndex, s.indexCount, totalV);
 
+	// Authored LODs (source _LOD0/_LOD1/... nodes): the levels ship as-is, one MeshLOD per
+	// level over its contiguous section run - the source artist's chain wins over auto-LOD.
+	bool authoredLods = false;
+	if (srcLodOf && srcLodOf->size() == meshes.size())
+	{
+		int maxLevel = 0;
+		for (int l : *srcLodOf) maxLevel = std::max(maxLevel, l);
+		if (maxLevel > 0)
+		{
+			authoredLods = true;
+			static const float kLevelScreen[] = { 0.0f, 0.35f, 0.15f, 0.06f, 0.02f };
+			// meshes arrive level-sorted, so each level's sections are already contiguous;
+			// a mesh with no triangles produced no section - walk sections by source order.
+			auto hasTris = [](aiMesh* am)
+			{
+				for (unsigned int f = 0; f < am->mNumFaces; ++f)
+					if (am->mFaces[f].mNumIndices == 3) return true;
+				return false;
+			};
+			int sec = 0;
+			for (int level = 0; level <= maxLevel; ++level)
+			{
+				MeshLOD ml;
+				ml.firstSection = sec;
+				for (size_t i = 0; i < meshes.size(); ++i)
+					if ((*srcLodOf)[i] == level && hasTris(meshes[i])) ++sec;
+				ml.sectionCount = sec - ml.firstSection;
+				ml.screenSize = level < 5 ? kLevelScreen[level] : 0.01f;
+				if (ml.sectionCount > 0) m->lods.push_back(ml);
+			}
+		}
+	}
+
 	const int lod0Count = (int)m->sections.size();
+	if (!authoredLods)
 	{
 		MeshLOD l0; l0.firstSection = 0; l0.sectionCount = lod0Count; l0.screenSize = 0.0f;
 		m->lods.push_back(l0);
@@ -325,7 +362,7 @@ static void BuildMeshInto(Mesh* m, const std::vector<aiMesh*>& meshes, const aiS
 	const float kRatio[]  = { 0.45f, 0.20f, 0.08f };
 	const float kScreen[] = { 0.35f, 0.15f, 0.06f };
 	size_t prevTris = idx.size() / 3;
-	for (int l = 0; l < 3; ++l)
+	for (int l = 0; l < 3 && !authoredLods; ++l)
 	{
 		std::vector<MeshSection> secs;
 		std::vector<uint32_t> lidx;
@@ -436,10 +473,11 @@ void Mesh::ImportAIMesh(aiMesh* mesh, const aiScene* scene)
 
 Mesh* Mesh::ImportAIMeshes(const std::vector<aiMesh*>& meshes, const aiScene* scene,
                            std::vector<unsigned int>* outSlotMats,
-                           const std::vector<MeshBone>* sharedSkeleton)
+                           const std::vector<MeshBone>* sharedSkeleton,
+                           const std::vector<int>* srcLodOf)
 {
 	Mesh* m = new Mesh();
-	BuildMeshInto(m, meshes, scene, outSlotMats, sharedSkeleton);
+	BuildMeshInto(m, meshes, scene, outSlotMats, sharedSkeleton, srcLodOf);
 	if (!meshes.empty())
 	{
 		strncpy(m->name, meshes[0]->mName.C_Str(), sizeof(m->name) - 1);

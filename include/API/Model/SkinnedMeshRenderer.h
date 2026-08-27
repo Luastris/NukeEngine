@@ -22,6 +22,9 @@ public:
 	[[nuke::prop(asset="skeleton", label="Skeleton")]] std::string skelGuid;
 	// Blend-shape weights, one per mesh morph target (mesh order); sized lazily.
 	[[nuke::prop(label="Morph Weights", tip="Blend-shape weights, one per target (mesh order).")]] std::vector<float> morphWeights;
+	// Morph NAME map (a .nubonemap: mesh target name -> canonical name): SetMorphWeight/
+	// MorphWeight also answer to the canonical names (e.g. ARKit-52 on a CC character).
+	[[nuke::prop(asset="bonemap", label="Morph Map", tip="Name map for morph targets (mesh name -> canonical): drive blendshapes by canonical names like ARKit-52.")]] std::string morphMapGuid;
 
 	Skeleton* skeleton = nullptr;   // resolved lazily (EnsureSkeleton)
 
@@ -56,6 +59,7 @@ public:
 
 	// --- script surface (auto-bound) ---
 	[[nuke::func]] void ResetPose();                                        // back to bind
+	int MorphIndexOf(const std::string& morph) const;   // mesh name, else Morph Map alias
 	[[nuke::func]] void SetMorphWeight(const std::string& morph, double w); // by target name
 	[[nuke::func]] double MorphWeight(const std::string& morph);
 	[[nuke::func]] std::string MorphNames();                                // ';'-joined target names

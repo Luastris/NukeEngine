@@ -98,7 +98,11 @@ extern "C" { NUKE_ABI_STAMP int nuke_build_debug = 0; }
 //  30 — Texture gained the dynamic block (dynamic + dynamicVersion — sizeof grew),
 //       iAudio gained the PCM stream API (openStream/pushStream/streamQueued/closeStream).
 //  31 — iRender gained setDebugView (appended vtable slot; mesh-cost view).
-#define NUKE_ENGINE_ABI 32
+//  32 — Material gained liveInsideMat (fracture cut faces; sizeof grew — a stale-module
+//       player crashed silently at boot), FireState gained ignitePos + Fire::IgnitePoint.
+//  33 — SkinnedMeshRenderer gained morphMapGuid (ARKit-52 morph aliases; sizeof grew,
+//       members after it shifted), Mesh::ImportAIMeshes gained the srcLodOf parameter.
+#define NUKE_ENGINE_ABI 33
 extern "C" { NUKE_ABI_STAMP int nuke_engine_abi = NUKE_ENGINE_ABI; }
 
 namespace nuke {

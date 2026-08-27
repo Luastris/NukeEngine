@@ -1,6 +1,7 @@
 #include "API/Model/SkinnedMeshRenderer.h"
 #include "API/Model/Atom.h"
 #include "API/Model/resdb.h"
+#include "API/Model/BoneMap.h"   // morph name map (C2)
 #include "API/Model/Jobs.h"
 #include "interface/AppInstance.h"
 #include "render/irender.h"
@@ -310,10 +311,26 @@ void SkinnedMeshRenderer::ResetPose()
 	if (Skeleton* sk = EnsureSkeleton()) { (void)sk; }   // EnsureSkeleton refills from bind
 }
 
+// Morph lookup: the mesh's own target name first, else a canonical name resolved through
+// the Morph Map asset (mesh name -> canonical; e.g. ARKit-52 aliases on a CC character).
+int SkinnedMeshRenderer::MorphIndexOf(const std::string& morph) const
+{
+	const int i = srcMesh->MorphIndex(morph);
+	if (i >= 0 || morphMapGuid.empty()) return i;
+	const BoneMap* mm = ResDB::getSingleton()->GetBoneMap(morphMapGuid);
+	if (!mm) return -1;
+	for (size_t t = 0; t < srcMesh->morphs.size(); ++t)
+	{
+		auto it = mm->map.find(srcMesh->morphs[t].name);
+		if (it != mm->map.end() && it->second == morph) return (int)t;
+	}
+	return -1;
+}
+
 void SkinnedMeshRenderer::SetMorphWeight(const std::string& morph, double w)
 {
 	if (!EnsureInstance()) return;
-	const int i = srcMesh->MorphIndex(morph);
+	const int i = MorphIndexOf(morph);
 	if (i < 0) return;
 	if (morphWeights.size() != srcMesh->morphs.size()) morphWeights.resize(srcMesh->morphs.size(), 0.0f);
 	morphWeights[i] = (float)w;
@@ -322,7 +339,7 @@ void SkinnedMeshRenderer::SetMorphWeight(const std::string& morph, double w)
 double SkinnedMeshRenderer::MorphWeight(const std::string& morph)
 {
 	if (!EnsureInstance()) return 0.0;
-	const int i = srcMesh->MorphIndex(morph);
+	const int i = MorphIndexOf(morph);
 	return (i >= 0 && i < (int)morphWeights.size()) ? morphWeights[i] : 0.0;
 }
 

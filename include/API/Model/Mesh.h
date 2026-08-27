@@ -215,9 +215,12 @@ public:
 	// SLOTS deduped in list order (outSlotMats = slot -> aiScene material index), merged
 	// skeleton, tangents/uv2/color streams, meshopt vertex-cache+fetch optimization and an
 	// auto-generated LOD chain (simplified index ranges appended after the LOD0 sections).
+	// srcLodOf: authored LOD level per source mesh (callers pass level-sorted lists) — the
+	// levels become the LOD chain verbatim and the auto-simplify chain is skipped.
 	static Mesh* ImportAIMeshes(const std::vector<aiMesh*>& meshes, const aiScene* scene,
 	                            std::vector<unsigned int>* outSlotMats = nullptr,
-	                            const std::vector<MeshBone>* sharedSkeleton = nullptr);
+	                            const std::vector<MeshBone>* sharedSkeleton = nullptr,
+	                            const std::vector<int>* srcLodOf = nullptr);
 	// The merged skeleton of EVERY skinned mesh in the scene — the .nuskel source. Empty
 	// result = no bones anywhere. Bone indices of meshes built with `sharedSkeleton` point
 	// into this palette (mesh embeds NO skeleton of its own then).

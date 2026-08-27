@@ -12,6 +12,7 @@
 #include <boost/thread/condition_variable.hpp>
 #include "API/Model/Jobs.h"      // Stopping(): background scans bail on shutdown
 #include "API/Model/Prefab.h"   // PrefabGuid (register prefab guid<->path)
+#include "API/Model/NukeRig.h"  // C1 canonical rig + rename presets (builtins)
 #include "render/irender.h"
 #include "interface/AppInstance.h"   // GuidForContentPath: content root + ResolveContent
 #include "input/Input.h"         // .nuinput content -> gameplay input system
@@ -47,6 +48,14 @@ ResDB::ResDB()
 	grn->matName = "Grass";
 	grn->color = Color(0.24, 0.52, 0.16, 1.0);
 	RegisterMaterial(grn);
+
+	// C1 canonical rig: the universal humanoid skeleton + rename presets ship as builtins,
+	// present in every project and packaged game (the importer auto-assigns the presets).
+	RegisterSkeleton(NukeRig::CreateCanonical());
+	RegisterBoneMap(NukeRig::CreatePreset(NukeRig::CC));
+	RegisterBoneMap(NukeRig::CreatePreset(NukeRig::Mixamo));
+	RegisterBoneMap(NukeRig::CreatePreset(NukeRig::UE));
+	RegisterBoneMap(NukeRig::CreateMorphPreset());   // C2: CC blendshapes -> ARKit-52 names
 }
 
 ResDB* ResDB::getSingleton()

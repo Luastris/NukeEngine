@@ -1378,6 +1378,8 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("skelGuid", &SkinnedMeshRenderer::skelGuid, "skeleton", "Skeleton"));
 		t.fields.push_back(MakeField("morphWeights", &SkinnedMeshRenderer::morphWeights, "", "Morph Weights"));
 		t.fields.back().tip = "Blend-shape weights, one per target (mesh order).";
+		t.fields.push_back(MakeField("morphMapGuid", &SkinnedMeshRenderer::morphMapGuid, "bonemap", "Morph Map"));
+		t.fields.back().tip = "Name map for morph targets (mesh name -> canonical): drive blendshapes by canonical names like ARKit-52.";
 		t.methods.push_back(MakeMethod("ResetPose", &SkinnedMeshRenderer::ResetPose));
 		Reflect_SetMethodDoc("SkinnedMeshRenderer", "ResetPose", "--- script surface (auto-bound) ---", "");
 		t.methods.push_back(MakeMethod("SetMorphWeight", &SkinnedMeshRenderer::SetMorphWeight));
