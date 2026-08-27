@@ -61,6 +61,38 @@ public:
     // If set, the camera renders into this RenderTexture asset (resolved into renderTarget).
     [[nuke::prop(asset="texture", label="Target Texture", tip="Render into this texture asset instead of the screen")]] std::string targetTexGuid;
 
+	// ---- camera utilities. ALL OPT-IN: with Rig=None and no Look At the camera is a raw
+	// transform a custom camera manager fully owns — nothing below touches it. ----
+	[[nuke::prop(label="Rig", enum="None,Spring Arm", tip="Spring Arm: the atom is the PIVOT, the rendered eye hangs Boom Length behind it (collision + lag). None = the transform IS the view.")]]
+	int rig = 0;
+	[[nuke::prop(label="Boom Length", min=0)]] float boomLength = 4.0f;
+	[[nuke::prop(label="Boom Lag", min=0, max=0.99, tip="Eye position smoothing; 0 = rigid")]] float boomLag = 0.0f;
+	[[nuke::prop(label="Boom Collision", tip="Pull the eye in front of geometry between it and the pivot")]] bool boomCollision = true;
+	[[nuke::prop(label="Boom Radius", min=0.01, tip="Collision skin around the eye")]] float boomRadius = 0.25f;
+	[[nuke::prop(label="Look At", tip="Rotate the atom to face this target every frame in play (null = off)")]] Atom* lookAtTarget = nullptr;
+	[[nuke::prop(label="Look Lag", min=0, max=0.99, tip="Rotation smoothing; 0 = snap")]] float lookLag = 0.0f;
+
+	// View blend to another camera atom over `seconds`; at the end that camera becomes Main.
+	// easing: 0 = linear, 1 = smoothstep, 2 = ease-in, 3 = ease-out.
+	[[nuke::func]] void    BlendTo(Atom* targetCamera, double seconds, double easing);
+	[[nuke::func]] bool    Blending();
+	[[nuke::func]] Vector3 ViewPos();   // composed eye of the last rendered frame (boom/blend applied)
+	[[nuke::func]] Vector3 ViewDir();
+
+	// Pivot -> boom/collision/lag -> blend; advances by the frame delta (the world render pass
+	// calls it once per frame). Everything off = the raw transform pose.
+	void ComposeView(Vector3& pos, Vector3& fwd, Vector3& up);
+
+	// Rig/blend runtime (never serialized).
+	Vector3 viewPos, viewFwd, viewUp;
+	bool    viewValid = false;
+	Vector3 boomEye;
+	bool    boomInit = false;
+	long    blendTarget = 0;
+	double  blendT = 0.0, blendDur = 0.0;
+	int     blendEase = 0;
+	bool    blendActive = false;
+
 
 	Camera();
 

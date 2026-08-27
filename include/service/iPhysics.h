@@ -295,6 +295,12 @@ public:
 	virtual bool  getWheelState(uint64_t v, int wheel, NukeWheelState& out) = 0;
 	virtual float vehicleRPM(uint64_t v) = 0;      // engine RPM (audio hooks)
 	virtual float vehicleSpeed(uint64_t v) = 0;    // signed forward speed, m/s
+
+	// ---- swept-sphere distance — ABI: appended at the END -----------------------------------
+	// How far the sphere's CENTER travels before first contact (camera booms, ledge probes) —
+	// unlike shapeCast this returns the travel distance, not the contact point. False = clear.
+	virtual bool sphereCastDist(float radius, const float from[3], const float dir[3],
+	                            float maxDist, uint64_t ignoreBody, float& outDist) = 0;
 };
 
 }  // namespace nuke

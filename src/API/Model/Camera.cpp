@@ -5,6 +5,11 @@
 #include "API/Model/Texture.h"
 #include "API/Model/Screen.h"   // screen->world rays use game-screen pixel space
 #include "API/Model/Time.h"     // shake impulses advance on game time
+#include "API/Model/Game.h"     // camera utilities gate on play mode
+#include "API/Model/Collider.h" // spring-arm boom ignores the camera's own body
+#include "API/Model/World.h"    // blend target resolve
+#include "interface/Services.h"
+#include "service/iPhysics.h"   // spring-arm boom collision (swept sphere)
 #include "interface/AppInstance.h"
 #include <cmath>
 #include <algorithm>
@@ -248,6 +253,116 @@ void Camera::Update() {
 	renderer->update();
 #endif
 	ProcessKeyboard();
+
+	// Look-at constraint (opt-in): face the target, optionally smoothed.
+	if (lookAtTarget && transform && Game::IsPlaying())
+	{
+		Vector3 p = transform->globalPosition();
+		Vector3 to = lookAtTarget->GetTransform().globalPosition() - p;
+		const double len = std::sqrt(to.x * to.x + to.y * to.y + to.z * to.z);
+		if (len > 1e-4)
+		{
+			Quaternion want = Quaternion::LookRotation(Vector3(to.x / len, to.y / len, to.z / len));
+			Quaternion cur = transform->globalRotation();
+			const double a = lookLag > 0.0f
+			               ? 1.0 - std::pow((double)lookLag, Time::getSingleton()->gameDelta * 60.0)
+			               : 1.0;
+			transform->SetGlobal(p, Quaternion::Slerp(cur, want, a), transform->globalScale());
+		}
+	}
+}
+
+// ---- camera utilities (spring arm / blend) ------------------------------------------------
+
+void Camera::BlendTo(Atom* targetCamera, double seconds, double easing)
+{
+	if (!targetCamera) return;
+	blendTarget = targetCamera->id.id;
+	blendDur = std::max(0.01, seconds);
+	blendT = 0.0;
+	blendEase = (int)easing;
+	blendActive = true;
+}
+
+bool Camera::Blending() { return blendActive; }
+Vector3 Camera::ViewPos() { return viewValid ? viewPos : (transform ? transform->globalPosition() : Vector3(0, 0, 0)); }
+Vector3 Camera::ViewDir() { return viewValid ? viewFwd : (transform ? transform->direction() : Vector3(0, 0, 1)); }
+
+static Vector3 VLerp(Vector3 a, Vector3 b, double t)
+{ return Vector3(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t); }
+
+static Vector3 VNorm(Vector3 v)
+{
+	const double l = std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+	return l > 1e-12 ? Vector3(v.x / l, v.y / l, v.z / l) : Vector3(0, 0, 1);
+}
+
+void Camera::ComposeView(Vector3& pos, Vector3& fwd, Vector3& up)
+{
+	pos = transform->globalPosition();
+	fwd = transform->direction();
+	up = transform->up();
+	const double dt = Time::getSingleton()->gameDelta;
+
+	if (rig == 1 && boomLength > 1e-4f)
+	{
+		double reach = boomLength;
+		if (boomCollision)
+		{
+			// Swept SPHERE, not a ray: a thin ray slips past anything a boomRadius-wide camera
+			// would clip through.
+			iPhysics* ph = GetService<iPhysics>();
+			Collider* own = atom ? atom->GetComponent<Collider>() : nullptr;
+			if (ph)
+			{
+				const float from[3] = { (float)pos.x, (float)pos.y, (float)pos.z };
+				const float back[3] = { (float)-fwd.x, (float)-fwd.y, (float)-fwd.z };
+				float dist = 0.0f;
+				if (ph->sphereCastDist(boomRadius, from, back, boomLength,
+				                       own ? own->bodyId : 0, dist))
+					reach = std::max(0.0, (double)dist - 0.01);
+			}
+		}
+		Vector3 want(pos.x - fwd.x * reach, pos.y - fwd.y * reach, pos.z - fwd.z * reach);
+		if (boomLag > 0.0f && boomInit)
+			boomEye = VLerp(boomEye, want, 1.0 - std::pow((double)boomLag, dt * 60.0));
+		else
+			boomEye = want;
+		boomInit = true;
+		pos = boomEye;
+	}
+
+	if (blendActive)
+	{
+		World* w = Game::GetWorld();
+		Atom* ta = w ? w->GetById(blendTarget) : nullptr;
+		Camera* tc = ta ? ta->GetComponent<Camera>() : nullptr;
+		if (!tc || !tc->transform)
+			blendActive = false;
+		else
+		{
+			blendT += dt / blendDur;
+			double t = std::min(1.0, blendT);
+			switch (blendEase)
+			{
+				case 1: t = t * t * (3.0 - 2.0 * t); break;   // smoothstep
+				case 2: t = t * t; break;                     // ease-in
+				case 3: t = 1.0 - (1.0 - t) * (1.0 - t); break;   // ease-out
+			}
+			pos = VLerp(pos, tc->transform->globalPosition(), t);
+			fwd = VNorm(VLerp(fwd, tc->transform->direction(), t));
+			up = VNorm(VLerp(up, tc->transform->up(), t));
+			if (blendT >= 1.0)
+			{
+				blendActive = false;
+				mainCamera = false;
+				tc->mainCamera = true;   // the hand-off: the target renders from here on
+			}
+		}
+	}
+
+	viewPos = pos; viewFwd = fwd; viewUp = up;
+	viewValid = true;
 }
 
 void Camera::SetProjection(Projection p) { projection = p; }   // World::Render eases projBlend toward it
@@ -266,12 +381,15 @@ Vector3 Camera::ScreenRayOrigin(double px, double py)
 	const double w = std::max(1.0, Screen::Width()), h = std::max(1.0, Screen::Height());
 	const double ndcx = px / w * 2.0 - 1.0;
 	const double ndcy = 1.0 - py / h * 2.0;   // top-left pixel origin -> +y up NDC
-	Vector3 p = transform->globalPosition();
+	// Rays must leave the RENDERED eye (boom/blend applied), or picking skews off-screen.
+	Vector3 p = viewValid ? viewPos : transform->globalPosition();
 	if (projBlend >= 0.5f)   // orthographic: parallel rays, origin slides over the view rect
 	{
 		const double oh = (orthoSize > 1e-4f) ? orthoSize : 1.0;
 		const double ow = oh * (w / h);
-		Vector3 r = transform->right(), u = transform->up();
+		Vector3 f0 = viewValid ? viewFwd : transform->direction();
+		Vector3 u = viewValid ? viewUp : transform->up();
+		Vector3 r(f0.y * u.z - f0.z * u.y, f0.z * u.x - f0.x * u.z, f0.x * u.y - f0.y * u.x);
 		return Vector3(p.x + ndcx * ow * r.x + ndcy * oh * u.x,
 		               p.y + ndcx * ow * r.y + ndcy * oh * u.y,
 		               p.z + ndcx * ow * r.z + ndcy * oh * u.z);
@@ -282,13 +400,14 @@ Vector3 Camera::ScreenRayOrigin(double px, double py)
 Vector3 Camera::ScreenRayDir(double px, double py)
 {
 	if (!transform) return Vector3(0, 0, 1);
-	Vector3 f = transform->direction();
+	Vector3 f = viewValid ? viewFwd : transform->direction();
 	if (projBlend >= 0.5f) return f;   // orthographic: fixed direction
 	const double w = std::max(1.0, Screen::Width()), h = std::max(1.0, Screen::Height());
 	const double ndcx = px / w * 2.0 - 1.0;
 	const double ndcy = 1.0 - py / h * 2.0;
 	const double thf = std::tan((double)fov * 0.5 * 0.017453292519943295);
-	Vector3 r = transform->right(), u = transform->up();
+	Vector3 u = viewValid ? viewUp : transform->up();
+	Vector3 r(f.y * u.z - f.z * u.y, f.z * u.x - f.x * u.z, f.x * u.y - f.y * u.x);
 	Vector3 d(f.x + ndcx * thf * (w / h) * r.x + ndcy * thf * u.x,
 	          f.y + ndcx * thf * (w / h) * r.y + ndcy * thf * u.y,
 	          f.z + ndcx * thf * (w / h) * r.z + ndcy * thf * u.z);
