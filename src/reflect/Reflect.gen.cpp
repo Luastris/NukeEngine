@@ -20,6 +20,7 @@
 #include "API/Model/DevConsole.h"
 #include "API/Model/Environment.h"
 #include "API/Model/Events.h"
+#include "API/Model/Fire.h"
 #include "API/Model/Foliage.h"
 #include "API/Model/Game.h"
 #include "API/Model/InstancedMesh.h"
@@ -408,6 +409,24 @@ bool NukeReflectInit() {
 		t.fields.back().tip = "Clear colour where nothing is drawn. Alpha < 1 makes a transparent window see-through (Game.SetTransparent)";
 		t.fields.push_back(MakeField("targetTexGuid", &Camera::targetTexGuid, "texture", "Target Texture"));
 		t.fields.back().tip = "Render into this texture asset instead of the screen";
+		t.fields.push_back(MakeField("rig", &Camera::rig, "", "Rig", 0.0f, 0.0f, "None,Spring Arm"));
+		t.fields.back().tip = "Spring Arm: the atom is the PIVOT, the rendered eye hangs Boom Length behind it (collision + lag). None = the transform IS the view.";
+		t.fields.push_back(MakeField("boomLength", &Camera::boomLength, "", "Boom Length"));
+		t.fields.push_back(MakeField("boomLag", &Camera::boomLag, "", "Boom Lag", 0.0f, 0.99f));
+		t.fields.back().tip = "Eye position smoothing; 0 = rigid";
+		t.fields.push_back(MakeField("boomCollision", &Camera::boomCollision, "", "Boom Collision"));
+		t.fields.back().tip = "Pull the eye in front of geometry between it and the pivot";
+		t.fields.push_back(MakeField("boomRadius", &Camera::boomRadius, "", "Boom Radius"));
+		t.fields.back().tip = "Collision skin around the eye";
+		t.fields.push_back(MakeField("lookAtTarget", &Camera::lookAtTarget, "", "Look At"));
+		t.fields.back().tip = "Rotate the atom to face this target every frame in play (null = off)";
+		t.fields.push_back(MakeField("lookLag", &Camera::lookLag, "", "Look Lag", 0.0f, 0.99f));
+		t.fields.back().tip = "Rotation smoothing; 0 = snap";
+		t.methods.push_back(MakeMethod("BlendTo", &Camera::BlendTo));
+		Reflect_SetMethodDoc("Camera", "BlendTo", "View blend to another camera atom over `seconds`; at the end that camera becomes Main. easing: 0 = linear, 1 = smoothstep, 2 = ease-in, 3 = ease-out.", "targetCamera,seconds,easing");
+		t.methods.push_back(MakeMethod("Blending", &Camera::Blending));
+		t.methods.push_back(MakeMethod("ViewPos", &Camera::ViewPos));
+		t.methods.push_back(MakeMethod("ViewDir", &Camera::ViewDir));
 		t.methods.push_back(MakeMethod("SetProjection", &Camera::SetProjection));
 		Reflect_SetMethodDoc("Camera", "SetProjection", "Reflected camera API. Setting the projection animates the switch (per projTransition).", "p");
 		t.methods.push_back(MakeMethod("GetProjection", &Camera::GetProjection));
@@ -603,6 +622,41 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("Cancel", &Events::Cancel));
 		Reflect_SetMethodDoc("Events", "Cancel", "", "id");
 		t.methods.push_back(MakeMethod("PendingCount", &Events::PendingCount));
+	}
+	{
+		TypeInfo& t = TypeOf<FireState>();
+		t.base = "Component";
+		t.category = "World";
+		t.fields.push_back(MakeField("heat", &FireState::heat, "", "Heat"));
+		t.fields.back().tip = "Accumulated ignition progress, seconds of exposure";
+		t.fields.push_back(MakeField("burning", &FireState::burning, "", "Burning"));
+		t.fields.push_back(MakeField("burnT", &FireState::burnT, "", "Burn Time"));
+		t.fields.back().tip = "Seconds burned so far";
+		t.fields.push_back(MakeField("burned", &FireState::burned, "", "Burned"));
+		t.fields.back().tip = "Burned out (charred)";
+		t.fields.push_back(MakeField("fx", &FireState::fx));
+		t.fields.back().hidden = true;
+		t.create = []() -> void* { return new FireState(); };
+	}
+	{
+		TypeInfo& t = TypeOf<Fire>();
+		t.base = "Object";
+		t.methods.push_back(MakeMethod("Ignite", &Fire::Ignite));
+		Reflect_SetMethodDoc("Fire", "Ignite", "", "a");
+		t.methods.push_back(MakeMethod("IgniteAt", &Fire::IgniteAt));
+		Reflect_SetMethodDoc("Fire", "IgniteAt", "", "pos,radius");
+		t.methods.push_back(MakeMethod("Extinguish", &Fire::Extinguish));
+		Reflect_SetMethodDoc("Fire", "Extinguish", "", "a");
+		t.methods.push_back(MakeMethod("Burning", &Fire::Burning));
+		Reflect_SetMethodDoc("Fire", "Burning", "", "a");
+		t.methods.push_back(MakeMethod("BurnProgress", &Fire::BurnProgress));
+		Reflect_SetMethodDoc("Fire", "BurnProgress", "", "a");
+		t.methods.push_back(MakeMethod("ActiveFires", &Fire::ActiveFires));
+		t.methods.push_back(MakeMethod("SetEnabled", &Fire::SetEnabled));
+		Reflect_SetMethodDoc("Fire", "SetEnabled", "", "on");
+		t.methods.push_back(MakeMethod("Enabled", &Fire::Enabled));
+		t.methods.push_back(MakeMethod("SetMaxFires", &Fire::SetMaxFires));
+		Reflect_SetMethodDoc("Fire", "SetMaxFires", "", "n");
 	}
 	{
 		TypeInfo& t = TypeOf<Foliage>();

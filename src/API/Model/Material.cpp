@@ -101,6 +101,12 @@ Material* Material::Clone() const
 	m->physTag      = physTag;
 	m->liveFriction = liveFriction;
 	m->liveBounce   = liveBounce;
+	m->liveIgnite = liveIgnite;
+	m->liveBurn = liveBurn;
+	m->liveSpread = liveSpread;
+	m->liveFirePrefab = liveFirePrefab;
+	m->liveDebrisPrefab = liveDebrisPrefab;
+	m->liveDebrisCount = liveDebrisCount;
 	m->Resolve();          // bind diff/norm/spec/mr/ao/em/shader pointers from ResDB
 	m->PushRenderProps();  // static UV/cutout/wipe state reaches previews and non-world users too
 	return m;
@@ -112,7 +118,7 @@ bool Material::HasLive() const
 	    || !liveMasks.empty() || !liveEvents.empty()
 	    || !liveSound.footsteps.empty() || !liveSound.ambientGuid.empty() || !liveSound.windGuid.empty()
 	    || !liveSurface.heightGuid.empty() || liveSurface.dispScale != 0.0f || liveSurface.varAmount != 0.0f
-	    || liveFriction >= 0.0f || liveBounce >= 0.0f;
+	    || liveFriction >= 0.0f || liveBounce >= 0.0f || liveIgnite >= 0.0f;
 }
 
 // ---- Substance-style separate map baking ---------------------------------------------------
@@ -855,6 +861,15 @@ bool Material::SaveToFile(const std::string& path) const
 		if (!physTag.empty())       l["physTag"] = physTag;
 		if (liveFriction >= 0.0f)   l["friction"] = liveFriction;
 		if (liveBounce >= 0.0f)     l["bounce"] = liveBounce;
+		if (liveIgnite >= 0.0f)
+		{
+			l["ignite"] = liveIgnite;
+			l["burnTime"] = liveBurn;
+			l["spreadR"] = liveSpread;
+			if (!liveFirePrefab.empty())   l["firePrefab"] = liveFirePrefab;
+			if (!liveDebrisPrefab.empty()) l["debris"] = liveDebrisPrefab;
+			l["debrisCount"] = liveDebrisCount;
+		}
 		j["live"] = l;
 	}
 	boost::filesystem::path p(path);
@@ -1138,6 +1153,12 @@ Material* Material::LoadFromString(const std::string& text)
 		m->physTag      = l.value("physTag", std::string());
 		m->liveFriction = l.value("friction", -1.0f);
 		m->liveBounce   = l.value("bounce", -1.0f);
+		m->liveIgnite = l.value("ignite", -1.0f);
+		m->liveBurn = l.value("burnTime", 20.0f);
+		m->liveSpread = l.value("spreadR", 3.0f);
+		m->liveFirePrefab = l.value("firePrefab", std::string());
+		m->liveDebrisPrefab = l.value("debris", std::string());
+		m->liveDebrisCount = l.value("debrisCount", 4);
 	}
 	return m;
 }

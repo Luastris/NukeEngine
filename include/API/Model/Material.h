@@ -390,6 +390,14 @@ public:
     float liveFriction = -1.0f;
     [[nuke::prop(label="Bounciness", min=-1, max=1, tip="Surface restitution override; -1 = keep the body's value")]]
     float liveBounce = -1.0f;
+    // Flammability + burn-out destruction (the fire system): liveIgnite < 0 = fireproof. The
+    // charring visual is the material's OWN "burn" condition state, driven 0..1 while burning.
+    float liveIgnite = -1.0f;            // seconds of neighbouring heat before catching fire
+    float liveBurn = 20.0f;              // burn duration to burn-out
+    float liveSpread = 3.0f;             // heat radius while burning (world units)
+    std::string liveFirePrefab;          // looping visual spawned while burning (flames/smoke/light)
+    std::string liveDebrisPrefab;        // burn-out destruction debris (empty = survives charred)
+    int   liveDebrisCount = 4;
     bool HasLive() const;                // any live section present (drives .numat serialization)
 
     Material();

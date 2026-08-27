@@ -18,6 +18,7 @@
 #include "API/Model/ReflectionProbe.h"
 #include "API/Model/Time.h"
 #include "API/Model/Events.h"
+#include "API/Model/Fire.h"
 #include "API/Model/PairedAnim.h"
 #include "API/Model/Profiler.h"
 #include "API/Model/Game.h"
@@ -435,6 +436,7 @@ void World::Update()
 	// Flush deferred destruction after the traversal, still under the game lock.
 	FlushDestroyQueue();
 	PairedAnim::Tick(this);   // paired-animation sessions: drift sync + lifetime, post-traversal
+	Fire::Tick(this);         // fire spread/burn-out (throttled scans; kill switch inside)
 	// World Partition streaming: ring maintenance AFTER the traversal (safe to add/remove
 	// roots), still under the game lock.
 	if (WorldStream::Active(this))
@@ -2137,6 +2139,8 @@ void World::Render(iRender* r)
 	// LiveMaterial auto-foliage: surfaces whose material carries foliage entries grow them
 	// (transient components). Render-phase so it runs in BOTH edit mode and PIE.
 	if (!auxiliary) Surface::DriveFoliage(this);
+	// Fire visual/debris spawns queue on the game tick and land here (same rule as hit spawns).
+	if (!auxiliary) Fire::Drain(this);
 
 	// Editor gizmos for the selection; lines live for one frame.
 	{
@@ -2597,9 +2601,9 @@ void World::Render(iRender* r)
 		d.vpW = 0; d.vpH = 0; // renderer uses the target's full size
 		d.clear[0] = cam->background.r; d.clear[1] = cam->background.g;
 		d.clear[2] = cam->background.b; d.clear[3] = cam->background.a;
-		Vector3 cp = cam->transform->globalPosition();
-		Vector3 cf = cam->transform->direction();
-		Vector3 cu = cam->transform->up();
+		// Composed view: spring-arm boom + camera blends (raw transform when both are off).
+		Vector3 cp, cf, cu;
+		cam->ComposeView(cp, cf, cu);
 		{
 			// View shake: compose the camera-local impulse offset into the eye position.
 			float sh[3];
