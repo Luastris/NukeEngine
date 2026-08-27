@@ -396,8 +396,9 @@ public:
     float liveBurn = 20.0f;              // burn duration to burn-out
     float liveSpread = 3.0f;             // heat radius while burning (world units)
     std::string liveFirePrefab;          // looping visual spawned while burning (flames/smoke/light)
-    std::string liveDebrisPrefab;        // burn-out destruction debris (empty = survives charred)
+    std::string liveDebrisPrefab;        // shatter debris (burn-out + Destruct.Shatter; empty = never shatters)
     int   liveDebrisCount = 4;
+    std::string liveInsideMat;           // fracture cut faces draw THIS material (brick core ≠ brick face)
     bool HasLive() const;                // any live section present (drives .numat serialization)
 
     Material();

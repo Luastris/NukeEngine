@@ -9,6 +9,7 @@
 #include "service/iPhysics.h"
 #include "interface/Services.h"
 #include <nlohmann/json.hpp>
+#include "API/Model/Events.h"
 #include <boost/filesystem/fstream.hpp>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -223,6 +224,27 @@ void Ragdoll::Reset()
 
 void Ragdoll::SetMode(double m) { mode = (Mode)(int)m; }
 double Ragdoll::GetMode() { return (double)(int)mode; }
+
+bool Ragdoll::DetachBone(const std::string& bone)
+{
+	iPhysics* ph = Phys();
+	if (!ph || !active || !def) return false;
+	Skeleton* sk = ResDB::getSingleton()->GetSkeleton(def->skelGuid);
+	if (!sk) return false;
+	const int bi = sk->BoneIndex(bone);
+	for (size_t k = 0; k < jointsRt.size(); ++k)
+		if (jointBone[k] == bi && jointsRt[k])
+		{
+			ph->destroyJoint(jointsRt[k]);
+			jointsRt[k] = 0;   // destroyJoint/setJointTarget no-op on 0 — the arrays stay aligned
+			nlohmann::json j;
+			j["atom"] = (double)(atom ? atom->id.id : 0);
+			j["bone"] = bone;
+			Events::Emit("ragdoll.detach", j.dump());
+			return true;
+		}
+	return false;
+}
 
 void Ragdoll::Impulse(const std::string& bone, const Vector3& imp)
 {

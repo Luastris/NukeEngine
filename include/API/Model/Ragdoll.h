@@ -89,6 +89,9 @@ public:
 	[[nuke::func]] void SetMode(double m);          // 0 Off / 1 Full / 2 Powered / 3 Partial
 	[[nuke::func]] double GetMode();
 	[[nuke::func]] void Impulse(const std::string& bone, const Vector3& worldImpulse);
+	// Severs the joint tying `bone` to its parent — the limb subtree swings free (the skin
+	// keeps stretching until the game hides/splits its mesh). "ragdoll.detach" on the bus.
+	[[nuke::func]] bool DetachBone(const std::string& bone);
 
 	// Blends the physics pose into smr->pose (and feeds the animated pose to the motors in
 	// Powered mode). The Animator calls it at handover with apply=false (its own ApplyPose

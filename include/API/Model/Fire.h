@@ -22,7 +22,9 @@ public:
 	[[nuke::prop(label="Burning")]] bool burning = false;
 	[[nuke::prop(label="Burn Time", min=0, tip="Seconds burned so far")]] float burnT = 0.0f;
 	[[nuke::prop(label="Burned", tip="Burned out (charred)")]] bool burned = false;
+	[[nuke::prop(hidden)]] Vector3 ignitePos;    // world point the fire started at (front origin)
 	[[nuke::prop(hidden)]] Atom* fx = nullptr;   // spawned fire-visual prefab instance
+	bool shattered = false;   // debris already spawned (runtime; guards double shatter)
 
 	FireState() : Component("FireState") {}
 	void Init(Atom* parent) override;
@@ -43,6 +45,7 @@ class NUKEENGINE_API Fire
 	NUKE_CLASS_NOCREATE(Fire, Object)
 public:
 	[[nuke::func]] static bool   Ignite(Atom* a);        // false = fireproof/off/over budget
+	[[nuke::func]] static bool   IgnitePoint(Atom* a, const Vector3& worldPos);   // fire starts HERE
 	[[nuke::func]] static void   IgniteAt(const Vector3& pos, double radius);   // everything flammable in range
 	[[nuke::func]] static void   Extinguish(Atom* a);    // stops burning, keeps the char so far
 	[[nuke::func]] static bool   Burning(Atom* a);
@@ -58,6 +61,17 @@ public:
 	static void Drain(class World* w);
 	static void Register(FireState* s);
 	static void Unregister(FireState* s);
+};
+
+// Destruction MECHANISM only — the game's own damage system decides WHEN. Shatter blows the
+// atom into its material's debris prefabs and removes it; "destruct.shatter" hits the bus.
+// (Ropes cut via Rope.Cut, joints via JointBase.Break, ragdoll bones via Ragdoll.DetachBone.)
+class NUKEENGINE_API Destruct
+{
+	NUKE_CLASS_NOCREATE(Destruct, Object)
+public:
+	[[nuke::func]] static bool Shatter(Atom* a);   // false = no debris data on the material
+	[[nuke::func]] static bool CanShatter(Atom* a);
 };
 
 }  // namespace nuke

@@ -107,6 +107,7 @@ Material* Material::Clone() const
 	m->liveFirePrefab = liveFirePrefab;
 	m->liveDebrisPrefab = liveDebrisPrefab;
 	m->liveDebrisCount = liveDebrisCount;
+	m->liveInsideMat = liveInsideMat;
 	m->Resolve();          // bind diff/norm/spec/mr/ao/em/shader pointers from ResDB
 	m->PushRenderProps();  // static UV/cutout/wipe state reaches previews and non-world users too
 	return m;
@@ -118,7 +119,7 @@ bool Material::HasLive() const
 	    || !liveMasks.empty() || !liveEvents.empty()
 	    || !liveSound.footsteps.empty() || !liveSound.ambientGuid.empty() || !liveSound.windGuid.empty()
 	    || !liveSurface.heightGuid.empty() || liveSurface.dispScale != 0.0f || liveSurface.varAmount != 0.0f
-	    || liveFriction >= 0.0f || liveBounce >= 0.0f || liveIgnite >= 0.0f;
+	    || liveFriction >= 0.0f || liveBounce >= 0.0f || liveIgnite >= 0.0f || !liveDebrisPrefab.empty() || !liveInsideMat.empty();
 }
 
 // ---- Substance-style separate map baking ---------------------------------------------------
@@ -866,10 +867,14 @@ bool Material::SaveToFile(const std::string& path) const
 			l["ignite"] = liveIgnite;
 			l["burnTime"] = liveBurn;
 			l["spreadR"] = liveSpread;
-			if (!liveFirePrefab.empty())   l["firePrefab"] = liveFirePrefab;
-			if (!liveDebrisPrefab.empty()) l["debris"] = liveDebrisPrefab;
+			if (!liveFirePrefab.empty()) l["firePrefab"] = liveFirePrefab;
+		}
+		if (!liveDebrisPrefab.empty())
+		{
+			l["debris"] = liveDebrisPrefab;
 			l["debrisCount"] = liveDebrisCount;
 		}
+		if (!liveInsideMat.empty()) l["insideMat"] = liveInsideMat;
 		j["live"] = l;
 	}
 	boost::filesystem::path p(path);
@@ -1159,6 +1164,7 @@ Material* Material::LoadFromString(const std::string& text)
 		m->liveFirePrefab = l.value("firePrefab", std::string());
 		m->liveDebrisPrefab = l.value("debris", std::string());
 		m->liveDebrisCount = l.value("debrisCount", 4);
+		m->liveInsideMat = l.value("insideMat", std::string());
 	}
 	return m;
 }

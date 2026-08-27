@@ -634,6 +634,8 @@ bool NukeReflectInit() {
 		t.fields.back().tip = "Seconds burned so far";
 		t.fields.push_back(MakeField("burned", &FireState::burned, "", "Burned"));
 		t.fields.back().tip = "Burned out (charred)";
+		t.fields.push_back(MakeField("ignitePos", &FireState::ignitePos));
+		t.fields.back().hidden = true;
 		t.fields.push_back(MakeField("fx", &FireState::fx));
 		t.fields.back().hidden = true;
 		t.create = []() -> void* { return new FireState(); };
@@ -643,6 +645,8 @@ bool NukeReflectInit() {
 		t.base = "Object";
 		t.methods.push_back(MakeMethod("Ignite", &Fire::Ignite));
 		Reflect_SetMethodDoc("Fire", "Ignite", "", "a");
+		t.methods.push_back(MakeMethod("IgnitePoint", &Fire::IgnitePoint));
+		Reflect_SetMethodDoc("Fire", "IgnitePoint", "", "a,worldPos");
 		t.methods.push_back(MakeMethod("IgniteAt", &Fire::IgniteAt));
 		Reflect_SetMethodDoc("Fire", "IgniteAt", "", "pos,radius");
 		t.methods.push_back(MakeMethod("Extinguish", &Fire::Extinguish));
@@ -657,6 +661,14 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("Enabled", &Fire::Enabled));
 		t.methods.push_back(MakeMethod("SetMaxFires", &Fire::SetMaxFires));
 		Reflect_SetMethodDoc("Fire", "SetMaxFires", "", "n");
+	}
+	{
+		TypeInfo& t = TypeOf<Destruct>();
+		t.base = "Object";
+		t.methods.push_back(MakeMethod("Shatter", &Destruct::Shatter));
+		Reflect_SetMethodDoc("Destruct", "Shatter", "", "a");
+		t.methods.push_back(MakeMethod("CanShatter", &Destruct::CanShatter));
+		Reflect_SetMethodDoc("Destruct", "CanShatter", "", "a");
 	}
 	{
 		TypeInfo& t = TypeOf<Foliage>();
@@ -1179,6 +1191,8 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("GetMode", &Ragdoll::GetMode));
 		t.methods.push_back(MakeMethod("Impulse", &Ragdoll::Impulse));
 		Reflect_SetMethodDoc("Ragdoll", "Impulse", "", "bone,worldImpulse");
+		t.methods.push_back(MakeMethod("DetachBone", &Ragdoll::DetachBone));
+		Reflect_SetMethodDoc("Ragdoll", "DetachBone", "Severs the joint tying `bone` to its parent — the limb subtree swings free (the skin keeps stretching until the game hides/splits its mesh). \"ragdoll.detach\" on the bus.", "bone");
 		t.create = []() -> void* { return new Ragdoll(); };
 	}
 	{
