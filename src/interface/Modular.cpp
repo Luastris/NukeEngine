@@ -1,6 +1,10 @@
 // Must precede any boost header: the lib flavor of chrono double-defines steady_clock::now (LNK2005).
 #define BOOST_CHRONO_HEADER_ONLY
 #include "interface/Modular.h"
+#include "interface/Importers.h"      // PurgeModuleRegistrations sweeps these registries
+#include "interface/AssetCreators.h"
+#include "interface/AtomCreators.h"
+#include "interface/EditorHooks.h"
 #include "interface/NukeVersion.h"
 #include "interface/Services.h"
 #include "config.h"              // writableDir/baseDir: no dir creation beside installed bundles
@@ -40,6 +44,7 @@ std::vector<std::string> RefusedModules()
 // Single instance, owned by the engine DLL.
 static bc::vector<std::shared_ptr<NUKEModule>> g_modules;
 static AppInstance* g_instance = nullptr;   // host, captured at discovery (for EnablePlugin)
+static std::string g_registering;           // module whose OnLoad() runs right now ("" outside)
 static std::map<std::string, std::string> g_typePlugin;   // component type -> owning dll name
 static std::map<const NUKEModule*, int> g_moduleAbi;      // per-DLL ABI stamp (see NUKEEInteface.h)
 // Worker threads the loader started for modules, tagged with the owning DLL and the OS thread
@@ -1015,7 +1020,11 @@ void EnablePlugin(NUKEModule* m)
 	std::set<std::string> before;
 	for (TypeInfo* t : Registry_All()) before.insert(t->name);
 	// Shielded: OnLoad runs foreign code, and the ABI stamp cannot see a Debug/Release mismatch.
-	if (!SehOnLoad(m))
+	// While it runs, the editor registries stamp new entries with this module (purged on disable).
+	g_registering = m->moduleFile;
+	const bool onLoadOk = SehOnLoad(m);
+	g_registering.clear();
+	if (!onLoadOk)
 	{
 		cout << "[Modular]\t" << m->moduleFile << " REFUSED: crashed in OnLoad — stale or built "
 		     << "for another engine build/configuration; rebuild it "
@@ -1103,6 +1112,10 @@ void DisablePlugin(NUKEModule* m)
 	for (const auto& tp : g_typePlugin)
 		if (tp.second == m->moduleFile)
 			Registry_ResetType(Registry_Find(tp.first));
+
+	// Everything the module registered into the editor surfaces (import formats, asset
+	// creators/icons/editors, atom creators, editor hooks) leaves the UI with it.
+	PurgeModuleRegistrations(m->moduleFile);
 
 	m->loaded = false;
 	cout << "[Modular]\tdisabled '" << m->title << "'" << endl;
@@ -1278,6 +1291,17 @@ void UnloadModules()
 		if (m) new std::shared_ptr<NUKEModule>(m);   // deliberate: outlives us by design
 	}
 	fprintf(stderr, "[Unload]\tdone\n"); fflush(stderr);
+}
+
+const std::string& RegisteringModule() { return g_registering; }
+
+void PurgeModuleRegistrations(const std::string& moduleDll)
+{
+	if (moduleDll.empty()) return;
+	UnregisterImportersOf(moduleDll);
+	UnregisterAssetCreatorsOf(moduleDll);
+	UnregisterAtomCreatorsOf(moduleDll);
+	UnregisterEditorHooksOf(moduleDll);
 }
 
 void LoadBuiltinShaders(iRender* render, const std::string& dir)

@@ -28,6 +28,18 @@ NUKEENGINE_API AnimClip* RetargetClip(const AnimClip* src, const Skeleton* from,
 NUKEENGINE_API AnimClip* RetargetCached(AnimClip* src, const Skeleton* to,
                                         const BoneMap* renames = nullptr);
 
+// LOOSE-clip adoption: bind a skeleton-less clip (collapsed-pivot animation packs) to the
+// registered skeleton covering its channel names (>= 90% match, real bind poses only).
+// Mutates clip->skelGuid in place; safe to call every bind (no-op once adopted).
+NUKEENGINE_API void AdoptLooseClipSkeleton(AnimClip* clip);
+
+// LOOSE clip (no source skeleton) through the CANONICAL HUB: `renames` maps its channel
+// names to canonical, then the canonical rig chain-retargets onto `to`. For targets whose
+// bones are NOT canonically named (VRM/VRoid) — plain renaming can never bind there.
+// Cached like RetargetCached; returns `src` when the route does not apply.
+NUKEENGINE_API AnimClip* RetargetLooseCached(AnimClip* src, const Skeleton* to,
+                                             const BoneMap* renames);
+
 // Script/editor face: bake a foreign clip onto a target skeleton as a .nuanim ASSET.
 class NUKEENGINE_API Retargeter
 {

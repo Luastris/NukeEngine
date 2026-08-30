@@ -1,3 +1,4 @@
+#include "API/Model/Physics.h"
 #include "API/Model/Camera.h"
 #include "API/Model/Layers.h"
 #include "API/Model/Atom.h"
@@ -311,7 +312,7 @@ void Camera::ComposeView(Vector3& pos, Vector3& fwd, Vector3& up)
 		{
 			// Swept SPHERE, not a ray: a thin ray slips past anything a boomRadius-wide camera
 			// would clip through.
-			iPhysics* ph = GetService<iPhysics>();
+			iPhysics* ph = Physics::Scene();
 			Collider* own = atom ? atom->GetComponent<Collider>() : nullptr;
 			if (ph)
 			{

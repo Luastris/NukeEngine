@@ -283,6 +283,14 @@ public:
     float iridescence = 0.0f;
     [[nuke::prop(label="Iridescence Thickness", min=0, max=1, tip="Film thickness sweep - shifts the rainbow bands")]]
     float iridescenceThickness = 0.5f;
+    // Toon shading (cel bands; anime/MToon-style avatars). The diffuse light response
+    // quantizes into a lit/shade band; the shade side tints with Toon Shade.
+    [[nuke::prop(label="Toon", min=0, max=1, tip="Cel-shading band threshold; 0 = off (plain PBR)")]]
+    float toonBand = 0.0f;
+    [[nuke::prop(label="Toon Soft", min=0, max=0.5, tip="Band edge softness")]]
+    float toonSoft = 0.05f;
+    [[nuke::prop(label="Toon Shade", tip="Tint of the unlit side of the band")]]
+    Color toonShade = Color(0.6, 0.55, 0.65, 1.0);
 
     Texture* diff = nullptr;       // runtime-resolved textures (via Resolve())
     Texture* norm = nullptr;

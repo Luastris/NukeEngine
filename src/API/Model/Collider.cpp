@@ -1,3 +1,4 @@
+#include "API/Model/Physics.h"
 #include "API/Model/Collider.h"
 #include "API/Model/Atom.h"
 #include "interface/Services.h"
@@ -18,7 +19,7 @@ void Collider::Destroy()
 {
 	if (bodyId)
 	{
-		if (iPhysics* p = GetService<iPhysics>())
+		if (iPhysics* p = Physics::Scene())
 			p->destroyBody(bodyId);
 		bodyId = 0;
 	}

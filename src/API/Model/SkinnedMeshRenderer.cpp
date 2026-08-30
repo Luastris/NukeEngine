@@ -19,7 +19,9 @@ SkinnedMeshRenderer::SkinnedMeshRenderer() : MeshRenderer("SkinnedMeshRenderer")
 void SkinnedMeshRenderer::Init(Atom* parent)
 {
 	MeshRenderer::Init(parent);   // mesh/material resolve (mesh = the bind-pose ASSET for now)
-	EnsureSkeleton();
+	// Skin the bind pose right away: a skinned mesh renders through the palette from frame
+	// one (glTF bakes verts in arbitrary per-mesh spaces — raw verts are NOT the rest pose).
+	if (EnsureSkeleton()) ApplyPose();
 }
 
 void SkinnedMeshRenderer::Destroy()
@@ -109,6 +111,7 @@ void SkinnedMeshRenderer::ReleaseInstance()
 	skinnedMesh->colorArray = nullptr;
 	delete skinnedMesh;
 	skinnedMesh = nullptr;
+	bindOverrideKey = nullptr;   // srcMesh may be swapped next EnsureInstance; addresses get reused
 	if (mesh && mesh != srcMesh) mesh = srcMesh;   // never leave the renderer on a dead instance
 }
 
@@ -144,6 +147,29 @@ void SkinnedMeshRenderer::ApplyPose()
 	if (morphWeights.size() != srcMesh->morphs.size()) morphWeights.resize(srcMesh->morphs.size(), 0.0f);
 
 	const size_t nb = sk->bones.size();
+
+	// Per-mesh inverse binds: a mesh that embeds its own bones was baked in a pose that
+	// DISAGREES with the skeleton's canonical binds — its palette must use its own invBind
+	// (matched by bone name; the skeleton's bind fills the gaps). Cached per source mesh.
+	if (!srcMesh->bones.empty() && (bindOverrideKey != srcMesh || bindOverrideBones != nb))
+	{
+		bindOverrideKey = srcMesh;
+		bindOverrideBones = nb;
+		bindOverride.resize(nb * 16);
+		for (size_t i = 0; i < nb; ++i)
+		{
+			const float* src = sk->bones[i].invBind;
+			if (i < srcMesh->bones.size() && srcMesh->bones[i].name == sk->bones[i].name)
+				src = srcMesh->bones[i].invBind;   // embedded copy mirrors the skeleton order
+			else
+				for (const MeshBone& mb : srcMesh->bones)
+					if (mb.name == sk->bones[i].name) { src = mb.invBind; break; }
+			memcpy(&bindOverride[i * 16], src, sizeof(float) * 16);
+		}
+	}
+	const float* ovr = (!srcMesh->bones.empty() && bindOverride.size() == nb * 16)
+	                 ? bindOverride.data() : nullptr;
+
 	std::vector<glm::mat4> global(nb), palette(nb);
 	for (size_t i = 0; i < nb; ++i)
 	{
@@ -158,7 +184,7 @@ void SkinnedMeshRenderer::ApplyPose()
 	for (size_t i = 0; i < nb; ++i)
 	{
 		memcpy(globals.data() + i * 16, glm::value_ptr(global[i]), sizeof(float) * 16);
-		palette[i] = global[i] * glm::make_mat4(sk->bones[i].invBind);
+		palette[i] = global[i] * glm::make_mat4(ovr ? ovr + i * 16 : sk->bones[i].invBind);
 		jointPos[i * 3 + 0] = global[i][3][0];
 		jointPos[i * 3 + 1] = global[i][3][1];
 		jointPos[i * 3 + 2] = global[i][3][2];
@@ -334,6 +360,9 @@ void SkinnedMeshRenderer::SetMorphWeight(const std::string& morph, double w)
 	if (i < 0) return;
 	if (morphWeights.size() != srcMesh->morphs.size()) morphWeights.resize(srcMesh->morphs.size(), 0.0f);
 	morphWeights[i] = (float)w;
+	// Take effect immediately: weights only reach the skin in ApplyPose, and an idle
+	// Animator (or none at all — a static character) never commits a pose.
+	ApplyPose();
 }
 
 double SkinnedMeshRenderer::MorphWeight(const std::string& morph)

@@ -91,6 +91,9 @@ void Animator::BindLayer(Layer& l) const
 {
 	l.boneMap.clear();
 	if (!l.clip || !bonesRef) return;
+	// Skeleton-less clip (animation packs): adopt the registered rig that covers its bone
+	// names, so the chain retarget below has a real source bind to work from.
+	AdoptLooseClipSkeleton(l.clip);
 	// Foreign-skeleton clip: swap in the cached chain retarget before name matching.
 	if (smr && smr->skeleton)
 		l.clip = RetargetCached(l.clip, smr->skeleton,
@@ -106,6 +109,24 @@ void Animator::BindLayer(Layer& l) const
 		if (l.boneMap[c] < 0 && want != l.clip->channels[c].bone)
 			for (size_t b = 0; b < bonesRef->size(); ++b)
 				if ((*bonesRef)[b].name == l.clip->channels[c].bone) { l.boneMap[c] = (int)b; break; }
+	}
+	// Loose clip whose bone map binds NOTHING here: the map's output is another naming
+	// scheme (canonical) — route through the canonical hub (rename + chain retarget), the
+	// only road onto rigs with non-canonical bones (VRM/VRoid).
+	bool any = false;
+	for (int b : l.boneMap) if (b >= 0) { any = true; break; }
+	if (!any && !boneMapGuid.empty() && smr && smr->skeleton && l.clip->skelGuid.empty())
+	{
+		AnimClip* hub = RetargetLooseCached(l.clip, smr->skeleton,
+		                                    ResDB::getSingleton()->GetBoneMap(boneMapGuid));
+		if (hub != l.clip)
+		{
+			l.clip = hub;   // channels now carry TARGET bone names
+			l.boneMap.assign(hub->channels.size(), -1);
+			for (size_t c = 0; c < hub->channels.size(); ++c)
+				for (size_t b = 0; b < bonesRef->size(); ++b)
+					if ((*bonesRef)[b].name == hub->channels[c].bone) { l.boneMap[c] = (int)b; break; }
+		}
 	}
 }
 
@@ -1287,6 +1308,7 @@ struct Animator::AnimGraph
 		const MeshBone& rb = (*a->bonesRef)[root];
 		glm::vec3 delta(0);
 		float yaw = 0;
+		float phase = 0;   // primary cursor's CURRENT hip twist vs clip start (see below)
 		for (const AnimCursor& cu : cursors)
 		{
 			if (!cu.clip || cu.weight <= 0.0f) continue;
@@ -1303,12 +1325,28 @@ struct Animator::AnimGraph
 			}
 			if (!C.rot.empty())
 			{
+				// Yaw as the HEADING of the bone's forward vector, accumulated telescopically:
+				// per-step twist extraction (2*atan2(dq.y, dq.w)) is NOT additive once the
+				// delta carries hip sway (pitch/roll), and the per-cycle residue slowly spins
+				// the atom — the classic "root motion drifts into an arc" (Mixamo walks).
+				// A state function telescopes to EXACTLY zero over a loop.
 				auto Q = [&](double t) { return SampleRot(C.rot, t, glm::quat(1, 0, 0, 0)); };
-				glm::quat dq;
-				if (cu.newT >= cu.prevT - 1e-9) dq = Q(cu.newT) * glm::inverse(Q(cu.prevT));
-				else dq = (Q(cu.newT) * glm::inverse(Q(0.0))) * (Q(cu.clip->duration) * glm::inverse(Q(cu.prevT)));
-				if (dq.w < 0) dq = -dq;
-				yaw += 2.0f * atan2f(dq.y, dq.w) * cu.weight;
+				auto Yaw = [&](double t)
+				{
+					const glm::vec3 f = Q(t) * glm::vec3(0, 0, 1);
+					return atan2f(f.x, f.z);
+				};
+				auto wrapPi = [](float a)
+				{
+					while (a >  3.14159265f) a -= 6.28318531f;
+					while (a < -3.14159265f) a += 6.28318531f;
+					return a;
+				};
+				float dy;
+				if (cu.newT >= cu.prevT - 1e-9) dy = wrapPi(Yaw(cu.newT) - Yaw(cu.prevT));
+				else dy = wrapPi(Yaw(cu.clip->duration) - Yaw(cu.prevT)) + wrapPi(Yaw(cu.newT) - Yaw(0.0));
+				yaw += dy * cu.weight;
+				if (cu.primary) phase = wrapPi(Yaw(cu.newT) - Yaw(0.0));
 			}
 		}
 		// bake the travel out of the pose: pin the root horizontally + strip its yaw twist
@@ -1324,12 +1362,28 @@ struct Animator::AnimGraph
 				pose[root].r = glm::inverse(twist) * pose[root].r;
 			}
 		}
-		// move the atom by the extracted travel (world space)
+		static const bool dbgRM = std::getenv("NUKE_DBG_RM") != nullptr;
+		if (dbgRM)
+		{
+			static float accYaw = 0.0f; static glm::vec3 accD(0); static int n = 0;
+			accYaw += yaw; accD += delta;
+			if (++n % 120 == 0)
+				std::cout << "[RMdbg]\taccYaw=" << glm::degrees(accYaw) << " deg  accDelta=("
+				          << accD.x << "," << accD.y << "," << accD.z << ")" << std::endl;
+		}
+		// move the atom by the extracted travel (world space). The POSITION delta is authored
+		// in CLIP space — it already contains the body's swings — so it rotates by the atom's
+		// BASE heading, not the instantaneous one: the hip twist currently baked into the atom
+		// (`phase`) is taken back out first. Rotating by the momentary heading correlates the
+		// sway phase with the step speed and walks the character off axis in a slow drift
+		// (the classic Mixamo root-motion arc). Real turn clips keep working: their heading
+		// change lives in the position keys AND in phase, which cancel exactly.
 		Vector3 gp = a->transform->globalPosition();
 		Quaternion gq = a->transform->globalRotation();
 		Vector3 gs = a->transform->globalScale();
 		const glm::quat gr((float)gq.w, (float)gq.x, (float)gq.y, (float)gq.z);
-		const glm::vec3 wd = gr * glm::vec3(delta.x * (float)gs.x, delta.y * (float)gs.y, delta.z * (float)gs.z);
+		const glm::quat base = gr * glm::angleAxis(-phase, glm::vec3(0, 1, 0));
+		const glm::vec3 wd = base * glm::vec3(delta.x * (float)gs.x, delta.y * (float)gs.y, delta.z * (float)gs.z);
 		const glm::quat nr = gr * glm::angleAxis(yaw, glm::vec3(0, 1, 0));
 		a->transform->SetGlobal(Vector3(gp.x + wd.x, gp.y + wd.y, gp.z + wd.z),
 		                        Quaternion(nr.x, nr.y, nr.z, nr.w), gs);
@@ -1422,6 +1476,109 @@ struct Animator::AnimGraph
 			}
 		}
 
+		// LIMB FIT: a clip authored on other proportions buries the hands in a thicker body's
+		// hips/chest. A hand penetrating the atom's ragdoll capsules becomes a ONE-FRAME
+		// chain-IK goal (pushed to the capsule surface; solved right below with everything
+		// else, elbows follow); chains the game already aims (SetChainIK) are left alone.
+		// Continuous by construction: at zero penetration the goal equals the animated pose.
+		std::vector<std::string> fitGoals;
+		if (a->fitLimbs && a->atom && a->smr && a->smr->skeleton && nb > 0)
+		{
+			Skeleton* sk = a->smr->skeleton;
+			RagdollDef* def = nullptr;
+			if (Ragdoll* rd = a->atom->GetComponent<Ragdoll>()) def = rd->Def();
+			if (!def)
+				for (RagdollDef* rg : ResDB::getSingleton()->ragdolls)
+					if (rg && rg->skelGuid == sk->guid) { def = rg; break; }
+			static const char* kArms[2] = { "LeftArm", "RightArm" };
+			if (def)
+			{
+				std::map<std::string, int> nameIdx;
+				for (size_t i = 0; i < nb; ++i) nameIdx[bones[i].name] = (int)i;
+				glm::mat4 model;
+				{
+					Vector3 gp = a->transform->globalPosition();
+					Quaternion gq = a->transform->globalRotation();
+					Vector3 gs = a->transform->globalScale();
+					model = glm::translate(glm::mat4(1.0f), glm::vec3((float)gp.x, (float)gp.y, (float)gp.z))
+					      * glm::mat4_cast(glm::quat((float)gq.w, (float)gq.x, (float)gq.y, (float)gq.z))
+					      * glm::scale(glm::mat4(1.0f), glm::vec3((float)gs.x, (float)gs.y, (float)gs.z));
+				}
+				for (const char* arm : kArms)
+				{
+					if (a->ikGoals.count(arm)) continue;
+					std::vector<int> fullChain;
+					if (!ResolveRigChain(a, arm, fullChain) || fullChain.size() < 3) continue;
+					const int tip = fullChain.back();
+					// Solve over the LAST 3 joints only (upper arm -> forearm -> hand): a chain
+					// that includes the clavicle lets FABRIK throw the whole shoulder around.
+					std::vector<int> chain(fullChain.end() - 3, fullChain.end());
+					const glm::vec3 wrist = glm::vec3(global[tip][3]);
+					// The hand extends well past the wrist joint: probe the wrist, the palm and
+					// the knuckles (toward the hand's first child — a finger root), so a palm
+					// buried in the hip registers even when the wrist point is still outside.
+					glm::vec3 knuckle = wrist;
+					for (size_t i = 0; i < nb; ++i)
+						if (bones[i].parent == tip) { knuckle = glm::vec3(global[i][3]); break; }
+					const glm::vec3 probes[3] = { wrist, (wrist + knuckle) * 0.5f, knuckle };
+					// hand thickness: the .nurag capsule on the hand bone when there is one
+					float handR = 0.04f;
+					for (const RagdollDef::Body& bd : def->bodies)
+						if (bd.bone == bones[tip].name) { handR = bd.radius; break; }
+					float bestPen = 0.0f;
+					glm::vec3 bestDir(0.0f);
+					for (const RagdollDef::Body& bd : def->bodies)
+					{
+						auto bi = nameIdx.find(bd.bone);
+						if (bi == nameIdx.end()) continue;
+						const int b = bi->second;
+						bool onArm = false;
+						for (int ci : fullChain) if (ci == b) { onArm = true; break; }
+						for (int j = b; j >= 0 && !onArm; j = bones[j].parent)
+							if (j == tip) onArm = true;   // fingers ride the hand
+						if (onArm) continue;
+						const glm::vec3 c = glm::make_vec3(bd.center);
+						const glm::vec3 ax = glm::make_vec3(bd.axis) * bd.halfHeight;
+						const glm::vec3 pa = glm::vec3(global[b] * glm::vec4(c - ax, 1.0f));
+						const glm::vec3 pb = glm::vec3(global[b] * glm::vec4(c + ax, 1.0f));
+						const glm::vec3 ab = pb - pa;
+						const float dd = glm::dot(ab, ab);
+						for (const glm::vec3& hp : probes)
+						{
+							const float tt = dd > 1e-12f ? glm::clamp(glm::dot(hp - pa, ab) / dd, 0.0f, 1.0f) : 0.0f;
+							const glm::vec3 q = pa + ab * tt;
+							const glm::vec3 d = hp - q;
+							const float l = glm::length(d);
+							const float pen = bd.radius + handR - l;
+							if (pen > bestPen && l > 1e-4f)
+							{
+								bestPen = pen;
+								bestDir = d / l;
+							}
+						}
+					}
+					if (bestPen > 0.004f)
+					{
+						// Translate the hand along the exit vector — never teleport the wrist
+						// onto a capsule surface (a palm-deep hit would fling the whole arm).
+						const glm::vec3 out = wrist + bestDir * (bestPen + 0.005f);
+						const glm::vec3 w = glm::vec3(model * glm::vec4(out, 1.0f));
+						Animator::IKGoal g;
+						g.target[0] = w.x; g.target[1] = w.y; g.target[2] = w.z;
+						g.isChain = true;
+						g.weight = glm::clamp(bestPen / 0.03f, 0.0f, 1.0f);   // ease in, no snap
+						g.fitChain = chain;   // pre-resolved: solve THESE joints, not the rig chain
+						a->ikGoals[arm] = g;
+						fitGoals.push_back(arm);
+						static const bool dbg = std::getenv("NUKE_LIMBFIT_DEBUG") != nullptr;
+						if (dbg)
+							std::cout << "[LimbFit]\t" << arm << " pen=" << bestPen
+							          << " w=" << g.weight << std::endl;
+					}
+				}
+			}
+		}
+
 		const bool wantIK   = !a->ikGoals.empty();
 		const bool wantLook = a->graph && !a->graph->lookAts.empty();
 		glm::mat4 invModel(1.0f);
@@ -1443,7 +1600,9 @@ struct Animator::AnimGraph
 			for (const auto& goal : a->ikGoals)
 			{
 				std::vector<int> chain;
-				if (goal.second.isChain)
+				if (!goal.second.fitChain.empty())
+					chain = goal.second.fitChain;   // limb fit: solve the pre-resolved sub-chain
+				else if (goal.second.isChain)
 				{
 					// named chain from the skeleton's IK rig (root -> tip)
 					if (!ResolveRigChain(a, goal.first, chain)) continue;
@@ -1590,6 +1749,7 @@ struct Animator::AnimGraph
 			}
 			if (touched) forwardPass();
 		}
+		for (const std::string& n : fitGoals) a->ikGoals.erase(n);   // limb-fit goals live one frame
 
 		// Look-at: spread the turn along the weighted chain (weights grow toward the tip),
 		// capped at maxAngle. Runs AFTER the reach IK so aims win over reaches on shared bones.
@@ -1650,20 +1810,23 @@ struct Animator::AnimGraph
 			std::vector<SpringPose> sp;
 			const Skeleton* sk = nullptr;
 			for (SkinnedMeshRenderer* s2 : a->smrs) if (s2 && s2->skeleton) { sk = s2->skeleton; break; }
+			std::vector<SpringBones*> springs;
+			bool wantCaps = false;
 			for (Component* c : a->atom->components)
-			{
-				if (!c || !c->enabled || std::strcmp(c->name, "SpringBones") != 0) continue;
-				SpringBones* sb = (SpringBones*)c;
-				if (sp.empty())
+				if (c && c->enabled && std::strcmp(c->name, "SpringBones") == 0)
 				{
-					sp.resize(nb);
-					for (size_t i = 0; i < nb; ++i)
-					{
-						sp[i].p[0] = pose[i].p.x; sp[i].p[1] = pose[i].p.y; sp[i].p[2] = pose[i].p.z;
-						sp[i].s[0] = pose[i].s.x; sp[i].s[1] = pose[i].s.y; sp[i].s[2] = pose[i].s.z;
-						sp[i].r[0] = pose[i].r.x; sp[i].r[1] = pose[i].r.y;
-						sp[i].r[2] = pose[i].r.z; sp[i].r[3] = pose[i].r.w;
-					}
+					springs.push_back((SpringBones*)c);
+					wantCaps = wantCaps || ((SpringBones*)c)->collision;
+				}
+			if (!springs.empty())
+			{
+				sp.resize(nb);
+				for (size_t i = 0; i < nb; ++i)
+				{
+					sp[i].p[0] = pose[i].p.x; sp[i].p[1] = pose[i].p.y; sp[i].p[2] = pose[i].p.z;
+					sp[i].s[0] = pose[i].s.x; sp[i].s[1] = pose[i].s.y; sp[i].s[2] = pose[i].s.z;
+					sp[i].r[0] = pose[i].r.x; sp[i].r[1] = pose[i].r.y;
+					sp[i].r[2] = pose[i].r.z; sp[i].r[3] = pose[i].r.w;
 				}
 				float M[16];
 				{
@@ -1675,8 +1838,16 @@ struct Animator::AnimGraph
 					                * glm::scale(glm::mat4(1.0f), glm::vec3((float)gs.x, (float)gs.y, (float)gs.z));
 					memcpy(M, &model[0][0], sizeof(M));
 				}
-				sprung |= sb->Apply(bones, sk, sp.data(), (int)nb, M, a->atom,
-				                    Time::getSingleton()->delta);
+				// ONE shared context for the whole group per commit — per-chain forward passes
+				// and capsule rebuilds made many-chain rigs (a VRM with 50 hair strands) crawl.
+				SpringSolveCtx ctx;
+				SpringBones::BuildSolveCtx(bones, sk, sp.data(), (int)nb, M, a->atom, wantCaps, ctx);
+				for (SpringBones* sb : springs)
+				{
+					sprung |= sb->Apply(bones, sk, sp.data(), (int)nb, M, a->atom,
+					                    Time::getSingleton()->delta, &ctx);
+					sb->lastSolveByAnim = true;   // the committing Animator owns the solve (Update defers)
+				}
 			}
 			if (sprung)
 			{
@@ -2079,12 +2250,46 @@ void Animator::Update()
 	{
 		started = true;
 		EnsureSM();
+		appliedClipGuid = clipGuid; appliedBoneMapGuid = boneMapGuid; appliedSmGuid = smGuid;
+		appliedLoop = loop; appliedSpeed = speed;
 		if (playOnStart)
 		{
 			if (!smGuid.empty()) playing = true;
 			else if (!entryState.empty() && states.count(entryState)) SetState(entryState);
 			else if (!clipGuid.empty())
 				StartClip(ResolveClip(clipGuid), loop, speed, 0.0);
+		}
+	}
+	else
+	{
+		// LIVE reflected props: writes to the fields (inspector, sync edit, scripts) apply
+		// immediately — before, they were read ONCE at auto-start and tweaking a running
+		// Animator silently did nothing.
+		if (smGuid != appliedSmGuid)
+		{
+			appliedSmGuid = smGuid;
+			if (!smGuid.empty()) playing = true;   // EnsureController rebinds to the new asset itself
+		}
+		if (smGuid.empty())
+		{
+			if (clipGuid != appliedClipGuid)
+			{
+				appliedClipGuid = clipGuid;
+				if (!clipGuid.empty())
+				{
+					EnsureTargets();
+					StartClip(ResolveClip(clipGuid), loop, speed, 0.15);
+				}
+				else { playing = false; cur = Layer(); prev = Layer(); }
+			}
+			if (loop  != appliedLoop)  { appliedLoop = loop;   cur.loop = loop; }
+			if (speed != appliedSpeed) { appliedSpeed = speed; cur.speed = speed; }
+		}
+		if (boneMapGuid != appliedBoneMapGuid)
+		{
+			appliedBoneMapGuid = boneMapGuid;
+			BindLayer(cur);
+			BindLayer(prev);   // re-resolve the active layers under the new map
 		}
 	}
 
@@ -2156,6 +2361,8 @@ void Animator::Update()
 			graph->CommitPose(this, pose);
 		}
 	}
+	// (idle: no pose commit — spring chains self-drive from SpringBones::Update, they are
+	// physics and never depended on a playing clip)
 
 	// v3 clip extras: legacy events + typed notifies + float curves + prop tracks.
 	graph->EvalExtras(this, cursors, fired, dt);
@@ -2238,6 +2445,7 @@ void Animator::MatchTo(const std::string& clipRef, double time, double blend)
 	AnimClip* c = ResolveClip(clipRef);
 	if (!c) return;
 	EnsureTargets();
+	AdoptLooseClipSkeleton(c);
 	if (smr && smr->skeleton)
 		c = RetargetCached(c, smr->skeleton,
 		                   boneMapGuid.empty() ? nullptr : ResDB::getSingleton()->GetBoneMap(boneMapGuid));

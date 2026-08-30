@@ -26,3 +26,5 @@ float4 g_MskA5; float4 g_MskB5; float4 g_MskC5;
 // Last hit that fired a material event: (impulse, hit normal xyz) — custom shaders react
 // to touches (water drops etc.) by reading this next to the mask weights.
 float4 g_Hit;
+// Toon cel band: g_Toon = (band threshold, edge softness, 0, on) and the shade-side tint.
+float4 g_Toon; float4 g_ToonShade;

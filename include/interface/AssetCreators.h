@@ -30,6 +30,8 @@ NUKEENGINE_API void RegisterAssetCreator(const std::string& label, const std::st
                                          const std::string& baseName, const std::string& content);
 NUKEENGINE_API void RegisterAssetCreator(const AssetCreator& desc);
 NUKEENGINE_API const std::vector<AssetCreator>& AssetCreators();
+// Purge a module's creators, file icons and asset editors (Modular.h PurgeModuleRegistrations).
+NUKEENGINE_API void UnregisterAssetCreatorsOf(const std::string& moduleDll);
 
 // The registered descriptor for a file extension (case-insensitive), or null.
 NUKEENGINE_API const AssetCreator* AssetCreatorForExt(const std::string& ext);

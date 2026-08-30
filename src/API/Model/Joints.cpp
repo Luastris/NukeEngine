@@ -1,4 +1,5 @@
 // Physics joint components: thin drivers over the iPhysics constraint seam (see Joints.h).
+#include "API/Model/Physics.h"
 #include "API/Model/Joints.h"
 #include "API/Model/Atom.h"
 #include "API/Model/Collider.h"
@@ -39,7 +40,7 @@ Transform* JointBase::AnchorT()
 
 void JointBase::TryAttach()
 {
-	iPhysics* ph = GetService<iPhysics>();
+	iPhysics* ph = Physics::Scene();
 	if (!ph) return;
 	Collider* own = atom->GetComponent<Collider>();
 	if (!own || !own->bodyId) return;
@@ -74,7 +75,7 @@ void JointBase::TryAttach()
 void JointBase::Detach()
 {
 	if (!handle) return;
-	if (iPhysics* ph = GetService<iPhysics>()) ph->destroyJoint(handle);
+	if (iPhysics* ph = Physics::Scene()) ph->destroyJoint(handle);
 	handle = 0;
 }
 
@@ -94,7 +95,7 @@ void JointBase::FixedUpdate()
 	if (!atom || !Game::IsPlaying()) return;
 	if (broken) return;
 	if (!handle) { TryAttach(); return; }
-	iPhysics* ph = GetService<iPhysics>();
+	iPhysics* ph = Physics::Scene();
 	if (!ph) return;
 	ApplyMotor();
 	if (breakForce > 0.0f)
@@ -139,7 +140,7 @@ void HingeJoint::FillDesc(NukeConstraintDesc& d)
 void HingeJoint::ApplyMotor()
 {
 	if (motor == motorApplied && motorTarget == motorTargetApplied && motorMax == motorMaxApplied) return;
-	iPhysics* ph = GetService<iPhysics>();
+	iPhysics* ph = Physics::Scene();
 	if (!ph || !handle) return;
 	ph->setConstraintMotor(handle, motor, motorTarget * kDeg2Rad, motorMax);
 	motorApplied = motor; motorTargetApplied = motorTarget; motorMaxApplied = motorMax;
@@ -156,7 +157,7 @@ void SliderJoint::FillDesc(NukeConstraintDesc& d)
 void SliderJoint::ApplyMotor()
 {
 	if (motor == motorApplied && motorTarget == motorTargetApplied && motorMax == motorMaxApplied) return;
-	iPhysics* ph = GetService<iPhysics>();
+	iPhysics* ph = Physics::Scene();
 	if (!ph || !handle) return;
 	ph->setConstraintMotor(handle, motor, motorTarget, motorMax);
 	motorApplied = motor; motorTargetApplied = motorTarget; motorMaxApplied = motorMax;

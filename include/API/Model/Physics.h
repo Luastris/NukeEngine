@@ -84,6 +84,26 @@ public:
 	// instead of destroying recycled ids.
 	static uint32_t ResetEpoch();
 	static void     BumpResetEpoch();
+
+	// SCENE ROUTING. Engine physics code resolves the scene through Scene() — normally the
+	// iPhysics service — so an editor preview can route everything a subtree does (body
+	// create/destroy, stepping, queries) into a PRIVATE sandbox (iPhysics::createScene):
+	// wrap every touchpoint in Push/Pop. Thread-local: the game's fixed thread never sees
+	// an editor-thread override.
+	static class iPhysics* Scene();
+	static void PushScene(class iPhysics* s);
+	static void PopScene();
+};
+
+// RAII Push/Pop for a scene override; null = no-op (plain service resolution stays).
+struct PhysicsSceneScope
+{
+	explicit PhysicsSceneScope(class iPhysics* s) : on(s != nullptr) { if (on) Physics::PushScene(s); }
+	~PhysicsSceneScope() { if (on) Physics::PopScene(); }
+	PhysicsSceneScope(const PhysicsSceneScope&) = delete;
+	PhysicsSceneScope& operator=(const PhysicsSceneScope&) = delete;
+private:
+	bool on;
 };
 
 }  // namespace nuke

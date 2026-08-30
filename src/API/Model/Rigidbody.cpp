@@ -1,3 +1,4 @@
+#include "API/Model/Physics.h"
 #include "API/Model/Rigidbody.h"
 #include "API/Model/Collider.h"
 #include "API/Model/Atom.h"
@@ -25,7 +26,7 @@ static uint64_t SiblingBody(Atom* atom)
 
 void Rigidbody::AddForce(const Vector3& force)
 {
-	iPhysics* p = GetService<iPhysics>();
+	iPhysics* p = Physics::Scene();
 	uint64_t b = SiblingBody(atom);
 	if (!p || !b) return;
 	float f[3] = { (float)force.x, (float)force.y, (float)force.z };
@@ -34,7 +35,7 @@ void Rigidbody::AddForce(const Vector3& force)
 
 void Rigidbody::AddImpulse(const Vector3& impulse)
 {
-	iPhysics* p = GetService<iPhysics>();
+	iPhysics* p = Physics::Scene();
 	uint64_t b = SiblingBody(atom);
 	if (!p || !b) return;
 	float i[3] = { (float)impulse.x, (float)impulse.y, (float)impulse.z };
@@ -43,7 +44,7 @@ void Rigidbody::AddImpulse(const Vector3& impulse)
 
 void Rigidbody::SetVelocity(const Vector3& v)
 {
-	iPhysics* p = GetService<iPhysics>();
+	iPhysics* p = Physics::Scene();
 	uint64_t b = SiblingBody(atom);
 	if (!p || !b) return;
 	float vel[3] = { (float)v.x, (float)v.y, (float)v.z };
@@ -52,7 +53,7 @@ void Rigidbody::SetVelocity(const Vector3& v)
 
 Vector3 Rigidbody::Velocity()
 {
-	iPhysics* p = GetService<iPhysics>();
+	iPhysics* p = Physics::Scene();
 	uint64_t b = SiblingBody(atom);
 	if (!p || !b) return Vector3(0, 0, 0);
 	float vel[3];
@@ -62,7 +63,7 @@ Vector3 Rigidbody::Velocity()
 
 void Rigidbody::SetAngularVelocity(const Vector3& v)
 {
-	iPhysics* p = GetService<iPhysics>();
+	iPhysics* p = Physics::Scene();
 	uint64_t b = SiblingBody(atom);
 	if (!p || !b) return;
 	float vel[3] = { (float)v.x, (float)v.y, (float)v.z };
@@ -71,7 +72,7 @@ void Rigidbody::SetAngularVelocity(const Vector3& v)
 
 Vector3 Rigidbody::AngularVelocity()
 {
-	iPhysics* p = GetService<iPhysics>();
+	iPhysics* p = Physics::Scene();
 	uint64_t b = SiblingBody(atom);
 	if (!p || !b) return Vector3(0, 0, 0);
 	float vel[3];

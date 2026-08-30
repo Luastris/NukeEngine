@@ -936,7 +936,7 @@ void World::FixedUpdate()
 	// ONE fixed step; the cadence lives in AppInstance::FixedThread, so this must not know
 	// about frames or accumulate time. World phases hold the game lock, the solve does not.
 	const float dt = settings.fixedDt > 0.0001f ? settings.fixedDt : 1.0f / 60.0f;
-	iPhysics* p = GetService<iPhysics>();
+	iPhysics* p = Physics::Scene();
 	std::map<uint64_t, Collider*> bodyMap;   // this step's live bodies, for contact dispatch
 
 	if (p)
@@ -3844,7 +3844,7 @@ void World::LoadHeaderFromJson(const json& j)
 	// module-owned resources (e.g. std::functions whose code lives in a module DLL) alive past
 	// the DLL. The lock keeps the fixed thread off a hierarchy that is being torn down.
 	boost::recursive_mutex::scoped_lock fixedGuard(gameLock);
-	if (iPhysics* p = GetService<iPhysics>()) { p->reset(); Physics::BumpResetEpoch(); }
+	if (iPhysics* p = Physics::Scene()) { p->reset(); Physics::BumpResetEpoch(); }
 	if (iAudio* au = GetService<iAudio>()) au->reset();   // silence game voices
 	AppInstance::GetSingleton()->selectedInHieararchy = nullptr;   // would dangle otherwise
 	AppInstance::GetSingleton()->selectedExtra.clear();
@@ -3902,7 +3902,7 @@ void World::FinalizeIncrementalLoad()
 void World::Clear()
 {
 	boost::recursive_mutex::scoped_lock fixedGuard(gameLock);   // don't tear down under the fixed thread
-	if (iPhysics* p = GetService<iPhysics>()) { p->reset(); Physics::BumpResetEpoch(); }   // atoms drop without Destroy: wipe bodies
+	if (iPhysics* p = Physics::Scene()) { p->reset(); Physics::BumpResetEpoch(); }   // atoms drop without Destroy: wipe bodies
 	if (iAudio* au = GetService<iAudio>()) au->reset();     // and their voices
 	Surface::ForgetWorld(this);   // ...and the foliage/sound growth records (components die with atoms)
 	for (auto it = hierarchy->begin(); it != hierarchy->end(); )   // keep editor camera

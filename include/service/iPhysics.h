@@ -301,6 +301,14 @@ public:
 	// unlike shapeCast this returns the travel distance, not the contact point. False = clear.
 	virtual bool sphereCastDist(float radius, const float from[3], const float dir[3],
 	                            float maxDist, uint64_t ignoreBody, float& outDist) = 0;
+
+	// ---- isolated scenes — ABI 35: appended at the END --------------------------------------
+	// A PRIVATE physics scene: its own world, bodies and step cadence, fully independent of
+	// this one (the editor's prefab preview simulates without touching the game scene). The
+	// returned object is a complete iPhysics; call init() before use and hand it back to
+	// destroyScene when done — the creator owns it.
+	virtual iPhysics* createScene() = 0;
+	virtual void      destroyScene(iPhysics* s) = 0;
 };
 
 }  // namespace nuke

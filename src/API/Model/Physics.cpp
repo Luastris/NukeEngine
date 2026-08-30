@@ -50,6 +50,16 @@ static uint32_t g_resetEpoch = 0;
 uint32_t Physics::ResetEpoch()     { return g_resetEpoch; }
 void     Physics::BumpResetEpoch() { ++g_resetEpoch; g_extBody.clear(); }   // every body is gone with the scene
 
+// Thread-local scene override stack (see Physics.h): empty = the iPhysics service.
+static thread_local std::vector<iPhysics*> tl_sceneStack;
+iPhysics* Physics::Scene()
+{
+	if (!tl_sceneStack.empty()) return tl_sceneStack.back();
+	return GetService<iPhysics>();
+}
+void Physics::PushScene(iPhysics* s) { tl_sceneStack.push_back(s); }
+void Physics::PopScene()             { if (!tl_sceneStack.empty()) tl_sceneStack.pop_back(); }
+
 static Atom* FindAtomById(bc::list<Atom*>& gos, unsigned long id)
 {
 	for (Atom* atom : gos)
@@ -79,13 +89,13 @@ Atom* Physics::ExternalBodyAtom(uint64_t body)
 	return w ? FindAtomById(w->GetHierarchy(), it->second) : nullptr;
 }
 
-bool Physics::Available() { return GetService<iPhysics>() != nullptr; }
+bool Physics::Available() { return Physics::Scene() != nullptr; }
 
 bool Physics::Raycast(const Vector3& from, const Vector3& dir, double maxDist)
 {
 	tl_lastHit = RayHit{};
 	tl_uvDone = false; tl_uv = Vector2();
-	iPhysics* p = GetService<iPhysics>();
+	iPhysics* p = Physics::Scene();
 	World* w = AppInstance::GetSingleton()->currentWorld;
 	if (!p || !w) return false;
 
@@ -118,7 +128,7 @@ bool Physics::RaycastIgnore(const Vector3& from, const Vector3& dir, double maxD
 {
 	tl_lastHit = RayHit{};
 	tl_uvDone = false; tl_uv = Vector2();
-	iPhysics* p = GetService<iPhysics>();
+	iPhysics* p = Physics::Scene();
 	World* w = AppInstance::GetSingleton()->currentWorld;
 	if (!p || !w) return false;
 
@@ -142,7 +152,7 @@ bool Physics::SphereCastIgnore(const Vector3& from, double radius, const Vector3
 {
 	tl_lastHit = RayHit{};
 	tl_uvDone = false; tl_uv = Vector2();
-	iPhysics* p = GetService<iPhysics>();
+	iPhysics* p = Physics::Scene();
 	World* w = AppInstance::GetSingleton()->currentWorld;
 	if (!p || !w) return false;
 
@@ -182,7 +192,7 @@ static bool ShapeCastCommon(const NukeShapeDesc& s, const Vector3& from, const Q
 {
 	tl_lastHit = RayHit{};
 	tl_uvDone = false; tl_uv = Vector2();
-	iPhysics* p = GetService<iPhysics>();
+	iPhysics* p = Physics::Scene();
 	if (!p) return false;
 	float f[3]  = { (float)from.x, (float)from.y, (float)from.z };
 	float q[4]  = { (float)rot.x, (float)rot.y, (float)rot.z, (float)rot.w };
@@ -222,7 +232,7 @@ static thread_local std::vector<Atom*> tl_overlap;
 static int OverlapCommon(const NukeShapeDesc& s, const Vector3& center, const Quaternion& rot)
 {
 	tl_overlap.clear();
-	iPhysics* p = GetService<iPhysics>();
+	iPhysics* p = Physics::Scene();
 	World* w = AppInstance::GetSingleton()->currentWorld;
 	if (!p || !w) return 0;
 	float pos[3] = { (float)center.x, (float)center.y, (float)center.z };

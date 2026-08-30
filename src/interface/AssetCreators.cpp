@@ -1,5 +1,6 @@
 #include "interface/AssetCreators.h"
 #include "interface/IconsFileTypes.h"
+#include "interface/Modular.h"   // RegisteringModule: entries remember their module
 #include <map>
 #include <algorithm>
 #include <cctype>
@@ -7,6 +8,7 @@
 namespace nuke {
 
 static std::vector<AssetCreator>& reg() { static std::vector<AssetCreator> v; return v; }
+static std::vector<std::string>& regOwners() { static std::vector<std::string> v; return v; }   // parallel
 
 static std::string LowerExt(const std::string& e)
 {
@@ -20,6 +22,7 @@ void RegisterAssetCreator(const AssetCreator& desc)
 	if (!desc.icon.empty()) RegisterFileIcon(desc.ext, desc.icon);   // the descriptor carries it
 	for (const AssetCreator& c : reg())            // dedup (re-enabling a plugin re-registers)
 		if (c.label == desc.label && c.ext == desc.ext) return;
+	regOwners().push_back(RegisteringModule());
 	reg().push_back(desc);
 }
 
@@ -44,10 +47,12 @@ const AssetCreator* AssetCreatorForExt(const std::string& ext)
 // ---- file-type icons (the type's owner declares its glyph) -----------------------------
 
 static std::map<std::string, std::string>& iconReg() { static std::map<std::string, std::string> m; return m; }
+static std::map<std::string, std::string>& iconOwner() { static std::map<std::string, std::string> m; return m; }
 
 void RegisterFileIcon(const std::string& ext, const std::string& glyph)
 {
 	if (ext.empty() || glyph.empty()) return;
+	iconOwner()[LowerExt(ext)] = RegisteringModule();
 	iconReg()[LowerExt(ext)] = glyph;
 }
 
@@ -154,11 +159,13 @@ static std::vector<std::pair<std::string, std::function<void(const std::string&)
 	static std::vector<std::pair<std::string, std::function<void(const std::string&)>>> v;
 	return v;
 }
+static std::map<std::string, std::string>& edOwner() { static std::map<std::string, std::string> m; return m; }
 
 void RegisterAssetEditor(const std::string& ext, std::function<void(const std::string&)> open)
 {
 	if (ext.empty() || !open) return;
 	const std::string key = LowerExt(ext);
+	edOwner()[key] = RegisteringModule();
 	for (auto& e : edReg())
 		if (e.first == key) { e.second = std::move(open); return; }   // re-enable: refresh the hook
 	edReg().push_back({ key, std::move(open) });
@@ -170,6 +177,31 @@ const std::function<void(const std::string&)>* AssetEditorForExt(const std::stri
 	for (auto& e : edReg())
 		if (e.first == want) return &e.second;
 	return nullptr;
+}
+
+void UnregisterAssetCreatorsOf(const std::string& moduleDll)
+{
+	if (moduleDll.empty()) return;
+	for (size_t i = reg().size(); i-- > 0;)
+		if (regOwners()[i] == moduleDll)
+		{
+			reg().erase(reg().begin() + i);
+			regOwners().erase(regOwners().begin() + i);
+		}
+	for (auto it = iconOwner().begin(); it != iconOwner().end();)
+		if (it->second == moduleDll) { iconReg().erase(it->first); it = iconOwner().erase(it); }
+		else ++it;
+	for (auto it = edOwner().begin(); it != edOwner().end();)
+	{
+		if (it->second == moduleDll)
+		{
+			const std::string key = it->first;
+			edReg().erase(std::remove_if(edReg().begin(), edReg().end(),
+			              [&](const auto& e) { return e.first == key; }), edReg().end());
+			it = edOwner().erase(it);
+		}
+		else ++it;
+	}
 }
 
 }  // namespace nuke

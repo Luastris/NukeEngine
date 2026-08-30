@@ -1,3 +1,4 @@
+#include "API/Model/Physics.h"
 #include "API/Model/Ragdoll.h"
 #include "API/Model/Atom.h"
 #include "API/Model/Mesh.h"
@@ -201,7 +202,7 @@ RagdollDef* RagdollDef::Build(const Skeleton* sk, const Mesh* mesh, float totalM
 
 // ---- runtime component ----------------------------------------------------------------------
 
-static iPhysics* Phys() { return GetService<iPhysics>(); }
+static iPhysics* Phys() { return Physics::Scene(); }
 
 Ragdoll::Ragdoll() : Component("Ragdoll") {}
 

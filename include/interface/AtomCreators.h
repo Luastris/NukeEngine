@@ -19,6 +19,8 @@ struct AtomCreator
 
 NUKEENGINE_API void RegisterAtomCreator(const AtomCreator& desc);
 NUKEENGINE_API const std::vector<AtomCreator>& AtomCreators();
+// Purge a module's registered creators (see Modular.h PurgeModuleRegistrations).
+NUKEENGINE_API void UnregisterAtomCreatorsOf(const std::string& moduleDll);
 
 }  // namespace nuke
 

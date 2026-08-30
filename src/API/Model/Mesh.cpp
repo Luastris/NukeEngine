@@ -5,6 +5,7 @@
 #include <assimp/scene.h>
 #include <algorithm>
 #include <array>
+#include <functional>
 #include <vector>
 #include <map>
 #include <set>
@@ -105,11 +106,13 @@ static void BuildSkeleton(const std::vector<aiMesh*>& meshes, const aiScene* sc,
 		}
 	if (needed.empty()) return;
 
+	std::vector<const aiNode*> boneNodes;
 	struct Walker
 	{
 		std::set<const aiNode*>& needed;
 		std::vector<MeshBone>&   bones;
 		std::map<std::string, int>& index;
+		std::vector<const aiNode*>& nodes;
 		void Walk(const aiNode* n, int parent)
 		{
 			int self = parent;
@@ -127,18 +130,118 @@ static void BuildSkeleton(const std::vector<aiMesh*>& meshes, const aiScene* sc,
 				self = (int)bones.size();
 				index[mb.name] = self;
 				bones.push_back(mb);
+				nodes.push_back(n);
 			}
 			for (unsigned int c = 0; c < n->mNumChildren; ++c) Walk(n->mChildren[c], self);
 		}
-	} w{ needed, outBones, outIndex };
+	} w{ needed, outBones, outIndex, boneNodes };
 	w.Walk(sc->mRootNode, -1);
 
-	for (aiMesh* mesh : meshes)
+	const size_t nb = outBones.size();
+	std::vector<aiMatrix4x4> offs(nb);          // identity default
+	std::vector<aiMatrix4x4> stampG(nb);        // node global of the mesh that stamped the bone
+	std::vector<char>        realIB(nb, 0);     // bone got an aiBone offset matrix
+
+	// Node global per mesh: assimp offsets transform MESH-space verts into bone space, so a
+	// mesh node's own transform is baked into them — anchoring the skeleton in scene space
+	// below needs it back (a glTF Body node offset by hip height sank the whole rig).
+	std::map<const aiMesh*, aiMatrix4x4> meshGlobal;
+	if (sc && sc->mRootNode)
+	{
+		std::function<void(const aiNode*, const aiMatrix4x4&)> walkG =
+			[&](const aiNode* n, const aiMatrix4x4& parent)
+		{
+			const aiMatrix4x4 g = parent * n->mTransformation;
+			for (unsigned int mi = 0; mi < n->mNumMeshes; ++mi)
+			{
+				const aiMesh* am = sc->mMeshes[n->mMeshes[mi]];
+				if (!meshGlobal.count(am)) meshGlobal[am] = g;
+			}
+			for (unsigned int c = 0; c < n->mNumChildren; ++c) walkG(n->mChildren[c], g);
+		};
+		walkG(sc->mRootNode, aiMatrix4x4());
+	}
+
+	// Canonical inverse binds: meshes may DISAGREE per bone (outfit-variant exports bake every
+	// mesh in its own pose) — the largest skin (the body) stamps first and wins; a mesh that
+	// disagrees keeps its own binds embedded at import and the skinning palette prefers those.
+	std::vector<aiMesh*> order(meshes);
+	std::stable_sort(order.begin(), order.end(),
+	                 [](const aiMesh* a, const aiMesh* b) { return a->mNumBones > b->mNumBones; });
+	int conflicts = 0;
+	for (aiMesh* mesh : order)
 		for (unsigned int b = 0; b < mesh->mNumBones; ++b)
 		{
 			auto it = outIndex.find(mesh->mBones[b]->mName.C_Str());
-			if (it != outIndex.end()) AiToCol16(mesh->mBones[b]->mOffsetMatrix, outBones[it->second].invBind);
+			if (it == outIndex.end()) continue;
+			if (realIB[it->second])
+			{
+				const float* have = &offs[it->second].a1;
+				const float* mine = &mesh->mBones[b]->mOffsetMatrix.a1;
+				for (int k = 0; k < 16; ++k)
+					if (std::fabs(have[k] - mine[k]) > 1e-3f) { ++conflicts; break; }
+				continue;
+			}
+			AiToCol16(mesh->mBones[b]->mOffsetMatrix, outBones[it->second].invBind);
+			offs[it->second] = mesh->mBones[b]->mOffsetMatrix;
+			auto gi = meshGlobal.find(mesh);
+			if (gi != meshGlobal.end()) stampG[it->second] = gi->second;
+			realIB[it->second] = 1;
 		}
+	if (conflicts > 0)
+		std::cout << "[Import]\t" << conflicts << " inverse bind(s) disagree between meshes "
+		             "(per-mesh bake poses) - largest skin wins, others carry their own" << std::endl;
+
+	// RECONCILE bind with the inverse binds. The vertices are baked in the pose the offset
+	// matrices describe; when the node hierarchy rests in a DIFFERENT pose (lossy exports:
+	// Poiyomi->VRM converts bake meshes without re-posing the armature), a bind-posed
+	// palette is not identity and the skin explodes on first ApplyPose. The bake world of a
+	// bone in SCENE space is meshGlobal * inverse(offset) (assimp offsets are mesh-relative);
+	// when the node rest drifts from that, rebuild the bind locals from the bake — bones
+	// without an aiBone (helper ancestors, leaf ends) keep their node transforms.
+	{
+		std::vector<aiMatrix4x4> fwd(nb);
+		for (size_t i = 0; i < nb; ++i)
+		{
+			const aiMatrix4x4& L = boneNodes[i]->mTransformation;
+			fwd[i] = outBones[i].parent >= 0 ? fwd[outBones[i].parent] * L : L;
+		}
+		std::vector<aiMatrix4x4> bake(nb);
+		for (size_t i = 0; i < nb; ++i)
+		{
+			if (realIB[i]) { bake[i] = offs[i]; bake[i].Inverse(); bake[i] = stampG[i] * bake[i]; }
+			else           bake[i] = fwd[i];
+		}
+		bool mismatch = false;
+		for (size_t i = 0; i < nb && !mismatch; ++i)
+		{
+			if (!realIB[i]) continue;
+			const float* a1 = &bake[i].a1;
+			const float* f1 = &fwd[i].a1;
+			for (int k = 0; k < 16; ++k)
+				if (std::fabs(a1[k] - f1[k]) > 1e-3f) { mismatch = true; break; }
+		}
+		if (mismatch)
+		{
+			int fixedN = 0;
+			for (size_t i = 0; i < nb; ++i)
+			{
+				if (!realIB[i]) continue;
+				aiMatrix4x4 pgi = outBones[i].parent >= 0 ? bake[outBones[i].parent] : aiMatrix4x4();
+				pgi.Inverse();
+				aiMatrix4x4 loc = pgi * bake[i];
+				aiVector3D p, s; aiQuaternion r;
+				loc.Decompose(s, r, p);
+				outBones[i].localPos[0] = p.x; outBones[i].localPos[1] = p.y; outBones[i].localPos[2] = p.z;
+				outBones[i].localRot[0] = r.x; outBones[i].localRot[1] = r.y;
+				outBones[i].localRot[2] = r.z; outBones[i].localRot[3] = r.w;
+				outBones[i].localScale[0] = s.x; outBones[i].localScale[1] = s.y; outBones[i].localScale[2] = s.z;
+				++fixedN;
+			}
+			std::cout << "[Import]\tskeleton bind rebuilt from inverse binds (" << fixedN
+			          << " bones: node rest pose != bake pose)" << std::endl;
+		}
+	}
 }
 
 void Mesh::ImportAISkeleton(const aiScene* scene, std::vector<MeshBone>& outBones)
@@ -151,6 +254,49 @@ void Mesh::ImportAISkeleton(const aiScene* scene, std::vector<MeshBone>& outBone
 	if (all.empty()) return;
 	std::map<std::string, int> index;
 	BuildSkeleton(all, scene, outBones, index);
+}
+
+// Skeleton from the NODE hierarchy (no skinned meshes to source bones from): the named
+// nodes + their ancestors, bind = the node transforms, identity inverse binds. Animation
+// packs (Mixamo "without skin" FBX) get a REAL skeleton this way, so their clips carry a
+// skelGuid with true bind poses and chain-retarget like any skinned rig.
+void Mesh::ImportAISkeletonFromNodes(const aiScene* scene, const std::vector<std::string>& nodeNames,
+                                     std::vector<MeshBone>& outBones)
+{
+	outBones.clear();
+	if (!scene || !scene->mRootNode) return;
+	std::set<const aiNode*> needed;
+	for (const std::string& nm : nodeNames)
+	{
+		const aiNode* n = scene->mRootNode->FindNode(nm.c_str());
+		for (; n; n = n->mParent) needed.insert(n);
+	}
+	if (needed.empty()) return;
+	struct Walker
+	{
+		std::set<const aiNode*>& needed;
+		std::vector<MeshBone>&   bones;
+		void Walk(const aiNode* n, int parent)
+		{
+			int self = parent;
+			if (needed.count(n))
+			{
+				MeshBone mb;
+				mb.name   = n->mName.C_Str();
+				mb.parent = parent;
+				for (int k = 0; k < 16; ++k) mb.invBind[k] = (k % 5 == 0) ? 1.0f : 0.0f;
+				aiVector3D p, s; aiQuaternion r;
+				n->mTransformation.Decompose(s, r, p);
+				mb.localPos[0] = p.x; mb.localPos[1] = p.y; mb.localPos[2] = p.z;
+				mb.localRot[0] = r.x; mb.localRot[1] = r.y; mb.localRot[2] = r.z; mb.localRot[3] = r.w;
+				mb.localScale[0] = s.x; mb.localScale[1] = s.y; mb.localScale[2] = s.z;
+				self = (int)bones.size();
+				bones.push_back(mb);
+			}
+			for (unsigned int c = 0; c < n->mNumChildren; ++c) Walk(n->mChildren[c], self);
+		}
+	} w{ needed, outBones };
+	w.Walk(scene->mRootNode, -1);
 }
 
 // The shared indexed builder behind ImportAIMesh/ImportAIMeshes (see Mesh.h for the contract).
@@ -314,6 +460,36 @@ static void BuildMeshInto(Mesh* m, const std::vector<aiMesh*>& meshes, const aiS
 			if (sum <= 0.0f) continue;   // unweighted vertex (mesh without bones in the merge): stays at bind
 			for (int k = 0; k < 4; ++k) bWgt[d * 4 + k] /= sum;
 		}
+
+	// Per-mesh inverse binds: when THIS mesh's binds disagree with the shared skeleton's
+	// canonical set (glTF bakes every skin in its own space — invBind is per SKIN, not per
+	// skeleton), embed the skeleton with the mesh's OWN binds swapped in; the skinning
+	// palette prefers embedded binds, so every mesh lands in the same scene space.
+	if (sharedSkeleton && skin && m->bones.empty())
+	{
+		bool differs = false;
+		std::map<int, const aiMatrix4x4*> own;
+		for (aiMesh* am : meshes)
+		{
+			if (!am->HasBones()) continue;
+			for (unsigned int b = 0; b < am->mNumBones; ++b)
+			{
+				auto bi = boneIdx.find(am->mBones[b]->mName.C_Str());
+				if (bi == boneIdx.end()) continue;
+				own[bi->second] = &am->mBones[b]->mOffsetMatrix;
+				float col[16];
+				AiToCol16(am->mBones[b]->mOffsetMatrix, col);
+				const float* skv = (*sharedSkeleton)[bi->second].invBind;
+				for (int k = 0; k < 16 && !differs; ++k)
+					if (std::fabs(col[k] - skv[k]) > 1e-3f) differs = true;
+			}
+		}
+		if (differs)
+		{
+			m->bones = *sharedSkeleton;   // canonical hierarchy/locals, own inverse binds
+			for (const auto& kv : own) AiToCol16(*kv.second, m->bones[kv.first].invBind);
+		}
+	}
 
 	// --- meshoptimizer: vertex-cache order per section, then the auto-LOD chain ------------
 	for (const MeshSection& s : m->sections)

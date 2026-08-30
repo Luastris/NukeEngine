@@ -102,7 +102,21 @@ extern "C" { NUKE_ABI_STAMP int nuke_build_debug = 0; }
 //       player crashed silently at boot), FireState gained ignitePos + Fire::IgnitePoint.
 //  33 — SkinnedMeshRenderer gained morphMapGuid (ARKit-52 morph aliases; sizeof grew,
 //       members after it shifted), Mesh::ImportAIMeshes gained the srcLodOf parameter.
-#define NUKE_ENGINE_ABI 33
+//  34 — Material gained the toon block (toonBand/toonSoft/toonShade; members after the
+//       BRDF pack shifted) for cel shading / VRM MToon (VR1).
+//  35 — iPhysics gained createScene/destroyScene (appended vtable slots; isolated physics
+//       scenes — the prefab editor's simulate runs its subtree in a private sandbox).
+//  36 — SpringBones gained lastSolveFrame/lastSolveByAnim + windOn (sizeof grew) and a real
+//       Update: spring chains self-drive every frame without an Animator (they are physics)
+//       and react to the global wind/WindZones (opt-out per chain).
+//  37 — Animator gained the applied* live-prop tracking block (sizeof grew): reflected
+//       field writes (clip/loop/speed/bone map/controller) now apply while running.
+//  38 — SkinnedMeshRenderer gained the per-mesh inverse-bind override cache (sizeof grew):
+//       a mesh baked in its own pose (heterogeneous outfit-variant exports) embeds its own
+//       binds and the skinning palette prefers them over the skeleton's canonical set.
+//  39 — Animator gained fitLimbs (sizeof grew): penetrating hands become one-frame chain-IK
+//       goals against the ragdoll capsules (proportion-mismatched clips).
+#define NUKE_ENGINE_ABI 39
 extern "C" { NUKE_ABI_STAMP int nuke_engine_abi = NUKE_ENGINE_ABI; }
 
 namespace nuke {

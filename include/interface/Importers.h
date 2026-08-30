@@ -28,6 +28,9 @@ NUKEENGINE_API void RegisterImporter(const AssetImporter& imp);
 NUKEENGINE_API const std::vector<AssetImporter>& AssetImporters();
 // The importer that handles `ext` (".eps", case-insensitive), or null. First match wins.
 NUKEENGINE_API const AssetImporter* ImporterForExt(const std::string& ext);
+// Purge a module's importers (Modular.h PurgeModuleRegistrations) — a disabled plugin's
+// formats leave the import dialog immediately.
+NUKEENGINE_API void UnregisterImportersOf(const std::string& moduleDll);
 
 // Route a ResDB mutation to the MAIN thread. Importer callbacks run on a worker, so wrap EVERY
 // ResDB write in this.

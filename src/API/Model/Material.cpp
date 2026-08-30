@@ -42,6 +42,20 @@ void Material::ImportAiMaterial(aiMaterial* m) {
 		if (ec.r > 0.f || ec.g > 0.f || ec.b > 0.f) emissiveIntensity = 1.0f;
 	}
 
+	// glTF alpha mode -> engine blend (MASK = cutout at the file's cutoff, BLEND = transparent).
+	aiString am;
+	if (m->Get("$mat.gltf.alphaMode", 0, 0, am) == AI_SUCCESS)
+	{
+		if (!strcmp(am.C_Str(), "MASK"))
+		{
+			blendMode = Cutout;
+			float cut = 0.5f;
+			if (m->Get("$mat.gltf.alphaCutoff", 0, 0, cut) == AI_SUCCESS)
+				alphaCutoff = std::max(0.01f, cut);
+		}
+		else if (!strcmp(am.C_Str(), "BLEND")) blendMode = Transparent;
+	}
+
 	aiMat = m;   // textures are converted + assigned (as .nutex GUIDs) by the importer
 }
 
@@ -83,6 +97,7 @@ Material* Material::Clone() const
 	m->vcolorMode       = vcolorMode;
 	m->clearCoat = clearCoat; m->clearCoatRoughness = clearCoatRoughness;
 	m->anisotropy = anisotropy; m->flowGuid = flowGuid;
+	m->toonBand = toonBand; m->toonSoft = toonSoft; m->toonShade = toonShade;
 	m->sheen = sheen; m->sheenTint = sheenTint;
 	m->translucency = translucency; m->translucencyTint = translucencyTint;
 	m->ior = ior; m->refractive = refractive;
@@ -694,6 +709,13 @@ void Material::PushRenderProps()
 		                     (blendMode == Transparent && refractive) ? 1.0f : 0.0f };
 	}
 
+	// Toon band -> g_Toon/g_ToonShade (w = on; zeroed when switched back off).
+	if (toonBand > 0.0f || props.count("g_Toon"))
+	{
+		props["g_Toon"] = { toonBand, std::max(toonSoft, 0.001f), 0.0f, toonBand > 0.0f ? 1.0f : 0.0f };
+		props["g_ToonShade"] = { (float)toonShade.r, (float)toonShade.g, (float)toonShade.b, 0.0f };
+	}
+
 	// GPU overlay slots: static layers claim slots first (always on), then the ACTIVE condition
 	// states — set globally, overridden on some atom or painted by some mask (the asset itself
 	// may carry any number; the slots are a per-draw resource budget, not an authoring cap).
@@ -790,6 +812,9 @@ bool Material::SaveToFile(const std::string& path) const
 	}
 	if (triplanar)       j["triplanar"] = true;
 	if (vcolorMode != 0) j["vcolorMode"] = vcolorMode;
+	if (toonBand > 0.0f)
+		j["toon"] = { {"band", toonBand}, {"soft", toonSoft},
+		              {"shade", {toonShade.r, toonShade.g, toonShade.b}} };
 	if (clearCoat > 0.0f || anisotropy != 0.0f || sheen > 0.0f || translucency > 0.0f
 	    || iridescence > 0.0f || ior != 1.5f || refractive || !flowGuid.empty())
 		j["brdf"] = { {"clearCoat", clearCoat}, {"coatRoughness", clearCoatRoughness},
@@ -928,6 +953,15 @@ Material* Material::LoadFromString(const std::string& text)
 	m->detailStrength   = j.value("detailStrength", 0.5f);
 	m->triplanar        = j.value("triplanar", false);
 	m->vcolorMode       = j.value("vcolorMode", 0);
+	if (j.contains("toon") && j["toon"].is_object())
+	{
+		const json& tb = j["toon"];
+		m->toonBand = tb.value("band", 0.0f);
+		m->toonSoft = tb.value("soft", 0.05f);
+		if (tb.contains("shade") && tb["shade"].is_array() && tb["shade"].size() >= 3)
+			m->toonShade = Color(tb["shade"][0].get<double>(), tb["shade"][1].get<double>(),
+			                     tb["shade"][2].get<double>(), 1.0);
+	}
 	if (j.contains("brdf") && j["brdf"].is_object())
 	{
 		const json& b = j["brdf"];

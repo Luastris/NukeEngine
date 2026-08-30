@@ -225,6 +225,10 @@ public:
 	// result = no bones anywhere. Bone indices of meshes built with `sharedSkeleton` point
 	// into this palette (mesh embeds NO skeleton of its own then).
 	static void ImportAISkeleton(const aiScene* scene, std::vector<MeshBone>& outBones);
+	// Skeleton from named NODES (+ ancestors) when the file has no skinned meshes to source
+	// bones from — animation packs (Mixamo "without skin") get real bind poses this way.
+	static void ImportAISkeletonFromNodes(const aiScene* scene, const std::vector<std::string>& nodeNames,
+	                                      std::vector<MeshBone>& outBones);
 
 	// Primitive factories; registered in ResDB under "builtin:<name>".
 	static Mesh* CreateCube();

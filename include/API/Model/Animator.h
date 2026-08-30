@@ -38,6 +38,7 @@ public:
 	[[nuke::prop(label="Loop")]]                 bool  loop = true;
 	[[nuke::prop(min=0, max=10, label="Speed")]] float speed = 1.0f;
 	[[nuke::prop(label="Root Motion", tip="Extract the root bone's horizontal travel + yaw from the pose and move the atom by it.")]] bool rootMotion = false;
+	[[nuke::prop(label="Fit Limbs", tip="Push penetrating hands out of the body's ragdoll (.nurag) capsules via chain IK - clips authored on other proportions stop burying the hand in the body. No-op while nothing penetrates.")]] bool fitLimbs = true;
 	// Serialized state machine: {"states":{name:{clip,loop,speed}},"transitions":[...],"entry":...}.
 	[[nuke::prop(hidden)]] std::string smJson;
 
@@ -162,6 +163,9 @@ private:
 		bool   hasNormal = false;
 		float  normal[3] = { 0, 1, 0 };
 		double normalWeight = 1.0;
+		// Limb fit: pre-resolved joint indices to solve INSTEAD of the named rig chain
+		// (sub-chain without the clavicle). Empty for API-set goals.
+		std::vector<int> fitChain;
 	};
 
 public:   // the editor's Animator window edits the deserialized machine directly
@@ -203,6 +207,13 @@ private:
 	std::vector<Atom*> channelAtoms;
 	AnimClip* atomBindClip = nullptr;
 	std::map<std::string, int> prevChanByBone;   // outgoing clip: bone name -> channel (fade blending)
+
+	// LIVE prop tracking: the last APPLIED values of the reflected fields — Update compares
+	// and re-applies on change, so inspector/sync-edit/script writes take effect immediately
+	// (they used to be read once at auto-start and never again).
+	std::string appliedClipGuid, appliedBoneMapGuid, appliedSmGuid;
+	bool   appliedLoop  = true;
+	double appliedSpeed = 1.0;
 
 	AnimClip* ResolveClip(const std::string& ref) const;   // guid first, then name
 	std::string MapName(const std::string& boneName) const;// runtime map > bonemap asset > as-is

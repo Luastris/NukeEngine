@@ -1,3 +1,4 @@
+#include "API/Model/Physics.h"
 #include "API/Model/CharacterController.h"
 #include "API/Model/Surface.h"
 #include "API/Model/Time.h"
@@ -24,7 +25,7 @@ void CharacterController::Destroy()
 {
 	if (charId)
 	{
-		if (iPhysics* p = GetService<iPhysics>())
+		if (iPhysics* p = Physics::Scene())
 			p->destroyCharacter(charId);
 		charId = 0;
 	}

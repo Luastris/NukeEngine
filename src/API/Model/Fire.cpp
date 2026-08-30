@@ -1,4 +1,5 @@
 // Fire system: LiveMaterial-driven ignition/spread/burn-out + debris destruction (see Fire.h).
+#include "API/Model/Physics.h"
 #include "API/Model/Fire.h"
 #include "API/Model/Atom.h"
 #include "API/Model/Collider.h"
@@ -502,7 +503,7 @@ void Fire::Tick(World* w)
 	dt = std::min(dt, 0.25);
 
 	// Fracture-piece upkeep: launch impulses once the bodies exist, free meshes of dead pieces.
-	if (iPhysics* ph = GetService<iPhysics>())
+	if (iPhysics* ph = Physics::Scene())
 		for (size_t i = g_pieceImpulses.size(); i-- > 0;)
 		{
 			Atom* a = w->GetById(g_pieceImpulses[i].first);

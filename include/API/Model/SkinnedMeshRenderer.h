@@ -78,6 +78,11 @@ private:
 	Mesh* srcMesh = nullptr;        // bind-pose asset (this->mesh points at the skinned instance)
 	Mesh* skinnedMesh = nullptr;    // owned instance (pos/nrm own; uv/idx/etc shared with source)
 	std::vector<float> morphScratchP, morphScratchN;   // CPU fallback: morphed bind streams
+	// Per-mesh inverse-bind override (16 floats per skeleton bone): a mesh baked in its own
+	// pose embeds its own binds and the palette must use THOSE (glTF: invBind is per skin).
+	std::vector<float> bindOverride;
+	const void* bindOverrideKey = nullptr;   // cache key: srcMesh
+	size_t bindOverrideBones = 0;
 	bool EnsureInstance();          // resolve srcMesh + allocate the skinned copy
 	void ReleaseInstance();
 	// Conservative posed bounds: bind AABB corners + joint positions, inflated.

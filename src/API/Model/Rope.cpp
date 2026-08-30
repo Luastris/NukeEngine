@@ -1,5 +1,6 @@
 // Rope/chain component: capsule-segment chain over the physics seam + a per-frame generated
 // visual (tube / repeated links / auto-rigged source mesh). See Rope.h.
+#include "API/Model/Physics.h"
 #include "API/Model/Rope.h"
 #include "API/Model/Atom.h"
 #include "API/Model/Collider.h"
@@ -68,7 +69,7 @@ void Rope::Reset() { Teardown(); }
 
 void Rope::Teardown()
 {
-	iPhysics* ph = GetService<iPhysics>();
+	iPhysics* ph = Physics::Scene();
 	if (ph)
 	{
 		if (startPin) ph->destroyJoint(startPin);
@@ -122,7 +123,7 @@ static void SampleAuthored(const std::vector<float>& pts, Transform* t, float se
 
 uint64_t Rope::TieEnd(int segIndex, Atom* attach, const Vector3& worldPoint)
 {
-	iPhysics* ph = GetService<iPhysics>();
+	iPhysics* ph = Physics::Scene();
 	if (!ph || segIndex < 0 || segIndex >= (int)segs.size()) return 0;
 	uint64_t other = 0;
 	if (attach)
@@ -144,7 +145,7 @@ uint64_t Rope::TieEnd(int segIndex, Atom* attach, const Vector3& worldPoint)
 
 void Rope::Build()
 {
-	iPhysics* ph = GetService<iPhysics>();
+	iPhysics* ph = Physics::Scene();
 	if (!ph) return;
 	// An attach target names a body: wait until its Collider body exists.
 	if (attachStart && (!attachStart->GetComponent<Collider>() || !attachStart->GetComponent<Collider>()->bodyId)) return;
@@ -229,7 +230,7 @@ Vector3 Rope::SegmentPos(double i)
 	const int idx = (int)i;
 	if (idx < 0 || idx >= (int)segs.size()) return Vector3(0, 0, 0);
 	Vector3 c; Quaternion q;
-	return SegPose(GetService<iPhysics>(), this, segs[idx].body, c, q) ? c : Vector3(0, 0, 0);
+	return SegPose(Physics::Scene(), this, segs[idx].body, c, q) ? c : Vector3(0, 0, 0);
 }
 
 Vector3 Rope::EndPos()
@@ -237,7 +238,7 @@ Vector3 Rope::EndPos()
 	if (segs.empty()) return Vector3(0, 0, 0);
 	Vector3 c; Quaternion q;
 	const Seg& s = segs.back();
-	if (!SegPose(GetService<iPhysics>(), this, s.body, c, q)) return Vector3(0, 0, 0);
+	if (!SegPose(Physics::Scene(), this, s.body, c, q)) return Vector3(0, 0, 0);
 	return c + q.Rotate(Vector3(0, s.len * 0.5, 0));
 }
 
@@ -250,7 +251,7 @@ double Rope::Length()
 
 bool Rope::Cut(const Vector3& worldPos)
 {
-	iPhysics* ph = GetService<iPhysics>();
+	iPhysics* ph = Physics::Scene();
 	if (!ph || !built) return false;
 	int best = -1;
 	double bestD = 1e300;
@@ -279,7 +280,7 @@ void Rope::Pull(const Vector3& impulse) { PullAt((double)segs.size() - 1.0, impu
 
 void Rope::PullAt(double seg, const Vector3& impulse)
 {
-	iPhysics* ph = GetService<iPhysics>();
+	iPhysics* ph = Physics::Scene();
 	const int idx = (int)seg;
 	if (!ph || idx < 0 || idx >= (int)segs.size()) return;
 	const float v[3] = { (float)impulse.x, (float)impulse.y, (float)impulse.z };
@@ -288,7 +289,7 @@ void Rope::PullAt(double seg, const Vector3& impulse)
 
 void Rope::AttachStartTo(Atom* a)
 {
-	iPhysics* ph = GetService<iPhysics>();
+	iPhysics* ph = Physics::Scene();
 	if (!ph || segs.empty()) return;
 	if (startPin) { ph->destroyJoint(startPin); startPin = 0; }
 	if (!a && !pinStart) return;
@@ -299,7 +300,7 @@ void Rope::AttachStartTo(Atom* a)
 
 void Rope::AttachEndTo(Atom* a)
 {
-	iPhysics* ph = GetService<iPhysics>();
+	iPhysics* ph = Physics::Scene();
 	if (!ph || segs.empty()) return;
 	if (endPin) { ph->destroyJoint(endPin); endPin = 0; }
 	if (!a && !pinEnd) return;
@@ -365,7 +366,7 @@ void Rope::EnsureGen(int vertCount, bool uvs)
 void Rope::CollectStations(std::vector<Station>& out)
 {
 	out.clear();
-	iPhysics* ph = GetService<iPhysics>();
+	iPhysics* ph = Physics::Scene();
 	int span = 0;
 	float dAcc = 0.0f;
 	if (built && ph)

@@ -59,6 +59,7 @@
 #include "API/Model/Texture.h"
 #include "API/Model/Time.h"
 #include "API/Model/Transform.h"
+#include "API/Model/VariantSet.h"
 #include "API/Model/Vehicle.h"
 #include "API/Model/Wind.h"
 #include "API/Model/World.h"
@@ -133,6 +134,8 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("speed", &Animator::speed, "", "Speed", 0.0f, 10.0f));
 		t.fields.push_back(MakeField("rootMotion", &Animator::rootMotion, "", "Root Motion"));
 		t.fields.back().tip = "Extract the root bone's horizontal travel + yaw from the pose and move the atom by it.";
+		t.fields.push_back(MakeField("fitLimbs", &Animator::fitLimbs, "", "Fit Limbs"));
+		t.fields.back().tip = "Push penetrating hands out of the body's ragdoll (.nurag) capsules via chain IK - clips authored on other proportions stop burying the hand in the body. No-op while nothing penetrates.";
 		t.fields.push_back(MakeField("smJson", &Animator::smJson));
 		t.fields.back().hidden = true;
 		t.methods.push_back(MakeMethod("Play", &Animator::Play));
@@ -1018,6 +1021,12 @@ bool NukeReflectInit() {
 		t.fields.back().tip = "Thin-film rainbow (soap bubble, oil slick)";
 		t.fields.push_back(MakeField("iridescenceThickness", &Material::iridescenceThickness, "", "Iridescence Thickness", 0.0f, 1.0f));
 		t.fields.back().tip = "Film thickness sweep - shifts the rainbow bands";
+		t.fields.push_back(MakeField("toonBand", &Material::toonBand, "", "Toon", 0.0f, 1.0f));
+		t.fields.back().tip = "Cel-shading band threshold; 0 = off (plain PBR)";
+		t.fields.push_back(MakeField("toonSoft", &Material::toonSoft, "", "Toon Soft", 0.0f, 0.5f));
+		t.fields.back().tip = "Band edge softness";
+		t.fields.push_back(MakeField("toonShade", &Material::toonShade, "", "Toon Shade"));
+		t.fields.back().tip = "Tint of the unlit side of the band";
 		t.fields.push_back(MakeField("shaderGuid", &Material::shaderGuid, "shader", "Shader"));
 		t.fields.push_back(MakeField("physTag", &Material::physTag, "", "Physics Tag"));
 		t.fields.back().tip = "Surface identity for gameplay/physics queries (e.g. metal, wood, flesh); empty = untagged";
@@ -1518,6 +1527,8 @@ bool NukeReflectInit() {
 		t.fields.back().tip = "Velocity kill per step; low = bouncy";
 		t.fields.push_back(MakeField("gravity", &SpringBones::gravity, "", "Gravity"));
 		t.fields.back().tip = "m/s^2 downward on the chain tails (droop)";
+		t.fields.push_back(MakeField("windOn", &SpringBones::windOn, "", "Wind"));
+		t.fields.back().tip = "Chain reacts to the global wind and WindZones (sampled per segment: gusts and turbulence ripple along it); off for heavy chains";
 		t.fields.push_back(MakeField("collision", &SpringBones::collision, "", "Collision"));
 		t.fields.back().tip = "Push the chain out of the atom's ragdoll (.nurag) capsules";
 		t.fields.push_back(MakeField("radius", &SpringBones::radius, "", "Radius"));
@@ -1701,6 +1712,24 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("setEuler", &Transform::setEuler));
 		Reflect_SetMethodDoc("Transform", "setEuler", "Legacy SCRIPT-facing aliases, reflected on purpose (real methods, not binder shims, so the script surface stays 100% reflection-driven).", "x,y,z");
 		t.methods.push_back(MakeMethod("euler", &Transform::euler));
+	}
+	{
+		TypeInfo& t = TypeOf<VariantSet>();
+		t.base = "Component";
+		t.category = "Gameplay";
+		t.fields.push_back(MakeField("multi", &VariantSet::multi, "", "Multi Groups"));
+		t.fields.back().tip = "';'-separated group prefixes that allow SEVERAL active items at once (accessories); every other group is exclusive - selecting an item disables its siblings. The VRM importer fills this from what the avatar ships enabled; edit freely.";
+		t.methods.push_back(MakeMethod("Groups", &VariantSet::Groups));
+		Reflect_SetMethodDoc("VariantSet", "Groups", "--- script surface (auto-bound) ---", "");
+		t.methods.push_back(MakeMethod("Items", &VariantSet::Items));
+		Reflect_SetMethodDoc("VariantSet", "Items", "", "group");
+		t.methods.push_back(MakeMethod("Selected", &VariantSet::Selected));
+		Reflect_SetMethodDoc("VariantSet", "Selected", "", "group");
+		t.methods.push_back(MakeMethod("IsMulti", &VariantSet::IsMulti));
+		Reflect_SetMethodDoc("VariantSet", "IsMulti", "", "group");
+		t.methods.push_back(MakeMethod("Select", &VariantSet::Select));
+		Reflect_SetMethodDoc("VariantSet", "Select", "Enable/disable one item; enabling in an exclusive group disables its siblings.", "group,item,on");
+		t.create = []() -> void* { return new VariantSet(); };
 	}
 	{
 		TypeInfo& t = TypeOf<Wheel>();

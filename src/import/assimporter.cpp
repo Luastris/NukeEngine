@@ -1,5 +1,6 @@
 #include "import/assimporter.h"
 #include "interface/Importers.h"   // plugin importer registry (dispatched from ImportAny)
+#include "interface/Modular.h"     // RegisteringModule: importer entries remember their module
 #include "API/Model/Prefab.h"
 #include "API/Model/Transform.h"
 #include "API/Model/Texture.h"
@@ -236,6 +237,33 @@ Atom* AssImporter::ImportObject(aiNode* node, const aiScene* scene) {
 	return atom;
 }
 
+// Assimp's glTF importer hands UVs through V-flipped (its bottom-left convention);
+// the rest of the pipeline — stbi top-down pixels, BC cook, D3D sampling — is top-left,
+// and FBX arrives already matching it. Undo the flip once, right after the parse, so
+// every consumer (static, skinned, morph targets) agrees.
+static void FixGltfUVs(const aiScene* sc, const char* srcPath)
+{
+	std::string ext = bfs::path(srcPath).extension().string();
+	for (char& c : ext) c = (char)std::tolower((unsigned char)c);
+	if (ext != ".gltf" && ext != ".glb" && ext != ".vrm") return;
+	for (unsigned int mi = 0; mi < sc->mNumMeshes; ++mi)
+	{
+		aiMesh* am = sc->mMeshes[mi];
+		for (unsigned int c = 0; c < AI_MAX_NUMBER_OF_TEXTURECOORDS; ++c)
+			if (am->HasTextureCoords(c))
+				for (unsigned int v = 0; v < am->mNumVertices; ++v)
+					am->mTextureCoords[c][v].y = 1.0f - am->mTextureCoords[c][v].y;
+		for (unsigned int a = 0; a < am->mNumAnimMeshes; ++a)
+		{
+			aiAnimMesh* an = am->mAnimMeshes[a];
+			for (unsigned int c = 0; c < AI_MAX_NUMBER_OF_TEXTURECOORDS; ++c)
+				if (an->mTextureCoords[c])
+					for (unsigned int v = 0; v < an->mNumVertices; ++v)
+						an->mTextureCoords[c][v].y = 1.0f - an->mTextureCoords[c][v].y;
+		}
+	}
+}
+
 void AssImporter::Import(const char* path) {
 
 	Assimp::Importer importer;
@@ -248,6 +276,7 @@ void AssImporter::Import(const char* path) {
 		cout << importer.GetErrorString() << endl;
 		return;
 	}
+	FixGltfUVs(sc, path);
 
 	std::cout << sc->HasAnimations() << " " << sc->mNumAnimations << std::endl;
 	std::cout << sc->HasCameras() << " " << sc->mNumCameras << std::endl;
@@ -354,6 +383,12 @@ static Atom* BuildPrefabNode(aiNode* node, const aiScene* sc,
 				sm->skelGuid = it->second.skelGuid;   // the file's shared .nuskel
 				sm->morphMapGuid = it->second.morphMap;
 				mr = sm;
+				// glTF contract: a skinned mesh IGNORES its node transform — the palette
+				// places the verts in scene space. Exporters leave junk here (a Body node
+				// offset by hip height) that would double-transform the skin.
+				t.position.x = t.position.y = t.position.z = 0.0;
+				t.rotation.x = t.rotation.y = t.rotation.z = 0.0; t.rotation.w = 1.0;
+				t.scale.x = t.scale.y = t.scale.z = 1.0;
 			}
 			else mr = new MeshRenderer();
 			mr->meshGuid = it->second.guid;
@@ -473,6 +508,7 @@ int AssImporter::ImportToContent(const char* srcPath, const char* destDir)
 		cout << "[Import]\t" << importer.GetErrorString() << endl;
 		return 0;
 	}
+	FixGltfUVs(sc, srcPath);
 	{
 		// What the file declared, so an odd-looking size is traceable to its units.
 		double unit = 1.0;
@@ -518,6 +554,17 @@ int AssImporter::ImportToContent(const char* srcPath, const char* destDir)
 	// skeleton block below both key off it.
 	std::vector<MeshBone> sceneBones;
 	Mesh::ImportAISkeleton(sc, sceneBones);
+	// Animation-only file (Mixamo "without skin" and friends): no skinned mesh to source
+	// bones from, but the animated NODES are the rig — build the skeleton from them, so the
+	// clips leave with a skelGuid + true bind poses and chain-retarget onto any character.
+	// Animation-only file (Mixamo packs and friends): NO skeleton is minted. FBX nodes
+	// carry pivot-mangled or plain missing bind poses — a skeleton built from them retargets
+	// garbage, and every pack file would mint another copy of the same rig. The clips import
+	// LOOSE and ADOPT the registered skeleton covering their bone names at play (the skinned
+	// model imported next to the pack), in any import order.
+	if (sceneBones.empty() && sc->HasAnimations())
+		cout << "[Import]\tanimation-only file: clips import LOOSE and bind to the matching"
+		        " skinned rig at play" << endl;
 	NukeRig::Scheme rigScheme = sceneBones.empty() ? NukeRig::None : NukeRig::Detect(sceneBones);
 
 	std::map<std::string, std::string> texCache;   // source ref -> texture GUID (dedupe)
@@ -981,14 +1028,27 @@ bool AssImporter::ImportAudio(const char* srcPath, const char* destDir)
 
 // --- plugin importer registry (interface/Importers.h) --------------------------------
 static std::vector<AssetImporter>& importerReg() { static std::vector<AssetImporter> v; return v; }
+static std::vector<std::string>& importerOwners() { static std::vector<std::string> v; return v; }   // parallel
 
 void RegisterImporter(const AssetImporter& imp)
 {
 	for (const AssetImporter& e : importerReg())   // dedup by label (re-enabling a plugin re-registers)
 		if (e.label == imp.label) return;
+	importerOwners().push_back(RegisteringModule());
 	importerReg().push_back(imp);
 }
 const std::vector<AssetImporter>& AssetImporters() { return importerReg(); }
+
+void UnregisterImportersOf(const std::string& moduleDll)
+{
+	if (moduleDll.empty()) return;
+	for (size_t i = importerReg().size(); i-- > 0;)
+		if (importerOwners()[i] == moduleDll)
+		{
+			importerReg().erase(importerReg().begin() + i);
+			importerOwners().erase(importerOwners().begin() + i);
+		}
+}
 void ImporterDefer(const std::function<void()>& fn) { AssImporter::Reg(fn); }   // -> main thread (see AssImporter::Reg)
 const AssetImporter* ImporterForExt(const std::string& ext)
 {

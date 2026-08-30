@@ -572,7 +572,17 @@ float4 main(in PSIn i) : SV_Target
             spec = spec * (1.0 - Fc) + Dc * G * Fc / max(4.0 * max(dot(N, V), 0.0) * ndl, 1e-4);
         }
         float3 kd = (1.0 - F) * (1.0 - metallic);
-        Lo += (kd * albedo / PI + spec) * radiance * ndl;
+        // Toon: the diffuse response quantizes into a lit/shade band (MToon-style cel look);
+        // the shade side tints, the response flattens so the band edge is the only gradient.
+        float  ndlD = ndl;
+        float3 albedoD = albedo;
+        [branch] if (g_Toon.w > 0.5)
+        {
+            float band = smoothstep(g_Toon.x - g_Toon.y, g_Toon.x + g_Toon.y, ndl);
+            albedoD = lerp(g_ToonShade.rgb * albedo, albedo, band);
+            ndlD = lerp(0.55, 1.0, band);
+        }
+        Lo += (kd * albedoD / PI + spec) * radiance * ndlD;
         // Sheen: soft retro-reflective grazing lobe (Charlie-style falloff).
         [branch] if (g_Brdf1.w > 0.0)
         {

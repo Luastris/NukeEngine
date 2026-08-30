@@ -46,6 +46,9 @@ NUKEENGINE_API const std::vector<EditorViewportOverlay>& ViewportOverlays();
 NUKEENGINE_API void RegisterCurveComponent(const std::string& typeName);
 NUKEENGINE_API const std::vector<std::string>& CurveComponents();
 
+// Purge every hook a module registered (see Modular.h PurgeModuleRegistrations).
+NUKEENGINE_API void UnregisterEditorHooksOf(const std::string& moduleDll);
+
 }  // namespace nuke
 
 #endif // !NUKEE_EDITOR_HOOKS_H

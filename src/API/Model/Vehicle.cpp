@@ -1,4 +1,5 @@
 // Wheeled vehicle components: thin drivers over the iPhysics vehicle seam (see Vehicle.h).
+#include "API/Model/Physics.h"
 #include "API/Model/Vehicle.h"
 #include "API/Model/Atom.h"
 #include "API/Model/Collider.h"
@@ -35,7 +36,7 @@ void Vehicle::Reset()   { Teardown(); }
 void Vehicle::Teardown()
 {
 	if (handle)
-		if (iPhysics* ph = GetService<iPhysics>()) ph->destroyVehicle(handle);
+		if (iPhysics* ph = Physics::Scene()) ph->destroyVehicle(handle);
 	handle = 0;
 	wheelAtoms.clear();
 	skidCool.clear();
@@ -44,7 +45,7 @@ void Vehicle::Teardown()
 
 void Vehicle::Build()
 {
-	iPhysics* ph = GetService<iPhysics>();
+	iPhysics* ph = Physics::Scene();
 	Collider* chassis = atom->GetComponent<Collider>();
 	if (!ph || !chassis || !chassis->bodyId) return;
 	std::vector<NukeWheelDesc> descs;
@@ -84,7 +85,7 @@ void Vehicle::FixedUpdate()
 {
 	if (!atom || !Game::IsPlaying()) return;
 	if (!handle) { Build(); if (!handle) return; }
-	iPhysics* ph = GetService<iPhysics>();
+	iPhysics* ph = Physics::Scene();
 	if (!ph) return;
 	if (readInput)
 	{
@@ -115,7 +116,7 @@ void Vehicle::FixedUpdate()
 void Vehicle::Update()
 {
 	if (!handle || !atom) return;
-	iPhysics* ph = GetService<iPhysics>();
+	iPhysics* ph = Physics::Scene();
 	World* w = Game::GetWorld();
 	if (!ph || !w) return;
 	for (int i = 0; i < (int)wheelAtoms.size(); ++i)
@@ -140,26 +141,26 @@ double Vehicle::WheelCount() { return (double)wheelAtoms.size(); }
 
 double Vehicle::RPM()
 {
-	iPhysics* ph = GetService<iPhysics>();
+	iPhysics* ph = Physics::Scene();
 	return ph && handle ? (double)ph->vehicleRPM(handle) : 0.0;
 }
 
 double Vehicle::SpeedKmh()
 {
-	iPhysics* ph = GetService<iPhysics>();
+	iPhysics* ph = Physics::Scene();
 	return ph && handle ? (double)ph->vehicleSpeed(handle) * 3.6 : 0.0;
 }
 
 bool Vehicle::WheelContact(double i)
 {
-	iPhysics* ph = GetService<iPhysics>();
+	iPhysics* ph = Physics::Scene();
 	NukeWheelState ws;
 	return ph && handle && ph->getWheelState(handle, (int)i, ws) && ws.contact != 0;
 }
 
 double Vehicle::WheelSlip(double i)
 {
-	iPhysics* ph = GetService<iPhysics>();
+	iPhysics* ph = Physics::Scene();
 	NukeWheelState ws;
 	if (!ph || !handle || !ph->getWheelState(handle, (int)i, ws)) return 0.0;
 	return std::max(std::fabs(ws.longSlip), std::fabs(ws.latSlip));

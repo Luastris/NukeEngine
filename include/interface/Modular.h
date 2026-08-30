@@ -33,6 +33,15 @@ NUKEENGINE_API bc::vector<std::shared_ptr<NUKEModule>>& GetModules();
 // the dir holding the .app. Hosts also chdir here at boot (config is CWD-relative).
 NUKEENGINE_API bfs::path RunRoot();
 
+// The module whose OnLoad() is currently running ("" outside one): the editor-facing
+// registries (importers, asset creators, file icons, asset editors, atom creators, editor
+// hooks) stamp their entries with it so DisablePlugin can purge everything the module added.
+NUKEENGINE_API const std::string& RegisteringModule();
+
+// Drop every editor-registry entry the module registered — called by DisablePlugin, so a
+// disabled plugin's formats/creators/hooks vanish from the UI immediately.
+NUKEENGINE_API void PurgeModuleRegistrations(const std::string& moduleDll);
+
 // The ABI level a discovered module's DLL was built against (1 for DLLs predating the stamp).
 // GUARD every call to a vtable-appended NUKEModule virtual with this — e.g.
 // `ModuleAbi(m) >= 2 && m->editorTool()` — since an older DLL has no such slot.
