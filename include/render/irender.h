@@ -661,6 +661,13 @@ public:
     // wireframe on top; materials are skipped.
     virtual void setDebugView(int mode) { (void)mode; }
 
+    // Editor claim of the fullscreen-video overlay (abi 43): the EDITOR calls this every frame
+    // to draw the overlay inside its game viewport itself. The first call permanently moves the
+    // draw off the backbuffer for this renderer; the return is the overlay texture's UI handle
+    // (a renderDrawLists texId; 0 = no video playing) with w/h receiving the video size for
+    // letterboxing. Standalone players never call it, so the fullscreen draw stays theirs.
+    virtual uint64_t claimScreenOverlay(int* w, int* h) { (void)w; (void)h; return 0; }
+
     // ABI: new virtuals are appended at the END of the class, NEVER inserted mid-vtable —
     // plugins are separate DLLs built at different times, and an inserted slot shifts every later one.
 };

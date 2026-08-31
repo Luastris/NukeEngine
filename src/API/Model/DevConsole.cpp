@@ -26,8 +26,13 @@ bool g_open = false;
 bool g_wantFocus = false;
 char g_buf[1024] = { 0 };
 float g_prevGrave = 0.0f;
-std::vector<std::string> g_history;         // submitted lines, oldest first
-std::vector<const char*> g_historyPtrs;     // stable c_str view handed to the widget
+std::vector<std::string> g_history;         // submitted lines, oldest first (engine-walked)
+// Command-line behavior state — ALL of it engine-side; the GUI backend only reports keys.
+int         g_histNav = -1;                 // history cursor (-1 = fresh line)
+int         g_suggSel = 0;                  // selected autocomplete candidate
+std::string g_suggPrevBuf;                  // typing detection: resets the selection
+std::string g_pendingSet;                   // buffer replacement applied next frame
+bool        g_pendingHas = false;           // "" is a valid replacement (clear the line)
 
 bool ResolveEnabled()
 {
@@ -189,6 +194,70 @@ std::string Help(const std::string& arg)
 	return s.empty() ? arg + " has no static commands" : s;
 }
 
+// --- autocomplete -------------------------------------------------------------------------
+
+bool StartsWithCI(const std::string& s, const std::string& prefix)
+{
+	if (prefix.size() > s.size()) return false;
+	for (size_t i = 0; i < prefix.size(); ++i)
+		if (tolower((unsigned char)s[i]) != tolower((unsigned char)prefix[i])) return false;
+	return true;
+}
+
+TypeInfo* FindTypeCI(const std::string& name)
+{
+	if (TypeInfo* ti = Registry_Find(name)) return ti;
+	for (TypeInfo* ti : Registry_All())
+		if (ti && ti->name.size() == name.size() && StartsWithCI(ti->name, name)) return ti;
+	return nullptr;
+}
+
+// Suggestions for the current buffer: "Prof" -> matching types, "Profiler.Sh" -> usage lines
+// of the matching statics (up to 8, arrow-navigable), a complete "Type.Method ..." -> its
+// usage while the arguments are typed. `lines` are the rows shown; the first cands.size() of
+// them correspond 1:1 to `cands`, the full strings Tab puts into the buffer.
+void BuildSuggestions(const char* bufC, std::vector<std::string>& lines, std::vector<std::string>& cands)
+{
+	const std::string buf = bufC;
+	if (buf.empty()) return;
+	const size_t space = buf.find(' ');
+	if (space != std::string::npos)
+	{
+		// Already past the command: remind its usage while the arguments are typed.
+		const std::string head = buf.substr(0, space);
+		const size_t dot = head.find('.');
+		if (dot == std::string::npos || dot == 0 || dot + 1 >= head.size()) return;
+		TypeInfo* ti = FindTypeCI(head.substr(0, dot));
+		const Method* m = ti ? Reflect_FindMethod(ti, head.substr(dot + 1)) : nullptr;
+		if (m && m->isStatic && !m->params.empty()) lines.push_back(Usage(ti->name, *m));
+		return;
+	}
+	size_t total = 0;
+	const size_t dot = buf.find('.');
+	if (dot == std::string::npos)
+	{
+		for (TypeInfo* ti : Registry_All())
+			if (ti && TypeHasStatics(ti) && StartsWithCI(ti->name, buf))
+			{
+				++total;
+				if (cands.size() < 8) { cands.push_back(ti->name + "."); lines.push_back(ti->name); }
+			}
+	}
+	else
+	{
+		TypeInfo* ti = FindTypeCI(buf.substr(0, dot));
+		if (!ti) return;
+		const std::string mpfx = buf.substr(dot + 1);
+		for (const Method& m : ti->methods)
+			if (m.isStatic && StartsWithCI(m.name, mpfx))
+			{
+				++total;
+				if (cands.size() < 8) { cands.push_back(ti->name + "." + m.name); lines.push_back(Usage(ti->name, m)); }
+			}
+	}
+	if (total > cands.size()) lines.push_back("... (" + std::to_string(total - cands.size()) + " more)");
+}
+
 }  // namespace
 
 void Console::SetEnabled(bool on)
@@ -291,7 +360,14 @@ void Console::Emit()
 		const bool fresh = ver != lastVer;
 		lastVer = ver;
 
-		ui->BeginScrollRegion("##conlog", 0);
+		// Autocomplete for what is typed so far: hint rows above the input, the selected
+		// candidate highlighted (first by default, Up/Down move it, Tab inserts it).
+		std::vector<std::string> sugg, cands;
+		BuildSuggestions(g_buf, sugg, cands);
+		if (g_suggPrevBuf != g_buf) { g_suggSel = 0; g_suggPrevBuf = g_buf; }   // typing resets to the first
+		if (g_suggSel >= (int)cands.size()) g_suggSel = cands.empty() ? 0 : (int)cands.size() - 1;
+
+		ui->BeginScrollRegion("##conlog", -(float)sugg.size());   // reserve a row per hint
 		std::vector<LogEntry> ring = Log::Snapshot();
 		const size_t first = ring.size() > 256 ? ring.size() - 256 : 0;
 		for (size_t i = first; i < ring.size(); ++i)
@@ -306,14 +382,46 @@ void Console::Emit()
 		if (fresh) ui->ScrollToBottom();
 		ui->EndScrollRegion();
 
+		for (size_t i = 0; i < sugg.size(); ++i)
+		{
+			if (i < cands.size() && (int)i == g_suggSel)
+				ui->TextColored(1.0f, 0.90f, 0.40f, 1.0f, ("> " + sugg[i]).c_str());
+			else
+				ui->TextColored(0.55f, 0.75f, 0.95f, 1.0f, ("  " + sugg[i]).c_str());
+		}
 		if (g_wantFocus) { ui->FocusNextWidget(); g_wantFocus = false; }
-		g_historyPtrs.clear();
-		for (const std::string& s : g_history) g_historyPtrs.push_back(s.c_str());
-		if (ui->InputTextHistory("##concmd", g_buf, (int)sizeof(g_buf),
-		                         g_historyPtrs.data(), (int)g_historyPtrs.size()))
+
+		// The widget is dumb on purpose: it reports Up/Down/Tab and takes a replacement
+		// string; what they MEAN — candidate selection, history walk, completion — is here.
+		int key = 0;
+		const bool submit = ui->InputTextKeys("##concmd", g_buf, (int)sizeof(g_buf),
+		                                      g_pendingHas ? g_pendingSet.c_str() : nullptr,
+		                                      "`~", &key);
+		if (g_pendingHas) { g_pendingHas = false; g_pendingSet.clear(); }
+		if (key == 1 || key == 2)
+		{
+			if (!cands.empty())   // candidates visible: arrows move the selection (wrap)
+				g_suggSel = key == 1 ? (g_suggSel <= 0 ? (int)cands.size() : g_suggSel) - 1
+				                     : (g_suggSel + 1) % (int)cands.size();
+			else if (!g_history.empty())   // otherwise: walk the submit history
+			{
+				const int n = (int)g_history.size();
+				if (key == 1) g_histNav = g_histNav < 0 ? n - 1 : (g_histNav > 0 ? g_histNav - 1 : 0);
+				else          { if (g_histNav >= 0 && ++g_histNav >= n) g_histNav = -1; }
+				g_pendingSet = g_histNav >= 0 ? g_history[g_histNav] : "";
+				g_pendingHas = true;
+			}
+		}
+		else if (key == 3 && !cands.empty())   // Tab: insert the selected candidate
+		{
+			g_pendingSet = cands[g_suggSel];
+			g_pendingHas = true;
+		}
+		if (submit)
 		{
 			Execute(g_buf);
 			g_buf[0] = 0;
+			g_histNav = -1;
 			g_wantFocus = true;   // keep typing
 		}
 	}

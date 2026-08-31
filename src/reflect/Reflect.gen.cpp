@@ -1222,6 +1222,12 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("Phases", &Profiler::Phases));
 		t.methods.push_back(MakeMethod("Capture", &Profiler::Capture));
 		Reflect_SetMethodDoc("Profiler", "Capture", "Snapshot every phase to a CSV (\"phase;ms\", heaviest first). Relative paths land next to the executable's working directory. Returns false on IO failure.", "file");
+		t.methods.push_back(MakeMethod("ShowFps", &Profiler::ShowFps));
+		Reflect_SetMethodDoc("Profiler", "ShowFps", "--- perf overlays (engine-drawn, top-right of the game screen) --- FPS counter and frame-time graph over the running game — player fullscreen included. Toggled from the dev console (\"Profiler.ShowFps true\") or any script; both enabled stack vertically, never overlapping. Hidden while the dev console is open.", "on");
+		t.methods.push_back(MakeMethod("ShowGraph", &Profiler::ShowGraph));
+		Reflect_SetMethodDoc("Profiler", "ShowGraph", "", "on");
+		t.methods.push_back(MakeMethod("FpsShown", &Profiler::FpsShown));
+		t.methods.push_back(MakeMethod("GraphShown", &Profiler::GraphShown));
 	}
 	{
 		TypeInfo& t = TypeOf<RagdollDef>();

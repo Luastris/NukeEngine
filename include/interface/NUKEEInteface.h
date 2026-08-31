@@ -127,7 +127,7 @@ extern "C" { NUKE_ABI_STAMP int nuke_build_debug = 0; }
 //  42 — NukeSoftBodyDesc gained localSpace (anchor-space cloth: fitted clothes simulate
 //       around the skeleton's anchor so clip drift/loop teleports never reach the solver;
 //       own collision layer — proxies only). Cloth's anchor block grew its sizeof.
-#define NUKE_ENGINE_ABI 42
+#define NUKE_ENGINE_ABI 43
 extern "C" { NUKE_ABI_STAMP int nuke_engine_abi = NUKE_ENGINE_ABI; }
 
 namespace nuke {

@@ -20,6 +20,19 @@ public:
 	// to the executable's working directory. Returns false on IO failure.
 	[[nuke::func]] static bool        Capture(const std::string& file);
 
+	// --- perf overlays (engine-drawn, top-right of the game screen) ---
+	// FPS counter and frame-time graph over the running game — player fullscreen included.
+	// Toggled from the dev console ("Profiler.ShowFps true") or any script; both enabled
+	// stack vertically, never overlapping. Hidden while the dev console is open.
+	[[nuke::func]] static void ShowFps(bool on);
+	[[nuke::func]] static void ShowGraph(bool on);
+	[[nuke::func]] static bool FpsShown();
+	[[nuke::func]] static bool GraphShown();
+
+	// Engine-internal: sample this frame into the history ring and draw the enabled overlays
+	// through the GUI backend seam. Called once per GUI frame by Ui::EmitFrame.
+	static void EmitOverlay();
+
 	// --- native reporting (engine internals + game modules) ---
 	static void Report(const std::string& phase, double ms);   // thread-safe
 

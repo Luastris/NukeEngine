@@ -3,6 +3,7 @@
 #include "API/Model/Atom.h"
 #include "API/Model/World.h"
 #include "API/Model/DevConsole.h"
+#include "API/Model/Profiler.h"
 #include "interface/AppInstance.h"
 #include <boost/thread/mutex.hpp>
 #include <cstring>
@@ -332,8 +333,9 @@ void Ui::EmitFrame()
 	// inside Lua — the whole frame contribution runs under the game lock.
 	app->currentWorld->LockGame();
 	for (Atom* a : app->currentWorld->GetHierarchy()) DispatchOnGUI(a);
-	Emit();              // the retained tree
-	Console::Emit();     // the dev console on top
+	Emit();                    // the retained tree
+	Console::Emit();           // the dev console on top
+	Profiler::EmitOverlay();   // FPS/graph overlays (skip themselves while the console is open)
 	app->currentWorld->UnlockGame();
 }
 

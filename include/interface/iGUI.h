@@ -77,10 +77,31 @@ public:
 	virtual bool InputTextHistory(const char* label, char* buf, int bufCap,
 	                              const char* const* history, int histCount) { return false; }
 	virtual void FocusNextWidget() {}                       // keyboard focus for the next widget
-	// Scrolling sub-region; height <= 0 = fill the window minus one input row.
+	// Scrolling sub-region; height <= 0 = fill the window minus one input row, with -height
+	// EXTRA text rows also reserved below (the console's autocomplete hints live there).
 	virtual void BeginScrollRegion(const char* id, float height) {}
 	virtual void EndScrollRegion() {}
 	virtual void ScrollToBottom() {}                        // stick to the end while inside
+
+	// ABI: appended (command-line input). A text field that owns NO behavior: special keys
+	// are reported out instead of acted on (*key: 0 none, 1 Up, 2 Down, 3 Tab), `setText`
+	// (non-null) replaces the field's content this frame — even mid-edit, cursor to the end —
+	// characters listed in `filterChars` never enter the buffer, and while this window is
+	// focused any typed character pulls the keyboard focus into the field first. True on
+	// Enter. What the keys DO — history, completion, selection — is the CALLER's logic.
+	virtual bool InputTextKeys(const char* label, char* buf, int bufCap,
+	                           const char* setText, const char* filterChars, int* key)
+	{ (void)setText; (void)filterChars; if (key) *key = 0;
+	  return InputText(label, buf, bufCap); }
+
+	// ABI: appended for the engine perf overlays (Profiler.ShowFps/ShowGraph). Screen-space
+	// primitives in game-screen pixels, drawn OVER every GUI window — no window needed.
+	virtual void OverlayLine(float x1, float y1, float x2, float y2,
+	                         float r, float g, float b, float a, float thickness) {}
+	virtual void OverlayRect(float x, float y, float w, float h,
+	                         float r, float g, float b, float a, float rounding) {}
+	virtual void OverlayText(float x, float y, float r, float g, float b, float a, const char* s) {}
+	virtual void OverlayTextSize(const char* s, float* w, float* h) { if (w) *w = 0; if (h) *h = 0; }
 };
 
 // The active backend. GUI() NEVER returns null — a no-op stub stands in when none is registered.
