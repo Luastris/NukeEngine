@@ -116,7 +116,18 @@ extern "C" { NUKE_ABI_STAMP int nuke_build_debug = 0; }
 //       binds and the skinning palette prefers them over the skeleton's canonical set.
 //  39 — Animator gained fitLimbs (sizeof grew): penetrating hands become one-frame chain-IK
 //       goals against the ragdoll capsules (proportion-mismatched clips).
-#define NUKE_ENGINE_ABI 39
+//  40 — C3 cloth: iPhysics gained the soft-body block (createSoftBody/destroySoftBody/
+//       set-/getSoftBodyVertices/addSoftBodyVelocity — appended vtable slots) and
+//       SkinnedMeshRenderer gained externalMesh (sizeof grew): a Cloth component owns the
+//       renderer's output mesh while the pose pipeline keeps feeding pins and sockets.
+//  41 — NukeBodyDesc gained softOnly (cloth body proxies: kinematic capsules that collide
+//       ONLY with soft bodies) and Cloth gained the proxy/interpolation block (sizeof grew):
+//       ragdoll capsules ride the pose inside the solver, and the render sheet interpolates
+//       between fixed steps.
+//  42 — NukeSoftBodyDesc gained localSpace (anchor-space cloth: fitted clothes simulate
+//       around the skeleton's anchor so clip drift/loop teleports never reach the solver;
+//       own collision layer — proxies only). Cloth's anchor block grew its sizeof.
+#define NUKE_ENGINE_ABI 42
 extern "C" { NUKE_ABI_STAMP int nuke_engine_abi = NUKE_ENGINE_ABI; }
 
 namespace nuke {

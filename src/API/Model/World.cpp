@@ -18,6 +18,7 @@
 #include "API/Model/ReflectionProbe.h"
 #include "API/Model/Time.h"
 #include "API/Model/Events.h"
+#include "API/Model/Cloth.h"
 #include "API/Model/Fire.h"
 #include "API/Model/PairedAnim.h"
 #include "API/Model/Profiler.h"
@@ -435,6 +436,7 @@ void World::Update()
 	app->worldTickActive = false;
 	// Flush deferred destruction after the traversal, still under the game lock.
 	FlushDestroyQueue();
+	Cloth::TickLate();        // garment render write with THIS frame's animator globals
 	PairedAnim::Tick(this);   // paired-animation sessions: drift sync + lifetime, post-traversal
 	Fire::Tick(this);         // fire spread/burn-out (throttled scans; kill switch inside)
 	// World Partition streaming: ring maintenance AFTER the traversal (safe to add/remove
@@ -3221,9 +3223,12 @@ static void DeleteSubtree(Atom* a)
 	if (!a) return;
 	for (Atom* c : a->children) DeleteSubtree(c);
 	// Components must release what they own, and script handles into the atom must be dropped
-	// before the memory goes.
+	// before the memory goes. Destroy ALL first, then free: a Destroy may look up sibling
+	// components (Cloth restores the MeshRenderer's mesh) and must find them alive.
 	for (Component* c : a->components)
-		if (c) { c->Destroy(); Reflect_DropObject(c); delete c; }
+		if (c) c->Destroy();
+	for (Component* c : a->components)
+		if (c) { Reflect_DropObject(c); delete c; }
 	a->components.clear();
 	Reflect_DropObject(&a->GetTransform());
 	delete a;
@@ -3853,7 +3858,9 @@ void World::LoadHeaderFromJson(const json& j)
 		if (!a) return;
 		for (Atom* ch : a->children) hardDestroy(ch);
 		a->children.clear();
-		for (Component* c : a->components) if (c) { c->Destroy(); delete c; }
+		// Destroy ALL first, then free: a Destroy may look up sibling components.
+		for (Component* c : a->components) if (c) c->Destroy();
+		for (Component* c : a->components) if (c) delete c;
 		a->components.clear();
 		delete a;
 	};

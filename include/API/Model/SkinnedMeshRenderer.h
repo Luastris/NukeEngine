@@ -28,6 +28,11 @@ public:
 
 	Skeleton* skeleton = nullptr;   // resolved lazily (EnsureSkeleton)
 
+	// An external driver (Cloth) owns this renderer's OUTPUT mesh: ApplyPose still runs the
+	// forward pass (Globals()/BoneWorld stay live for pins and sockets) but neither skins nor
+	// touches `mesh` — the driver writes its own simulated instance there every frame.
+	bool externalMesh = false;
+
 	// Local pose palette, one TRS per skeleton bone; initialized to bind.
 	struct BonePose
 	{

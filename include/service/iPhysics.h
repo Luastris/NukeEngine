@@ -39,6 +39,10 @@ struct NukeBodyDesc
 	// ABI: appended fields only (the engine is the sole producer of this struct).
 	// Center-of-mass shift in shape-local units (vehicles/boats: lower = stabler).
 	float comOffset[3] = { 0, 0, 0 };
+
+	// Collides ONLY with soft bodies (cloth body proxies: a character's capsules pushing
+	// its clothes out, invisible to the rest of the scene).
+	bool softOnly = false;
 };
 
 // A query shape (shape casts / overlaps) — the primitive subset of NukeBodyDesc.
@@ -149,6 +153,49 @@ struct NukeWheelState
 	int   contact = 0;                 // touching ground
 	float longSlip = 0.0f;             // longitudinal slip (velocity ratio)
 	float latSlip = 0.0f;              // lateral slip (radians)
+};
+
+// A soft-body cloth description (see createSoftBody). Vertices are WORLD positions of the
+// WELDED sim mesh (the caller merges UV-seam duplicates); indices are triangles into it.
+// Vertex/index arrays are read only DURING createSoftBody.
+struct NukeSoftBodyDesc
+{
+	const float* verts = nullptr;          // xyz per sim vertex (world)
+	int numVerts = 0;
+	const unsigned int* indices = nullptr; // 3 per triangle
+	int numTris = 0;
+	// Per-vertex inverse mass; 0 = pinned (kinematic, driven via setSoftBodyVertices).
+	// Null = every vertex free at mass 1.
+	const float* invMass = nullptr;
+	float compliance = 0.0f;               // edge/shear stretch compliance (0 = inextensible)
+	float bendCompliance = 0.01f;          // dihedral bend compliance
+	float vertexRadius = 0.01f;            // collision skin per vertex
+	float friction = 0.3f;
+	float linearDamping = 0.1f;
+	float gravityFactor = 1.0f;
+	float pressure = 0.0f;                 // closed meshes: internal pressure (balloons)
+	int   iterations = 5;                  // solver iterations per step
+	float pos[3] = { 0, 0, 0 };            // body origin (usually the cloth AABB center)
+
+	// OPTIONAL skinned-constraint block (fitted clothes). When present, `verts` must be the
+	// BIND-pose model-space positions and `pos` should be zero: the backend skins every
+	// vertex from the joint matrices fed via setSoftBodyJoints each step and constrains it
+	// to its skinned position — skinMaxDist 0 glues (waistbands), a finite value leashes the
+	// drape, and the backstop sphere keeps the sheet from sinking BEHIND the skinned surface
+	// (its normal comes from the surrounding faces). Arrays are read only DURING create.
+	const float* invBind = nullptr;              // 16 floats per joint, model space, column-major
+	int numJoints = 0;
+	const unsigned short* skinJoints = nullptr;  // 4 joint indices per sim vertex
+	const float* skinWeights = nullptr;          // 4 weights per sim vertex
+	const float* skinMaxDist = nullptr;          // per sim vertex; >= 1e9 = unconstrained
+	float backstopDistance = 1e9f;               // sphere starts this far behind the surface
+	float backstopRadius = 40.0f;                // huge radius ~ a plane
+
+	// ABI: appended. Anchor-space cloth (fitted clothes): the caller feeds joints/proxies
+	// with the skeleton's anchor position subtracted, so world travel, clip drift and loop
+	// teleports never reach the solver. Such a sheet collides ONLY with the body proxies
+	// (it sits near the world origin — world geometry there is unrelated).
+	bool localSpace = false;
 };
 
 // The physics service contract: the active backend implements it and hands it to the loader
@@ -309,6 +356,23 @@ public:
 	// destroyScene when done — the creator owns it.
 	virtual iPhysics* createScene() = 0;
 	virtual void      destroyScene(iPhysics* s) = 0;
+
+	// ---- soft-body cloth (C3) — ABI 40: appended at the END ---------------------------------
+	// Cloth simulates inside step() and collides with the scene's bodies; pinned vertices
+	// (invMass 0) are kinematic and follow setSoftBodyVertices.
+	virtual uint64_t createSoftBody(const NukeSoftBodyDesc& d) = 0;   // 0 on failure
+	virtual void     destroySoftBody(uint64_t sb) = 0;
+	// Move `n` vertices (sim indices) to WORLD positions — kinematic pins each step, or
+	// post-step position corrections (capsule push-out) on free vertices.
+	virtual void setSoftBodyVertices(uint64_t sb, const int* idx, const float* worldPos, int n) = 0;
+	// WORLD positions of the sim vertices after the last step (up to maxVerts). False = unknown.
+	virtual bool getSoftBodyVertices(uint64_t sb, float* outWorldPos, int maxVerts) = 0;
+	// Velocity delta applied to every FREE vertex this step (wind).
+	virtual void addSoftBodyVelocity(uint64_t sb, const float dv[3]) = 0;
+	// Skinned cloth: this step's joint matrices (16 floats each, WORLD space, column-major,
+	// indexed as in the desc's invBind). hardSkin snaps every vertex onto its skinned
+	// position — call once right after create, then feed each step with hardSkin=false.
+	virtual void setSoftBodyJoints(uint64_t sb, const float* joints16, int numJoints, bool hardSkin) = 0;
 };
 
 }  // namespace nuke

@@ -14,6 +14,7 @@
 #include "API/Model/Canvas.h"
 #include "API/Model/CharacterController.h"
 #include "API/Model/Clock.h"
+#include "API/Model/Cloth.h"
 #include "API/Model/Collider.h"
 #include "API/Model/DebugDraw.h"
 #include "API/Model/Decal.h"
@@ -523,6 +524,53 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("Now", &Clock::Now));
 		Reflect_SetMethodDoc("Clock", "Now", "Monotonic seconds since process start — the timeline every Clock measures on.", "");
 		t.create = []() -> void* { return new Clock(); };
+	}
+	{
+		TypeInfo& t = TypeOf<Cloth>();
+		t.base = "Component";
+		t.category = "Physics";
+		t.fields.push_back(MakeField("pinMode", &Cloth::pinMode, "", "Pin Mode", 0.0f, 0.0f, "None,Top Edge,Bone Weights"));
+		t.fields.back().tip = "Which vertices are sewn to the animation: the mesh's top band (flags, capes) or the vertices skinned to Pin Bones (a skirt's waistband). None = fully free (tablecloth)";
+		t.fields.push_back(MakeField("pinBones", &Cloth::pinBones, "", "Pin Bones"));
+		t.fields.back().tip = "';'-separated bone names for Bone Weights mode - a vertex with at least half its skin weight on them is pinned";
+		t.fields.push_back(MakeField("pinBand", &Cloth::pinBand, "", "Pin Band", 0.0f, 1.0f));
+		t.fields.back().tip = "Top Edge mode: fraction of the mesh height (from the top) that pins";
+		t.fields.push_back(MakeField("stiffness", &Cloth::stiffness, "", "Stiffness", 0.0f, 1.0f));
+		t.fields.back().tip = "Stretch resistance of the sheet; 1 = inextensible";
+		t.fields.push_back(MakeField("bendStiffness", &Cloth::bendStiffness, "", "Bend Stiffness", 0.0f, 1.0f));
+		t.fields.back().tip = "Fold resistance; low = silky, high = leathery";
+		t.fields.push_back(MakeField("thickness", &Cloth::thickness, "", "Thickness"));
+		t.fields.back().tip = "Collision skin around every vertex";
+		t.fields.push_back(MakeField("friction", &Cloth::friction, "", "Friction", 0.0f, 1.0f));
+		t.fields.push_back(MakeField("damping", &Cloth::damping, "", "Damping"));
+		t.fields.back().tip = "Velocity kill per second; low = flowy";
+		t.fields.push_back(MakeField("gravityFactor", &Cloth::gravityFactor, "", "Gravity Factor"));
+		t.fields.back().tip = "Multiplier on scene gravity";
+		t.fields.push_back(MakeField("pressure", &Cloth::pressure, "", "Pressure"));
+		t.fields.back().tip = "Closed meshes only: internal pressure (balloons)";
+		t.fields.push_back(MakeField("iterations", &Cloth::iterations, "", "Iterations", 1.0f, 32.0f));
+		t.fields.back().tip = "Solver iterations per step - more = stiffer under load, costlier";
+		t.fields.push_back(MakeField("windOn", &Cloth::windOn, "", "Wind"));
+		t.fields.back().tip = "Catch the global wind and WindZones";
+		t.fields.push_back(MakeField("collision", &Cloth::collision, "", "Body Collision"));
+		t.fields.back().tip = "Push the sheet out of the atom's ragdoll (.nurag) capsules; scene bodies always collide";
+		t.fields.push_back(MakeField("weldDistance", &Cloth::weldDistance, "", "Weld Distance"));
+		t.fields.back().tip = "UV-seam duplicates closer than this merge into one sim vertex";
+		t.fields.push_back(MakeField("maxDistance", &Cloth::maxDistance, "", "Max Distance"));
+		t.fields.back().tip = "Skinned meshes: a free vertex may stray at most this far from its ANIMATED (skinned) position - the fitted-clothes leash (skirts, sleeves). 0 = fully free (capes)";
+		t.fields.push_back(MakeField("backstop", &Cloth::backstop, "", "Backstop"));
+		t.fields.back().tip = "Skinned meshes: a vertex may sink at most this far BEHIND its skinned surface (face-normal backstop) - keeps fitted cloth out of the body. Near zero for tight clothes";
+		t.fields.push_back(MakeField("bodyGap", &Cloth::bodyGap, "", "Body Gap"));
+		t.fields.back().tip = "Skinned meshes: the sheet is inflated this far along its normals - fitted cloth hugs an air cushion instead of the skin, so a flexing thigh can't poke through";
+		t.fields.push_back(MakeField("simBand", &Cloth::simBand, "", "Sim Band", 0.0f, 1.0f));
+		t.fields.back().tip = "Skinned meshes: only the BOTTOM fraction of the sheet simulates, the rest rides the animation rigidly (skirt hems, coat tails - the fitted part can never be pushed through by the body). 1 = the whole sheet simulates";
+		t.methods.push_back(MakeMethod("Rebuild", &Cloth::Rebuild));
+		Reflect_SetMethodDoc("Cloth", "Rebuild", "Drop the sim and rebuild from the current pose (after prop edits that change the sheet).", "");
+		t.methods.push_back(MakeMethod("SimVertexCount", &Cloth::SimVertexCount));
+		Reflect_SetMethodDoc("Cloth", "SimVertexCount", "--- script surface (auto-bound) ---", "");
+		t.methods.push_back(MakeMethod("PinnedCount", &Cloth::PinnedCount));
+		t.methods.push_back(MakeMethod("CenterOfMass", &Cloth::CenterOfMass));
+		t.create = []() -> void* { return new Cloth(); };
 	}
 	{
 		TypeInfo& t = TypeOf<Collider>();

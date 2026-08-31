@@ -142,8 +142,23 @@ void SkinnedMeshRenderer::PoseBounds(const std::vector<float>& jointPos)
 void SkinnedMeshRenderer::ApplyPose()
 {
 	Skeleton* sk = EnsureSkeleton();
-	if (!sk || sk->bones.empty() || pose.size() != sk->bones.size()) return;
-	if (!EnsureInstance()) return;
+	static const bool smrDbg = std::getenv("NUKE_SMR_DEBUG") != nullptr;
+	if (!sk || sk->bones.empty() || pose.size() != sk->bones.size())
+	{
+		if (smrDbg)
+			std::cout << "[SMRDbg]\tApplyPose early-out (skel) atom='" << (atom ? atom->name : "?")
+			          << "' sk=" << (sk ? 1 : 0) << " bones=" << (sk ? sk->bones.size() : 0)
+			          << " pose=" << pose.size() << std::endl;
+		return;
+	}
+	if (!EnsureInstance())
+	{
+		if (smrDbg)
+			std::cout << "[SMRDbg]\tApplyPose early-out (instance) atom='" << (atom ? atom->name : "?")
+			          << "' meshGuid='" << meshGuid << "' src=" << (srcMesh ? 1 : 0)
+			          << " boneIdx=" << (srcMesh && srcMesh->boneIndex ? 1 : 0) << std::endl;
+		return;
+	}
 	if (morphWeights.size() != srcMesh->morphs.size()) morphWeights.resize(srcMesh->morphs.size(), 0.0f);
 
 	const size_t nb = sk->bones.size();
@@ -189,6 +204,10 @@ void SkinnedMeshRenderer::ApplyPose()
 		jointPos[i * 3 + 1] = global[i][3][1];
 		jointPos[i * 3 + 2] = global[i][3][2];
 	}
+
+	// External driver (Cloth) owns the output mesh: globals/palette above stay live for
+	// pins and sockets, but the skin itself is the driver's business.
+	if (externalMesh) return;
 
 	// --- GPU path: the renderer skins in a compute pre-pass (palette + morph weights per
 	// frame); vertices never touch the CPU and prev-positions feed TAA motion vectors.
