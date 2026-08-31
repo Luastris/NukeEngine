@@ -63,8 +63,7 @@ endif()
 set(_nukegen "${CMAKE_CURRENT_SOURCE_DIR}/../NukeUtils/bin/NukeGen${NUKE_HOSTTOOL_SUFFIX}")
 if(WIN32 AND (EXISTS "${_nukegen}" OR TARGET NukeGen))
     add_custom_command(TARGET NukeEngine PRE_BUILD
-        COMMAND "${_nukegen}" --root "${CMAKE_CURRENT_SOURCE_DIR}/.."
-                --doc "${CMAKE_CURRENT_SOURCE_DIR}/../NukeUtils/sdkdocs/NukeEngine.md"
+        COMMAND "${_nukegen}" --module "${CMAKE_CURRENT_SOURCE_DIR}"
         COMMENT "NukeEngine reflection codegen (NukeGen)"
         VERBATIM)
 endif()
