@@ -933,7 +933,13 @@ void InitModules(AppInstance* instance)
 	}
 
 	DiscoverModulesIn(modulesDir.string());
-	// Native plugins the mounted mods brought. The host's own modules/ was walked first, so a
+	// plugins/ — the OPTIONAL add-on tier. The intended split (user 2026-08-31): modules/
+	// holds the ENGINE's own system modules (service providers), plugins/ holds optional
+	// bolt-on functionality. Both feed one pool; modules/ walks first so it wins name clashes.
+	const bfs::path pluginsDir = exeDir / "plugins";
+	if (bfs::exists(pluginsDir, ec))
+		DiscoverModulesIn(pluginsDir.string());
+	// Native plugins the mounted mods brought. The host's own directories walked first, so a
 	// mod cannot shadow an engine plugin by reusing its file name.
 	for (const std::string& d : Package::ModuleCacheDirs()) DiscoverModulesIn(d);
 }

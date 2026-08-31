@@ -1,5 +1,9 @@
 #include "API/iGUI.h"
 #include "interface/iGUI.h"
+#include "API/Model/Atom.h"
+#include "API/Model/World.h"
+#include "API/Model/DevConsole.h"
+#include "interface/AppInstance.h"
 #include <boost/thread/mutex.hpp>
 #include <cstring>
 #include <map>
@@ -304,6 +308,33 @@ void Ui::Emit()
 		}
 		g->End();   // ALWAYS paired with Begin (collapsed included) — backend contract
 	}
+}
+
+
+// --- the engine's whole contribution to a gui backend's frame --------------------------------
+
+namespace {
+// OnGUI sweep: every enabled component of every enabled atom, children first come later —
+// same order the world ticks.
+void DispatchOnGUI(Atom* a)
+{
+	if (!a || !a->enabled) return;   // disabled atom = whole subtree off
+	for (Component* c : a->components) if (c && c->enabled) c->OnGUI();
+	for (Atom* ch : a->children) DispatchOnGUI(ch);
+}
+}  // namespace
+
+void Ui::EmitFrame()
+{
+	AppInstance* app = AppInstance::GetSingleton();
+	if (!app || !app->currentWorld) return;
+	// OnGUI enters the script VM on the render thread while the fixed thread may also be
+	// inside Lua — the whole frame contribution runs under the game lock.
+	app->currentWorld->LockGame();
+	for (Atom* a : app->currentWorld->GetHierarchy()) DispatchOnGUI(a);
+	Emit();              // the retained tree
+	Console::Emit();     // the dev console on top
+	app->currentWorld->UnlockGame();
 }
 
 }  // namespace nuke

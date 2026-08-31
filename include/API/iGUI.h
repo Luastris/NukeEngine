@@ -51,6 +51,12 @@ public:
 	// Re-emit the whole tree through the immediate backend. Called once per frame by the GUI
 	// plugin; harmless with no backend.
 	static void Emit();
+
+	// THE runtime-GUI frame: everything the ENGINE contributes to a gui backend's frame —
+	// the world's OnGUI sweep, the retained tree above, the dev console on top — under the
+	// game lock. A backend calls exactly this once per frame and never needs to know what
+	// the engine draws; new engine-side overlays land here, not in the backends.
+	static void EmitFrame();
 };
 
 }  // namespace nuke
