@@ -15,6 +15,10 @@ it with submodules and build everything with one command via the superbuild.
 - The Model API (`nuke::` namespace): Atom / World / Component, Transform (quaternions),
   Material, Mesh, Texture, Shader, AnimClip, Prefab, ResDB, Package (NUPAK), Audio,
   Physics facades, Jobs, Log, Math.
+- Animation: Animator (clips, state machines, blend spaces, IK, root motion) and
+  `PoseClone` — runtime pose cloning across skeletons the UE5 way: a source atom plays
+  its clips natively on its own skeleton, the component copies the pose through a bone
+  map + retarget pose (auto-aligned, editable per bone) every frame. Nothing is baked.
 - The reflection registry (`[[nuke::prop]]` / `[[nuke::func]]` + nukegen codegen for
   C++ < 26) — the single source the inspector, serialization, Lua, C# and modding ride.
 - Service seams (`iRender`, `iPhysics`, `iAudio`, `iScript`, `iGUI`) and the module

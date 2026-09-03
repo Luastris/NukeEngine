@@ -71,6 +71,10 @@ public:
 	[[nuke::func]] void SetPersistent(bool on);     // survive game world switches (root atoms; see `persistent`)
 	[[nuke::func]] bool IsPersistent();
 	[[nuke::func]] void SetEnabled(bool on);        // whole-atom switch incl. subtree (see `enabled`)
+	// Runtime-only hide of this subtree's renderers (a driver hiding its source rig): never
+	// serialized; draws and picks skip a hidden atom and everything under it.
+	static void SetRuntimeHidden(Atom* a, bool on);
+	static bool RuntimeHidden(const Atom* a);
 	[[nuke::func]] bool IsEnabled();                // this atom's OWN flag (an ancestor may still disable it)
 	[[nuke::func]] bool IsFolder();                 // hierarchy folder node (see `folder`)
 	[[nuke::func]] void SetAlwaysLoaded(bool on);   // opt this ROOT out of world streaming (see `alwaysLoaded`)
@@ -102,6 +106,7 @@ public:
 	void Init(Atom* parent);
 	void FixedUpdate();
 	void Update();
+	void LateUpdate();          // second pass of the tick: every enabled component, after all Updates
 
 	[[nuke::func]] void SetParent(Atom* newparent);
 	[[nuke::func]] Atom* GetParent();

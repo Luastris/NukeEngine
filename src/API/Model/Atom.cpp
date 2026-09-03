@@ -3,6 +3,7 @@
 #include "interface/AppInstance.h"
 #include "reflect/ReflectBind.h"
 #include <iostream>
+#include <set>
 
 namespace nuke {
 
@@ -16,8 +17,31 @@ Atom::Atom(const char* name) : name(name), transform(this)
 	cout << "[Atom]\t\t" << "New Atom(\"" << name << "\")" << endl;
 }
 
+// Hidden atoms by pointer; keys are compared, never dereferenced, and an atom drops its
+// own key when it dies — a recycled address can never inherit the flag.
+static std::set<const Atom*>& HiddenAtoms()
+{
+	static std::set<const Atom*> v;
+	return v;
+}
+
+void Atom::SetRuntimeHidden(Atom* a, bool on)
+{
+	if (!a) return;
+	if (on) HiddenAtoms().insert(a); else HiddenAtoms().erase(a);
+}
+
+bool Atom::RuntimeHidden(const Atom* a)
+{
+	if (HiddenAtoms().empty()) return false;
+	for (const Atom* p = a; p; p = p->parent)
+		if (HiddenAtoms().count(p)) return true;
+	return false;
+}
+
 Atom::~Atom()
 {
+	HiddenAtoms().erase(this);
 	Reflect_DropObject(&transform);   // script handles to this transform go stale-safe
 }
 
@@ -107,6 +131,18 @@ void Atom::Update()
 			continue;
 		cmp->Update();
 	}
+}
+
+void Atom::LateUpdate()
+{
+	if (!enabled) return;   // whole subtree off
+	for (auto child : children)
+	{
+		if (child)
+			child->LateUpdate();
+	}
+	for (auto cmp : components)
+		if (cmp && cmp->enabled) cmp->LateUpdate();
 }
 
 void Atom::SetParent(Atom* newparent) {

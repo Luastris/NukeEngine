@@ -36,6 +36,7 @@
 #include "API/Model/Noise.h"
 #include "API/Model/PairedAnim.h"
 #include "API/Model/Physics.h"
+#include "API/Model/PoseClone.h"
 #include "API/Model/PostProcess.h"
 #include "API/Model/Prefab.h"
 #include "API/Model/Profiler.h"
@@ -169,6 +170,14 @@ bool NukeReflectInit() {
 		Reflect_SetMethodDoc("Animator", "AddEvent", "Add a marker to a clip (guid or name); fired as Component::OnAnimEvent on siblings.", "clip,t,name");
 		t.methods.push_back(MakeMethod("MapBone", &Animator::MapBone));
 		Reflect_SetMethodDoc("Animator", "MapBone", "Retarget: rename clip channels onto this skeleton's bone names, for every clip played.", "from,to");
+		t.methods.push_back(MakeMethod("CopyPoseFrom", &Animator::CopyPoseFrom));
+		Reflect_SetMethodDoc("Animator", "CopyPoseFrom", "Copy the source rig's current pose onto this rig now: auto-aligned, pelvis travel scaled by height. Returns the paired bone count (0 = the rigs cannot pair).", "source");
+		t.methods.push_back(MakeMethod("CopyPoseFromWith", &Animator::CopyPoseFromWith));
+		Reflect_SetMethodDoc("Animator", "CopyPoseFromWith", "Same with an explicit alignment pose (JSON from PoseAlignment) and translation mode: 0 none, 1 root scaled, 2 all scaled.", "source,poseJson,translation");
+		t.methods.push_back(MakeMethod("PoseAlignment", &Animator::PoseAlignment));
+		Reflect_SetMethodDoc("Animator", "PoseAlignment", "The auto alignment pose for the pair as JSON ({\"bone\":[x,y,z,w]}): keep, edit, feed CopyPoseFromWith.", "source");
+		t.methods.push_back(MakeMethod("PoseSourceBone", &Animator::PoseSourceBone));
+		Reflect_SetMethodDoc("Animator", "PoseSourceBone", "The source bone driving `bone` in a clone from `source` (\"\" = unpaired).", "source,bone");
 		t.methods.push_back(MakeMethod("ClearBoneMap", &Animator::ClearBoneMap));
 		t.methods.push_back(MakeMethod("SetIK", &Animator::SetIK));
 		Reflect_SetMethodDoc("Animator", "SetIK", "IK post-pass on the sampled pose: pull `tipBone` toward a WORLD-space target, weight [0..1] blends against the clip. Chain 2 = analytic two-bone, more = FABRIK; the pole is a WORLD-space point aiming the bend plane.", "tipBone,target,weight");
@@ -1075,6 +1084,14 @@ bool NukeReflectInit() {
 		t.fields.back().tip = "Band edge softness";
 		t.fields.push_back(MakeField("toonShade", &Material::toonShade, "", "Toon Shade"));
 		t.fields.back().tip = "Tint of the unlit side of the band";
+		t.fields.push_back(MakeField("subsurface", &Material::subsurface, "", "Subsurface", 0.0f, 1.0f));
+		t.fields.back().tip = "Skin-style scattering: wrapped soft diffuse, the scatter tint bleeds into the terminator; pair with Translucency for backlit ears/nose";
+		t.fields.push_back(MakeField("subsurfaceTint", &Material::subsurfaceTint, "", "Subsurface Tint"));
+		t.fields.back().tip = "Scatter color - reddish for skin (blood under the surface)";
+		t.fields.push_back(MakeField("irisDepth", &Material::irisDepth, "", "Iris Depth", 0.0f, 0.5f));
+		t.fields.back().tip = "Eye shading: view parallax sinks the iris under the cornea so the eye reads as a sphere with depth; 0 = off";
+		t.fields.push_back(MakeField("hashedAlpha", &Material::hashedAlpha, "", "Hashed Alpha"));
+		t.fields.back().tip = "Cutout blend: stochastic alpha test instead of the hard threshold - soft hair-card edges (shadow dither already matches)";
 		t.fields.push_back(MakeField("shaderGuid", &Material::shaderGuid, "shader", "Shader"));
 		t.fields.push_back(MakeField("physTag", &Material::physTag, "", "Physics Tag"));
 		t.fields.back().tip = "Surface identity for gameplay/physics queries (e.g. metal, wood, flesh); empty = untagged";
@@ -1199,6 +1216,43 @@ bool NukeReflectInit() {
 		Reflect_SetMethodDoc("Physics", "OverlapCapsule", "", "center,radius,halfHeight,rot");
 		t.methods.push_back(MakeMethod("OverlapAtom", &Physics::OverlapAtom));
 		Reflect_SetMethodDoc("Physics", "OverlapAtom", "", "index");
+	}
+	{
+		TypeInfo& t = TypeOf<PoseClone>();
+		t.base = "Component";
+		t.category = "Animation";
+		t.fields.push_back(MakeField("source", &PoseClone::source, "Animator", "Source"));
+		t.fields.back().tip = "Atom whose skeleton the pose is copied FROM every frame (its Animator plays the clips natively).";
+		t.fields.back().widget = "foreign";
+		t.fields.push_back(MakeField("boneMapGuid", &PoseClone::boneMapGuid, "bonemap", "Bone Map"));
+		t.fields.back().tip = "Explicit source->target bone renames (.nubonemap). Identical names and same-named rig chains pair automatically.";
+		t.fields.push_back(MakeField("hideSource", &PoseClone::hideSource, "", "Hide Source"));
+		t.fields.back().tip = "Skip the source's renderers while this component drives (runtime only, nothing is written into the source). Off = the source stays visible for side-by-side checks.";
+		t.fields.push_back(MakeField("autoAlign", &PoseClone::autoAlign, "", "Auto Align"));
+		t.fields.back().tip = "Build the alignment pose on bind when none is stored: every paired bone is turned so its segment points where the source's does (UE 'Align All Bones').";
+		t.fields.push_back(MakeField("translation", &PoseClone::translation, "", "Translation", 0.0f, 0.0f, "None,Root Scaled,All Scaled"));
+		t.fields.back().tip = "Root Scaled: the pelvis travel scaled by the rigs' height ratio (UE 'Globally Scaled'). All Scaled: every paired bone's travel.";
+		t.fields.push_back(MakeField("weight", &PoseClone::weight, "", "Weight", 0.0f, 1.0f));
+		t.fields.back().tip = "Blend against the rig's own pose (its Animator or bind).";
+		t.fields.push_back(MakeField("rootMotion", &PoseClone::rootMotion, "", "Root Motion"));
+		t.fields.back().tip = "Move THIS atom by the travel the source extracts (its Animator's Root Motion must be on) and pin the source in place: a nested source stays under the character, a separate one treads in place.";
+		t.fields.push_back(MakeField("poseJson", &PoseClone::poseJson));
+		t.fields.back().hidden = true;
+		t.methods.push_back(MakeMethod("AutoAlign", &PoseClone::AutoAlign));
+		Reflect_SetMethodDoc("PoseClone", "AutoAlign", "Rebuild the alignment pose from the bind directions (UE 'Align All Bones'), stored in poseJson.", "");
+		t.methods.push_back(MakeMethod("SetBoneOffset", &PoseClone::SetBoneOffset));
+		Reflect_SetMethodDoc("PoseClone", "SetBoneOffset", "Edit one bone of the alignment pose: a local rotation offset (euler degrees) over its bind.", "bone,eulerDeg");
+		t.methods.push_back(MakeMethod("BoneOffset", &PoseClone::BoneOffset));
+		Reflect_SetMethodDoc("PoseClone", "BoneOffset", "The stored offset of a bone, euler degrees (zero when unset).", "bone");
+		t.methods.push_back(MakeMethod("ClearOffsets", &PoseClone::ClearOffsets));
+		Reflect_SetMethodDoc("PoseClone", "ClearOffsets", "Alignment pose = plain bind (drops every offset; Auto Align rebuilds it on the next frame when on).", "");
+		t.methods.push_back(MakeMethod("Rebind", &PoseClone::Rebind));
+		Reflect_SetMethodDoc("PoseClone", "Rebind", "Drop the cached pairing (after a skeleton or bone-map change).", "");
+		t.methods.push_back(MakeMethod("PairedCount", &PoseClone::PairedCount));
+		Reflect_SetMethodDoc("PoseClone", "PairedCount", "Paired bone count (0 = not bound yet: no source, no skeleton, nothing pairs).", "");
+		t.methods.push_back(MakeMethod("PairOf", &PoseClone::PairOf));
+		Reflect_SetMethodDoc("PoseClone", "PairOf", "The source bone driving a target bone, \"\" when unpaired.", "targetBone");
+		t.create = []() -> void* { return new PoseClone(); };
 	}
 	{
 		TypeInfo& t = TypeOf<PostProcess>();

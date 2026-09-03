@@ -27,7 +27,7 @@ public:
 	[[nuke::func]] static bool Active(Atom* any);
 	[[nuke::func]] static double PairTime(Atom* any);   // master clip time; -1 = no session
 
-	static void Tick(World* w);                          // World::Update, after the traversal
+	static void Tick(World* w);                          // late tick: sessions drift-sync + lifetime
 	static void Reload(const std::string& contentRel);   // drop the cached asset ("" = all)
 };
 

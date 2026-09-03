@@ -65,11 +65,10 @@ public:
 	[[nuke::prop(label="Sim Band", min=0, max=1, tip="Skinned meshes: only the BOTTOM fraction of the sheet simulates, the rest rides the animation rigidly (skirt hems, coat tails - the fitted part can never be pushed through by the body). 1 = the whole sheet simulates")]]
 	float simBand = 1.0f;
 
-	// World::Update calls this AFTER the atom traversal: children tick before their parent,
-	// so a per-atom Update sees LAST frame's animator globals — the garment edge would lag
-	// one frame behind the top rendered with this frame's palette. This pass re-writes every
-	// live sheet with the fresh globals.
-	static void TickLate();
+	// Children tick before their parent, so Update sees LAST frame's animator globals — the
+	// garment edge would lag the top by a frame. The late pass re-writes the sheet with the
+	// fresh globals.
+	void LateUpdate() override;
 
 	// Drop the sim and rebuild from the current pose (after prop edits that change the sheet).
 	[[nuke::func]] void Rebuild();
@@ -79,7 +78,7 @@ public:
 	[[nuke::func]] Vector3 CenterOfMass();     // world center of the simulated sheet
 
 	Cloth() : Component("Cloth") {}
-	~Cloth();                          // drops the TickLate registration
+	~Cloth();
 	void Init(Atom* parent) override;
 	void Destroy() override;
 	void Update() override;            // render write: sim interpolated between fixed steps

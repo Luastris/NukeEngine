@@ -41,6 +41,9 @@ public:
 	// C2: tune a recognized CC character's material by its conventional slot name
 	// (Std_Skin_* / eyes / teeth / hair ...); false = no convention matched.
 	static bool TuneCCMaterial(class Material* m);
+	// A material name that reads as Reallusion CC content (Std_* / game-base Ga_*): CC5's UE5
+	// export preset renames the bones, so the importer detects CC scenes by materials too.
+	static bool LooksLikeCCMaterial(const std::string& name);
 
 	// C2: CC ExPlus blendshape -> ARKit-52 morph name map ("builtin:morphmap-arkit-cc");
 	// SkinnedMeshRenderer resolves morph names through it (Morph Map slot).

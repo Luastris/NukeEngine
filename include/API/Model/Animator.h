@@ -8,6 +8,7 @@
 #include "Vector.h"
 #include "reflect/Reflect.h"
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -19,6 +20,7 @@ class SkinnedMeshRenderer;
 class Skeleton;
 class AnimSM;
 class BlendSpace;
+class BoneMap;
 
 // Skeletal animation player next to a skinned MeshRenderer. Two drive modes:
 //  * CONTROLLER (smGuid = a .nusm asset): full pose pipeline — parameter-driven states with
@@ -73,6 +75,31 @@ public:
 	[[nuke::func]] void AddEvent(const std::string& clip, double t, const std::string& name);
 	// Retarget: rename clip channels onto this skeleton's bone names, for every clip played.
 	[[nuke::func]] void MapBone(const std::string& from, const std::string& to);
+	// --- POSE CLONING (the UE5 way): copy another rig's CURRENT pose onto this one ---------
+	// The source plays its clips natively on its own skeleton; this rig strikes the same pose
+	// through the bone pairing (names > .nubonemap > rig chains) and an ALIGNMENT POSE (per-bone
+	// bind offsets, JSON {"bone":[x,y,z,w]}). One call = one copy; binds are cached per source.
+
+	// Copy the source rig's current pose onto this rig now: auto-aligned, pelvis travel scaled by height. Returns the paired bone count (0 = the rigs cannot pair).
+	[[nuke::func]] double CopyPoseFrom(Atom* source);
+	// Same with an explicit alignment pose (JSON from PoseAlignment) and translation mode: 0 none, 1 root scaled, 2 all scaled.
+	[[nuke::func]] double CopyPoseFromWith(Atom* source, const std::string& poseJson, int translation);
+	// The auto alignment pose for the pair as JSON ({"bone":[x,y,z,w]}): keep, edit, feed CopyPoseFromWith.
+	[[nuke::func]] std::string PoseAlignment(Atom* source);
+	// The source bone driving `bone` in a clone from `source` ("" = unpaired).
+	[[nuke::func]] std::string PoseSourceBone(Atom* source, const std::string& bone);
+	// C++ face for drivers: an opaque bind you keep and reapply.
+	struct PoseBindData; struct PoseBind;
+	std::shared_ptr<PoseBind> PoseBindTo(Atom* source, const BoneMap* renames, const std::string& poseJson);   // null: no rig on a side, a cycle, nothing pairs
+	static bool PoseBindValid(const PoseBind& b, Atom* target, Atom* source, const std::string& poseJson);   // skeletons + pose still the bound ones
+	static int  PoseBindPaired(const PoseBind& b);
+	static std::string PoseBindAlign(PoseBind& b);            // UE "Align All Bones" -> offsets JSON, applied to the bind
+	void PoseBindApply(PoseBind& b, Atom* source, int translation, float weight);   // one pose copy onto this rig
+	static std::string PoseBindPairOf(const PoseBind& b, const std::string& targetBone);
+	static std::string PoseOffsetSet(const PoseBind& b, const std::string& poseJson, const std::string& bone, const Vector3& eulerDeg);
+	static Vector3     PoseOffsetGet(const PoseBind& b, const std::string& poseJson, const std::string& bone);
+	static void PoseCacheDrop(const Animator* owner);          // the one-call cache of a dying animator
+
 	[[nuke::func]] void ClearBoneMap();
 	// IK post-pass on the sampled pose: pull `tipBone` toward a WORLD-space target, weight
 	// [0..1] blends against the clip. Chain 2 = analytic two-bone, more = FABRIK; the pole

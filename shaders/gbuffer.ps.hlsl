@@ -106,7 +106,11 @@ void main(PSIn i, out PSOut o)
     {
         float a = g_Color.a;
         if (g_Params.x > 0.5) a *= g_Tex.Sample(g_Tex_sampler, i.uv).a;
-        clip(a - g_UVT2.y);
+        // Hashed alpha (C5): the SAME per-pixel hash as world.ps so both passes keep pixels.
+        [branch] if (g_Sss.z > 0.5)
+            clip(a - max(0.02, frac(52.9829189 * frac(dot(i.pos.xy, float2(0.06711056, 0.00583715))))));
+        else
+            clip(a - g_UVT2.y);
     }
     // Overlay slot weights — identical math to world.ps so SSR normals/roughness stay in step.
     float3 ovNg = normalize(i.nrm);

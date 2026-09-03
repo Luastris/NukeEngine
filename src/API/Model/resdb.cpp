@@ -446,6 +446,9 @@ static void ApplyMatTemplate(Material* m, const Material* fresh)
 	m->translucency = fresh->translucency; m->translucencyTint = fresh->translucencyTint;
 	m->ior = fresh->ior; m->refractive = fresh->refractive;
 	m->iridescence = fresh->iridescence; m->iridescenceThickness = fresh->iridescenceThickness;
+	m->toonBand = fresh->toonBand; m->toonSoft = fresh->toonSoft; m->toonShade = fresh->toonShade;
+	m->subsurface = fresh->subsurface; m->subsurfaceTint = fresh->subsurfaceTint;
+	m->irisDepth = fresh->irisDepth; m->hashedAlpha = fresh->hashedAlpha;
 	m->liveStates = fresh->liveStates; m->liveLayers = fresh->liveLayers; m->liveHits = fresh->liveHits;
 	m->liveFoliage = fresh->liveFoliage; m->liveTweens = fresh->liveTweens;
 	m->liveMasks = fresh->liveMasks;   m->liveEvents = fresh->liveEvents;

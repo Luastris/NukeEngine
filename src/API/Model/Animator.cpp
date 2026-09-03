@@ -1708,6 +1708,11 @@ struct Animator::AnimGraph
 				}
 
 				const float w = (float)goal.second.weight;
+				// The tip keeps its ANIMATED world orientation: the reach may only translate
+				// it. Without this, every parent rotation the solver applies drags the hand
+				// around with it — a limb-fit push near the hip visibly wrings the wrist.
+				const int tipB = chain.back();
+				const glm::quat tipW0 = glm::quat_cast(global[tipB]);
 				for (size_t i = 0; i < S; ++i)
 				{
 					const int bi = chain[i];
@@ -1720,6 +1725,13 @@ struct Animator::AnimGraph
 					const glm::quat parentG = par >= 0 ? glm::quat_cast(global[par]) : glm::quat(1, 0, 0, 0);
 					const glm::quat newLocal = glm::inverse(parentG) * (delta * glm::quat_cast(global[bi]));
 					pose[bi].r = glm::slerp(pose[bi].r, glm::normalize(newLocal), w);
+					forwardPass();
+				}
+				{
+					const int parT = bones[tipB].parent;
+					const glm::quat parentGT = parT >= 0 ? glm::quat_cast(global[parT]) : glm::quat(1, 0, 0, 0);
+					pose[tipB].r = glm::slerp(pose[tipB].r,
+						glm::normalize(glm::inverse(parentGT) * tipW0), w);
 					forwardPass();
 				}
 
@@ -2143,6 +2155,7 @@ struct Animator::AnimGraph
 
 void Animator::Destroy()
 {
+	PoseCacheDrop(this);
 	ReleaseSkinned();
 	delete graph;
 	graph = nullptr;
@@ -2497,6 +2510,494 @@ void Animator::ForceGraphState(const std::string& name)
 std::string Animator::GraphStateName()
 {
 	return graph ? graph->Layer0StateName() : std::string();
+}
+
+// One pose-cloning bind: pairs + alignment pose of (source skeleton, target skeleton, map, offsets).
+// (data at namespace scope so the helpers below can work on it before PoseBind is complete)
+struct Animator::PoseBindData
+{
+	Skeleton* src = nullptr;
+	Skeleton* tgt = nullptr;
+	std::string poseKey;                       // poseJson the target ref pose was built from
+	std::vector<int> srcToDst, dstToSrc;
+	glm::quat F{ 1, 0, 0, 0 };                 // facing yaw, source model space -> target
+	std::vector<glm::quat> srcRefW, tgtRefW, tgtRefLoc;
+	std::vector<glm::vec3> srcRefPos, tgtRefPos, tgtRefLocPos;
+	int pelvisT = -1, pelvisS = -1;
+	float heightScale = 1.0f;
+	int paired = 0;
+};
+struct Animator::PoseBind : Animator::PoseBindData {};
+
+namespace {
+bool IsAncestor(const Skeleton* sk, int anc, int b);
+
+glm::quat BindLocalRot(const MeshBone& b) { return glm::quat(b.localRot[3], b.localRot[0], b.localRot[1], b.localRot[2]); }
+glm::vec3 BindLocalPos(const MeshBone& b) { return glm::vec3(b.localPos[0], b.localPos[1], b.localPos[2]); }
+
+// Forward pass over (localRot, localPos): model-space rotation + position per bone.
+void ForwardPass(const Skeleton* sk, const std::vector<glm::quat>& loc, const std::vector<glm::vec3>& locPos,
+                 std::vector<glm::quat>& w, std::vector<glm::vec3>& pos)
+{
+	const size_t n = sk->bones.size();
+	w.resize(n); pos.resize(n);
+	for (size_t i = 0; i < n; ++i)
+	{
+		const int p = sk->bones[i].parent;
+		if (p >= 0) { w[i] = glm::normalize(w[p] * loc[i]); pos[i] = pos[p] + w[p] * locPos[i]; }
+		else        { w[i] = loc[i]; pos[i] = locPos[i]; }
+	}
+}
+
+glm::quat RotBetween(const glm::vec3& a, const glm::vec3& b)
+{
+	const float d = glm::dot(a, b);
+	if (d > 0.99999f) return glm::quat(1, 0, 0, 0);
+	if (d < -0.99999f)
+	{
+		glm::vec3 axis = glm::cross(glm::vec3(1, 0, 0), a);
+		if (glm::dot(axis, axis) < 1e-8f) axis = glm::cross(glm::vec3(0, 1, 0), a);
+		return glm::angleAxis(3.14159265f, glm::normalize(axis));
+	}
+	const glm::vec3 c = glm::cross(a, b);
+	return glm::normalize(glm::quat(1.0f + d, c.x, c.y, c.z));
+}
+
+void CollectSMRs(Atom* a, std::vector<SkinnedMeshRenderer*>& out, Atom* exclude = nullptr)
+{
+	if (!a || a == exclude) return;
+	for (Component* c : a->components)
+		if (SkinnedMeshRenderer* s = dynamic_cast<SkinnedMeshRenderer*>(c)) out.push_back(s);
+	for (Atom* ch : a->children) CollectSMRs(ch, out, exclude);
+}
+
+bool InSubtree(Atom* root, Atom* a)
+{
+	for (Atom* p = a; p; p = p->parent) if (p == root) return true;
+	return false;
+}
+
+
+// The skinned renderers of a subtree that share the FIRST valid skeleton (one pose palette).
+// `exclude` skips a subtree: a source rig nested INSIDE the target atom (a hidden "shadow"
+// child) must not be mistaken for the target's own skin.
+Skeleton* RigOf(Atom* a, std::vector<SkinnedMeshRenderer*>& out, Atom* exclude = nullptr)
+{
+	std::vector<SkinnedMeshRenderer*> all;
+	CollectSMRs(a, all, exclude);
+	Skeleton* sk = nullptr;
+	for (SkinnedMeshRenderer* s : all)
+	{
+		Skeleton* ssk = s->EnsureSkeleton();
+		if (!ssk || ssk->bones.empty()) continue;
+		if (!sk) sk = ssk;
+		if (ssk == sk) out.push_back(s);
+	}
+	return sk;
+}
+
+// Offsets {"bone":[x,y,z,w]} -> per-bone local quats (identity where absent).
+void ParseOffsets(const std::string& js, const Skeleton* sk, std::vector<glm::quat>& off)
+{
+	off.assign(sk->bones.size(), glm::quat(1, 0, 0, 0));
+	if (js.empty()) return;
+	try
+	{
+		nlohmann::json j = nlohmann::json::parse(js);
+		for (auto it = j.begin(); it != j.end(); ++it)
+		{
+			const int bi = sk->BoneIndex(it.key());
+			if (bi < 0 || !it.value().is_array() || it.value().size() != 4) continue;
+			const auto& v = it.value();
+			off[bi] = glm::normalize(glm::quat((float)v[3], (float)v[0], (float)v[1], (float)v[2]));
+		}
+	}
+	catch (...) {}
+}
+
+std::string SerializeOffsets(const Skeleton* sk, const std::vector<glm::quat>& off)
+{
+	nlohmann::json j = nlohmann::json::object();
+	for (size_t i = 0; i < off.size(); ++i)
+	{
+		const glm::quat& q = off[i];
+		if (std::fabs(q.w) > 0.9999999f) continue;
+		j[sk->bones[i].name] = { q.x, q.y, q.z, q.w };
+	}
+	return j.empty() ? std::string() : j.dump();
+}
+
+// Facing yaw from the shoulder line (LeftArm/RightArm chain roots): Mixamo faces +Z, VRM
+// 0.x faces -Z. A model-space delta must turn with the character or every swing mirrors.
+glm::quat Facing(const Skeleton* from, const std::vector<glm::vec3>& fromPos,
+                 const Skeleton* to, const std::vector<glm::vec3>& toPos)
+{
+	auto rootPos = [](const Skeleton* sk, const std::vector<glm::vec3>& pos, const char* name, glm::vec3& out)
+	{
+		for (const SkeletonChain& c : sk->chains)
+			if (c.name == name && !c.bones.empty())
+			{
+				const int b = sk->BoneIndex(c.bones.front());
+				if (b >= 0) { out = pos[b]; return true; }
+			}
+		return false;
+	};
+	glm::vec3 sl, sr, dl, dr;
+	if (!rootPos(from, fromPos, "LeftArm", sl) || !rootPos(from, fromPos, "RightArm", sr)
+	 || !rootPos(to, toPos, "LeftArm", dl) || !rootPos(to, toPos, "RightArm", dr)) return glm::quat(1, 0, 0, 0);
+	const glm::vec3 s = sl - sr, d = dl - dr;
+	if (glm::dot(glm::vec2(s.x, s.z), glm::vec2(s.x, s.z)) < 1e-8f
+	 || glm::dot(glm::vec2(d.x, d.z), glm::vec2(d.x, d.z)) < 1e-8f) return glm::quat(1, 0, 0, 0);
+	const float ps = std::atan2(-s.z, s.x), pd = std::atan2(-d.z, d.x);
+	return glm::angleAxis(pd - ps, glm::vec3(0.0f, 1.0f, 0.0f));
+}
+
+// Alignment pose of the target from its bind + offsets.
+void BuildTargetRef(Animator::PoseBindData& b, const std::vector<glm::quat>& off)
+{
+	const Skeleton* sk = b.tgt;
+	const size_t n = sk->bones.size();
+	b.tgtRefLoc.resize(n); b.tgtRefLocPos.resize(n);
+	for (size_t i = 0; i < n; ++i)
+	{
+		b.tgtRefLoc[i] = glm::normalize(BindLocalRot(sk->bones[i]) * off[i]);
+		b.tgtRefLocPos[i] = BindLocalPos(sk->bones[i]);
+	}
+	ForwardPass(sk, b.tgtRefLoc, b.tgtRefLocPos, b.tgtRefW, b.tgtRefPos);
+}
+
+// The direction the alignment aims a bone along, on both rigs: its rig chain's next bone
+// when paired, else the MEAN of its nearest paired descendants when they point one way (a
+// hand along its fingers, a foot along its toes). False = no anchor (the bone inherits its
+// parent's turn).
+bool AnchorDirs(const Animator::PoseBindData& b, int t, glm::vec3& dT, glm::vec3& dS)
+{
+	const Skeleton* sk = b.tgt;
+	const int s = b.dstToSrc[t];
+	auto pairDir = [&](int aT) -> bool
+	{
+		const int aS = b.dstToSrc[aT];
+		if (aS < 0 || !IsAncestor(b.src, s, aS)) return false;
+		dT = b.tgtRefPos[aT] - b.tgtRefPos[t];
+		dS = b.srcRefPos[aS] - b.srcRefPos[s];
+		return glm::dot(dT, dT) > 1e-10f && glm::dot(dS, dS) > 1e-10f;
+	};
+	for (const SkeletonChain& c : sk->chains)
+		for (size_t k = 0; k + 1 < c.bones.size(); ++k)
+			if (sk->BoneIndex(c.bones[k]) == t)
+			{
+				const int nx = sk->BoneIndex(c.bones[k + 1]);
+				return nx >= 0 && b.dstToSrc[nx] >= 0 && pairDir(nx);
+			}
+	// nearest paired descendant per branch: paired ones stop their branch, unpaired links
+	// (metacarpals) are walked through — the thumb must not shadow the knuckles behind them
+	std::vector<int> found;
+	std::vector<int> wave(1, t);
+	for (int depth = 0; depth < 6 && !wave.empty(); ++depth)
+	{
+		std::vector<int> next;
+		for (int w : wave)
+			for (size_t j = 0; j < sk->bones.size(); ++j)
+				if (sk->bones[j].parent == w)
+				{
+					if (b.dstToSrc[j] >= 0) found.push_back((int)j);
+					else next.push_back((int)j);
+				}
+		wave.swap(next);
+	}
+	std::vector<glm::vec3> aT, aS;
+	for (int f : found)
+		if (pairDir(f)) { aT.push_back(dT); aS.push_back(dS); }
+	if (aT.empty()) return false;
+	// Outliers leave the fan (the thumb among the fingers): drop the member farthest from
+	// the mean while it sits > 25 deg off and three or more remain.
+	for (;;)
+	{
+		glm::vec3 m(0.0f);
+		for (const glm::vec3& a : aT) m += glm::normalize(a);
+		if (aT.size() < 3) break;
+		const glm::vec3 mn = glm::normalize(m);
+		size_t worst = 0; float worstDot = 2.0f;
+		for (size_t i = 0; i < aT.size(); ++i)
+		{
+			const float dd = glm::dot(glm::normalize(aT[i]), mn);
+			if (dd < worstDot) { worstDot = dd; worst = i; }
+		}
+		if (worstDot > 0.906f) break;   // cos 25 deg
+		aT.erase(aT.begin() + worst); aS.erase(aS.begin() + worst);
+	}
+	glm::vec3 sumT(0.0f), sumS(0.0f), cohT(0.0f);
+	for (size_t i = 0; i < aT.size(); ++i) { sumT += aT[i]; sumS += aS[i]; cohT += glm::normalize(aT[i]); }
+	if (aT.size() > 1 && glm::length(cohT) / (float)aT.size() < 0.7f) return false;   // a spread fan (pelvis)
+	dT = sumT; dS = sumS;
+	return true;
+}
+
+bool IsAncestor(const Skeleton* sk, int anc, int b)
+{
+	for (int p = sk->bones[b].parent; p >= 0; p = sk->bones[p].parent)
+		if (p == anc) return true;
+	return false;
+}
+
+// Pairs + alignment pose for (target rig, source rig). Null when either side has no rig.
+// `poseJson` = the target's offsets ("" = plain bind). Logs nothing: callers do.
+std::shared_ptr<Animator::PoseBind> MakeBind(Atom* target, Atom* source, const BoneMap* renames,
+                                           const std::string& poseJson)
+{
+	std::vector<SkinnedMeshRenderer*> ts, ss;
+	Skeleton* tsk = RigOf(target, ts, source);
+	Skeleton* ssk = RigOf(source, ss);
+	if (!tsk || !ssk) return nullptr;
+	std::shared_ptr<Animator::PoseBind> b = std::make_shared<Animator::PoseBind>();
+	b->src = ssk;
+	b->tgt = tsk;
+	RetargetPairs(ssk, tsk, renames, b->srcToDst);
+	b->dstToSrc.assign(tsk->bones.size(), -1);
+	for (size_t si = 0; si < ssk->bones.size(); ++si)
+		if (b->srcToDst[si] >= 0 && b->dstToSrc[b->srcToDst[si]] < 0)
+		{
+			b->dstToSrc[b->srcToDst[si]] = (int)si;
+			++b->paired;
+		}
+	// source alignment pose = its bind
+	{
+		std::vector<glm::quat> loc(ssk->bones.size());
+		std::vector<glm::vec3> lp(ssk->bones.size());
+		for (size_t i = 0; i < ssk->bones.size(); ++i) { loc[i] = BindLocalRot(ssk->bones[i]); lp[i] = BindLocalPos(ssk->bones[i]); }
+		ForwardPass(ssk, loc, lp, b->srcRefW, b->srcRefPos);
+	}
+	std::vector<glm::quat> off;
+	ParseOffsets(poseJson, tsk, off);
+	BuildTargetRef(*b, off);
+	b->F = Facing(ssk, b->srcRefPos, tsk, b->tgtRefPos);
+	// the travel root: the highest paired bone below the skeleton root (the pelvis)
+	for (size_t i = 0; i < tsk->bones.size(); ++i)
+	{
+		if (b->dstToSrc[i] < 0 || tsk->bones[i].parent < 0) continue;
+		bool pairedAbove = false;
+		for (int p = tsk->bones[i].parent; p >= 0; p = tsk->bones[p].parent)
+			if (b->dstToSrc[p] >= 0 && tsk->bones[p].parent >= 0) { pairedAbove = true; break; }
+		if (!pairedAbove) { b->pelvisT = (int)i; b->pelvisS = b->dstToSrc[i]; break; }
+	}
+	if (b->pelvisT >= 0)
+	{
+		const float sh = std::fabs(b->srcRefPos[b->pelvisS].y), dh = std::fabs(b->tgtRefPos[b->pelvisT].y);
+		b->heightScale = (sh > 1e-4f && dh > 1e-4f) ? dh / sh : 1.0f;
+	}
+	b->poseKey = poseJson;
+	return b;
+}
+
+// UE "Align All Bones": top-down, turn every paired bone so its segment points where the
+// source's does, re-running the forward pass so children measure against the corrected
+// parent. Rebuilds the bind's target ref pose and returns the offsets as JSON.
+std::string AlignBind(Animator::PoseBindData& b)
+{
+	const Skeleton* sk = b.tgt;
+	const size_t n = sk->bones.size();
+	std::vector<glm::quat> off(n, glm::quat(1, 0, 0, 0));
+	BuildTargetRef(b, off);
+	for (size_t t = 0; t < n; ++t)
+	{
+		const int s = b.dstToSrc[t];
+		if (s < 0 || sk->bones[t].parent < 0) continue;
+		glm::vec3 dT, dS;
+		if (!AnchorDirs(b, (int)t, dT, dS)) continue;
+		const glm::quat R = RotBetween(glm::normalize(dT), glm::normalize(b.F * dS));
+		const glm::quat newW = glm::normalize(R * b.tgtRefW[t]);
+		const int p = sk->bones[t].parent;
+		const glm::quat newLoc = glm::normalize(glm::inverse(b.tgtRefW[p]) * newW);
+		off[t] = glm::normalize(glm::inverse(BindLocalRot(sk->bones[t])) * newLoc);
+		BuildTargetRef(b, off);
+	}
+	b.poseKey = SerializeOffsets(sk, off);
+	return b.poseKey;
+}
+
+// One pose copy: the source's committed pose -> the target's skinned renderers.
+// translation: 0 none, 1 pelvis scaled by the height ratio, 2 every paired bone.
+void ApplyBind(Animator::PoseBindData& b, Atom* target, Atom* source, int translation, float weight)
+{
+	std::vector<SkinnedMeshRenderer*> ts, ss;
+	RigOf(target, ts, source);
+	RigOf(source, ss);
+	if (ts.empty() || ss.empty()) return;
+	SkinnedMeshRenderer* srcSmr = ss.front();
+	const Skeleton* ssk = b.src;
+	const Skeleton* tsk = b.tgt;
+	const size_t ns = ssk->bones.size(), nt = tsk->bones.size();
+	if (srcSmr->pose.size() < ns) return;   // no source pose yet
+	// source model-space pose: forward pass over the renderer's committed local palette
+	std::vector<glm::quat> srcLoc(ns), srcW;
+	std::vector<glm::vec3> srcLp(ns), srcPos;
+	for (size_t i = 0; i < ns; ++i)
+	{
+		const SkinnedMeshRenderer::BonePose& bp = srcSmr->pose[i];
+		srcLoc[i] = glm::normalize(glm::quat(bp.rot[3], bp.rot[0], bp.rot[1], bp.rot[2]));
+		srcLp[i]  = glm::vec3(bp.pos[0], bp.pos[1], bp.pos[2]);
+	}
+	ForwardPass(ssk, srcLoc, srcLp, srcW, srcPos);
+	// target pose, top-down
+	std::vector<glm::quat> loc(nt), w(nt);
+	std::vector<glm::vec3> lp(nt), wp(nt);
+	for (size_t t = 0; t < nt; ++t)
+	{
+		const MeshBone& bone = tsk->bones[t];
+		const int p = bone.parent;
+		const glm::quat parentW = p >= 0 ? w[p] : glm::quat(1, 0, 0, 0);
+		const int s = b.dstToSrc[t];
+		loc[t] = b.tgtRefLoc[t];
+		lp[t]  = b.tgtRefLocPos[t];
+		if (s >= 0 && p >= 0)
+		{
+			const glm::quat tq = glm::normalize(b.F * srcW[s] * glm::inverse(b.F * b.srcRefW[s]) * b.tgtRefW[t]);
+			loc[t] = glm::normalize(glm::inverse(parentW) * tq);
+			const bool travel = translation == 2 || (translation == 1 && (int)t == b.pelvisT);
+			if (travel)
+			{
+				const glm::vec3 d = b.F * (srcPos[s] - b.srcRefPos[s]);
+				lp[t] = b.tgtRefLocPos[t] + glm::inverse(parentW) * (d * b.heightScale);
+			}
+		}
+		w[t]  = p >= 0 ? glm::normalize(parentW * loc[t]) : loc[t];
+		wp[t] = p >= 0 ? wp[p] + parentW * lp[t] : lp[t];
+	}
+	const float k = glm::clamp(weight, 0.0f, 1.0f);
+	for (SkinnedMeshRenderer* smr : ts)
+	{
+		smr->pose.resize(nt);
+		for (size_t t = 0; t < nt; ++t)
+		{
+			SkinnedMeshRenderer::BonePose& bp = smr->pose[t];
+			glm::quat q = loc[t];
+			glm::vec3 pv = lp[t];
+			if (k < 1.0f)
+			{
+				const glm::quat cur(bp.rot[3], bp.rot[0], bp.rot[1], bp.rot[2]);
+				q = glm::normalize(glm::slerp(cur, q, k));
+				pv = glm::mix(glm::vec3(bp.pos[0], bp.pos[1], bp.pos[2]), pv, k);
+			}
+			bp.rot[0] = q.x; bp.rot[1] = q.y; bp.rot[2] = q.z; bp.rot[3] = q.w;
+			bp.pos[0] = pv.x; bp.pos[1] = pv.y; bp.pos[2] = pv.z;
+		}
+		smr->ApplyPose();
+	}
+}
+
+// Cache for the one-call API: one bind per (animator, source) pair, revalidated by skeleton
+// identity and alignment pose.
+struct StaticBind { std::shared_ptr<Animator::PoseBind> b; };
+std::map<std::pair<const Animator*, long>, StaticBind> s_static;
+
+std::shared_ptr<Animator::PoseBind> StaticBindFor(const Animator* owner, Atom* target, Atom* source, const std::string& poseJson, bool autoAlign)
+{
+	if (!target || !source || source == target || InSubtree(source, target)) return nullptr;
+	const auto key = std::make_pair(owner, (long)source->id.id);
+	std::vector<SkinnedMeshRenderer*> ts, ss;
+	Skeleton* tsk = RigOf(target, ts, source);
+	Skeleton* ssk = RigOf(source, ss);
+	if (!tsk || !ssk) return nullptr;
+	auto it = s_static.find(key);
+	if (it != s_static.end())
+	{
+		Animator::PoseBindData& b = *it->second.b;
+		if (b.src == ssk && b.tgt == tsk && (autoAlign || b.poseKey == poseJson)) return it->second.b;
+	}
+	std::shared_ptr<Animator::PoseBind> b = MakeBind(target, source, nullptr, poseJson);
+	if (!b || !b->paired) return nullptr;
+	if (autoAlign && poseJson.empty()) AlignBind(*b);
+	s_static[key] = { b };
+	return b;
+}
+
+}  // namespace
+
+// ===== POSE CLONING API (the UE5 way): another rig plays its clips natively on its own skeleton,
+// this rig strikes the SAME pose through the bone pairing and an alignment pose (bind offsets).
+
+
+std::shared_ptr<Animator::PoseBind> Animator::PoseBindTo(Atom* source, const BoneMap* renames, const std::string& poseJson)
+{
+	if (!atom || !source || source == atom || InSubtree(source, atom)) return nullptr;   // a rig cannot clone itself
+	std::shared_ptr<PoseBind> b = MakeBind(atom, source, renames, poseJson);
+	return (b && b->paired) ? b : nullptr;
+}
+
+bool Animator::PoseBindValid(const PoseBind& b, Atom* target, Atom* source, const std::string& poseJson)
+{
+	std::vector<SkinnedMeshRenderer*> ts, ss;
+	return RigOf(target, ts, source) == b.tgt && RigOf(source, ss) == b.src && b.poseKey == poseJson;
+}
+
+int Animator::PoseBindPaired(const PoseBind& b) { return b.paired; }
+
+std::string Animator::PoseBindAlign(PoseBind& b) { return AlignBind(b); }
+
+void Animator::PoseBindApply(PoseBind& b, Atom* source, int translation, float weight)
+{
+	if (atom && source) ApplyBind(b, atom, source, translation, weight);
+}
+
+std::string Animator::PoseBindPairOf(const PoseBind& b, const std::string& targetBone)
+{
+	const int t = b.tgt->BoneIndex(targetBone);
+	if (t < 0 || b.dstToSrc[t] < 0) return std::string();
+	return b.src->bones[b.dstToSrc[t]].name;
+}
+
+std::string Animator::PoseOffsetSet(const PoseBind& b, const std::string& poseJson, const std::string& bone, const Vector3& eulerDeg)
+{
+	std::vector<glm::quat> off;
+	ParseOffsets(poseJson, b.tgt, off);
+	const int bi = b.tgt->BoneIndex(bone);
+	if (bi < 0) return poseJson;
+	off[bi] = glm::normalize(glm::quat(glm::radians(glm::vec3((float)eulerDeg.x, (float)eulerDeg.y, (float)eulerDeg.z))));
+	return SerializeOffsets(b.tgt, off);
+}
+
+Vector3 Animator::PoseOffsetGet(const PoseBind& b, const std::string& poseJson, const std::string& bone)
+{
+	std::vector<glm::quat> off;
+	ParseOffsets(poseJson, b.tgt, off);
+	const int bi = b.tgt->BoneIndex(bone);
+	if (bi < 0) return Vector3(0, 0, 0);
+	const glm::vec3 e = glm::degrees(glm::eulerAngles(off[bi]));
+	return Vector3(e.x, e.y, e.z);
+}
+
+double Animator::CopyPoseFrom(Atom* source)
+{
+	std::shared_ptr<PoseBind> b = StaticBindFor(this, atom, source, std::string(), true);
+	if (!b) return 0.0;
+	ApplyBind(*b, atom, source, 1, 1.0f);
+	return (double)b->paired;
+}
+
+double Animator::CopyPoseFromWith(Atom* source, const std::string& poseJson, int translation)
+{
+	std::shared_ptr<PoseBind> b = StaticBindFor(this, atom, source, poseJson, false);
+	if (!b) return 0.0;
+	ApplyBind(*b, atom, source, translation, 1.0f);
+	return (double)b->paired;
+}
+
+std::string Animator::PoseAlignment(Atom* source)
+{
+	std::shared_ptr<PoseBind> b = PoseBindTo(source, nullptr, std::string());
+	return b ? AlignBind(*b) : std::string();
+}
+
+std::string Animator::PoseSourceBone(Atom* source, const std::string& bone)
+{
+	std::shared_ptr<PoseBind> b = StaticBindFor(this, atom, source, std::string(), true);
+	return b ? PoseBindPairOf(*b, bone) : std::string();
+}
+
+void Animator::PoseCacheDrop(const Animator* owner)
+{
+	for (auto it = s_static.begin(); it != s_static.end();)
+		if (it->first.first == owner) it = s_static.erase(it); else ++it;
 }
 
 }  // namespace nuke

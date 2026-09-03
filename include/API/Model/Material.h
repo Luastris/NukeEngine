@@ -291,6 +291,15 @@ public:
     float toonSoft = 0.05f;
     [[nuke::prop(label="Toon Shade", tip="Tint of the unlit side of the band")]]
     Color toonShade = Color(0.6, 0.55, 0.65, 1.0);
+    // C5 shading polish: skin scattering, eye depth, hair-card alpha quality.
+    [[nuke::prop(label="Subsurface", min=0, max=1, tip="Skin-style scattering: wrapped soft diffuse, the scatter tint bleeds into the terminator; pair with Translucency for backlit ears/nose")]]
+    float subsurface = 0.0f;
+    [[nuke::prop(label="Subsurface Tint", tip="Scatter color - reddish for skin (blood under the surface)")]]
+    Color subsurfaceTint = Color(0.9, 0.36, 0.3, 1.0);
+    [[nuke::prop(label="Iris Depth", min=0, max=0.5, tip="Eye shading: view parallax sinks the iris under the cornea so the eye reads as a sphere with depth; 0 = off")]]
+    float irisDepth = 0.0f;
+    [[nuke::prop(label="Hashed Alpha", tip="Cutout blend: stochastic alpha test instead of the hard threshold - soft hair-card edges (shadow dither already matches)")]]
+    bool hashedAlpha = false;
 
     Texture* diff = nullptr;       // runtime-resolved textures (via Resolve())
     Texture* norm = nullptr;

@@ -311,32 +311,51 @@ void NukeRig::StampChains(Skeleton* sk, Scheme s)
 	}
 }
 
+// A material name that reads as CC content regardless of the rig naming: CC5's UE5 export
+// preset renames the bones but keeps the Reallusion material slots ("Std_*", game-base "Ga_*").
+bool NukeRig::LooksLikeCCMaterial(const std::string& name)
+{
+	std::string n = name;
+	for (char& c : n) c = (char)tolower((unsigned char)c);
+	return n.rfind("std_", 0) == 0 || n.rfind("ga_", 0) == 0;
+}
+
 bool NukeRig::TuneCCMaterial(Material* m)
 {
 	if (!m) return false;
 	std::string n = m->matName;
 	for (char& c : n) c = (char)tolower((unsigned char)c);
 	auto has = [&](const char* sub) { return n.find(sub) != std::string::npos; };
-	// Order matters: the specific eye layers match before the generic "std_eye".
-	if (has("std_eye_occlusion"))
+	// Order matters: the specific eye layers match before the generic "std_eye". The CC5
+	// game-base exports drop the Std_ prefix ("Ga_Skin_Body", "Lash_Up_Wavy", "Brows_*") —
+	// every slot matches by its bare identity too.
+	if (has("eye_occlusion"))
 	{ m->blendMode = Material::Transparent; m->castShadows = false; }
-	else if (has("std_tearline"))
+	else if (has("tearline"))
 	{ m->blendMode = Material::Transparent; m->roughness = 0.05f; m->specular = 1.0f; m->color.a = 0.25; m->castShadows = false; }
-	else if (has("std_cornea"))
+	else if (has("cornea"))
 	{ m->blendMode = Material::Transparent; m->roughness = 0.03f; m->specular = 1.0f; m->color.a = 0.15; m->castShadows = false; }
-	else if (has("std_eyelash"))
+	else if (has("eyelash") || has("lash_"))
 	{ m->blendMode = Material::Cutout; m->alphaCutoff = 0.35f; m->roughness = 0.7f; }
-	else if (has("std_eye"))
-	{ m->roughness = 0.1f; m->specular = 0.9f; }
-	else if (has("std_skin"))
-	{ m->roughness = 0.5f; m->specular = 0.5f; }
-	else if (has("_teeth"))
+	else if (has("std_eye") || n.rfind("ga_eye", 0) == 0)
+	{ m->roughness = 0.1f; m->specular = 0.9f; m->irisDepth = 0.12f; }
+	else if (has("skin"))
+	{
+		m->roughness = 0.5f; m->specular = 0.5f;
+		// Pre-integrated-style scatter + a touch of translucency for backlit ears/nose.
+		// Kept SUBTLE: on textured skin an aggressive terminator tint reads as bruises.
+		m->subsurface = 0.35f;
+		m->translucency = 0.12f; m->translucencyTint = Color(1.0, 0.45, 0.35, 1.0);
+	}
+	else if (has("_teeth") || has("teeth_"))
 	{ m->roughness = 0.25f; m->specular = 0.7f; }
-	else if (has("std_tongue"))
+	else if (has("tongue"))
 	{ m->roughness = 0.35f; m->specular = 0.6f; }
-	else if (has("std_nails"))
+	else if (has("nails"))
 	{ m->roughness = 0.4f; }
-	else if (has("hair") || has("scalp") || has("beard") || has("eyebrow"))
+	// NOTE: hashedAlpha stays a MANUAL opt-in — without temporal smoothing the stochastic
+	// clip reads as dirty speckle on faces (brows/lashes), not soft edges.
+	else if (has("hair") || has("scalp") || has("beard") || has("eyebrow") || has("brows"))
 	{ m->blendMode = Material::Cutout; m->alphaCutoff = 0.4f; m->roughness = 0.45f; m->anisotropy = 0.5f; }
 	else return false;
 	return true;

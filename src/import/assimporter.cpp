@@ -237,15 +237,15 @@ Atom* AssImporter::ImportObject(aiNode* node, const aiScene* scene) {
 	return atom;
 }
 
-// Assimp's glTF importer hands UVs through V-flipped (its bottom-left convention);
-// the rest of the pipeline — stbi top-down pixels, BC cook, D3D sampling — is top-left,
-// and FBX arrives already matching it. Undo the flip once, right after the parse, so
-// every consumer (static, skinned, morph targets) agrees.
+// Assimp hands UVs through in the source's bottom-left convention; the rest of the pipeline
+// — stbi top-down pixels, BC cook, D3D sampling — is top-left. Flip V once for EVERY format,
+// right after the parse, so all consumers (static, skinned, morph targets) agree. This was
+// once gated to glTF on the belief that FBX "arrives matching" — a real CC5 FBX proved that
+// wrong (the torso sampled the atlas padding as a pale bodysuit): the FBX V convention varies
+// by exporter, so the importer standardizes like everyone else does. Old imports: re-import.
 static void FixGltfUVs(const aiScene* sc, const char* srcPath)
 {
-	std::string ext = bfs::path(srcPath).extension().string();
-	for (char& c : ext) c = (char)std::tolower((unsigned char)c);
-	if (ext != ".gltf" && ext != ".glb" && ext != ".vrm") return;
+	(void)srcPath;
 	for (unsigned int mi = 0; mi < sc->mNumMeshes; ++mi)
 	{
 		aiMesh* am = sc->mMeshes[mi];
@@ -433,15 +433,14 @@ static std::string ConvertTexture(const aiScene* sc, const std::string& texRef,
 	int w = 0, h = 0, n = 0;
 	std::vector<unsigned char> rgba;
 
-	if (texRef[0] == '*')   // embedded texture
+	// Decode one assimp-embedded texture (compressed png/jpg bytes, or raw BGRA texels).
+	auto decodeEmbedded = [&](const aiTexture* t) -> bool
 	{
-		int idx = atoi(texRef.c_str() + 1);
-		if (idx < 0 || (unsigned)idx >= sc->mNumTextures) return std::string();
-		const aiTexture* t = sc->mTextures[idx];
+		if (!t) return false;
 		if (t->mHeight == 0)   // compressed (png/jpg bytes)
 		{
 			unsigned char* px = stbi_load_from_memory((const unsigned char*)t->pcData, (int)t->mWidth, &w, &h, &n, 4);
-			if (!px) return std::string();
+			if (!px) return false;
 			rgba.assign(px, px + (size_t)w * h * 4);
 			stbi_image_free(px);
 		}
@@ -457,16 +456,39 @@ static std::string ConvertTexture(const aiScene* sc, const std::string& texRef,
 				rgba[i * 4 + 3] = t->pcData[i].a;
 			}
 		}
+		return true;
+	};
+
+	if (texRef[0] == '*')   // embedded texture by index
+	{
+		int idx = atoi(texRef.c_str() + 1);
+		if (idx < 0 || (unsigned)idx >= sc->mNumTextures) return std::string();
+		if (!decodeEmbedded(sc->mTextures[idx])) return std::string();
 	}
 	else                     // external file (resolve relative to the model)
 	{
 		boost::system::error_code ec;
+		const std::string fname = bfs::path(texRef).filename().string();
 		bfs::path full = modelDir / texRef;
 		if (!bfs::exists(full, ec)) full = bfs::path(texRef);
-		unsigned char* px = stbi_load(full.string().c_str(), &w, &h, &n, 4);
-		if (!px) { cout << "[Import]\ttexture not found: " << texRef << endl; return std::string(); }
-		rgba.assign(px, px + (size_t)w * h * 4);
-		stbi_image_free(px);
+		if (!bfs::exists(full, ec)) full = modelDir / fname;   // dead absolute path, file beside the model
+		unsigned char* px = bfs::exists(full, ec) ? stbi_load(full.string().c_str(), &w, &h, &n, 4) : nullptr;
+		if (px)
+		{
+			rgba.assign(px, px + (size_t)w * h * 4);
+			stbi_image_free(px);
+		}
+		else
+		{
+			// CC/FBX exports reference their temp working dir while the actual bytes are
+			// EMBEDDED in the file under that very name — resolve through assimp's embedded
+			// lookup (full ref, then the bare filename) before giving up.
+			const aiTexture* emb = sc->GetEmbeddedTexture(texRef.c_str());
+			if (!emb) emb = sc->GetEmbeddedTexture(fname.c_str());
+			if (!decodeEmbedded(emb))
+			{ cout << "[Import]\ttexture not found: " << texRef << endl; return std::string(); }
+			cout << "[Import]\ttexture '" << fname << "' resolved from the embedded set" << endl;
+		}
 	}
 
 	Texture* tex = new Texture();
@@ -531,6 +553,7 @@ int AssImporter::ImportToContent(const char* srcPath, const char* destDir)
 			if (has(aiTextureType_METALNESS) || has(aiTextureType_DIFFUSE_ROUGHNESS) || has(aiTextureType_UNKNOWN)) ++texUnits;
 			if (has(aiTextureType_AMBIENT_OCCLUSION) || has(aiTextureType_LIGHTMAP)) ++texUnits;
 			if (has(aiTextureType_EMISSIVE)) ++texUnits;
+			if (has(aiTextureType_OPACITY)) ++texUnits;
 		}
 		// Mesh units = unique NODE mesh-sets (one .numesh per node; shared sets = one asset).
 		std::set<std::string> nodeKeys;
@@ -569,6 +592,37 @@ int AssImporter::ImportToContent(const char* srcPath, const char* destDir)
 
 	std::map<std::string, std::string> texCache;   // source ref -> texture GUID (dedupe)
 	std::vector<std::string> matGuids(sc->mNumMaterials);
+	if (std::getenv("NUKE_DBG_IMPORT"))
+	{
+		std::function<void(aiNode*, int)> dumpNode = [&](aiNode* n, int depth)
+		{
+			std::string ind(depth * 2, ' ');
+			cout << "[ImpDbg]\t" << ind << n->mName.C_Str() << " meshes=" << n->mNumMeshes;
+			for (unsigned int m = 0; m < n->mNumMeshes; ++m)
+			{
+				const aiMesh* am2 = sc->mMeshes[n->mMeshes[m]];
+				aiString mn;
+				sc->mMaterials[am2->mMaterialIndex]->Get(AI_MATKEY_NAME, mn);
+				cout << " [" << am2->mName.C_Str() << " v" << am2->mNumVertices
+				     << " mat#" << am2->mMaterialIndex << "='" << mn.C_Str() << "']";
+			}
+			cout << endl;
+			for (unsigned int c = 0; c < n->mNumChildren; ++c) dumpNode(n->mChildren[c], depth + 1);
+		};
+		dumpNode(sc->mRootNode, 0);
+	}
+	// CC content detection: CC5's UE5 export preset renames the BONES to the UE mannequin set,
+	// so the rig scheme alone misses it — ANY Std_*/Ga_* material marks the scene as CC and
+	// every slot (Bra, Brows_*, Lash_* included) gets the conventional tuning.
+	bool ccScene = rigScheme == NukeRig::CC;
+	for (unsigned int i = 0; !ccScene && i < sc->mNumMaterials; ++i)
+	{
+		aiString mn;
+		if (sc->mMaterials[i]->Get(AI_MATKEY_NAME, mn) == AI_SUCCESS && NukeRig::LooksLikeCCMaterial(mn.C_Str()))
+			ccScene = true;
+	}
+	if (ccScene && rigScheme != NukeRig::CC)
+		cout << "[Import]\tCC materials detected (rig named otherwise) -> CC slot conventions apply" << endl;
 	for (unsigned int i = 0; i < sc->mNumMaterials; ++i)
 	{
 		ProgStage("material " + std::to_string(i + 1) + "/" + std::to_string(sc->mNumMaterials));
@@ -598,8 +652,19 @@ int AssImporter::ImportToContent(const char* srcPath, const char* destDir)
 		tp.Clear();
 		if (am->GetTexture(aiTextureType_EMISSIVE, 0, &tp) == AI_SUCCESS)
 			mt->emissiveGuid = ConvertTexture(sc, tp.C_Str(), modelDir, destDir, texCache, Texture::UsageEmissive);
+		tp.Clear();
+		// Separate opacity mask (CC exports EVERY transparent slot this way — lashes, brows,
+		// cornea, and the body's hidden eyelash/overlay submesh which must vanish entirely).
+		// Resolve() bakes it into the diffuse alpha; an alpha-aware blend must be on or the
+		// mask is dead — the CC convention below may still refine the mode.
+		if (am->GetTexture(aiTextureType_OPACITY, 0, &tp) == AI_SUCCESS)
+		{
+			mt->opacityGuid = ConvertTexture(sc, tp.C_Str(), modelDir, destDir, texCache, Texture::UsageData);
+			if (!mt->opacityGuid.empty() && mt->blendMode == Material::Opaque)
+			{ mt->blendMode = Material::Cutout; mt->alphaCutoff = 0.5f; }
+		}
 		// C2: a CC character's conventional slots get sensible engine materials.
-		if (rigScheme == NukeRig::CC && NukeRig::TuneCCMaterial(mt))
+		if (ccScene && NukeRig::TuneCCMaterial(mt))
 			cout << "[Import]	tuned CC material '" << mt->matName << "'" << endl;
 		std::string mstem = SafeStem(mt->matName.empty() ? "material" : mt->matName.c_str());
 		bfs::path mout = bfs::path(destDir) / (mstem + ".numat");
@@ -712,8 +777,9 @@ int AssImporter::ImportToContent(const char* srcPath, const char* destDir)
 					cout << "[Import]	kept " << m->LodCount() << " authored LOD level(s) for '"
 					     << node->mName.C_Str() << "'" << endl;
 				if (useShared) { m->skelGuid = skelGuid; rec.skelGuid = skelGuid; }
-				// C2: CC characters drive their blendshapes by ARKit-52 names out of the box.
-				if (rigScheme == NukeRig::CC && !m->morphs.empty())
+				// C2: CC characters drive their blendshapes by ARKit-52 names out of the box
+				// (ccScene: CC5's UE5 preset renames the rig but the morphs stay CC-named).
+				if (ccScene && !m->morphs.empty())
 					rec.morphMap = NukeRig::MorphPresetGuid();
 				// the mesh remembers the materials it came with (v7) — every "show this mesh"
 				// path (previews, editor rigs, bare drops) then looks right without a prefab
@@ -898,6 +964,18 @@ int AssImporter::ImportToContent(const char* srcPath, const char* destDir)
 	if (count > 0)
 	{
 		Atom* root = BuildPrefabNode(sc->mRootNode, sc, nodeMeshes, matGuids, boneNames, lodFolded, firstClipGuid);
+		// Skinned file: the root node's axis-conversion rotation (CC/UE exports carry X=-90,
+		// Z-up -> Y-up) is JUNK for the skin — the bind palette already places the verts
+		// upright in scene space, so the inherited root rotation would lay the character flat.
+		if (!skelGuid.empty())
+		{
+			Transform& rt = root->GetTransform();
+			if (std::fabs(rt.rotation.x) > 1e-4 || std::fabs(rt.rotation.y) > 1e-4 || std::fabs(rt.rotation.z) > 1e-4)
+			{
+				cout << "[Import]\tdropped the root axis-conversion rotation (skinned scene)" << endl;
+				rt.rotation.x = rt.rotation.y = rt.rotation.z = 0.0; rt.rotation.w = 1.0;
+			}
+		}
 		// Skinned file: ONE Animator on the ROOT — it drives every subtree
 		// SkinnedMeshRenderer through the shared skeleton.
 		if (!skelGuid.empty())

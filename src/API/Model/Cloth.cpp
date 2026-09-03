@@ -29,31 +29,25 @@
 namespace nuke {
 
 // Live components, for the post-traversal render pass (game thread, under the game lock).
-static std::vector<Cloth*> s_liveCloth;
-
 void Cloth::Init(Atom* parent)
 {
 	atom = parent;
 	transform = &parent->GetTransform();
 	parent->components.push_back(this);
-	s_liveCloth.push_back(this);
 }
 
 void Cloth::Destroy()
 {
-	s_liveCloth.erase(std::remove(s_liveCloth.begin(), s_liveCloth.end(), this), s_liveCloth.end());
 	ReleaseBody();
 }
 
 Cloth::~Cloth()
 {
-	s_liveCloth.erase(std::remove(s_liveCloth.begin(), s_liveCloth.end(), this), s_liveCloth.end());
 }
 
-void Cloth::TickLate()
+void Cloth::LateUpdate()
 {
-	for (Cloth* c : s_liveCloth)
-		if (c && c->enabled) c->Update();
+	Update();
 }
 
 void Cloth::Rebuild()

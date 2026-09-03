@@ -28,3 +28,5 @@ float4 g_MskA5; float4 g_MskB5; float4 g_MskC5;
 float4 g_Hit;
 // Toon cel band: g_Toon = (band threshold, edge softness, 0, on) and the shade-side tint.
 float4 g_Toon; float4 g_ToonShade;
+// C5 skin/eye/hair: g_Sss = (subsurface, irisDepth, hashedAlpha, 0); g_SssTint = scatter rgb.
+float4 g_Sss; float4 g_SssTint;

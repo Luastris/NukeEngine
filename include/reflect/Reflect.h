@@ -35,6 +35,10 @@ NUKEENGINE_API unsigned long Reflect_AtomId(Atom* a);
 // hierarchy exists.
 NUKEENGINE_API void Reflect_QueueAtomRefFixup(Atom** slot, unsigned long id);
 NUKEENGINE_API void Reflect_ResolveAtomRefs();
+// Same, but ids are looked up INSIDE `root` first (a subtree loaded on its own — a prefab, an
+// undo snapshot, a preview-world rig — resolves its internal refs regardless of which world
+// it lands in), then in the current world; unknown ids -> null.
+NUKEENGINE_API void Reflect_ResolveAtomRefsIn(Atom* root);
 // Remap queued fixup ids through a clone's old->new atom id map, BEFORE Resolve, so a duplicated
 // subtree references its own copies. Ids not in the map stay put.
 NUKEENGINE_API void Reflect_RemapPendingAtomRefs(const std::map<unsigned long, unsigned long>& oldToNew);
@@ -138,7 +142,8 @@ struct Field {
     std::vector<std::string> enumLabels;// [[nuke::prop(enum="A,B,C")]] dropdown labels; the int is the index
     std::string tip;                    // [[nuke::prop(tip="...")]] inspector tooltip
     // [[nuke::prop(widget="...")]] named custom widget. Known: "layers" (int bitmask over
-    // nuke::Layers). Unknown names fall back to the default widget.
+    // nuke::Layers), "foreign" (AtomRef: never the owning atom or its ancestors). Unknown
+    // names fall back to the default widget.
     std::string widget;
     // [[nuke::prop(net)]] — this field is REPLICATED. NukeNet's NetSync auto-collects every
     // net field on an atom's components and streams it (server-authoritative). Purely a hint;

@@ -332,6 +332,22 @@ float4 main(in PSIn i) : SV_Target
         i.uv = uvp;
     }
 
+    // C5 eye: the iris sinks under the cornea by view parallax (one tap at iris depth) —
+    // the eye reads as a sphere with interior depth instead of a painted ball.
+    [branch] if (g_Sss.y > 0.0)
+    {
+        float3 Ng = normalize(i.nrm);
+        float3 dp1 = ddx(i.wpos), dp2 = ddy(i.wpos);
+        float2 du1 = ddx(i.uv),  du2 = ddy(i.uv);
+        float3 dp2p = cross(dp2, Ng), dp1p = cross(Ng, dp1);
+        float3 T = dp2p * du1.x + dp1p * du2.x;
+        float3 B = dp2p * du1.y + dp1p * du2.y;
+        float inv = rsqrt(max(max(dot(T, T), dot(B, B)), 1e-20));
+        float3 Vw = normalize(g_CamPos.xyz - i.wpos);
+        float3 Vt = float3(dot(Vw, T * inv), dot(Vw, B * inv), dot(Vw, Ng));
+        i.uv -= Vt.xy / max(Vt.z, 0.35) * g_Sss.y;
+    }
+
     // Overlay slot weights (uv after POM so the overlays sit on the parallaxed surface; the
     // geometric normal drives topOnly — snow settles by geometry, not by the normal map).
     float3 ovNg = normalize(i.nrm);
@@ -393,7 +409,15 @@ float4 main(in PSIn i) : SV_Target
     // Per-cell hue/brightness variation breaks the remaining repetition.
     if (g_Var.z > 0.0)
         base.rgb *= 1.0 + (Hash3(floor(i.uv / max(g_Var.y, 1e-3))) - 0.5) * g_Var.z * 0.6;
-    if (g_UVT2.y > 0.0) clip(base.a - g_UVT2.y);   // Cutout blend: alpha clip at the threshold
+    if (g_UVT2.y > 0.0)
+    {
+        // Hashed alpha (hair cards): stochastic coverage instead of the hard threshold —
+        // semi-transparent tips keep pixels in proportion to alpha (shadow dither matches).
+        [branch] if (g_Sss.z > 0.5)
+            clip(base.a - max(0.02, frac(52.9829189 * frac(dot(i.pos.xy, float2(0.06711056, 0.00583715))))));
+        else
+            clip(base.a - g_UVT2.y);   // Cutout blend: alpha clip at the threshold
+    }
     float3 albedo = pow(max(base.rgb, 0.0), 2.2);   // sRGB -> linear
 
     // Detail albedo: gray-neutral overlay multiply at its own tiling (close-up texture).
@@ -533,7 +557,8 @@ float4 main(in PSIn i) : SV_Target
                 atten *= s * s;
             }
         }
-        float ndl = max(dot(N, L), 0.0);
+        float ndlS = dot(N, L);            // signed: subsurface wrap lights past the terminator
+        float ndl  = max(ndlS, 0.0);
         // Translucency: light leaking THROUGH the surface (works for back lights too).
         [branch] if (g_Brdf2.x > 0.0 && atten > 1e-6)
         {
@@ -541,9 +566,11 @@ float4 main(in PSIn i) : SV_Target
             Lo += g_Brdf2.x * g_Brdf4.rgb * albedo * tw
                 * lt.colorIntensity.rgb * lt.colorIntensity.w * atten;
         }
-        if (ndl <= 0.0 || atten <= 1e-6) continue;
+        const float sssWrap = g_Sss.x * 0.5;
+        if ((ndl <= 0.0 && ndlS <= -sssWrap) || atten <= 1e-6) continue;
         float3 H = normalize(V + L);
         float3 radiance = lt.colorIntensity.rgb * lt.colorIntensity.w * atten;
+        float  shadow = 1.0;
         if (g_DrawFlags.x > 0.5)   // receiveShadows
         {
 #ifdef RT_ENABLED
@@ -551,13 +578,14 @@ float4 main(in PSIn i) : SV_Target
             if (casts)
             {
                 float maxD = (type < 0.5) ? 1e4 : length(lt.posType.xyz - i.wpos);
-                radiance *= RTShadow(swpos, L, maxD);
+                shadow = RTShadow(swpos, L, maxD);
             }
 #else
-            if (type > 0.5 && type < 1.5) radiance *= SamplePointShadow(swpos, lt.posType.xyz, (int)lt.spot.w, lt.dirRange.w);
-            else                          radiance *= SampleShadow(swpos, (int)lt.spot.z, ndl);   // dir/spot 2D slot
+            if (type > 0.5 && type < 1.5) shadow = SamplePointShadow(swpos, lt.posType.xyz, (int)lt.spot.w, lt.dirRange.w);
+            else                          shadow = SampleShadow(swpos, (int)lt.spot.z, ndl);   // dir/spot 2D slot
 #endif
         }
+        radiance *= shadow;
 
         float  D = (abs(aniso) > 0.001) ? D_Aniso(N, H, anisoT, anisoB, rough, aniso)
                                         : DistributionGGX(N, H, rough);
@@ -582,7 +610,29 @@ float4 main(in PSIn i) : SV_Target
             albedoD = lerp(g_ToonShade.rgb * albedo, albedo, band);
             ndlD = lerp(0.55, 1.0, band);
         }
-        Lo += (kd * albedoD / PI + spec) * radiance * ndlD;
+        // C5 subsurface: pre-integrated-style approximation — the diffuse response wraps past
+        // the terminator and the scatter tint bleeds into the soft band (blood under skin).
+        // Specular keeps the true ndl below, so no highlight appears on the dark side.
+        float3 diffuse = kd * albedoD / PI;
+        float  specNdl = ndlD;   // non-SSS paths keep the historical shared factor
+        float3 diffRad = radiance;
+        [branch] if (g_Sss.x > 0.0)
+        {
+            ndlD = saturate((ndlS + sssWrap) / (1.0 + sssWrap));
+            // Terminator scatter: a NARROW, gentle warm band. Anything stronger reads as
+            // bruised blotches on textured skin (the tint multiplies the albedo, so it only
+            // shifts hue - never brightens past the plain diffuse).
+            float band = saturate(1.0 - abs(ndlS) / (0.25 + sssWrap));
+            band *= band * band;
+            diffuse *= lerp(float3(1.0, 1.0, 1.0), g_SssTint.rgb * 1.25, band * g_Sss.x);
+            specNdl = ndl;
+            // The wrapped tail is light scattered THROUGH the surface — the facing shadow test
+            // (RT self-shadow acne at grazing angles especially) is meaningless there and cuts
+            // a hard cliff into the bright wrap zone. Fade the shadow in over the grazing band.
+            float shD = lerp(1.0, shadow, smoothstep(-sssWrap, 0.35, ndlS));
+            diffRad = lt.colorIntensity.rgb * lt.colorIntensity.w * atten * shD;
+        }
+        Lo += diffuse * diffRad * ndlD + spec * radiance * specNdl;
         // Sheen: soft retro-reflective grazing lobe (Charlie-style falloff).
         [branch] if (g_Brdf1.w > 0.0)
         {

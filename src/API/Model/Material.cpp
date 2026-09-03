@@ -102,6 +102,8 @@ Material* Material::Clone() const
 	m->translucency = translucency; m->translucencyTint = translucencyTint;
 	m->ior = ior; m->refractive = refractive;
 	m->iridescence = iridescence; m->iridescenceThickness = iridescenceThickness;
+	m->subsurface = subsurface; m->subsurfaceTint = subsurfaceTint;
+	m->irisDepth = irisDepth; m->hashedAlpha = hashedAlpha;
 	m->shaderGuid  = shaderGuid;
 	m->props       = props;
 	m->liveStates  = liveStates;
@@ -233,9 +235,9 @@ static Texture* BakeOpacityDiffuse(Material* m, ResDB* db)
 			px[0] = td ? SampleCh(pd, td->width, td->height, 0, u, v) : 255;
 			px[1] = td ? SampleCh(pd, td->width, td->height, 1, u, v) : 255;
 			px[2] = td ? SampleCh(pd, td->width, td->height, 2, u, v) : 255;
-			const unsigned op = SampleCh(po, to->width, to->height, 0, u, v);
-			const unsigned da = td ? SampleCh(pd, td->width, td->height, 3, u, v) : 255;
-			px[3] = (unsigned char)(op * da / 255);   // opacity multiplies the base alpha
+			// A dedicated opacity map is THE authority: diffuse alpha channels are routinely
+			// junk (CC exports ship zeroed alpha) and multiplying them in erases the mesh.
+			px[3] = (unsigned char)SampleCh(po, to->width, to->height, 0, u, v);
 		}
 	if (b.tex)
 		if (AppInstance* app = AppInstance::GetSingleton())
@@ -716,6 +718,13 @@ void Material::PushRenderProps()
 		props["g_ToonShade"] = { (float)toonShade.r, (float)toonShade.g, (float)toonShade.b, 0.0f };
 	}
 
+	// C5 skin/eye/hair -> g_Sss/g_SssTint (zeroed when every feature is switched back off).
+	if (subsurface > 0.0f || irisDepth > 0.0f || hashedAlpha || props.count("g_Sss"))
+	{
+		props["g_Sss"] = { subsurface, irisDepth, hashedAlpha ? 1.0f : 0.0f, 0.0f };
+		props["g_SssTint"] = { (float)subsurfaceTint.r, (float)subsurfaceTint.g, (float)subsurfaceTint.b, 0.0f };
+	}
+
 	// GPU overlay slots: static layers claim slots first (always on), then the ACTIVE condition
 	// states — set globally, overridden on some atom or painted by some mask (the asset itself
 	// may carry any number; the slots are a per-draw resource budget, not an authoring cap).
@@ -816,14 +825,18 @@ bool Material::SaveToFile(const std::string& path) const
 		j["toon"] = { {"band", toonBand}, {"soft", toonSoft},
 		              {"shade", {toonShade.r, toonShade.g, toonShade.b}} };
 	if (clearCoat > 0.0f || anisotropy != 0.0f || sheen > 0.0f || translucency > 0.0f
-	    || iridescence > 0.0f || ior != 1.5f || refractive || !flowGuid.empty())
+	    || iridescence > 0.0f || ior != 1.5f || refractive || !flowGuid.empty()
+	    || subsurface > 0.0f || irisDepth > 0.0f || hashedAlpha)
 		j["brdf"] = { {"clearCoat", clearCoat}, {"coatRoughness", clearCoatRoughness},
 		              {"anisotropy", anisotropy}, {"flow", flowGuid},
 		              {"sheen", sheen}, {"sheenTint", {sheenTint.r, sheenTint.g, sheenTint.b}},
 		              {"translucency", translucency},
 		              {"translucencyTint", {translucencyTint.r, translucencyTint.g, translucencyTint.b}},
 		              {"ior", ior}, {"refractive", refractive},
-		              {"iridescence", iridescence}, {"iridescenceThickness", iridescenceThickness} };
+		              {"iridescence", iridescence}, {"iridescenceThickness", iridescenceThickness},
+		              {"subsurface", subsurface},
+		              {"subsurfaceTint", {subsurfaceTint.r, subsurfaceTint.g, subsurfaceTint.b}},
+		              {"irisDepth", irisDepth}, {"hashedAlpha", hashedAlpha} };
 	// LiveMaterial sections: written only when present, so plain materials stay clean.
 	if (HasLive())
 	{
@@ -979,6 +992,11 @@ Material* Material::LoadFromString(const std::string& text)
 		{ m->sheenTint.r = b["sheenTint"][0]; m->sheenTint.g = b["sheenTint"][1]; m->sheenTint.b = b["sheenTint"][2]; }
 		if (b.contains("translucencyTint") && b["translucencyTint"].is_array() && b["translucencyTint"].size() == 3)
 		{ m->translucencyTint.r = b["translucencyTint"][0]; m->translucencyTint.g = b["translucencyTint"][1]; m->translucencyTint.b = b["translucencyTint"][2]; }
+		m->subsurface  = b.value("subsurface", 0.0f);
+		m->irisDepth   = b.value("irisDepth", 0.0f);
+		m->hashedAlpha = b.value("hashedAlpha", false);
+		if (b.contains("subsurfaceTint") && b["subsurfaceTint"].is_array() && b["subsurfaceTint"].size() == 3)
+		{ m->subsurfaceTint.r = b["subsurfaceTint"][0]; m->subsurfaceTint.g = b["subsurfaceTint"][1]; m->subsurfaceTint.b = b["subsurfaceTint"][2]; }
 	}
 	if (j.contains("uvTiling") && j["uvTiling"].is_array() && j["uvTiling"].size() == 2)
 	{ m->uvTiling.x = j["uvTiling"][0]; m->uvTiling.y = j["uvTiling"][1]; }

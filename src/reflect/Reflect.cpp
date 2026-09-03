@@ -186,6 +186,23 @@ void Reflect_ResolveAtomRefs()
         *p.first = Reflect_AtomById(p.second);
     pendingAtomRefs().clear();
 }
+static Atom* FindInSubtreeById(Atom* a, unsigned long id)
+{
+    if (!a) return nullptr;
+    if (a->id.id == id) return a;
+    for (Atom* ch : a->children)
+        if (Atom* f = FindInSubtreeById(ch, id)) return f;
+    return nullptr;
+}
+void Reflect_ResolveAtomRefsIn(Atom* root)
+{
+    for (auto& p : pendingAtomRefs())
+    {
+        Atom* a = FindInSubtreeById(root, p.second);
+        *p.first = a ? a : Reflect_AtomById(p.second);
+    }
+    pendingAtomRefs().clear();
+}
 void Reflect_RemapPendingAtomRefs(const std::map<unsigned long, unsigned long>& oldToNew)
 {
     for (auto& p : pendingAtomRefs())

@@ -55,7 +55,7 @@ public:
 	[[nuke::func]] static bool   Enabled();
 	[[nuke::func]] static void   SetMaxFires(double n);  // performance budget (default 64)
 
-	static void Tick(class World* w);                    // World::Update, post-traversal
+	static void Tick(class World* w);                    // late tick: spread / burn-out (throttled scans)
 	// Render-phase spawn pump (fire visuals / debris) — prefab spawns from the game tick race
 	// the render pass, so they queue and land here, same as Surface::DrainHits.
 	static void Drain(class World* w);

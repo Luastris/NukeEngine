@@ -3,6 +3,7 @@
 #define NUKEE_RETARGET_H
 #include "NukeAPI.h"
 #include <string>
+#include <vector>
 #include "reflect/Reflect.h"
 
 namespace nuke {
@@ -16,6 +17,12 @@ class BoneMap;
 // chains (.nuskel `chains` give the semantics when nothing else matches). Transfer:
 // local-rotation POSE DIFF (delta vs the source bind applied onto the target bind) +
 // translation keys scaled by the bind-height ratio of the paired bones.
+
+// Bone pairing shared by the clip retarget and the runtime PoseClone component:
+// src bone index -> dst bone index (-1 = unpaired). Identical names > .nubonemap renames >
+// position inside SAME-NAMED rig chains > the roots and the pelvis pair with each other.
+NUKEENGINE_API void RetargetPairs(const Skeleton* from, const Skeleton* to,
+                                  const BoneMap* renames, std::vector<int>& srcToDst);
 
 // A NEW clip re-authored on `to` (fresh guid, channels renamed, keys converted; events,
 // notifies, curves and prop tracks copied). Null when nothing pairs. Caller owns the clip.

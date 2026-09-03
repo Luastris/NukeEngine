@@ -79,6 +79,7 @@ public:
 	void Start();
 
 	void Update();              // game logic, once per frame (Play mode); takes the game lock
+	void Tick();                // the per-world step of Update (traversal + late passes), no app globals: sandbox worlds
 	// ONE fixed step (settings.fixedDt): sync bodies -> iPhysics::step -> pull dynamic poses into
 	// Transforms -> Atom::FixedUpdate; runs even without a physics provider. Driven by
 	// AppInstance's FIXED-FREQUENCY THREAD, never the render loop — cadence is frame-rate independent.
@@ -191,6 +192,16 @@ public:
 using WorldPickFn = bool(*)(const Vector3& origin, const Vector3& dir,
                             double& outDist, unsigned long& outAtomId);
 NUKEENGINE_API void RegisterWorldPicker(WorldPickFn fn);
+
+// RAII: makes `w` the app's CURRENT world for the scope (loads, ticks, lookups that resolve
+// through AppInstance::currentWorld — AtomRef ids, scripts, pickers). Sandbox worlds
+// (editor previews) step inside one, so world-bound code lands in them, not in the game.
+struct NUKEENGINE_API WorldScope
+{
+	World* saved = nullptr;
+	explicit WorldScope(World* w);
+	~WorldScope();
+};
 
 }  // namespace nuke
 

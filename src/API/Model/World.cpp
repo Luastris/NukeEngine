@@ -18,9 +18,6 @@
 #include "API/Model/ReflectionProbe.h"
 #include "API/Model/Time.h"
 #include "API/Model/Events.h"
-#include "API/Model/Cloth.h"
-#include "API/Model/Fire.h"
-#include "API/Model/PairedAnim.h"
 #include "API/Model/Profiler.h"
 #include "API/Model/Game.h"
 #include "API/Model/Cursor.h"
@@ -36,6 +33,8 @@
 #include "API/Model/DebugDraw.h"
 #include "API/Model/InstancedMesh.h"
 #include "API/Model/Wind.h"
+#include "API/Model/Fire.h"
+#include "API/Model/PairedAnim.h"
 #include "API/Model/Surface.h"
 #include "interface/WorldHooks.h"
 #include "API/Model/BendVolumes.h"
@@ -124,7 +123,7 @@ static void PickRec(bc::list<Atom*>& gos, const glm::vec3& ro, const glm::vec3& 
 {
 	for (auto atom : gos)
 	{
-		if (!atom || !atom->enabled) continue;   // not rendered -> clicks pass through
+		if (!atom || !atom->enabled || Atom::RuntimeHidden(atom)) continue;   // not rendered -> clicks pass through
 		// Editor picks also hit invisible VOLUMES: a decal is its projector box (unit cube
 		// [-0.5,0.5] scaled by the transform — the same box the renderer rasterizes).
 		if (editorVolumes)
@@ -397,6 +396,37 @@ void World::Start()
 void World::LockGame()   { gameLock.lock(); }
 void World::UnlockGame() { gameLock.unlock(); }
 
+// The per-world simulation step: the atom traversal + deferred destruction + the late passes
+// that need every Animator committed. No app globals (input, time, events, world switching):
+// a SANDBOX world (the prefab editor's preview) steps through here under a WorldScope.
+void World::Tick()
+{
+	for (Atom* atom : *hierarchy)
+	{
+		atom->Update();
+	}
+	// Flush deferred destruction after the traversal, still under the game lock.
+	FlushDestroyQueue();
+	for (Atom* atom : *hierarchy)
+	{
+		atom->LateUpdate();
+	}
+	PairedAnim::Tick(this);   // paired-animation sessions: drift sync + lifetime, post-traversal
+	Fire::Tick(this);         // fire spread/burn-out (throttled scans; kill switch inside)
+}
+
+WorldScope::WorldScope(World* w)
+{
+	AppInstance* app = AppInstance::GetSingleton();
+	saved = app->currentWorld;
+	app->currentWorld = w;
+}
+
+WorldScope::~WorldScope()
+{
+	AppInstance::GetSingleton()->currentWorld = saved;
+}
+
 void World::Update()
 {
 	Profiler::Scope profScope("update");
@@ -429,16 +459,8 @@ void World::Update()
 		};
 		deliver(*hierarchy);
 	});
-	for (Atom* atom : *hierarchy)
-	{
-		atom->Update();
-	}
+	Tick();
 	app->worldTickActive = false;
-	// Flush deferred destruction after the traversal, still under the game lock.
-	FlushDestroyQueue();
-	Cloth::TickLate();        // garment render write with THIS frame's animator globals
-	PairedAnim::Tick(this);   // paired-animation sessions: drift sync + lifetime, post-traversal
-	Fire::Tick(this);         // fire spread/burn-out (throttled scans; kill switch inside)
 	// World Partition streaming: ring maintenance AFTER the traversal (safe to add/remove
 	// roots), still under the game lock.
 	if (WorldStream::Active(this))
@@ -1088,7 +1110,7 @@ static void CollectMeshes(bc::list<Atom*>& gos, std::vector<DrawItem>& out, unsi
 		if (!atom || !atom->enabled) continue;
 		if (LayerVisible(atom, mask))
 		if (auto* mr = atom->GetComponent<MeshRenderer>())
-			if (mr->enabled && mr->mesh)
+			if (mr->enabled && mr->mesh && !Atom::RuntimeHidden(atom))
 			{
 				Transform& t = atom->GetTransform();
 				Vector3    p = t.globalPosition();
@@ -1760,7 +1782,7 @@ static void DrawDecals(std::vector<Decal*>& decals, iRender* r)
 				Atom* a = stack.back();
 				stack.pop_back();
 				if (!a || !a->enabled) continue;
-				if (MeshRenderer* mr = a->GetComponent<MeshRenderer>(); mr && mr->enabled && mr->mesh)
+				if (MeshRenderer* mr = a->GetComponent<MeshRenderer>(); mr && mr->enabled && mr->mesh && !Atom::RuntimeHidden(a))
 				{
 					Transform& tt = a->GetTransform();
 					Vector3 tp = tt.globalPosition(); Quaternion tq = tt.globalRotation(); Vector3 ts = tt.globalScale();
@@ -1864,7 +1886,7 @@ static void RenderShadowMeshes(bc::list<Atom*>& gos, iRender* r)
 			if (mr->mesh && mr->mesh->numSlots > 1)
 				for (int sl = 0; sl < mr->mesh->numSlots && !casts; ++sl)
 					if (Material* m = mr->MaterialForSlot(sl)) casts = m->castShadows;
-			if (mr->enabled && mr->mesh && casts)
+			if (mr->enabled && mr->mesh && !Atom::RuntimeHidden(atom) && casts)
 			{
 				Transform& t = atom->GetTransform();
 				Vector3    p = t.globalPosition();
@@ -2752,7 +2774,7 @@ void World::Render(iRender* r)
 				{
 					if (!a || !a->enabled) return;
 					if (MeshRenderer* mr = a->GetComponent<MeshRenderer>())
-						if (mr->enabled && mr->mesh)
+						if (mr->enabled && mr->mesh && !Atom::RuntimeHidden(a))
 						{
 							if (!opened) { r->selectionOutlineBegin(); opened = true; }
 							Transform& t = a->GetTransform();
@@ -3132,7 +3154,7 @@ Atom* LoadPrefabFromString(const std::string& text)
 	std::map<unsigned long, unsigned long> ids;
 	RegenIds(a, ids);                    // instances must not share the prefab's saved ids
 	Reflect_RemapPendingAtomRefs(ids);   // refs inside the subtree follow their clones
-	Reflect_ResolveAtomRefs();           // remaining world-external ids -> null
+	Reflect_ResolveAtomRefsIn(a);        // internal refs bind here, world-external ids -> live atoms or null
 	return a;
 }
 
@@ -3197,7 +3219,7 @@ Atom* LoadAtomFromString(const std::string& data)
 	json j = ParseDoc(data);
 	if (j.is_discarded()) return nullptr;
 	Atom* a = LoadAtom(j);
-	Reflect_ResolveAtomRefs();   // AtomRef props in the restored subtree
+	Reflect_ResolveAtomRefsIn(a);   // AtomRef props in the restored subtree resolve INSIDE it first
 	return a;
 }
 
@@ -3213,7 +3235,7 @@ Atom* CloneAtomFromString(const std::string& data)
 	std::map<unsigned long, unsigned long> ids;
 	RegenIds(a, ids);
 	Reflect_RemapPendingAtomRefs(ids);
-	Reflect_ResolveAtomRefs();
+	Reflect_ResolveAtomRefsIn(a);
 	return a;
 }
 

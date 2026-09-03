@@ -107,6 +107,10 @@ public:
 	// ABI: appended at the END of the vtable (engine abi 21).
 	virtual bool StreamGlobal() const { return false; }
 
+	// Second traversal of the tick, after EVERY component's Update ran (animators have
+	// committed their poses). ABI: appended at the END of the vtable (engine abi 44).
+	virtual void LateUpdate() {}
+
 	// Derived/generated component (e.g. LiveMaterial auto-foliage): never serialized with the
 	// world or prefabs — its owner recreates it. ABI: data appended at the END (engine abi 18).
 	bool transient = false;
