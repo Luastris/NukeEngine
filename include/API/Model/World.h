@@ -37,6 +37,11 @@ public:
 		float shadowSoftness   = 1.0f;    // PCF kernel scale
 		bool  frustumCull      = true;    // skip drawing objects outside the camera frustum (toggle)
 		bool  occlusionCull    = true;    // Hi-Z GPU occlusion over meshes + instanced chunks
+		// Ambient occlusion (ambient/IBL term only): 0 off, 1 SSAO, 2 HBAO, 3 GTAO, 4 VBAO, 5 RT-AO (DXR).
+		int   aoQuality   = 0;
+		float aoRadius    = 0.6f;         // occluder search radius, world units
+		float aoIntensity = 1.0f;
+		float aoPower     = 1.5f;         // contrast
 		// Physics (drives the fixed-step loop; pushed to the physics service).
 		float gravity[3] = { 0.0f, -9.81f, 0.0f };
 		float fixedDt    = 1.0f / 60.0f;  // fixed simulation timestep (seconds)

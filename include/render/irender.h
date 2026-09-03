@@ -77,6 +77,9 @@ struct NukeCameraDesc
     float    ortho     = 0.0f;                  // 0 = perspective (fov), 1 = orthographic (orthoSize); blends in between
     float    orthoSize = 5.0f;                  // ortho view half-height in world units
     int      editorCamera = 0;                  // 1 = editor viewport camera, 0 = game/world camera (ABI: appended)
+    uint64_t cameraId = 0;                      // stable id of the camera (its atom): keys the per-camera temporal state
+                                                // (TAA / AO history, occlusion views) — two cameras on one target no longer
+                                                // share one history. 0 = anonymous (falls back to the target). (abi 44, appended)
 };
 
 // Backend-neutral window description, filled by the app from its config and passed to
@@ -667,6 +670,14 @@ public:
     // (a renderDrawLists texId; 0 = no video playing) with w/h receiving the video size for
     // letterboxing. Standalone players never call it, so the fullscreen draw stays theirs.
     virtual uint64_t claimScreenOverlay(int* w, int* h) { (void)w; (void)h; return 0; }
+
+    // Screen-space ambient occlusion (abi 44): quality 0 = off, then the method tiers
+    // 1 SSAO (hemisphere samples), 2 HBAO (horizons), 3 GTAO (analytic horizons), 4 VBAO
+    // (visibility bitmask, thickness-aware), 5 RT-AO (DXR rays against the scene TLAS; runs
+    // as GTAO without ray tracing). radius = world units occluders are searched
+    // within, intensity = strength, power = contrast. Needs the G-buffer prepass; darkens
+    // the ambient/IBL term only — direct light is untouched.
+    virtual void setAmbientOcclusion(int quality, float radius, float intensity, float power) { (void)quality; (void)radius; (void)intensity; (void)power; }
 
     // ABI: new virtuals are appended at the END of the class, NEVER inserted mid-vtable —
     // plugins are separate DLLs built at different times, and an inserted slot shifts every later one.

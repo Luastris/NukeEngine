@@ -148,6 +148,7 @@ Texture2D    g_Mask3D;       // painted SurfaceMask flipbook: width = res*res (Z
 Texture2D    g_Detail;       // high-frequency detail albedo (gray = neutral) - shares g_Ov0Alb_sampler
 Texture2D    g_DetailNrm;    // high-frequency detail normal
 Texture2D    g_Flow;         // RG = anisotropy tangent direction (0.5,0.5 = neutral)
+Texture2D    g_ScreenAO;     // screen-space AO visibility, full-res, Load by pixel (1 = open; white when off)
 Texture2D    g_SceneRefr;    // pre-transparent scene snapshot (1x1 white when absent)
 
 // Anisotropic GGX: the highlight stretches along the tangent (at) vs the bitangent (ab).
@@ -644,6 +645,10 @@ float4 main(in PSIn i) : SV_Target
     }
 
     float ao = (g_Params2.y > 0.5) ? g_Occlusion.Sample(g_Occlusion_sampler, i.uv).r : 1.0;
+    {   // screen-space AO (ambient/IBL only); the 1x1 white fallback must not be Load-ed by pixel
+        uint aoW, aoH; g_ScreenAO.GetDimensions(aoW, aoH);
+        if (aoW > 1) ao *= g_ScreenAO.Load(int3((int2)i.pos.xy, 0)).r;
+    }
     float3 ambient;
     if (g_SkyParams.y > 0.5)   // image-based lighting from the procedural sky
     {

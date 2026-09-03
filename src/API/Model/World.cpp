@@ -2606,6 +2606,7 @@ void World::Render(iRender* r)
 	s_cullFrozen = !auxiliary && AppInstance::GetSingleton()->freezeCulling;
 	if (!s_cullFrozen) s_frozenVP.clear();
 	r->setOcclusionCulling(settings.occlusionCull && !auxiliary, s_cullFrozen);
+	r->setAmbientOcclusion(auxiliary ? 0 : settings.aoQuality, settings.aoRadius, settings.aoIntensity, settings.aoPower);
 
 	for (Camera* cam : cams)
 	{
@@ -2647,6 +2648,7 @@ void World::Render(iRender* r)
 		d.nearZ = cam->_near;
 		d.farZ  = cam->_far;
 		d.editorCamera = cam->editorCamera ? 1 : 0;
+		d.cameraId = cam->atom ? (uint64_t)cam->atom->id.id : 0;
 		// Ease the projection blend toward the target (Perspective 0 / Orthographic 1).
 		{
 			float tgt = (cam->projection == Projection::Orthographic) ? 1.0f : 0.0f;
@@ -2723,7 +2725,7 @@ void World::Render(iRender* r)
 		bool hookPrepass = false;
 		for (WorldRenderHook* hk : WorldRenderHooks())
 			if (hk->wantsScenePrepass()) { hookPrepass = true; break; }
-		if (hasSSR || hasTAA || !decals.empty() || hookPrepass)
+		if (hasSSR || hasTAA || !decals.empty() || hookPrepass || (settings.aoQuality > 0 && !auxiliary))
 		{
 			Profiler::Scope ps("rnd.cam.gbuf");
 			r->beginGBufferPass(d);
@@ -3310,6 +3312,8 @@ std::string World::SaveToString()
 		{"shadowDepthBias", settings.shadowDepthBias}, {"shadowNormalBias", settings.shadowNormalBias},
 		{"shadowSoftness", settings.shadowSoftness}, {"frustumCull", settings.frustumCull},
 		{"occlusionCull", settings.occlusionCull},
+		{"aoQuality", settings.aoQuality}, {"aoRadius", settings.aoRadius},
+		{"aoIntensity", settings.aoIntensity}, {"aoPower", settings.aoPower},
 		{"gravity", { settings.gravity[0], settings.gravity[1], settings.gravity[2] }},
 		{"fixedDt", settings.fixedDt} };
 	if (settings.streamEnabled)
@@ -3836,6 +3840,10 @@ void World::LoadHeaderFromJson(const json& j)
 		settings.shadowSoftness   = s.value("shadowSoftness", settings.shadowSoftness);
 		settings.frustumCull      = s.value("frustumCull", settings.frustumCull);
 		settings.occlusionCull    = s.value("occlusionCull", settings.occlusionCull);
+		settings.aoQuality        = s.value("aoQuality", settings.aoQuality);
+		settings.aoRadius         = s.value("aoRadius", settings.aoRadius);
+		settings.aoIntensity      = s.value("aoIntensity", settings.aoIntensity);
+		settings.aoPower          = s.value("aoPower", settings.aoPower);
 		if (s.contains("gravity") && s["gravity"].is_array() && s["gravity"].size() == 3)
 			for (int i = 0; i < 3; ++i) settings.gravity[i] = s["gravity"][i].get<float>();
 		settings.fixedDt = s.value("fixedDt", settings.fixedDt);

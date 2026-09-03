@@ -127,6 +127,11 @@ extern "C" { NUKE_ABI_STAMP int nuke_build_debug = 0; }
 //  42 — NukeSoftBodyDesc gained localSpace (anchor-space cloth: fitted clothes simulate
 //       around the skeleton's anchor so clip drift/loop teleports never reach the solver;
 //       own collision layer — proxies only). Cloth's anchor block grew its sizeof.
+//  43 — Material gained the shading polish block (subsurface / irisDepth / hashedAlpha,
+//       sizeof grew); iRender gained claimScreenOverlay (appended).
+//  44 — Component::LateUpdate appended to the vtable (second traversal of the world tick);
+//       iRender gained setAmbientOcclusion (appended); NukeCameraDesc gained cameraId (sizeof
+//       grew): TAA / AO history and occlusion views are keyed per camera, not per target.
 #define NUKE_ENGINE_ABI 44
 extern "C" { NUKE_ABI_STAMP int nuke_engine_abi = NUKE_ENGINE_ABI; }
 
