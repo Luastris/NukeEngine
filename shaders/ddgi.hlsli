@@ -98,21 +98,22 @@ bool DDGISample(Texture2D irrTex, Texture2D visTex, SamplerState samp, GIVolumeG
     int3   base = clamp(int3(floor(g)), int3(0, 0, 0), v.counts.xyz - 2);
     float3 a    = saturate(g - float3(base));
 
-    float3 sum = 0.0; float wsum = 0.0;
+    float3 sum = 0.0; float wsum = 0.0; int active = 0;
     [unroll]
     for (int i = 0; i < 8; ++i)
     {
         int3 off = int3(i & 1, (i >> 1) & 1, (i >> 2) & 1);
         int3 c   = base + off;
         int  p   = DDGIStorageIndex(v, c);   // atlas tile of this cell
+        float4 irr4 = irrTex.SampleLevel(samp, DDGIIrrUV(v, p, N, invIrrAtlas), 0);
+        if (irr4.a < 0.5) continue;          // never written, or inside geometry (update-pass classification): no vote
         float3 probePos = DDGIProbePos(v, c);
         float3 tri = lerp(1.0 - a, a, float3(off));
-        float  w   = tri.x * tri.y * tri.z;
 
         // back-face: probes behind the surface contribute little (smooth wrap instead of a cut)
         float3 toProbe = normalize(probePos - P);
         float  wrap = (dot(toProbe, N) + 1.0) * 0.5;
-        w *= wrap * wrap + 0.2;
+        float  w = wrap * wrap + 0.2;
 
         // chebyshev visibility: how likely is the biased point to see this probe
         float3 d    = Pb - probePos;
@@ -126,14 +127,16 @@ bool DDGISample(Texture2D irrTex, Texture2D visTex, SamplerState samp, GIVolumeG
             cheb = var / (var + t * t);
             cheb = max(cheb * cheb * cheb, 0.0);
         }
-        w *= max(cheb, 0.05);
-        w  = max(w, 1e-5);
+        w *= cheb;
+        if (w < 0.2) w *= w * w / 0.04;      // crush tiny weights: a probe that barely sees the point does not flicker in
+        w  = max(w, 1e-6) * tri.x * tri.y * tri.z;
 
-        float3 irr = irrTex.SampleLevel(samp, DDGIIrrUV(v, p, N, invIrrAtlas), 0).rgb;
-        sum  += irr * w;
+        sum  += irr4.rgb * w;
         wsum += w;
+        ++active;
     }
-    irradiance = (wsum > 0.0 ? sum / wsum : 0.0) * v.origin.w;
+    if (active == 0 || wsum <= 0.0) return false;   // every neighbour sits in geometry: the caller keeps its sky term
+    irradiance = sum / wsum * v.origin.w;
     return true;
 }
 

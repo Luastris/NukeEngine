@@ -312,6 +312,7 @@ static bool RendererInternalShader(const std::string& name)
 	    || name == "gbuffer"                                               // SSR/TAA prepass
 	    || name.rfind("hiz", 0) == 0 || name == "occl"                     // Hi-Z occlusion
 	    || name == "meshcost"                                              // mesh-cost debug view
+	    || name == "giprobe"                                               // DDGI Debug Probes spheres
 	    || name == "boot";                                                 // startup stand-in world shading
 }
 

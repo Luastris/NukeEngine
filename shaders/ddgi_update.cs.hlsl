@@ -90,17 +90,21 @@ void main(uint3 tid : SV_DispatchThreadID)
 
     if (mode == 0)
     {
-        float3 sum = 0.0; float wsum = 0.0;
+        float3 sum = 0.0; float wsum = 0.0; uint back = 0;
         for (uint r = 0; r < rays; ++r)
         {
             float4 rd = g_RayData[base + r];
-            if (rd.w < 0.0) continue;                          // back-face hit: no light from inside walls
+            if (rd.w < 0.0) { ++back; continue; }              // back-face hit: no light from inside walls
             float w = max(0.0, dot(dir, RotateQ(FibDir(r, rays), g_GIRot)));
             sum += rd.rgb * w; wsum += w;
         }
         float3 irr  = wsum > 1e-4 ? sum / wsum : 0.0;          // = E / pi for a uniform environment (matches the sky irradiance convention)
+        // Classification: a probe whose rays mostly start inside geometry (> 25% back faces) averages
+        // only the open half of its sphere - an inflated value that leaks light along every crease.
+        // It keeps updating but gets no vote (a = 0.25); a = 1 = active, 0 = never written.
+        const bool inside = back * 4 > rays;
         float4 prev = g_IrrAtlas[dst];
-        g_IrrAtlas[dst] = float4(prev.a > 0.5 ? lerp(irr, prev.rgb, h) : irr, 1.0);   // a = 1 marks an initialised texel
+        g_IrrAtlas[dst] = float4(prev.a > 0.1 ? lerp(irr, prev.rgb, h) : irr, inside ? 0.25 : 1.0);
     }
     else
     {

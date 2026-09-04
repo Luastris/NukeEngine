@@ -7,14 +7,13 @@
 #include "rt_common.hlsl"
 #include "ddgi.hlsli"
 
-cbuffer GICB { GIVolumeGPU g_GIVol[DDGI_MAX_VOLUMES]; int4 g_GICount; float4 g_GIAtlasInv; };
+// GICB + g_GIIrr / g_GIVis are declared by rt_common.hlsl (shared with the reflection stages).
 cbuffer GIPassCB
 {
     int4   g_GIPass;   // x = volume index, y = first probe, z = rays per probe, w = probe count in this dispatch
     float4 g_GIRot;    // random rotation quaternion for this frame's ray set
     float4 g_GIMisc;   // x = max ray distance, y = hysteresis, z = frame, w = 0
 };
-Texture2D g_GIIrr;  Texture2D g_GIVis;  SamplerState g_GIIrr_sampler;
 RWStructuredBuffer<float4> g_RayData;
 
 float3 RotateQ(float3 v, float4 q) { return v + 2.0 * cross(q.xyz, cross(q.xyz, v) + q.w * v); }

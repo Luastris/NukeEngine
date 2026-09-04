@@ -699,7 +699,10 @@ public:
     // Ray-tracing devices update the probes themselves in updateGIVolumes (probe rays against the
     // scene TLAS). Elsewhere the World captures probe cube faces through giCapture*, amortized:
     // giCaptureBudget probes per frame, six faces each, then giCaptureCommit folds them into the
-    // atlases. The world shader replaces the sky irradiance wherever a volume covers the point.
+    // atlases. Faces 6..11 are the BACK-FACE depth pass of face-6 (the World submits every opaque
+    // mesh through the shadow path): a ray whose nearest surface there is closer than in the
+    // colour capture crossed a back face, which classifies probes sitting inside geometry.
+    // The world shader replaces the sky irradiance wherever a volume covers the point.
     virtual void setGIVolumes(const NukeGIVolumeDesc* volumes, int count) { (void)volumes; (void)count; }
     virtual void updateGIVolumes() {}
     virtual int  giCaptureBudget() { return 0; }

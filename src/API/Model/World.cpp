@@ -2635,17 +2635,29 @@ void World::Render(iRender* r)
 			{
 				std::vector<DrawItem> gitems; CollectMeshes(*hierarchy, gitems);   // no cull: probes look everywhere
 				for (int slot = 0; slot < budget; ++slot)
-					for (int f = 0; f < 6; ++f)
+					for (int f = 0; f < 12; ++f)   // 0..5 colour faces, 6..11 back-face depth of face-6 (probe classification)
 					{
 						float ppos[3]; float nz = 0.05f, fz = 100.0f;
 						if (!r->giCaptureBegin(slot, f, ppos, &nz, &fz)) break;
-						for (auto& it : gitems) if (it.anyOpaque)
+						if (f < 6)
 						{
-							PushLiveContext(it);
-							if (it.matCount > 1) r->renderObjectMulti(it.mesh, it.mats, it.matCount, it.pos, it.quat, it.scale, 0);
-							else if (it.blend == 0) r->renderObject(it.mesh, it.mat, it.pos, it.quat, it.scale);
+							for (auto& it : gitems) if (it.anyOpaque)
+							{
+								PushLiveContext(it);
+								if (it.matCount > 1) r->renderObjectMulti(it.mesh, it.mats, it.matCount, it.pos, it.quat, it.scale, 0);
+								else if (it.blend == 0) r->renderObject(it.mesh, it.mat, it.pos, it.quat, it.scale);
+							}
+							DrawInstancedMeshes(instSets, r, false);
 						}
-						DrawInstancedMeshes(instSets, r, false);
+						else   // depth of every opaque surface, back faces included (shadow path = cull none)
+						{
+							for (auto& it : gitems) if (it.anyOpaque)
+							{
+								if (it.matCount > 1) r->renderShadowObjectMulti(it.mesh, it.mats, it.matCount, it.pos, it.quat, it.scale);
+								else if (it.blend == 0) r->renderShadowObject(it.mesh, it.pos, it.quat, it.scale, it.mat);
+							}
+							DrawInstancedShadows(instSets, r);
+						}
 						r->giCaptureEnd(slot, f);
 					}
 				r->giCaptureCommit();

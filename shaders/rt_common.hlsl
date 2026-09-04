@@ -51,6 +51,12 @@ cbuffer FrameCB   // identical layout to world.ps / worldFrameCB
     float4 g_SkyTop; float4 g_SkyHorizon; float4 g_SkyGround; float4 g_SkyParams;
     float4 g_ProbePos; float4 g_ProbeParams; float4 g_ProbeBox;
 };
+// Dynamic GI (DDGI): the diffuse ambient of a hit reads the probe grid where it covers the point,
+// so a reflection carries the same bounced light as the raster view. One declaration for every
+// RT consumer (reflection stages + ddgi_trace); the renderer binds GICB + the atlases per frame.
+#include "ddgi.hlsli"
+cbuffer GICB { GIVolumeGPU g_GIVol[DDGI_MAX_VOLUMES]; int4 g_GICount; float4 g_GIAtlasInv; };
+Texture2D g_GIIrr;  Texture2D g_GIVis;  SamplerState g_GIIrr_sampler;
 
 float3 OctDecode(float2 e)
 {
@@ -263,6 +269,10 @@ float3 ShadeSurface(float3 pos, float3 N, float3 V, float3 albedo, float metal, 
         Lo += (kd * albedo / RTPI + spec) * radiance * ndl;
     }
     // Diffuse image-based ambient only: the specular term is added by the caller (chit) from a traced ray.
+    // The dynamic GI probes replace the sky / reflection-probe irradiance where they cover the hit (as world.ps does).
+    float3 giIrr = 0.0; bool giHit = false;
+    if (g_GICount.x > 0)
+        giHit = DDGISample(g_GIIrr, g_GIVis, g_GIIrr_sampler, g_GIVol, g_GICount.x, g_GIAtlasInv.xy, g_GIAtlasInv.zw, pos, N, V, giIrr);
     float3 ambient;
     if (g_SkyParams.y > 0.5)
     {
@@ -270,8 +280,9 @@ float3 ShadeSurface(float3 pos, float3 N, float3 V, float3 albedo, float metal, 
         float3 irr = (g_ProbePos.w > 0.5) ? g_Probe.SampleLevel(g_Probe_sampler, N, g_ProbeParams.y).rgb * g_ProbeParams.x : SkyColor(N);
         float3 Fr  = F0 + (max(float3(1.0 - rough, 1.0 - rough, 1.0 - rough), F0) - F0) * pow(1.0 - ndv, 5.0);
         float3 kd  = (1.0 - Fr) * (1.0 - metal);
-        ambient = kd * irr * albedo * g_Ambient.w;
+        ambient = kd * (giHit ? giIrr : irr * g_Ambient.w) * albedo;
     }
+    else if (giHit) ambient = giIrr * (1.0 - metal) * albedo;     // probe light instead of the flat ambient
     else ambient = g_Ambient.rgb * g_Ambient.w * albedo;          // flat ambient (sky off)
 
     return ambient * ao + Lo + emissive;                          // occlusion attenuates ambient only, as in world.ps
