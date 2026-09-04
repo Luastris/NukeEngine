@@ -42,6 +42,22 @@ public:
 		float aoRadius    = 0.6f;         // occluder search radius, world units
 		float aoIntensity = 1.0f;
 		float aoPower     = 1.5f;         // contrast
+		// Dynamic diffuse GI (DDGI): a global probe grid centred on the view that scrolls with it;
+		// probes trace the scene every frame (cube captures without ray tracing) and the world
+		// shader takes their irradiance instead of the sky term. Ambient/IBL only.
+		bool  giEnabled     = false;
+		float giSpacing     = 2.0f;       // probe step, world units
+		int   giCountX = 24, giCountY = 8, giCountZ = 24;
+		int   giRays        = 128;        // rays per probe per update
+		float giHysteresis  = 0.97f;
+		float giNormalBias  = 0.25f, giViewBias = 0.3f;   // probe-spacing units
+		float giIntensity   = 1.0f;
+		float giMaxDistance = 100.0f;
+		bool  giDebugProbes = false;      // draw the probes as small spheres lit by their irradiance
+		// Screen-space GI: contact-scale bounce from last frame's lit scene on top of the probes.
+		int   ssgiQuality   = 0;          // 0 off, 1 Low, 2 Medium, 3 High
+		float ssgiRadius    = 1.0f;       // march distance, world units
+		float ssgiIntensity = 1.0f;
 		// Physics (drives the fixed-step loop; pushed to the physics service).
 		float gravity[3] = { 0.0f, -9.81f, 0.0f };
 		float fixedDt    = 1.0f / 60.0f;  // fixed simulation timestep (seconds)

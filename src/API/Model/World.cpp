@@ -2600,6 +2600,60 @@ void World::Render(iRender* r)
 	}
 	else { float z[3] = { 0, 0, 0 }; r->setReflectionProbe(0, z, 0.0f, 0.0f, z); }
 
+	// Dynamic GI probe volumes: after shadows + TLAS (probe rays see lit geometry), before the
+	// cameras. Ray-tracing devices trace inside the renderer; the others get amortized cube
+	// captures submitted here, the same way the reflection probe captures.
+	{
+		// One global grid on a fixed lattice (origin snapped to whole probe steps): moving the
+		// view shifts the grid by whole cells, so the renderer keeps every probe's history and
+		// only re-seeds the cells that came into range.
+		std::vector<NukeGIVolumeDesc> descs;
+		if (!auxiliary && settings.giEnabled)
+		{
+			NukeGIVolumeDesc d;
+			d.id = 1;
+			const float sp = settings.giSpacing < 0.1f ? 0.1f : settings.giSpacing;
+			auto cl = [](int k) { return k < 2 ? 2 : (k > 64 ? 64 : k); };
+			d.counts[0] = cl(settings.giCountX); d.counts[1] = cl(settings.giCountY); d.counts[2] = cl(settings.giCountZ);
+			const double c[3] = { sceneCamP.x, sceneCamP.y, sceneCamP.z };
+			for (int k = 0; k < 3; ++k)
+			{
+				d.spacing[k] = sp;
+				d.origin[k]  = (float)(std::floor(c[k] / sp - (d.counts[k] - 1) * 0.5) * sp);
+			}
+			d.raysPerProbe = settings.giRays; d.hysteresis = settings.giHysteresis;
+			d.normalBias = settings.giNormalBias; d.viewBias = settings.giViewBias; d.intensity = settings.giIntensity;
+			d.maxRayDistance = settings.giMaxDistance; d.debugProbes = settings.giDebugProbes ? 1 : 0;
+			descs.push_back(d);
+		}
+		r->setGIVolumes(descs.empty() ? nullptr : descs.data(), (int)descs.size());
+		if (!descs.empty())
+		{
+			Profiler::Scope pg("rnd.gi");
+			const int budget = r->giCaptureBudget();
+			if (budget > 0)
+			{
+				std::vector<DrawItem> gitems; CollectMeshes(*hierarchy, gitems);   // no cull: probes look everywhere
+				for (int slot = 0; slot < budget; ++slot)
+					for (int f = 0; f < 6; ++f)
+					{
+						float ppos[3]; float nz = 0.05f, fz = 100.0f;
+						if (!r->giCaptureBegin(slot, f, ppos, &nz, &fz)) break;
+						for (auto& it : gitems) if (it.anyOpaque)
+						{
+							PushLiveContext(it);
+							if (it.matCount > 1) r->renderObjectMulti(it.mesh, it.mats, it.matCount, it.pos, it.quat, it.scale, 0);
+							else if (it.blend == 0) r->renderObject(it.mesh, it.mat, it.pos, it.quat, it.scale);
+						}
+						DrawInstancedMeshes(instSets, r, false);
+						r->giCaptureEnd(slot, f);
+					}
+				r->giCaptureCommit();
+			}
+			r->updateGIVolumes();
+		}
+	}
+
 	const bool editor = AppInstance::GetSingleton()->isEditor();
 	// Culling debug freeze (editor toolbar) + the renderer's occlusion state for this world's
 	// cameras. Auxiliary worlds (previews) never take part.
@@ -2607,6 +2661,7 @@ void World::Render(iRender* r)
 	if (!s_cullFrozen) s_frozenVP.clear();
 	r->setOcclusionCulling(settings.occlusionCull && !auxiliary, s_cullFrozen);
 	r->setAmbientOcclusion(auxiliary ? 0 : settings.aoQuality, settings.aoRadius, settings.aoIntensity, settings.aoPower);
+	r->setScreenGI(auxiliary ? 0 : settings.ssgiQuality, settings.ssgiRadius, settings.ssgiIntensity);
 
 	for (Camera* cam : cams)
 	{
@@ -2725,7 +2780,7 @@ void World::Render(iRender* r)
 		bool hookPrepass = false;
 		for (WorldRenderHook* hk : WorldRenderHooks())
 			if (hk->wantsScenePrepass()) { hookPrepass = true; break; }
-		if (hasSSR || hasTAA || !decals.empty() || hookPrepass || (settings.aoQuality > 0 && !auxiliary))
+		if (hasSSR || hasTAA || !decals.empty() || hookPrepass || ((settings.aoQuality > 0 || settings.ssgiQuality > 0) && !auxiliary))
 		{
 			Profiler::Scope ps("rnd.cam.gbuf");
 			r->beginGBufferPass(d);
@@ -3314,6 +3369,13 @@ std::string World::SaveToString()
 		{"occlusionCull", settings.occlusionCull},
 		{"aoQuality", settings.aoQuality}, {"aoRadius", settings.aoRadius},
 		{"aoIntensity", settings.aoIntensity}, {"aoPower", settings.aoPower},
+		{"giEnabled", settings.giEnabled}, {"giSpacing", settings.giSpacing},
+		{"giCountX", settings.giCountX}, {"giCountY", settings.giCountY}, {"giCountZ", settings.giCountZ},
+		{"giRays", settings.giRays}, {"giHysteresis", settings.giHysteresis},
+		{"giNormalBias", settings.giNormalBias}, {"giViewBias", settings.giViewBias},
+		{"giIntensity", settings.giIntensity}, {"giMaxDistance", settings.giMaxDistance},
+		{"giDebugProbes", settings.giDebugProbes},
+		{"ssgiQuality", settings.ssgiQuality}, {"ssgiRadius", settings.ssgiRadius}, {"ssgiIntensity", settings.ssgiIntensity},
 		{"gravity", { settings.gravity[0], settings.gravity[1], settings.gravity[2] }},
 		{"fixedDt", settings.fixedDt} };
 	if (settings.streamEnabled)
@@ -3844,6 +3906,21 @@ void World::LoadHeaderFromJson(const json& j)
 		settings.aoRadius         = s.value("aoRadius", settings.aoRadius);
 		settings.aoIntensity      = s.value("aoIntensity", settings.aoIntensity);
 		settings.aoPower          = s.value("aoPower", settings.aoPower);
+		settings.giEnabled        = s.value("giEnabled", settings.giEnabled);
+		settings.giSpacing        = s.value("giSpacing", settings.giSpacing);
+		settings.giCountX         = s.value("giCountX", settings.giCountX);
+		settings.giCountY         = s.value("giCountY", settings.giCountY);
+		settings.giCountZ         = s.value("giCountZ", settings.giCountZ);
+		settings.giRays           = s.value("giRays", settings.giRays);
+		settings.giHysteresis     = s.value("giHysteresis", settings.giHysteresis);
+		settings.giNormalBias     = s.value("giNormalBias", settings.giNormalBias);
+		settings.giViewBias       = s.value("giViewBias", settings.giViewBias);
+		settings.giIntensity      = s.value("giIntensity", settings.giIntensity);
+		settings.giMaxDistance    = s.value("giMaxDistance", settings.giMaxDistance);
+		settings.giDebugProbes    = s.value("giDebugProbes", settings.giDebugProbes);
+		settings.ssgiQuality      = s.value("ssgiQuality", settings.ssgiQuality);
+		settings.ssgiRadius       = s.value("ssgiRadius", settings.ssgiRadius);
+		settings.ssgiIntensity    = s.value("ssgiIntensity", settings.ssgiIntensity);
 		if (s.contains("gravity") && s["gravity"].is_array() && s["gravity"].size() == 3)
 			for (int i = 0; i < 3; ++i) settings.gravity[i] = s["gravity"][i].get<float>();
 		settings.fixedDt = s.value("fixedDt", settings.fixedDt);

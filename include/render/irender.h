@@ -82,6 +82,21 @@ struct NukeCameraDesc
                                                 // share one history. 0 = anonymous (falls back to the target). (abi 44, appended)
 };
 
+// One dynamic-GI probe volume as the renderer sees it (World fills it from a GIVolume).
+struct NukeGIVolumeDesc
+{
+    uint64_t id = 0;                 // stable identity (the atom id): probe history survives edits
+    float    origin[3] = {0, 0, 0};  // probe (0,0,0) world position
+    float    spacing[3] = {1, 1, 1}; // probe step per axis
+    int      counts[3] = {2, 2, 2};  // probes per axis (>= 2)
+    int      raysPerProbe = 128;
+    float    hysteresis = 0.97f;
+    float    normalBias = 0.25f, viewBias = 0.3f;   // probe-spacing units
+    float    intensity = 1.0f;
+    float    maxRayDistance = 100.0f;
+    int      debugProbes = 0;        // draw the probes as small lit spheres in the camera pass
+};
+
 // Backend-neutral window description, filled by the app from its config and passed to
 // iRender::init; the renderer translates it into its windowing backend at creation time.
 struct WindowDesc
@@ -678,6 +693,23 @@ public:
     // within, intensity = strength, power = contrast. Needs the G-buffer prepass; darkens
     // the ambient/IBL term only — direct light is untouched.
     virtual void setAmbientOcclusion(int quality, float radius, float intensity, float power) { (void)quality; (void)radius; (void)intensity; (void)power; }
+
+    // --- Dynamic diffuse GI probe volumes (abi 44, appended) --------------------------------------
+    // The World pushes every enabled GIVolume before the camera passes (count 0 = no dynamic GI).
+    // Ray-tracing devices update the probes themselves in updateGIVolumes (probe rays against the
+    // scene TLAS). Elsewhere the World captures probe cube faces through giCapture*, amortized:
+    // giCaptureBudget probes per frame, six faces each, then giCaptureCommit folds them into the
+    // atlases. The world shader replaces the sky irradiance wherever a volume covers the point.
+    virtual void setGIVolumes(const NukeGIVolumeDesc* volumes, int count) { (void)volumes; (void)count; }
+    virtual void updateGIVolumes() {}
+    virtual int  giCaptureBudget() { return 0; }
+    virtual bool giCaptureBegin(int slot, int face, float pos[3], float* nearZ, float* farZ) { (void)slot; (void)face; (void)pos; (void)nearZ; (void)farZ; return false; }
+    virtual void giCaptureEnd(int slot, int face) { (void)slot; (void)face; }
+    virtual void giCaptureCommit() {}
+    // Screen-space GI (abi 44, appended): contact-scale diffuse bounce from last frame's lit
+    // scene, layered on the probes. quality 0 = off, 1..3 = Low/Medium/High (rays x steps);
+    // radius = world units the rays march; intensity = strength. Needs the G-buffer prepass.
+    virtual void setScreenGI(int quality, float radius, float intensity) { (void)quality; (void)radius; (void)intensity; }
 
     // ABI: new virtuals are appended at the END of the class, NEVER inserted mid-vtable —
     // plugins are separate DLLs built at different times, and an inserted slot shifts every later one.

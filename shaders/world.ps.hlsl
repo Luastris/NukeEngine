@@ -32,12 +32,19 @@ cbuffer FrameCB
     float4 g_ProbePos; float4 g_ProbeParams; float4 g_ProbeBox;
     // g_Wind = (dir.xyz, strength m/s); g_Wind2 = (turbulence, 1/turbScale, time, gustFreq); read by vertex-bend shaders.
     float4 g_Wind; float4 g_Wind2;
+    float4 g_Misc;   // x = DDGI probe capture in progress (alpha = distance / y), y = max ray distance
 };
 TextureCube  g_Probe;          // scene-captured reflection cubemap (when g_ProbePos.w > 0.5)
 SamplerState g_Probe_sampler;
 
 // g_DrawFlags.x = receiveShadows (0 -> surface ignores all shadowing).
 cbuffer DrawFlagsCB { float4 g_DrawFlags; };
+#include "ddgi.hlsli"
+// Dynamic GI probe volumes (World::Render pushes them; count 0 = none).
+cbuffer GICB { GIVolumeGPU g_GIVol[DDGI_MAX_VOLUMES]; int4 g_GICount; float4 g_GIAtlasInv; };   // AtlasInv: xy irradiance 1/size, zw visibility 1/size
+Texture2D    g_GIIrr;        SamplerState g_GIIrr_sampler;   // irradiance atlas (linear, clamp)
+Texture2D    g_GIVis;                                        // visibility atlas (distance, distance^2), same sampler
+Texture2D    g_ScreenGI;     // screen-space bounce (E / pi), full-res, Load by pixel (black-ish white when off: guarded like g_ScreenAO)
 
 #ifdef RT_ENABLED   // D3D12 + DXR: inline ray-traced shadows (RayQuery, SM6.5) instead of shadow maps
 RaytracingAccelerationStructure g_TLAS;
@@ -649,6 +656,21 @@ float4 main(in PSIn i) : SV_Target
         uint aoW, aoH; g_ScreenAO.GetDimensions(aoW, aoH);
         if (aoW > 1) ao *= g_ScreenAO.Load(int3((int2)i.pos.xy, 0)).r;
     }
+    // Dynamic GI: probe irradiance replaces the sky irradiance wherever a volume covers the point
+    // (specular keeps the sky / reflection probe). Not scaled by the ambient intensity: it is
+    // real bounced light, the ambient knob stays an artistic control of the sky term.
+    float3 giIrr = 0.0;
+    bool   giHit = false;
+    // Screen-space GI: rgb = contact bounce, a = the fraction of the hemisphere its rays hit. That
+    // fraction REPLACES the far-field light (sky / probes) instead of adding to it - otherwise
+    // every crease glows twice.
+    float3 ssgi = 0.0; float ssgiOpen = 1.0;
+    {
+        uint sgW, sgH; g_ScreenGI.GetDimensions(sgW, sgH);
+        if (sgW > 1) { float4 sg = g_ScreenGI.Load(int3((int2)i.pos.xy, 0)); ssgi = sg.rgb; ssgiOpen = 1.0 - saturate(sg.a); }
+    }
+    [branch] if (g_GICount.x > 0)
+        giHit = DDGISample(g_GIIrr, g_GIVis, g_GIIrr_sampler, g_GIVol, g_GICount.x, g_GIAtlasInv.xy, g_GIAtlasInv.zw, i.wpos, N, V, giIrr);
     float3 ambient;
     if (g_SkyParams.y > 0.5)   // image-based lighting from the procedural sky
     {
@@ -681,10 +703,13 @@ float4 main(in PSIn i) : SV_Target
         }
         float3 Fr  = F0 + (max(float3(1.0 - rough, 1.0 - rough, 1.0 - rough), F0) - F0) * pow(1.0 - ndv, 5.0);
         float3 kd  = (1.0 - Fr) * (1.0 - metallic);
-        ambient = (kd * irr * albedo + env * Fr) * g_Ambient.w * ao;
+        if (giHit) ambient = (kd * (giIrr * ssgiOpen + ssgi) * albedo + env * Fr * g_Ambient.w) * ao;
+        else       ambient = (kd * (irr * g_Ambient.w * ssgiOpen + ssgi) * albedo + env * Fr * g_Ambient.w) * ao;
     }
+    else if (giHit)
+        ambient = (giIrr * ssgiOpen + ssgi) * (1.0 - metallic) * albedo * ao;   // probe light instead of the flat ambient
     else
-        ambient = g_Ambient.rgb * g_Ambient.w * albedo * ao;                   // flat ambient (no sky)
+        ambient = (g_Ambient.rgb * g_Ambient.w * ssgiOpen + ssgi) * (1.0 - metallic) * albedo * ao;   // flat ambient (no sky) + bounce
     float3 emissive = g_Emissive2.rgb * g_Emissive2.w;
     [branch] if (g_EmisT.w > 0.5)   // masked emissive tween (rgb premultiplied by intensity)
         emissive = lerp(emissive, g_EmisT.rgb, NukeMaskW((int)(g_EmisT.w - 0.5), i.uv, i.wpos, g_MskStamp, g_Ov0Alb_sampler));
@@ -697,8 +722,9 @@ float4 main(in PSIn i) : SV_Target
     }
     float3 color = ambient + Lo + emissive;
 
-    // g_SkyParams.z == 0: emit linear HDR and let the post pass tonemap; == 1: tonemap here.
-    if (g_SkyParams.z > 0.5)
+    // g_SkyParams.z == 0: emit linear HDR and let the post pass tonemap; == 1: tonemap here
+    // (never during a GI probe capture: the probes integrate linear radiance).
+    if (g_SkyParams.z > 0.5 && g_Misc.x < 0.5)
     {
         float W = (g_SkyParams.w > 1e-3) ? g_SkyParams.w : 1.0;   // tonemap white point
         color = color * (1.0 + color / (W * W)) / (1.0 + color);  // extended Reinhard
@@ -737,5 +763,6 @@ float4 main(in PSIn i) : SV_Target
             alphaOut = 1.0;
         }
     }
+    if (g_Misc.x > 0.5) alphaOut = saturate(length(i.wpos - g_CamPos.xyz) / max(g_Misc.y, 1e-3));   // probe capture: distance in alpha
     return float4(color, alphaOut);
 }
