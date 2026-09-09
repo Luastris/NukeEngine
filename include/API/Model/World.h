@@ -28,7 +28,7 @@ public:
 
 	// World-level render settings (saved in .nuworld -> "settings"), pushed to the renderer each
 	// frame in Render(). Shadow GLOBALS only — which lights cast is per-Light.
-	struct Settings
+	struct NUKEENGINE_API Settings
 	{
 		int   shadowRes        = 2048;    // shadow map resolution (1024/2048/4096)
 		float shadowDistance   = 60.0f;   // directional ortho extent / range
@@ -58,6 +58,22 @@ public:
 		int   ssgiQuality   = 0;          // 0 off, 1 Low, 2 Medium, 3 High
 		float ssgiRadius    = 1.0f;       // march distance, world units
 		float ssgiIntensity = 1.0f;
+		// Volumetric fog (froxel grid): global height fog lit by the lights (god rays) and the probes.
+		// Volumetrics = the froxel grid: the global height fog, every FogVolume atom AND the
+		// light shafts render through it - Off (0) turns all three off. Each is its own opt-in:
+		// the global fog by its density (0 = none), volumes by their atoms, shafts by their density.
+		int   volQuality = 2;             // 0 off, 1 Low, 2 Medium, 3 High (on by default: the lights' scattering)
+		float volDensity = 0.0f;          // global fog extinction at the base height, 1/m (0 = no global fog)
+		float volHeightBase = 0.0f;
+		float volHeightFalloff = 0.1f;    // 1/m above the base
+		float volAlbedo[3] = { 0.9f, 0.9f, 0.9f };
+		float volAnisotropy = 0.3f;       // -1..1, forward scattering > 0
+		float volMaxDistance = 200.0f;
+		float volLightIntensity = 1.0f;
+		float volAmbientIntensity = 1.0f;
+		float volShaftDensity = 0.003f;   // light scattering: lit-air scattering with no extinction and no ambient (the lights' rays in clear air), 1/m
+		float sunShaftIntensity = 0.0f;   // screen-space crepuscular rays around the sun (no grid needed), 0 = off
+		float sunShaftLength = 0.6f;      // their radial reach, fraction of the screen
 		// Physics (drives the fixed-step loop; pushed to the physics service).
 		float gravity[3] = { 0.0f, -9.81f, 0.0f };
 		float fixedDt    = 1.0f / 60.0f;  // fixed simulation timestep (seconds)
@@ -68,6 +84,13 @@ public:
 		float streamCellSize  = 128.0f;    // cell edge, world units
 		float streamRange     = 256.0f;    // load radius around the cameras (unload = x1.3)
 		float streamHlodRange = 8192.0f;   // draw HLOD proxies for unloaded cells inside this
+
+		// The ONE serialisation (.nuworld "settings"); equality goes through it, so every
+		// field is undoable/comparable the day it is added.
+		nlohmann::json ToJson() const;
+		void FromJson(const nlohmann::json& s);   // missing keys keep the defaults
+		bool operator==(const Settings& o) const;
+		bool operator!=(const Settings& o) const { return !(*this == o); }
 	};
 	Settings settings;
 

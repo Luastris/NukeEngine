@@ -280,7 +280,7 @@ float3 PerturbNormal(float3 N, float3 n, float3 dp1, float3 dp2, float2 du1, flo
     return normalize(T * (inv * n.x) + B * (inv * n.y) + N * n.z);
 }
 
-float4 main(in PSIn i) : SV_Target
+float4 main(in PSIn i, bool isFront : SV_IsFrontFace) : SV_Target
 {
     // Triplanar projection (world position, UV Tiling = repeats per meter): the base albedo
     // blends across the three planes; everything else follows the DOMINANT plane's uv so all
@@ -590,7 +590,9 @@ float4 main(in PSIn i) : SV_Target
             }
 #else
             if (type > 0.5 && type < 1.5) shadow = SamplePointShadow(swpos, lt.posType.xyz, (int)lt.spot.w, lt.dirRange.w);
-            else                          shadow = SampleShadow(swpos, (int)lt.spot.z, ndl);   // dir/spot 2D slot
+            else   // dir/spot 2D slot: normal-offset shadows - the receiver steps off its surface by up to
+                   // 4 offsets at grazing incidence, where a shadow texel's depth slope dwarfs the depth bias (acne)
+                   shadow = SampleShadow(i.wpos + N * g_ShadowParams.y * (1.0 + 3.0 * (1.0 - saturate(ndl))), (int)lt.spot.z, ndl);
 #endif
         }
         radiance *= shadow;
@@ -763,6 +765,8 @@ float4 main(in PSIn i) : SV_Target
             alphaOut = 1.0;
         }
     }
-    if (g_Misc.x > 0.5) alphaOut = saturate(length(i.wpos - g_CamPos.xyz) / max(g_Misc.y, 1e-3));   // probe capture: distance in alpha
+    // Probe capture: distance in alpha; a back face (the world PSOs are double-sided, so a probe
+    // inside geometry sees its walls from behind) writes 0 = "inside" for the probe classification.
+    if (g_Misc.x > 0.5) alphaOut = isFront ? max(saturate(length(i.wpos - g_CamPos.xyz) / max(g_Misc.y, 1e-3)), 0.004) : 0.0;
     return float4(color, alphaOut);
 }

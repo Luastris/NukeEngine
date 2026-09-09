@@ -132,6 +132,12 @@ extern "C" { NUKE_ABI_STAMP int nuke_build_debug = 0; }
 //  44 — Component::LateUpdate appended to the vtable (second traversal of the world tick);
 //       iRender gained setAmbientOcclusion (appended); NukeCameraDesc gained cameraId (sizeof
 //       grew): TAA / AO history and occlusion views are keyed per camera, not per target.
+//       Same cycle, appended: iRender setGIVolumes/updateGIVolumes/giCapture* (DDGI), setScreenGI,
+//       setVolumetrics (froxel fog), setFogVolumes / setSpriteVolumeLight / drawSpriteRunSixWay
+//       (VL2); NukeGIVolumeDesc / NukeVolumetricsDesc / NukeFogVolumeDesc are new structs;
+//       NukeVolumetricsDesc gained shaftDensity, then sunShaftIntensity/sunShaftLength;
+//       NukeFogVolumeDesc gained shaftDensity, then the fluid block (sizeof grew); NukeFogDisplacerDesc
+//       is new (bodies moving through fluid fog); iRender gained setFogDisplacers (appended).
 #define NUKE_ENGINE_ABI 44
 extern "C" { NUKE_ABI_STAMP int nuke_engine_abi = NUKE_ENGINE_ABI; }
 

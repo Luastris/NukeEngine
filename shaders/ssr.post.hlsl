@@ -12,6 +12,20 @@ cbuffer PostParams         // inspector-tweakable (names + defaults parsed by th
     float g_MaxSteps    = 48.0;   // linear march steps
 };
 cbuffer SSRCB { float4x4 g_View; float4x4 g_Proj; float4x4 g_InvProj; float4x4 g_InvView; float4 g_SSRRes; };  // res: w,h,1/w,1/h
+#define MAX_LIGHTS 256
+#define MAX_SHADOWS 4
+struct Light { float4 posType; float4 dirRange; float4 colorIntensity; float4 spot; };
+cbuffer FrameCB   // identical layout to world.ps / worldFrameCB (the lights for the fog outside the grid)
+{
+    float4 g_CamPos; float4 g_Ambient; float4 g_LightCount; Light g_Lights[MAX_LIGHTS];
+    float4x4 g_ShadowVP[MAX_SHADOWS]; float4 g_ShadowParams;
+    float4 g_SkyTop; float4 g_SkyHorizon; float4 g_SkyGround; float4 g_SkyParams;
+    float4 g_ProbePos; float4 g_ProbeParams; float4 g_ProbeBox;
+};
+#define VOL_REFLECT 1
+#define VOL_REFLECT_LIGHTS 1
+#define VOL_REFLECT_VOLUMES 1
+#include "vol.hlsli"   // VolFogSegment: the reflected leg through this frame's froxel fog
 
 struct PSIn { float4 pos : SV_POSITION; float2 uv : TEXCOORD0; };
 
@@ -121,6 +135,13 @@ float4 main(in PSIn i) : SV_Target
         const float2 off[6] = { float2(1,0), float2(-1,0), float2(0,1), float2(0,-1), float2(0.7,0.7), float2(-0.7,-0.7) };
         [unroll] for (int t = 0; t < 6; ++t) reflColor += g_Source.SampleLevel(g_Source_sampler, hitUV + off[t] * tx, 0).rgb;
         reflColor /= 7.0;
+    }
+    {   // the reflected leg (mirror -> what it shows) through the fog; the camera -> mirror leg comes with the fog composite
+        float3 wS = mul(g_InvView, float4(vpos, 1.0)).xyz;
+        float3 wH = mul(g_InvView, float4(ViewPosFromUV(hitUV, hd), 1.0)).xyz;
+        float3 amb = (g_SkyParams.y > 0.5) ? (g_SkyTop.rgb + 2.0 * g_SkyHorizon.rgb + g_SkyGround.rgb) * 0.25 * g_SkyParams.x * g_Ambient.w
+                                           : g_Ambient.rgb * g_Ambient.w;
+        reflColor = VolFogSegment(wS, wH, reflColor, amb);
     }
     // lerp, not add: the surface already carries the probe/IBL reflection, so adding would double-count.
     float  k = saturate(refl * g_Intensity * fade);

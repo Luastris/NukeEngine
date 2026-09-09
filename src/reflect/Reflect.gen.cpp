@@ -23,6 +23,7 @@
 #include "API/Model/Events.h"
 #include "API/Model/Fire.h"
 #include "API/Model/Foliage.h"
+#include "API/Model/ForceField.h"
 #include "API/Model/Game.h"
 #include "API/Model/InstancedMesh.h"
 #include "API/Model/Joints.h"
@@ -30,6 +31,7 @@
 #include "API/Model/Light.h"
 #include "API/Model/Log.h"
 #include "API/Model/Material.h"
+#include "API/Model/MediumVolume.h"
 #include "API/Model/Mesh.h"
 #include "API/Model/MeshRenderer.h"
 #include "API/Model/MotionMatcher.h"
@@ -773,6 +775,31 @@ bool NukeReflectInit() {
 		t.create = []() -> void* { return new Foliage(); };
 	}
 	{
+		TypeInfo& t = TypeOf<ForceField>();
+		t.base = "Component";
+		t.category = "Effects";
+		t.fields.push_back(MakeField("mode", &ForceField::mode, "", "Mode", 0.0f, 0.0f, "Attract,Repel,Vortex,Turbulence"));
+		t.fields.push_back(MakeField("vortexAxis", &ForceField::vortexAxis, "", "Vortex Axis", 0.0f, 0.0f, "Free,Atom Up"));
+		t.fields.back().tip = "Free: the vortex turns around the world's up. Atom Up: around the atom's up axis - rotate the atom to pick the plane.";
+		t.fields.push_back(MakeField("vortexPull", &ForceField::vortexPull, "", "Vortex Pull", -1.0f, 1.0f));
+		t.fields.back().tip = "0: turns in place. 0..1: pulls into the centre (the inner turns faster, angular momentum). -1..0: pushes out of it.";
+		t.fields.push_back(MakeField("vortexInner", &ForceField::vortexInner, "", "Inner Radius"));
+		t.fields.back().tip = "The funnel's core: inside it the turn is solid-body (0 = 15% of the radius). Radius is the outer edge.";
+		t.fields.push_back(MakeField("dentDepth", &ForceField::dentDepth, "", "Dent Depth", 0.0f, 1.0f));
+		t.fields.back().tip = "How deep the funnel dents the fog: 0 = the fog's own noise only, 1 = the folds go to clear air.";
+		t.fields.push_back(MakeField("dentSharp", &ForceField::dentSharp, "", "Dent Sharpness", 0.0f, 1.0f));
+		t.fields.back().tip = "0 = soft rolls, 1 = crisp ridges.";
+		t.fields.push_back(MakeField("dentSize", &ForceField::dentSize, "", "Dent Size"));
+		t.fields.back().tip = "Size of a dent, metres (0 = the fog volume's Noise Scale).";
+		t.fields.push_back(MakeField("dentDensity", &ForceField::dentDensity, "", "Dent Density"));
+		t.fields.back().tip = "Extra density in the folds (1 = the folds are twice as dense as the fog around) - the funnel shows from the side too.";
+		t.fields.push_back(MakeField("radius", &ForceField::radius, "", "Radius"));
+		t.fields.push_back(MakeField("strength", &ForceField::strength, "", "Strength"));
+		t.fields.push_back(MakeField("falloff", &ForceField::falloff, "", "Falloff", 0.0f, 1.0f));
+		t.fields.back().tip = "0 = full strength to the edge, 1 = linear fade.";
+		t.create = []() -> void* { return new ForceField(); };
+	}
+	{
 		TypeInfo& t = TypeOf<Game>();
 		t.base = "Object";
 		t.methods.push_back(MakeMethod("GetWorld", &Game::GetWorld));
@@ -1112,6 +1139,16 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("SetVector", &Material::SetVector));
 		Reflect_SetMethodDoc("Material", "SetVector", "", "param,v,w");
 		t.create = []() -> void* { return new Material(); };
+	}
+	{
+		TypeInfo& t = TypeOf<MediumVolume>();
+		t.base = "Component";
+		t.category = "World";
+		t.fields.push_back(MakeField("shape", &MediumVolume::shape, "", "Shape", 0.0f, 0.0f, "Box,Sphere,Ellipsoid"));
+		t.fields.push_back(MakeField("halfExtents", &MediumVolume::halfExtents, "", "Half Extents"));
+		t.fields.back().tip = "Box half size / ellipsoid radii (local, scaled by the atom). Sphere uses X.";
+		t.fields.push_back(MakeField("falloff", &MediumVolume::falloff, "", "Edge Falloff", 0.0f, 1.0f));
+		t.fields.back().tip = "0 = hard edge, 1 = fades from the centre to the edge.";
 	}
 	{
 		TypeInfo& t = TypeOf<Mesh>();

@@ -5,6 +5,7 @@
 [shader("closesthit")]
 void main(inout RTPayload p, in BuiltInTriangleIntersectionAttributes attr)
 {
+    p.hitT = RayTCurrent();
     uint instId = InstanceID();
     RTInstanceData inst = g_Instances[instId];
     uint   prim = PrimitiveIndex();

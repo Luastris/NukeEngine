@@ -136,7 +136,7 @@ Component* Reflect_AddComponent(Atom* atom, const std::string& typeName)
 {
 	if (!atom) return nullptr;
 	TypeInfo* ti = Registry_Find(typeName);
-	if (!ti || !ti->create || ti->base != "Component") return nullptr;   // same guard as the editor menu
+	if (!ti || !ti->create || !Registry_IsComponentType(ti)) return nullptr;   // the whole base chain (FogVolume : ScatterVolume : MediumVolume : Component), as the editor menu
 	Component* c = (Component*)ti->create();
 	atom->AddComponent(c);   // Init: sets atom/transform + registers in atom->components
 	return c;

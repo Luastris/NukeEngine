@@ -38,6 +38,10 @@
 #include "API/Model/Surface.h"
 #include "interface/WorldHooks.h"
 #include "API/Model/BendVolumes.h"
+#include "API/Model/MediumVolume.h"
+#include "API/Model/CharacterController.h"
+#include "API/Model/Rigidbody.h"
+#include <unordered_map>
 #include "API/Model/WorldStream.h"
 #include "interface/Services.h"
 #include "service/iPhysics.h"
@@ -2075,6 +2079,31 @@ static void EmitSelectionGizmos(Atom* a)
 			DebugDraw::WireSphere(pos, 1.0, c);   // infinite probe: a small marker sphere
 	}
 
+	if (MediumVolume* fv = a->GetComponent<MediumVolume>())   // scatter and fog volumes alike (any medium)
+	{
+		const Color c(0.75, 0.8, 0.9, 1.0);   // volumes: misty grey-blue bounds
+		const Vector3 he = ScaleExtents(fv->halfExtents, scl);
+		if (fv->shape == 1) DebugDraw::WireSphere(pos, ScaleRadius((float)fv->halfExtents.x, scl), c);
+		else if (fv->shape == 0) DebugDraw::WireBox(pos, he, rot, c);
+		else
+		{   // ellipsoid: the three principal circles inside the bounding box
+			DebugDraw::WireBox(pos, he, rot, Color(c.r, c.g, c.b, 0.35));
+			const Vector3 ax = t.right(), ay = t.up(), az = t.direction();
+			const int n = 32;
+			auto ring = [&](const Vector3& u, const Vector3& v, double ru, double rv)
+			{
+				for (int i = 0; i < n; ++i)
+				{
+					const double a0 = 6.283185307 * i / n, a1 = 6.283185307 * (i + 1) / n;
+					const Vector3 p0(pos.x + u.x * ru * cos(a0) + v.x * rv * sin(a0), pos.y + u.y * ru * cos(a0) + v.y * rv * sin(a0), pos.z + u.z * ru * cos(a0) + v.z * rv * sin(a0));
+					const Vector3 p1(pos.x + u.x * ru * cos(a1) + v.x * rv * sin(a1), pos.y + u.y * ru * cos(a1) + v.y * rv * sin(a1), pos.z + u.z * ru * cos(a1) + v.z * rv * sin(a1));
+					DebugDraw::Line(p0, p1, c);
+				}
+			};
+			ring(ax, ay, he.x, he.y); ring(ay, az, he.y, he.z); ring(az, ax, he.z, he.x);
+		}
+	}
+
 	if (WindZone* wz = a->GetComponent<WindZone>())
 	{
 		const Color c(0.35, 0.9, 0.75, 1.0);   // wind zones: teal bounds + direction/radial arrows
@@ -2450,7 +2479,8 @@ void World::Render(iRender* r)
 				const float seed = (float)((i * 37) % 13) * 0.7f;
 				vflat.insert(vflat.end(), { v.pos[0], v.pos[1], v.pos[2], v.radius,
 				                            v.dir[0], v.dir[1], v.dir[2], v.strength,
-				                            (float)v.mode, v.falloff, seed, 0.0f });
+				                            (float)v.mode, v.falloff, seed, v.pull,
+				                            v.inner, v.dentDepth, v.dentSharp, v.dentSize, v.dentDensity, 0.0f, 0.0f, 0.0f });   // 20 floats a volume (setBendVolumes)
 			}
 			r->setBendVolumes(vflat.empty() ? nullptr : vflat.data(), (int)vols.size());
 		}
@@ -2635,29 +2665,17 @@ void World::Render(iRender* r)
 			{
 				std::vector<DrawItem> gitems; CollectMeshes(*hierarchy, gitems);   // no cull: probes look everywhere
 				for (int slot = 0; slot < budget; ++slot)
-					for (int f = 0; f < 12; ++f)   // 0..5 colour faces, 6..11 back-face depth of face-6 (probe classification)
+					for (int f = 0; f < 6; ++f)
 					{
 						float ppos[3]; float nz = 0.05f, fz = 100.0f;
 						if (!r->giCaptureBegin(slot, f, ppos, &nz, &fz)) break;
-						if (f < 6)
+						for (auto& it : gitems) if (it.anyOpaque)
 						{
-							for (auto& it : gitems) if (it.anyOpaque)
-							{
-								PushLiveContext(it);
-								if (it.matCount > 1) r->renderObjectMulti(it.mesh, it.mats, it.matCount, it.pos, it.quat, it.scale, 0);
-								else if (it.blend == 0) r->renderObject(it.mesh, it.mat, it.pos, it.quat, it.scale);
-							}
-							DrawInstancedMeshes(instSets, r, false);
+							PushLiveContext(it);
+							if (it.matCount > 1) r->renderObjectMulti(it.mesh, it.mats, it.matCount, it.pos, it.quat, it.scale, 0);
+							else if (it.blend == 0) r->renderObject(it.mesh, it.mat, it.pos, it.quat, it.scale);
 						}
-						else   // depth of every opaque surface, back faces included (shadow path = cull none)
-						{
-							for (auto& it : gitems) if (it.anyOpaque)
-							{
-								if (it.matCount > 1) r->renderShadowObjectMulti(it.mesh, it.mats, it.matCount, it.pos, it.quat, it.scale);
-								else if (it.blend == 0) r->renderShadowObject(it.mesh, it.pos, it.quat, it.scale, it.mat);
-							}
-							DrawInstancedShadows(instSets, r);
-						}
+						DrawInstancedMeshes(instSets, r, false);
 						r->giCaptureEnd(slot, f);
 					}
 				r->giCaptureCommit();
@@ -2674,6 +2692,83 @@ void World::Render(iRender* r)
 	r->setOcclusionCulling(settings.occlusionCull && !auxiliary, s_cullFrozen);
 	r->setAmbientOcclusion(auxiliary ? 0 : settings.aoQuality, settings.aoRadius, settings.aoIntensity, settings.aoPower);
 	r->setScreenGI(auxiliary ? 0 : settings.ssgiQuality, settings.ssgiRadius, settings.ssgiIntensity);
+	{
+		NukeVolumetricsDesc vd;
+		vd.quality = auxiliary ? 0 : settings.volQuality;
+		vd.density = settings.volDensity; vd.heightBase = settings.volHeightBase; vd.heightFalloff = settings.volHeightFalloff;
+		for (int k = 0; k < 3; ++k) vd.albedo[k] = settings.volAlbedo[k];
+		vd.anisotropy = settings.volAnisotropy; vd.maxDistance = settings.volMaxDistance;
+		vd.lightIntensity = settings.volLightIntensity; vd.ambientIntensity = settings.volAmbientIntensity;
+		vd.shaftDensity = settings.volShaftDensity;
+		vd.sunShaftIntensity = auxiliary ? 0.0f : settings.sunShaftIntensity; vd.sunShaftLength = settings.sunShaftLength;
+		r->setVolumetrics(vd);
+		// Local volumes: every enabled medium volume (NukeVFX ScatterVolume / FogVolume), nearest 32 to the camera (the grid's cap).
+		static std::vector<NukeFogVolumeDesc> fogs; fogs.clear();
+		if (!auxiliary && settings.volQuality > 0) MediumVolume::Collect(fogs);
+		if (fogs.size() > 32)
+		{
+			std::sort(fogs.begin(), fogs.end(), [&](const NukeFogVolumeDesc& a, const NukeFogVolumeDesc& b)
+			{
+				const double ax = a.pos[0] - sceneCamP.x, ay = a.pos[1] - sceneCamP.y, az = a.pos[2] - sceneCamP.z;
+				const double bx = b.pos[0] - sceneCamP.x, by = b.pos[1] - sceneCamP.y, bz = b.pos[2] - sceneCamP.z;
+				return ax * ax + ay * ay + az * az < bx * bx + by * by + bz * bz;
+			});
+			fogs.resize(32);
+		}
+		r->setFogVolumes(fogs.empty() ? nullptr : fogs.data(), (int)fogs.size());
+		// Bodies moving through the fluid volumes: every character (its capsule) and every
+		// non-kinematic rigidbody (its mesh bounds), with the velocity from last frame's position.
+		// Force Fields reach the fluid as the bend volumes pushed above.
+		if (!auxiliary && settings.volQuality > 0)
+		{
+			static std::vector<NukeFogDisplacerDesc> disps; disps.clear();
+			static std::unordered_map<uint64_t, Vector3> lastPos; static std::unordered_map<uint64_t, Vector3> curPos;
+			const double dt = Time::getSingleton()->delta;
+			bool anyFluid = false;
+			for (const NukeFogVolumeDesc& f : fogs) if (f.fluid) { anyFluid = true; break; }
+			if (anyFluid)
+			{
+				curPos.clear();
+				for (Atom* a : GetHierarchy())
+				{
+					if (!a) continue;
+					float radius = 0.0f; bool self = false;
+					if (CharacterController* cc = a->GetComponent<CharacterController>()) { radius = std::max(cc->radius, cc->height * 0.5f) * 1.1f; self = true; }
+					else if (Rigidbody* rb = a->GetComponent<Rigidbody>())
+					{
+						if (rb->isKinematic) continue;
+						if (MeshRenderer* mr = a->GetComponent<MeshRenderer>()) if (mr->mesh)
+						{
+							mr->mesh->EnsureBounds();
+							if (mr->mesh->boundsValid)
+							{
+								const Vector3 s = a->transform.globalScale();
+								const float ex = (mr->mesh->aabbMax[0] - mr->mesh->aabbMin[0]) * 0.5f * (float)fabs(s.x);
+								const float ey = (mr->mesh->aabbMax[1] - mr->mesh->aabbMin[1]) * 0.5f * (float)fabs(s.y);
+								const float ez = (mr->mesh->aabbMax[2] - mr->mesh->aabbMin[2]) * 0.5f * (float)fabs(s.z);
+								radius = std::sqrt(ex * ex + ey * ey + ez * ez) * 0.8f; self = true;
+							}
+						}
+					}
+					if (!self || radius <= 0.05f) continue;
+					const Vector3 p = a->transform.globalPosition();
+					const uint64_t key = (uint64_t)a->id.id;
+					curPos[key] = p;
+					NukeFogDisplacerDesc d;
+					d.pos[0] = (float)p.x; d.pos[1] = (float)p.y; d.pos[2] = (float)p.z; d.radius = radius; d.strength = 1.0f;
+					auto it = lastPos.find(key);
+					if (it != lastPos.end() && dt > 1e-6)
+					{
+						d.vel[0] = (float)((p.x - it->second.x) / dt); d.vel[1] = (float)((p.y - it->second.y) / dt); d.vel[2] = (float)((p.z - it->second.z) / dt);
+					}
+					disps.push_back(d);
+				}
+				lastPos.swap(curPos);
+			}
+			else lastPos.clear();
+			r->setFogDisplacers(disps.empty() ? nullptr : disps.data(), (int)disps.size());
+		}
+	}
 
 	for (Camera* cam : cams)
 	{
@@ -2792,7 +2887,7 @@ void World::Render(iRender* r)
 		bool hookPrepass = false;
 		for (WorldRenderHook* hk : WorldRenderHooks())
 			if (hk->wantsScenePrepass()) { hookPrepass = true; break; }
-		if (hasSSR || hasTAA || !decals.empty() || hookPrepass || ((settings.aoQuality > 0 || settings.ssgiQuality > 0) && !auxiliary))
+		if (hasSSR || hasTAA || !decals.empty() || hookPrepass || ((settings.aoQuality > 0 || settings.ssgiQuality > 0 || settings.volQuality > 0 || settings.sunShaftIntensity > 0.0f) && !auxiliary))
 		{
 			Profiler::Scope ps("rnd.cam.gbuf");
 			r->beginGBufferPass(d);
@@ -3368,35 +3463,99 @@ void World::RestorePluginComponents(const std::string& moduleFile)
 	for (Atom* a : GetHierarchy()) UpgradeAtom(a, moduleFile);
 }
 
+json World::Settings::ToJson() const
+{
+	json s = {
+		{"shadowRes", shadowRes}, {"shadowDistance", shadowDistance},
+		{"shadowDepthBias", shadowDepthBias}, {"shadowNormalBias", shadowNormalBias},
+		{"shadowSoftness", shadowSoftness}, {"frustumCull", frustumCull},
+		{"occlusionCull", occlusionCull},
+		{"aoQuality", aoQuality}, {"aoRadius", aoRadius},
+		{"aoIntensity", aoIntensity}, {"aoPower", aoPower},
+		{"giEnabled", giEnabled}, {"giSpacing", giSpacing},
+		{"giCountX", giCountX}, {"giCountY", giCountY}, {"giCountZ", giCountZ},
+		{"giRays", giRays}, {"giHysteresis", giHysteresis},
+		{"giNormalBias", giNormalBias}, {"giViewBias", giViewBias},
+		{"giIntensity", giIntensity}, {"giMaxDistance", giMaxDistance},
+		{"giDebugProbes", giDebugProbes},
+		{"ssgiQuality", ssgiQuality}, {"ssgiRadius", ssgiRadius}, {"ssgiIntensity", ssgiIntensity},
+		{"volQuality", volQuality}, {"volDensity", volDensity}, {"volHeightBase", volHeightBase},
+		{"volHeightFalloff", volHeightFalloff}, {"volAlbedo", { volAlbedo[0], volAlbedo[1], volAlbedo[2] }},
+		{"volAnisotropy", volAnisotropy}, {"volMaxDistance", volMaxDistance},
+		{"volLightIntensity", volLightIntensity}, {"volAmbientIntensity", volAmbientIntensity},
+		{"volShaftDensity", volShaftDensity}, {"sunShaftIntensity", sunShaftIntensity}, {"sunShaftLength", sunShaftLength},
+		{"gravity", { gravity[0], gravity[1], gravity[2] }},
+		{"fixedDt", fixedDt} };
+	if (streamEnabled)   // streaming keys only when on: an unstreamed world file stays as it was
+	{
+		s["streamEnabled"]   = true;
+		s["streamCellSize"]  = streamCellSize;
+		s["streamRange"]     = streamRange;
+		s["streamHlodRange"] = streamHlodRange;
+	}
+	return s;
+}
+
+void World::Settings::FromJson(const json& s)
+{
+	if (!s.is_object()) return;
+	shadowRes        = s.value("shadowRes", shadowRes);
+	shadowDistance   = s.value("shadowDistance", shadowDistance);
+	shadowDepthBias  = s.value("shadowDepthBias", shadowDepthBias);
+	shadowNormalBias = s.value("shadowNormalBias", shadowNormalBias);
+	shadowSoftness   = s.value("shadowSoftness", shadowSoftness);
+	frustumCull      = s.value("frustumCull", frustumCull);
+	occlusionCull    = s.value("occlusionCull", occlusionCull);
+	aoQuality        = s.value("aoQuality", aoQuality);
+	aoRadius         = s.value("aoRadius", aoRadius);
+	aoIntensity      = s.value("aoIntensity", aoIntensity);
+	aoPower          = s.value("aoPower", aoPower);
+	giEnabled        = s.value("giEnabled", giEnabled);
+	giSpacing        = s.value("giSpacing", giSpacing);
+	giCountX         = s.value("giCountX", giCountX);
+	giCountY         = s.value("giCountY", giCountY);
+	giCountZ         = s.value("giCountZ", giCountZ);
+	giRays           = s.value("giRays", giRays);
+	giHysteresis     = s.value("giHysteresis", giHysteresis);
+	giNormalBias     = s.value("giNormalBias", giNormalBias);
+	giViewBias       = s.value("giViewBias", giViewBias);
+	giIntensity      = s.value("giIntensity", giIntensity);
+	giMaxDistance    = s.value("giMaxDistance", giMaxDistance);
+	giDebugProbes    = s.value("giDebugProbes", giDebugProbes);
+	ssgiQuality      = s.value("ssgiQuality", ssgiQuality);
+	ssgiRadius       = s.value("ssgiRadius", ssgiRadius);
+	ssgiIntensity    = s.value("ssgiIntensity", ssgiIntensity);
+	volQuality       = s.value("volQuality", volQuality);
+	volDensity       = s.value("volDensity", volDensity);
+	volHeightBase    = s.value("volHeightBase", volHeightBase);
+	volHeightFalloff = s.value("volHeightFalloff", volHeightFalloff);
+	if (s.contains("volAlbedo") && s["volAlbedo"].is_array() && s["volAlbedo"].size() == 3)
+		for (int i = 0; i < 3; ++i) volAlbedo[i] = s["volAlbedo"][i].get<float>();
+	volAnisotropy    = s.value("volAnisotropy", volAnisotropy);
+	volMaxDistance   = s.value("volMaxDistance", volMaxDistance);
+	volLightIntensity   = s.value("volLightIntensity", volLightIntensity);
+	volAmbientIntensity = s.value("volAmbientIntensity", volAmbientIntensity);
+	volShaftDensity  = s.value("volShaftDensity", volShaftDensity);
+	sunShaftIntensity = s.value("sunShaftIntensity", sunShaftIntensity);
+	sunShaftLength   = s.value("sunShaftLength", sunShaftLength);
+	if (s.contains("gravity") && s["gravity"].is_array() && s["gravity"].size() == 3)
+		for (int i = 0; i < 3; ++i) gravity[i] = s["gravity"][i].get<float>();
+	fixedDt          = s.value("fixedDt", fixedDt);
+	streamEnabled    = s.value("streamEnabled", streamEnabled);
+	streamCellSize   = s.value("streamCellSize", streamCellSize);
+	streamRange      = s.value("streamRange", streamRange);
+	streamHlodRange  = s.value("streamHlodRange", streamHlodRange);
+}
+
+bool World::Settings::operator==(const Settings& o) const { return ToJson() == o.ToJson(); }
+
 std::string World::SaveToString()
 {
 	json j;
 	j["type"] = "World";
 	j["version"] = 1;
 	j["name"] = name;
-	j["settings"] = {
-		{"shadowRes", settings.shadowRes}, {"shadowDistance", settings.shadowDistance},
-		{"shadowDepthBias", settings.shadowDepthBias}, {"shadowNormalBias", settings.shadowNormalBias},
-		{"shadowSoftness", settings.shadowSoftness}, {"frustumCull", settings.frustumCull},
-		{"occlusionCull", settings.occlusionCull},
-		{"aoQuality", settings.aoQuality}, {"aoRadius", settings.aoRadius},
-		{"aoIntensity", settings.aoIntensity}, {"aoPower", settings.aoPower},
-		{"giEnabled", settings.giEnabled}, {"giSpacing", settings.giSpacing},
-		{"giCountX", settings.giCountX}, {"giCountY", settings.giCountY}, {"giCountZ", settings.giCountZ},
-		{"giRays", settings.giRays}, {"giHysteresis", settings.giHysteresis},
-		{"giNormalBias", settings.giNormalBias}, {"giViewBias", settings.giViewBias},
-		{"giIntensity", settings.giIntensity}, {"giMaxDistance", settings.giMaxDistance},
-		{"giDebugProbes", settings.giDebugProbes},
-		{"ssgiQuality", settings.ssgiQuality}, {"ssgiRadius", settings.ssgiRadius}, {"ssgiIntensity", settings.ssgiIntensity},
-		{"gravity", { settings.gravity[0], settings.gravity[1], settings.gravity[2] }},
-		{"fixedDt", settings.fixedDt} };
-	if (settings.streamEnabled)
-	{
-		j["settings"]["streamEnabled"]   = true;
-		j["settings"]["streamCellSize"]  = settings.streamCellSize;
-		j["settings"]["streamRange"]     = settings.streamRange;
-		j["settings"]["streamHlodRange"] = settings.streamHlodRange;
-	}
+	j["settings"] = settings.ToJson();
 	// Capture the live calendar + pending event schedule so a savegame resumes at the exact
 	// in-game moment. Only the real world owns the clock; auxiliary worlds must not clobber it.
 	if (!auxiliary)
@@ -3904,43 +4063,7 @@ void World::LoadHeaderFromJson(const json& j)
 	// Empty when the file carries no name; AppInstance::OpenWorld then fills it from the stem.
 	name = j.value("name", std::string());
 	settings = Settings{};   // defaults, then override from file
-	if (j.contains("settings") && j["settings"].is_object())
-	{
-		const json& s = j["settings"];
-		settings.shadowRes        = s.value("shadowRes", settings.shadowRes);
-		settings.shadowDistance   = s.value("shadowDistance", settings.shadowDistance);
-		settings.shadowDepthBias  = s.value("shadowDepthBias", settings.shadowDepthBias);
-		settings.shadowNormalBias = s.value("shadowNormalBias", settings.shadowNormalBias);
-		settings.shadowSoftness   = s.value("shadowSoftness", settings.shadowSoftness);
-		settings.frustumCull      = s.value("frustumCull", settings.frustumCull);
-		settings.occlusionCull    = s.value("occlusionCull", settings.occlusionCull);
-		settings.aoQuality        = s.value("aoQuality", settings.aoQuality);
-		settings.aoRadius         = s.value("aoRadius", settings.aoRadius);
-		settings.aoIntensity      = s.value("aoIntensity", settings.aoIntensity);
-		settings.aoPower          = s.value("aoPower", settings.aoPower);
-		settings.giEnabled        = s.value("giEnabled", settings.giEnabled);
-		settings.giSpacing        = s.value("giSpacing", settings.giSpacing);
-		settings.giCountX         = s.value("giCountX", settings.giCountX);
-		settings.giCountY         = s.value("giCountY", settings.giCountY);
-		settings.giCountZ         = s.value("giCountZ", settings.giCountZ);
-		settings.giRays           = s.value("giRays", settings.giRays);
-		settings.giHysteresis     = s.value("giHysteresis", settings.giHysteresis);
-		settings.giNormalBias     = s.value("giNormalBias", settings.giNormalBias);
-		settings.giViewBias       = s.value("giViewBias", settings.giViewBias);
-		settings.giIntensity      = s.value("giIntensity", settings.giIntensity);
-		settings.giMaxDistance    = s.value("giMaxDistance", settings.giMaxDistance);
-		settings.giDebugProbes    = s.value("giDebugProbes", settings.giDebugProbes);
-		settings.ssgiQuality      = s.value("ssgiQuality", settings.ssgiQuality);
-		settings.ssgiRadius       = s.value("ssgiRadius", settings.ssgiRadius);
-		settings.ssgiIntensity    = s.value("ssgiIntensity", settings.ssgiIntensity);
-		if (s.contains("gravity") && s["gravity"].is_array() && s["gravity"].size() == 3)
-			for (int i = 0; i < 3; ++i) settings.gravity[i] = s["gravity"][i].get<float>();
-		settings.fixedDt = s.value("fixedDt", settings.fixedDt);
-		settings.streamEnabled   = s.value("streamEnabled", settings.streamEnabled);
-		settings.streamCellSize  = s.value("streamCellSize", settings.streamCellSize);
-		settings.streamRange     = s.value("streamRange", settings.streamRange);
-		settings.streamHlodRange = s.value("streamHlodRange", settings.streamHlodRange);
-	}
+	if (j.contains("settings") && j["settings"].is_object()) settings.FromJson(j["settings"]);
 	// A new world means a new streaming session (parked subtrees reference the OLD hierarchy).
 	if (stream) stream->Reset();
 	// Restore the calendar + pending event schedule. Only the real world touches the global

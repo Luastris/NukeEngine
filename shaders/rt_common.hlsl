@@ -1,7 +1,7 @@
 // Shared RT reflection code: payload, bindless geometry/material fetch, environment and the PBR model.
 // The renderer CONCATENATES this ahead of rt_rgen / rt_rmiss / rt_rchit (it is not #included).
 
-struct RTPayload { float3 color; uint depth; };   // color = reflected radiance; depth = current recursion depth
+struct RTPayload { float3 color; uint depth; float hitT; };   // color = reflected radiance; depth = current recursion depth; hitT = hit distance (TMax on a miss)
 
 // TLAS instance-mask bit for "visible in reflections". Default instance Mask = 0xFF;
 // excluded = 0xFF & ~RT_REFLECT_BIT. Both color and shadow rays inside a reflection use this mask.
@@ -56,6 +56,10 @@ cbuffer FrameCB   // identical layout to world.ps / worldFrameCB
 // RT consumer (reflection stages + ddgi_trace); the renderer binds GICB + the atlases per frame.
 #include "ddgi.hlsli"
 cbuffer GICB { GIVolumeGPU g_GIVol[DDGI_MAX_VOLUMES]; int4 g_GICount; float4 g_GIAtlasInv; };
+#define VOL_REFLECT 1
+#define VOL_REFLECT_LIGHTS 1
+#define VOL_REFLECT_VOLUMES 1
+#include "vol.hlsli"   // VolFogSegment: the reflected leg through this frame's froxel fog (after FrameCB: the lights)
 Texture2D g_GIIrr;  Texture2D g_GIVis;  SamplerState g_GIIrr_sampler;
 
 float3 OctDecode(float2 e)

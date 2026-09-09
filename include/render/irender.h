@@ -82,6 +82,66 @@ struct NukeCameraDesc
                                                 // share one history. 0 = anonymous (falls back to the target). (abi 44, appended)
 };
 
+// Froxel volumetric lighting / fog (World::Settings): a global height-fog medium lit by the
+// frame's lights and the GI probes, in a camera-aligned froxel grid. quality 0 = off.
+struct NukeVolumetricsDesc
+{
+    int   quality = 0;               // 0 off, 1 Low, 2 Medium, 3 High (froxel size / slice count)
+    float density = 0.0f;            // global fog extinction at the base height, 1/m (0 = none)
+    float heightBase = 0.0f;         // world height of full density
+    float heightFalloff = 0.1f;      // 1/m: density *= exp(-(y - base) * falloff) above the base
+    float albedo[3] = {0.9f, 0.9f, 0.9f};
+    float anisotropy = 0.3f;         // Henyey-Greenstein g: 0 isotropic, > 0 forward (glow around the sun)
+    float maxDistance = 200.0f;      // far edge of the grid, world units
+    float lightIntensity = 1.0f;     // scattering from the lights (god rays)
+    float ambientIntensity = 1.0f;   // scattering from the probes / sky
+    float shaftDensity = 0.003f;     // light scattering: lit-air scattering (same height profile) with NO
+                                     // extinction and no ambient - the lights' rays in clear air, 1/m
+    float sunShaftIntensity = 0.0f;  // screen-space crepuscular rays around the sun (0 = off); no grid needed
+    float sunShaftLength = 0.6f;     // radial blur reach, fraction of the screen
+};
+
+// One local fog volume as the renderer sees it (World fills it from a FogVolume component):
+// its medium is added to the froxel grid inside the shape.
+struct NukeFogVolumeDesc
+{
+    float pos[3] = {0, 0, 0};
+    int   shape = 0;                     // 0 box, 1 sphere, 2 ellipsoid
+    float halfExt[3] = {5, 5, 5};        // local half extents / radii (world-scaled)
+    float density = 0.1f;                // extinction added inside, 1/m
+    float rot[4] = {0, 0, 0, 1};         // local -> world rotation quaternion (xyzw)
+    float albedo[3] = {0.9f, 0.9f, 0.9f};
+    float falloff = 0.5f;                // 0 hard edge .. 1 fades from the centre
+    float emission[3] = {0, 0, 0};       // radiance per metre the medium emits
+    float noise = 0.0f;                  // erosion amount 0..1
+    float noiseScale = 4.0f;             // world units per noise feature
+    float windAdvect = 1.0f;             // noise drift with the global wind (1 = wind speed)
+    float shaftDensity = 0.0f;           // local light scattering: lit air inside the shape, no extinction, 1/m
+    float heightFalloff = 0.0f;          // 1/m: the medium thins exponentially above the shape's bottom (0 = uniform); lets fields lift it
+    int   fluidMode = 0;                 // 0 = grid (the density advected on the grid), 1 = clumps (parcels of medium carried by the flow)
+    float clumpSize = 0.0f;              // clumps: a parcel's radius, m (0 = from the shape's size)
+    // Fluid volume (abi 44, appended): the medium is a simulated 3D field inside the shape -
+    // advected by the wind, pushed aside and swirled by the fog displacers, curling by itself,
+    // refilling toward the shape at `fluidRefill` per second. `id` keys the renderer's sim state.
+    unsigned long long id = 0;
+    int   fluid = 0;
+    int   fluidRes = 48;                 // cells along the longest axis
+    float fluidTurbulence = 0.3f;        // curl-noise stirring, m/s
+    float fluidRefill = 0.5f;            // 1/s toward the resting field
+    float fluidDissipation = 0.1f;       // 1/s density loss
+};
+
+// A body moving through the fog: a solid the fluid volumes' medium parts around and follows
+// (the World collects CharacterControllers and Rigidbodies). Force Fields act on the fluid
+// through the bend volumes (setBendVolumes).
+struct NukeFogDisplacerDesc
+{
+    float pos[3] = {0, 0, 0};
+    float radius = 1.0f;
+    float vel[3] = {0, 0, 0};            // world velocity, m/s
+    float strength = 1.0f;
+};
+
 // One dynamic-GI probe volume as the renderer sees it (World fills it from a GIVolume).
 struct NukeGIVolumeDesc
 {
@@ -442,7 +502,7 @@ public:
     // Analytic local volumes that bend foliage. 12 floats each: (pos.xyz, radius),
     // (dir.xyz, strength), (mode, falloff, seed, 0); mode 0=directional 1=radial 2=vortex
     // 3=turbulence. Up to 16; count 0 clears.
-    virtual void setBendVolumes(const float* vols, int count) {}
+    virtual void setBendVolumes(const float* vols, int count) {}   // 20 floats a volume: (pos,r)(dir,strength)(mode,falloff,seed,pull)(inner,dentDepth,dentSharp,dentSize)(dentDensity,0,0,0)
 
     // --- Water ---------------------------------------------------------------------------
     // Global wave state, pushed once per frame. The renderer runs the Tessendorf FFT over it for
@@ -699,10 +759,9 @@ public:
     // Ray-tracing devices update the probes themselves in updateGIVolumes (probe rays against the
     // scene TLAS). Elsewhere the World captures probe cube faces through giCapture*, amortized:
     // giCaptureBudget probes per frame, six faces each, then giCaptureCommit folds them into the
-    // atlases. Faces 6..11 are the BACK-FACE depth pass of face-6 (the World submits every opaque
-    // mesh through the shadow path): a ray whose nearest surface there is closer than in the
-    // colour capture crossed a back face, which classifies probes sitting inside geometry.
-    // The world shader replaces the sky irradiance wherever a volume covers the point.
+    // atlases (the world shader marks back faces with alpha 0 during a capture, which classifies
+    // probes sitting inside geometry). The world shader replaces the sky irradiance wherever a
+    // volume covers the point.
     virtual void setGIVolumes(const NukeGIVolumeDesc* volumes, int count) { (void)volumes; (void)count; }
     virtual void updateGIVolumes() {}
     virtual int  giCaptureBudget() { return 0; }
@@ -713,6 +772,30 @@ public:
     // scene, layered on the probes. quality 0 = off, 1..3 = Low/Medium/High (rays x steps);
     // radius = world units the rays march; intensity = strength. Needs the G-buffer prepass.
     virtual void setScreenGI(int quality, float radius, float intensity) { (void)quality; (void)radius; (void)intensity; }
+    // Froxel volumetrics (abi 44, appended): the medium in a per-camera froxel grid, in-scatter
+    // from every FrameCB light (the sun through its shadow map, or inline shadow rays on
+    // ray-tracing devices = god rays; point/spot with falloff, particle lights included) with
+    // the Henyey-Greenstein phase and the DDGI/sky ambient; integrated front to back and
+    // composited before the post chain (after the reflection effects). Needs the G-buffer prepass.
+    virtual void setVolumetrics(const NukeVolumetricsDesc& desc) { (void)desc; }
+    // Local fog volumes for this frame's froxel grid (abi 44, appended): the World pushes the
+    // nearest 32 enabled FogVolume components each frame (count 0 = none).
+    virtual void setFogVolumes(const NukeFogVolumeDesc* volumes, int count) { (void)volumes; (void)count; }
+    // Froxel-grid lighting of the following sprite runs (abi 44, appended): 0 = off, 1 = the
+    // grid's incident light (sun through its shadows, point/spot, probe ambient) multiplies the
+    // sprite colour — smoke sits in the god rays. Sprite runs are also fogged by their own column
+    // whenever the grid is active. Like setSpriteSoftDepth: set, draw, reset.
+    virtual void setSpriteVolumeLight(float amount) { (void)amount; }
+    // Six-way lit sprite run (abi 44, appended): two lightmaps hold the puff lit from six
+    // directions in the billboard frame — A.rgb = from +right, -right, +up; B.rgb = from -up,
+    // +front (toward the eye), -front; A.a = opacity. Lit by the frame's lights + ambient, then
+    // treated like drawSpriteRun (soft depth, fog). Falls back to drawSpriteRun(lightA, ...).
+    virtual void drawSpriteRunSixWay(Texture* lightA, Texture* lightB, const float* verts, int vertCount)
+    { (void)lightB; drawSpriteRun(lightA, verts, vertCount); }
+    // Short name of the active graphics backend for titles / overlays ("Vk", "Dx11", "Dx12"; "" = unknown). abi 44, appended.
+    virtual const char* backendName() { return ""; }
+    // This frame's fog displacers for the fluid volumes (abi 44, appended; count 0 = none).
+    virtual void setFogDisplacers(const NukeFogDisplacerDesc* displacers, int count) { (void)displacers; (void)count; }
 
     // ABI: new virtuals are appended at the END of the class, NEVER inserted mid-vtable —
     // plugins are separate DLLs built at different times, and an inserted slot shifts every later one.

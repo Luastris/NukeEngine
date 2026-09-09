@@ -50,8 +50,13 @@ void main()
     float  maxD = (g_RTParams.y > 0.5) ? g_RTParams.y : 1000.0;
     float3 R = reflect(V, N);
     RayDesc ray; ray.Origin = wpos + N * 0.08 + R * 0.05; ray.Direction = R; ray.TMin = 0.02; ray.TMax = maxD;
-    RTPayload p; p.color = 0.0; p.depth = 1;
+    RTPayload p; p.color = 0.0; p.depth = 1; p.hitT = maxD;
     TraceRay(g_TLAS, RAY_FLAG_NONE, RT_REFLECT_MASK, 0, 1, 0, ray, p);   // only reflection-visible instances
+    {   // the reflected leg through the fog (the camera -> mirror leg comes with the fog composite)
+        float3 amb = (g_SkyParams.y > 0.5) ? (g_SkyTop.rgb + 2.0 * g_SkyHorizon.rgb + g_SkyGround.rgb) * 0.25 * g_SkyParams.x * g_Ambient.w
+                                           : g_Ambient.rgb * g_Ambient.w;
+        p.color = VolFogSegment(ray.Origin, ray.Origin + R * min(p.hitT, g_VolRange.y), p.color, amb);
+    }
 
     float k = saturate(refl * intensity);
     // The G-buffer holds no water, so attenuate the reflection by whatever water the
