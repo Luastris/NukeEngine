@@ -50,6 +50,8 @@ struct NukeSky
     float moonPhase = 0.5f;                      // 0/1 = new, 0.5 = full (procedural terminator)
     float exposure   = 1.0f;                      // SDR tonemap exposure multiplier
     float whitePoint = 1.0f;                      // SDR tonemap white point: linear value mapped to pure white
+    float sunSize    = 0.01745f;                  // sun disc angular radius (radians); the glow and the sun shafts' source follow it
+    float sunGlow    = 0.35f;                     // glow around the disc (its own strength, not the light's intensity)
 };
 
 // One post-process effect in a camera's chain: a post shader pipeline + its packed

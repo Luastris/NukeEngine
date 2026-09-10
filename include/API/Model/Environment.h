@@ -29,6 +29,8 @@ public:
 	[[nuke::prop(label="White Point", min=0.1, max=8)]] float whitePoint = 1.0f;
 
 	[[nuke::prop(label="Sun Disk")]]    bool  sunDisk = true;   // draw a sun in the sky from the first directional light
+	[[nuke::prop(label="Sun Size (deg)", min=0.05, max=30)]] float sunSize = 1.0f;   // the disc's angular radius; the glow and the sun shafts' source scale with it
+	[[nuke::prop(label="Sun Glow", min=0, max=4)]]           float sunGlow = 0.35f;  // the glow around the disc, independent of the light's intensity
 
 	// Time of day: drives the FIRST directional light + sky colours from `hour`; other lights untouched.
 	[[nuke::prop(label="Time of Day")]]      bool  useTimeOfDay = false;

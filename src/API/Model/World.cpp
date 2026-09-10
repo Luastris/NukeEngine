@@ -2344,6 +2344,7 @@ void World::Render(iRender* r)
 			sky.ambient[0]=(float)env->ambient.r; sky.ambient[1]=(float)env->ambient.g; sky.ambient[2]=(float)env->ambient.b;
 			sky.ambientIntensity = env->ambientIntensity;
 			sky.exposure = env->exposure; sky.whitePoint = env->whitePoint;   // SDR tonemap
+			sky.sunSize = env->sunSize * 0.01745329252f; sky.sunGlow = env->sunGlow;   // deg -> radians
 			if (env->useTimeOfDay)   // sky colours overridden by the time of day
 			{
 				auto sat = [](float v){ return v < 0 ? 0.0f : (v > 1 ? 1.0f : v); };

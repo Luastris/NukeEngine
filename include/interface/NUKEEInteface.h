@@ -139,7 +139,8 @@ extern "C" { NUKE_ABI_STAMP int nuke_build_debug = 0; }
 //       NukeFogVolumeDesc gained shaftDensity, then the fluid block (sizeof grew); NukeFogDisplacerDesc
 //       is new (bodies moving through fluid fog); iRender gained setFogDisplacers (appended).
 //       VL3: NukeCloudsDesc is new, iRender gained setClouds + cloudsState (appended); Environment
-//       gained the cloud block and ReflectionProbe cloudsSeen (sizeof grew).
+//       gained the cloud block and ReflectionProbe cloudsSeen (sizeof grew). NukeSky gained
+//       sunSize/sunGlow, Environment sunSize/sunGlow (sizeof grew).
 #define NUKE_ENGINE_ABI 44
 extern "C" { NUKE_ABI_STAMP int nuke_engine_abi = NUKE_ENGINE_ABI; }
 

@@ -5,8 +5,8 @@ cbuffer SkyCB
     float4 g_CamPos;
     float4 g_Top; float4 g_Horizon; float4 g_Ground;
     float4 g_Params;    // x = skyIntensity, y = sunIntensity
-    float4 g_SunDir;    // xyz = direction the sun light travels
-    float4 g_SunCol;
+    float4 g_SunDir;    // xyz = direction the sun light travels, w = disc angular radius (radians)
+    float4 g_SunCol;    // rgb = sun colour, w = glow strength
     float4 g_MoonDir;   // xyz = direction toward the moon
     float4 g_MoonParams;// x = amount (0 = hidden), y = angular radius (radians), z = phase (0/1 new, .5 full)
 };
@@ -71,13 +71,17 @@ float4 main(in PSIn i) : SV_Target
         }
     }
 
-    if (g_Params.y > 0.0)   // sun disk + glow halo
+    if (g_Params.y > 0.0)   // sun disc + glow
     {
+        // The disc has the authored angular size; the glow scales with it and has its OWN strength:
+        // the light's intensity only brightens the disc, so a strong sun never bloats into the sky.
         float sd   = dot(dir, normalize(-g_SunDir.xyz));   // g_SunDir is the travel direction, so negate it
-        float disk = smoothstep(0.9991, 0.9997, sd);
-        float halo = pow(saturate(sd), 350.0) * 0.35
-                   + pow(saturate(sd), 18.0)  * 0.025;
-        sky += g_SunCol.rgb * g_Params.y * (disk * 2.5 + halo);
+        float ang  = acos(clamp(sd, -1.0, 1.0));
+        float size = g_SunDir.w;
+        float disk = 1.0 - smoothstep(size * 0.9, size * 1.1, ang);
+        float q    = ang / size;
+        float halo = exp(-q * q * 0.25) * 0.6 + exp(-q * 0.15) * 0.06;   // a tight corona + a faint wide skirt
+        sky += g_SunCol.rgb * (g_Params.y * disk * 2.5 + g_SunCol.w * halo * (1.0 - disk));
     }
 
     // Authored in display space: emitted raw, with no tonemap or gamma applied here.

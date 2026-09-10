@@ -13,7 +13,7 @@ cbuffer SunShaftCB
     float4   g_SSSun;   // xy = sun uv, z = on-screen weight, w = intensity
     float4   g_SSPrm;   // x = blur reach (uv), y = tap decay, z = mode, w = scene is LDR (1)
     float4   g_SSCol;   // rgb = shaft radiance at the sun, w = white point (LDR path)
-    float4   g_SSDir;   // xyz = direction TO the sun (world)
+    float4   g_SSDir;   // xyz = direction TO the sun (world), w = the sky's sun disc radius (radians)
     float4x4 g_SSInvViewProj;
 };
 struct PSIn { float4 pos : SV_POSITION; float2 uv : TEXCOORD0; };
@@ -32,24 +32,27 @@ float3 ToLDR(float3 c)
     return pow(max(c, 0.0), 1.0 / 2.2);
 }
 
+// The source: the sky's sun disc (its authored size) with a short halo, on sky pixels only.
+// Shared by the mask pass and the composite (which subtracts it so the rays never thicken the sun).
+float3 Source(float2 uv)
+{
+    if (g_Depth.Sample(g_Depth_sampler, uv).r < 0.99999) return 0.0;   // geometry: an occluder
+    float2 ndc = float2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+    float4 wf = mul(g_SSInvViewProj, float4(ndc, 1.0, 1.0));
+    float4 wn = mul(g_SSInvViewProj, float4(ndc, 0.0, 1.0));
+    float3 dir = normalize(wf.xyz / wf.w - wn.xyz / wn.w);
+    float  ang  = acos(clamp(dot(dir, g_SSDir.xyz), -1.0, 1.0));
+    float  size = g_SSDir.w;
+    float  disc = 1.0 - smoothstep(size * 0.9, size * 1.3, ang);
+    float  halo = (1.0 - smoothstep(size * 1.3, size * 4.0, ang)) * 0.35;
+    float  cloudT = g_Clouds.Sample(g_Clouds_sampler, uv).a;   // the clouds occlude the source
+    return g_SSCol.rgb * (disc + halo) * cloudT;
+}
+
 float4 main(in PSIn i) : SV_Target
 {
     const int mode = (int)g_SSPrm.z;
-    if (mode == 0)
-    {
-        if (g_Depth.Sample(g_Depth_sampler, i.uv).r < 0.99999) return float4(0.0, 0.0, 0.0, 1.0);   // geometry: an occluder
-        float2 ndc = float2(i.uv.x * 2.0 - 1.0, 1.0 - i.uv.y * 2.0);
-        float4 wf = mul(g_SSInvViewProj, float4(ndc, 1.0, 1.0));
-        float4 wn = mul(g_SSInvViewProj, float4(ndc, 0.0, 1.0));
-        float3 dir = normalize(wf.xyz / wf.w - wn.xyz / wn.w);
-        float  c = dot(dir, g_SSDir.xyz);
-        // The source is the sun itself: a ~3 degree disc with a halo to ~8 degrees. A wide source
-        // made a bright cloud instead of rays.
-        float  disc = smoothstep(0.9975, 0.9990, c);                 // cos 4 .. cos 2.5 degrees
-        float  halo = smoothstep(0.990, 0.9986, c) * 0.35;           // cos 8 .. cos 3 degrees
-        float  cloudT = g_Clouds.Sample(g_Clouds_sampler, i.uv).a;   // the clouds occlude the source
-        return float4(g_SSCol.rgb * (disc + halo) * cloudT, 1.0);
-    }
+    if (mode == 0) return float4(Source(i.uv), 1.0);
     if (mode == 1)
     {
         float2 step = (g_SSSun.xy - i.uv) * g_SSPrm.x / 32.0;
@@ -64,7 +67,8 @@ float4 main(in PSIn i) : SV_Target
         return float4(sum / wsum, 1.0);
     }
     float3 src = g_Source.Sample(g_Source_sampler, i.uv).rgb;
-    float3 sh  = g_Mask.Sample(g_Mask_sampler, i.uv).rgb * (g_SSSun.w * g_SSSun.z);
+    // only the smear: the source itself is already in the sky (subtracted, so the sun keeps its size)
+    float3 sh  = max(g_Mask.Sample(g_Mask_sampler, i.uv).rgb - Source(i.uv), 0.0) * (g_SSSun.w * g_SSSun.z);
     float3 outC = (g_SSPrm.w > 0.5) ? ToLDR(FromLDR(src) + sh) : src + sh;
     return float4(outC, 1.0);
 }
