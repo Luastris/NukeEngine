@@ -671,6 +671,31 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("moonTexGuid", &Environment::moonTexGuid, "texture", "Moon Texture"));
 		t.fields.push_back(MakeField("moonSize", &Environment::moonSize, "", "Moon Size (deg)", 0.5f, 30.0f));
 		t.fields.push_back(MakeField("moonPhase", &Environment::moonPhase, "", "Moon Phase", 0.0f, 1.0f));
+		t.fields.push_back(MakeField("clouds", &Environment::clouds, "", "Clouds"));
+		t.fields.push_back(MakeField("cloudCoverage", &Environment::cloudCoverage, "", "Cloud Coverage", 0.0f, 1.0f));
+		t.fields.push_back(MakeField("cloudType", &Environment::cloudType, "", "Cloud Type", 0.0f, 1.0f));
+		t.fields.push_back(MakeField("cloudDensity", &Environment::cloudDensity, "", "Cloud Density", 0.0f, 4.0f));
+		t.fields.push_back(MakeField("cloudBottom", &Environment::cloudBottom, "", "Cloud Bottom (m)", 0.0f, 20000.0f));
+		t.fields.push_back(MakeField("cloudThickness", &Environment::cloudThickness, "", "Cloud Thickness (m)", 10.0f, 20000.0f));
+		t.fields.push_back(MakeField("cloudShapeScale", &Environment::cloudShapeScale, "", "Cloud Shape Scale (m)", 100.0f, 1e+05f));
+		t.fields.push_back(MakeField("cloudDetailScale", &Environment::cloudDetailScale, "", "Cloud Detail Scale (m)", 10.0f, 10000.0f));
+		t.fields.push_back(MakeField("cloudErosion", &Environment::cloudErosion, "", "Cloud Erosion", 0.0f, 1.0f));
+		t.fields.push_back(MakeField("cloudWeatherScale", &Environment::cloudWeatherScale, "", "Weather Scale (m)", 1000.0f, 5e+05f));
+		t.fields.push_back(MakeField("cloudWindInfluence", &Environment::cloudWindInfluence, "", "Cloud Wind Influence", 0.0f, 10.0f));
+		t.fields.push_back(MakeField("cloudDriftSpeed", &Environment::cloudDriftSpeed, "", "Cloud Drift Speed (m/s)", 0.0f, 200.0f));
+		t.fields.push_back(MakeField("cloudDriftDirection", &Environment::cloudDriftDirection, "", "Cloud Drift Direction (deg)", 0.0f, 360.0f));
+		t.fields.push_back(MakeField("cloudSunIntensity", &Environment::cloudSunIntensity, "", "Cloud Sun Light", 0.0f, 4.0f));
+		t.fields.push_back(MakeField("cloudAmbientIntensity", &Environment::cloudAmbientIntensity, "", "Cloud Sky Light", 0.0f, 4.0f));
+		t.fields.push_back(MakeField("cloudForwardScatter", &Environment::cloudForwardScatter, "", "Cloud Forward Scatter", 0.0f, 0.99f));
+		t.fields.push_back(MakeField("cloudBackScatter", &Environment::cloudBackScatter, "", "Cloud Back Scatter", -0.99f, 0.0f));
+		t.fields.push_back(MakeField("cloudMultiScatter", &Environment::cloudMultiScatter, "", "Cloud Multi-Scatter", 0.0f, 1.0f));
+		t.fields.push_back(MakeField("cloudMultiScatterFalloff", &Environment::cloudMultiScatterFalloff, "", "Cloud Multi-Scatter Falloff", 0.05f, 1.0f));
+		t.fields.push_back(MakeField("cloudSilverLining", &Environment::cloudSilverLining, "", "Cloud Silver Lining", 0.0f, 1.0f));
+		t.fields.push_back(MakeField("cloudShadows", &Environment::cloudShadows, "", "Cloud Shadows"));
+		t.fields.push_back(MakeField("cloudShadowStrength", &Environment::cloudShadowStrength, "", "Cloud Shadow Strength", 0.0f, 1.0f));
+		t.fields.push_back(MakeField("cloudShadowArea", &Environment::cloudShadowArea, "", "Cloud Shadow Area (m)", 100.0f, 50000.0f));
+		t.fields.push_back(MakeField("cloudQuality", &Environment::cloudQuality, "", "Cloud Quality", 0.0f, 0.0f, "Low,Medium,High"));
+		t.fields.push_back(MakeField("cloudMaxDistance", &Environment::cloudMaxDistance, "", "Cloud Max Distance (m)", 1000.0f, 5e+05f));
 		t.create = []() -> void* { return new Environment(); };
 	}
 	{

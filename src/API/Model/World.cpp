@@ -2390,6 +2390,22 @@ void World::Render(iRender* r)
 					}
 		}
 		r->setSky(sky);
+		// The cloud layer: Environment's cloud block (none = no clouds).
+		NukeCloudsDesc cl;
+		if (Environment* env = FindEnvironment(*hierarchy); env && env->clouds)
+		{
+			cl.enabled = 1;
+			cl.coverage = env->cloudCoverage; cl.type = env->cloudType; cl.density = env->cloudDensity;
+			cl.bottom = env->cloudBottom; cl.thickness = env->cloudThickness;
+			cl.shapeScale = env->cloudShapeScale; cl.detailScale = env->cloudDetailScale; cl.erosion = env->cloudErosion; cl.weatherScale = env->cloudWeatherScale;
+			cl.windInfluence = env->cloudWindInfluence; cl.driftSpeed = env->cloudDriftSpeed; cl.driftDirection = env->cloudDriftDirection;
+			cl.sunIntensity = env->cloudSunIntensity; cl.ambientIntensity = env->cloudAmbientIntensity;
+			cl.forwardScatter = env->cloudForwardScatter; cl.backScatter = env->cloudBackScatter;
+			cl.multiScatter = env->cloudMultiScatter; cl.multiScatterFalloff = env->cloudMultiScatterFalloff; cl.silverLining = env->cloudSilverLining;
+			cl.shadows = env->cloudShadows ? 1 : 0; cl.shadowStrength = env->cloudShadowStrength; cl.shadowArea = env->cloudShadowArea;
+			cl.quality = (int)env->cloudQuality; cl.maxDistance = env->cloudMaxDistance;
+		}
+		r->setClouds(cl);
 	}
 
 	// Scene view position, shared by the pusher cap below and the RT nearest-instance pick.
@@ -2587,6 +2603,10 @@ void World::Render(iRender* r)
 		{ probe->cubeId = r->createReflectionCube(res); probe->builtRes = res; probe->captured = false; }
 		Vector3 pp = probe->transform->globalPosition();
 		float pos[3] = { (float)pp.x, (float)pp.y, (float)pp.z };
+		{   // the clouds land in the capture: once they are ready (or gone), a static probe re-captures
+			const int cs = r->cloudsState();
+			if (cs != 1) { if (probe->captured && cs != probe->cloudsSeen) probe->captured = false; probe->cloudsSeen = cs; }
+		}
 		if (probe->cubeId && (!probe->captured || probe->realtime || probe->bake))
 		{
 			Profiler::Scope pr("rnd.probe");

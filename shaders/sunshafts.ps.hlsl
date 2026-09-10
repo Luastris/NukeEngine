@@ -7,6 +7,7 @@
 Texture2D g_Source; SamplerState g_Source_sampler;   // scene colour (composite)
 Texture2D g_Depth;  SamplerState g_Depth_sampler;    // prepass device depth (point)
 Texture2D g_Mask;   SamplerState g_Mask_sampler;     // mask / blurred shafts (linear)
+Texture2D g_Clouds; SamplerState g_Clouds_sampler;   // resolved clouds (a = transmittance; white when off)
 cbuffer SunShaftCB
 {
     float4   g_SSSun;   // xy = sun uv, z = on-screen weight, w = intensity
@@ -46,7 +47,8 @@ float4 main(in PSIn i) : SV_Target
         // made a bright cloud instead of rays.
         float  disc = smoothstep(0.9975, 0.9990, c);                 // cos 4 .. cos 2.5 degrees
         float  halo = smoothstep(0.990, 0.9986, c) * 0.35;           // cos 8 .. cos 3 degrees
-        return float4(g_SSCol.rgb * (disc + halo), 1.0);
+        float  cloudT = g_Clouds.Sample(g_Clouds_sampler, i.uv).a;   // the clouds occlude the source
+        return float4(g_SSCol.rgb * (disc + halo) * cloudT, 1.0);
     }
     if (mode == 1)
     {

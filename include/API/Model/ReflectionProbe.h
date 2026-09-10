@@ -30,6 +30,7 @@ public:
 	bool     captured = false;
 	int      sliceFace = 0;   // round-robin cursor when sliceFaces time-slicing is active
 	int      builtRes = 0;
+	int      cloudsSeen = -1;   // iRender::cloudsState the capture saw (off / ready); a change re-captures
 
 	ReflectionProbe();
 	void Init(Atom* parent) override;

@@ -142,6 +142,37 @@ struct NukeFogDisplacerDesc
     float strength = 1.0f;
 };
 
+// The volumetric cloud layer (abi 44, appended): a shell around the planet above sea level (y 0),
+// filled from the World's Environment component (Environment owns the whole sky).
+struct NukeCloudsDesc
+{
+    int   enabled = 0;
+    float coverage = 0.5f;            // 0..1, how much of the sky the weather covers
+    float type = 0.5f;                // 0 = stratus (flat, low), 1 = cumulus (tall towers)
+    float density = 1.0f;             // extinction scale
+    float bottom = 1500.0f;           // layer bottom, m above sea level
+    float thickness = 3500.0f;        // layer thickness, m
+    float shapeScale = 8000.0f;       // base noise period, m
+    float detailScale = 900.0f;       // erosion noise period, m
+    float erosion = 0.35f;            // 0..1, how deep the detail eats the edges
+    float weatherScale = 40000.0f;    // weather map period, m
+    float windInfluence = 1.0f;       // global wind (setWind) times this drifts the clouds
+    float driftSpeed = 5.0f;          // own drift, m/s
+    float driftDirection = 0.0f;      // own drift heading, degrees (0 = +X, 90 = +Z)
+    float sunIntensity = 1.0f;        // sun light scale
+    float ambientIntensity = 1.0f;    // sky light scale
+    float forwardScatter = 0.8f;      // HG forward lobe g
+    float backScatter = -0.3f;        // HG back lobe g
+    float multiScatter = 0.5f;        // multiple-scattering contribution
+    float multiScatterFalloff = 0.5f; // per-octave attenuation
+    float silverLining = 0.5f;        // forward-lobe boost at the edges toward the sun
+    int   shadows = 1;                // the layer shadows the ground (cloud shadow map)
+    float shadowStrength = 0.8f;
+    float shadowArea = 4000.0f;       // shadow map square around the camera, m
+    int   quality = 1;                // 0 = low (quarter res, 40 steps), 1 = medium (half, 64), 2 = high (half, 96)
+    float maxDistance = 60000.0f;     // march range, m
+};
+
 // One dynamic-GI probe volume as the renderer sees it (World fills it from a GIVolume).
 struct NukeGIVolumeDesc
 {
@@ -796,6 +827,11 @@ public:
     virtual const char* backendName() { return ""; }
     // This frame's fog displacers for the fluid volumes (abi 44, appended; count 0 = none).
     virtual void setFogDisplacers(const NukeFogDisplacerDesc* displacers, int count) { (void)displacers; (void)count; }
+    // The volumetric cloud layer (abi 44, appended); enabled 0 = none.
+    virtual void setClouds(const NukeCloudsDesc& clouds) { (void)clouds; }
+    // 0 = no clouds, 1 = clouds requested but their pipeline / noise is still building, 2 = ready
+    // (abi 44, appended). The World re-captures a static reflection probe when this changes.
+    virtual int cloudsState() { return 0; }
 
     // ABI: new virtuals are appended at the END of the class, NEVER inserted mid-vtable —
     // plugins are separate DLLs built at different times, and an inserted slot shifts every later one.

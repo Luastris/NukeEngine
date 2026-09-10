@@ -33,7 +33,9 @@ cbuffer FrameCB
     // g_Wind = (dir.xyz, strength m/s); g_Wind2 = (turbulence, 1/turbScale, time, gustFreq); read by vertex-bend shaders.
     float4 g_Wind; float4 g_Wind2;
     float4 g_Misc;   // x = DDGI probe capture in progress (alpha = distance / y), y = max ray distance
+    float4 g_CloudShadow;   // VL3 cloud shadow map: origin x, z, 1/size, strength (0 = none)
 };
+Texture2D<float> g_CloudShadowMap;   // the sun's transmittance through the clouds over the square (Load; white when off)
 TextureCube  g_Probe;          // scene-captured reflection cubemap (when g_ProbePos.w > 0.5)
 SamplerState g_Probe_sampler;
 
@@ -98,6 +100,26 @@ float3 SkyColor(float3 dir)
 }
 Texture2DArray          g_Shadow;
 SamplerComparisonState  g_Shadow_sampler;
+
+// The clouds' shadow at a world point: bilinear over the map (Load: no sampler), 1 outside the square.
+float CloudShadowAt(float3 wp)
+{
+    if (g_CloudShadow.w <= 0.0) return 1.0;
+    float2 uv = (wp.xz - g_CloudShadow.xy) * g_CloudShadow.z;
+    if (any(uv < 0.0) || any(uv > 1.0)) return 1.0;
+    uint mw, mh; g_CloudShadowMap.GetDimensions(mw, mh);
+    if (mw <= 1) return 1.0;
+    float2 p = uv * float2(mw, mh) - 0.5;
+    int2   i0 = (int2)floor(p);
+    float2 f  = p - (float2)i0;
+    int2   mx = int2(mw - 1, mh - 1);
+    float t00 = g_CloudShadowMap.Load(int3(clamp(i0, int2(0, 0), mx), 0));
+    float t10 = g_CloudShadowMap.Load(int3(clamp(i0 + int2(1, 0), int2(0, 0), mx), 0));
+    float t01 = g_CloudShadowMap.Load(int3(clamp(i0 + int2(0, 1), int2(0, 0), mx), 0));
+    float t11 = g_CloudShadowMap.Load(int3(clamp(i0 + int2(1, 1), int2(0, 0), mx), 0));
+    float T = lerp(lerp(t00, t10, f.x), lerp(t01, t11, f.x), f.y);
+    return lerp(1.0, T, g_CloudShadow.w);
+}
 
 // Shadow factor (1 = lit, 0 = shadowed) for a light's 2D shadow-map slot, 3x3 PCF.
 // ndl = saturate(N.L) of the receiver, used to slope-scale the depth bias.
@@ -594,6 +616,7 @@ float4 main(in PSIn i, bool isFront : SV_IsFrontFace) : SV_Target
                    // 4 offsets at grazing incidence, where a shadow texel's depth slope dwarfs the depth bias (acne)
                    shadow = SampleShadow(i.wpos + N * g_ShadowParams.y * (1.0 + 3.0 * (1.0 - saturate(ndl))), (int)lt.spot.z, ndl);
 #endif
+            if (type < 0.5) shadow *= CloudShadowAt(i.wpos);   // the sun through the cloud layer
         }
         radiance *= shadow;
 
