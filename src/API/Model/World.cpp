@@ -2294,7 +2294,8 @@ void World::Render(iRender* r)
 			{
 				glm::quat q = glm::rotation(glm::vec3(0, 0, 1), glm::vec3(-sx, -sy, -sz));   // forward = travel dir
 				L->transform->rotation = Quaternion(q.x, q.y, q.z, q.w);
-				L->color = Color(1.0, 0.55 + 0.45 * day, 0.25 + 0.75 * day, 1.0);
+				// the physical sky reddens the sun through its own atmosphere: the light stays white there
+				L->color = (todEnv->mode == Environment::Physical) ? Color(1.0, 1.0, 1.0, 1.0) : Color(1.0, 0.55 + 0.45 * day, 0.25 + 0.75 * day, 1.0);
 				L->intensity = day * 4.0f;
 				break;
 			}
@@ -2329,7 +2330,7 @@ void World::Render(iRender* r)
 	if (!auxiliary)
 		r->setShadowSettings(settings.shadowRes, settings.shadowDistance, settings.shadowDepthBias,
 		                     settings.shadowNormalBias, settings.shadowSoftness);
-	r->setLights(gpuLights.empty() ? nullptr : gpuLights.data(), (int)gpuLights.size());
+	// setLights comes after the Environment block: the eclipse dims the sun, the moon adds a light.
 
 	// Environment (sky + ambient): first Environment component, default sky if none.
 	{
@@ -2345,7 +2346,15 @@ void World::Render(iRender* r)
 			sky.ambientIntensity = env->ambientIntensity;
 			sky.exposure = env->exposure; sky.whitePoint = env->whitePoint;   // SDR tonemap
 			sky.sunSize = env->sunSize * 0.01745329252f; sky.sunGlow = env->sunGlow;   // deg -> radians
-			if (env->useTimeOfDay)   // sky colours overridden by the time of day
+			// the physical atmosphere's medium
+			sky.planetRadius = env->planetRadius; sky.atmosphereHeight = env->atmosphereHeight; sky.atmoDensity = env->atmoDensity;
+			sky.rayleighColor[0]=(float)env->rayleighColor.r; sky.rayleighColor[1]=(float)env->rayleighColor.g; sky.rayleighColor[2]=(float)env->rayleighColor.b;
+			sky.rayleighAmount = env->rayleighAmount; sky.rayleighHeight = env->rayleighHeight;
+			sky.mieAmount = env->mieAmount; sky.mieAbsorption = env->mieAbsorption; sky.mieHeight = env->mieHeight; sky.mieAnisotropy = env->mieAnisotropy;
+			sky.ozoneAmount = env->ozoneAmount;
+			sky.groundAlbedo[0]=(float)env->groundAlbedo.r; sky.groundAlbedo[1]=(float)env->groundAlbedo.g; sky.groundAlbedo[2]=(float)env->groundAlbedo.b;
+			sky.aerialRange = env->aerialRange; sky.aerialStrength = env->aerialStrength;
+			if (env->useTimeOfDay && env->mode != Environment::Physical)   // sky colours overridden by the time of day (the physical sky computes its own)
 			{
 				auto sat = [](float v){ return v < 0 ? 0.0f : (v > 1 ? 1.0f : v); };
 				auto lrp = [](float a, float b, float t){ return a + (b - a) * t; };
@@ -2362,6 +2371,7 @@ void World::Render(iRender* r)
 			{
 				float night = 0.4f;
 				if (env->useTimeOfDay) { float d = (todElev + 0.1f) / 0.3f; d = d < 0 ? 0 : (d > 1 ? 1 : d); night = 1.0f - d; }
+				if (env->mode == Environment::Physical) night = 1.0f;   // the physical sky fades them itself: by its brightness and in space never
 				sky.stars = night < 0 ? 0 : night;
 				if (!env->starsTexGuid.empty()) sky.starsTex = ResDB::getSingleton()->GetTexture(env->starsTexGuid);
 			}
@@ -2377,7 +2387,44 @@ void World::Render(iRender* r)
 				sky.moonPhase = env->moonPhase;
 				float vis = 0.8f;
 				if (env->useTimeOfDay) { float d = (todElev + 0.1f) / 0.3f; d = d < 0 ? 0 : (d > 1 ? 1 : d); vis = 1.0f - d; }
+				if (env->mode == Environment::Physical) vis = 1.0f;   // the physical sky's brightness hides it by day
 				sky.moonAmount = vis < 0 ? 0 : vis;
+				// The moon as a light: from the moon's direction, by its visibility and phase; no shadows,
+				// appended after the scene's lights (the FIRST directional light stays the sun).
+				if (env->moonLight > 0.0f && sky.moonAmount > 0.0f)
+				{
+					const float lit = 0.5f - 0.5f * std::cos(env->moonPhase * 6.2831853f);
+					NukeLight ml; ml.type = 0; ml.castShadows = 0;
+					ml.dir[0] = -mx; ml.dir[1] = -my; ml.dir[2] = -mz;   // travels from the moon
+					ml.color[0] = 0.72f; ml.color[1] = 0.80f; ml.color[2] = 1.0f;
+					ml.intensity = env->moonLight * sky.moonAmount * lit;
+					if (ml.intensity > 1e-4f) gpuLights.push_back(ml);
+				}
+			}
+			// The eclipse: the slider is the moon's transit. 0..0.075 it comes in from far outside the
+			// glow, contact at 0.075, centred at 0.5, contact again at 0.925, gone by 1 (0 and 1 = no moon).
+			float eclipseDim = 1.0f;
+			{
+				float x = 1.0e4f;
+				if (env->eclipse > 0.0f && env->eclipse < 1.0f)
+				{
+					const float u = (env->eclipse - 0.5f) * 2.0f, au = std::fabs(u), sg = u < 0 ? -1.0f : 1.0f;
+					x = (au <= 0.85f) ? sg * au / 0.85f * 2.05f : sg * (2.05f + 12.0f * (au - 0.85f) / 0.15f);
+				}
+				sky.eclipse = x;
+				// the sunlight dims by the covered area of the sun's disc (r 1) under the moon's (r 1.05)
+				const float d = std::fabs(x), r1 = 1.0f, r2 = 1.05f;
+				float f = 0.0f;
+				if (d <= r2 - r1) f = 1.0f;
+				else if (d < r1 + r2)
+				{
+					auto ac = [](float v) { return std::acos(std::max(-1.0f, std::min(1.0f, v))); };
+					const float a = r1 * r1 * ac((d * d + r1 * r1 - r2 * r2) / (2.0f * d * r1)) + r2 * r2 * ac((d * d + r2 * r2 - r1 * r1) / (2.0f * d * r2))
+					              - 0.5f * std::sqrt(std::max(0.0f, (-d + r1 + r2) * (d + r1 - r2) * (d - r1 + r2) * (d + r1 + r2)));
+					f = std::max(0.0f, std::min(1.0f, a / (3.14159265f * r1 * r1)));
+				}
+				eclipseDim = 1.0f - 0.995f * f;
+				if (f > 0.0f) for (NukeLight& n : gpuLights) if (n.type == 0) { n.intensity *= eclipseDim; break; }
 			}
 			if (env->sunDisk)
 				for (Light* L : lights)
@@ -2386,10 +2433,11 @@ void World::Render(iRender* r)
 						Vector3 d = L->transform->direction();
 						sky.sunDir[0]=(float)d.x; sky.sunDir[1]=(float)d.y; sky.sunDir[2]=(float)d.z;
 						sky.sunColor[0]=(float)L->color.r; sky.sunColor[1]=(float)L->color.g; sky.sunColor[2]=(float)L->color.b;
-						sky.sunIntensity = L->intensity;
+						sky.sunIntensity = L->intensity * eclipseDim;
 						break;
 					}
 		}
+		r->setLights(gpuLights.empty() ? nullptr : gpuLights.data(), (int)gpuLights.size());
 		r->setSky(sky);
 		// The cloud layer: Environment's cloud block (none = no clouds).
 		NukeCloudsDesc cl;
@@ -2908,7 +2956,10 @@ void World::Render(iRender* r)
 		bool hookPrepass = false;
 		for (WorldRenderHook* hk : WorldRenderHooks())
 			if (hk->wantsScenePrepass()) { hookPrepass = true; break; }
-		if (hasSSR || hasTAA || !decals.empty() || hookPrepass || ((settings.aoQuality > 0 || settings.ssgiQuality > 0 || settings.volQuality > 0 || settings.sunShaftIntensity > 0.0f) && !auxiliary))
+		// The clouds and the physical atmosphere composite against the depth too.
+		Environment* skyEnv = FindEnvironment(*hierarchy);
+		const bool skyNeedsDepth = skyEnv && (skyEnv->clouds || skyEnv->mode == Environment::Physical);
+		if (hasSSR || hasTAA || !decals.empty() || hookPrepass || ((settings.aoQuality > 0 || settings.ssgiQuality > 0 || settings.volQuality > 0 || settings.sunShaftIntensity > 0.0f || skyNeedsDepth) && !auxiliary))
 		{
 			Profiler::Scope ps("rnd.cam.gbuf");
 			r->beginGBufferPass(d);

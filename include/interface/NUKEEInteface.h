@@ -140,7 +140,9 @@ extern "C" { NUKE_ABI_STAMP int nuke_build_debug = 0; }
 //       is new (bodies moving through fluid fog); iRender gained setFogDisplacers (appended).
 //       VL3: NukeCloudsDesc is new, iRender gained setClouds + cloudsState (appended); Environment
 //       gained the cloud block and ReflectionProbe cloudsSeen (sizeof grew). NukeSky gained
-//       sunSize/sunGlow, Environment sunSize/sunGlow (sizeof grew).
+//       sunSize/sunGlow, Environment sunSize/sunGlow (sizeof grew). Physical atmosphere: NukeSky
+//       gained the medium block (planetRadius .. aerialStrength), Environment mode Physical + the
+//       atmosphere block (sizeof grew). NukeSky gained eclipse, Environment moonLight/eclipse (sizeof grew).
 #define NUKE_ENGINE_ABI 44
 extern "C" { NUKE_ABI_STAMP int nuke_engine_abi = NUKE_ENGINE_ABI; }
 

@@ -227,6 +227,7 @@ void Camera::Init(Atom* parent)
 {
 	if (!renderer) renderer = AppInstance::GetSingleton()->render;   // e.g. cameras loaded from a scene
 	transform = &parent->GetTransform();
+	atom = parent;   // the back-reference keys the renderer's per-camera state (NukeCameraDesc::cameraId): unset, every camera was id 0
 	if (this->renderer)
 		this->renderer->transform = transform;
 	parent->components.push_back(this);

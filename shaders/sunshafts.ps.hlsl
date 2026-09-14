@@ -4,6 +4,7 @@
 // 0 = mask (half res: the sun's disc + halo on sky pixels), 1 = radial blur (32 taps, the start
 // dithered per pixel; run twice - the full reach, then one tap's worth - no ghost copies of the
 // occluder edges), 2 = composite.
+#include "atmosphere.hlsli"   // the physical atmosphere: the source is the sun THROUGH it (none below the horizon, none in space)
 Texture2D g_Source; SamplerState g_Source_sampler;   // scene colour (composite)
 Texture2D g_Depth;  SamplerState g_Depth_sampler;    // prepass device depth (point)
 Texture2D g_Mask;   SamplerState g_Mask_sampler;     // mask / blurred shafts (linear)
@@ -15,6 +16,7 @@ cbuffer SunShaftCB
     float4   g_SSCol;   // rgb = shaft radiance at the sun, w = white point (LDR path)
     float4   g_SSDir;   // xyz = direction TO the sun (world), w = the sky's sun disc radius (radians)
     float4x4 g_SSInvViewProj;
+    float4   g_SSEcl;   // x = the eclipsing moon's offset from the sun (sun radii; >= 1000 = none)
 };
 struct PSIn { float4 pos : SV_POSITION; float2 uv : TEXCOORD0; };
 
@@ -39,14 +41,21 @@ float3 Source(float2 uv)
     if (g_Depth.Sample(g_Depth_sampler, uv).r < 0.99999) return 0.0;   // geometry: an occluder
     float2 ndc = float2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
     float4 wf = mul(g_SSInvViewProj, float4(ndc, 1.0, 1.0));
-    float4 wn = mul(g_SSInvViewProj, float4(ndc, 0.0, 1.0));
-    float3 dir = normalize(wf.xyz / wf.w - wn.xyz / wn.w);
+    float3 dir = normalize(wf.xyz / wf.w);   // the direction matrix has no translation (precision far from the origin): no camera subtraction
     float  ang  = acos(clamp(dot(dir, g_SSDir.xyz), -1.0, 1.0));
     float  size = g_SSDir.w;
     float  disc = 1.0 - smoothstep(size * 0.9, size * 1.3, ang);
-    float  halo = (1.0 - smoothstep(size * 1.3, size * 4.0, ang)) * 0.35;
+    float  halo = (1.0 - smoothstep(size * 1.3, size * 3.0, ang)) * 0.2;
     float  cloudT = g_Clouds.Sample(g_Clouds_sampler, uv).a;   // the clouds occlude the source
-    return g_SSCol.rgb * (disc + halo) * cloudT;
+    float3 src = g_SSCol.rgb * (disc + halo) * cloudT;
+    src *= 1.0 - EclipseCover(dir, g_SSDir.xyz, size, g_SSEcl.x);   // the moon over the source: the rays fade with the sun
+    if (AtmoOn())
+    {   // the sun seen through the air (red, none behind the planet), and rays need air around the camera
+        float3 camKm = AtmoToKm(g_AtCam.xyz);
+        float  air = exp(-max(length(camKm) - AtmoRg(), 0.0) / max(g_AtRayleigh.w, 0.01));
+        src *= AtmoViewTransmittance(camKm, g_SSDir.xyz) * air;
+    }
+    return src;
 }
 
 float4 main(in PSIn i) : SV_Target

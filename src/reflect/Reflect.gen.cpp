@@ -652,7 +652,7 @@ bool NukeReflectInit() {
 		TypeInfo& t = TypeOf<Environment>();
 		t.base = "Component";
 		t.category = "World";
-		t.fields.push_back(MakeField("mode", &Environment::mode, "", "Mode", 0.0f, 0.0f, "None,Procedural"));
+		t.fields.push_back(MakeField("mode", &Environment::mode, "", "Mode", 0.0f, 0.0f, "None,Procedural,Physical"));
 		t.fields.push_back(MakeField("skyTop", &Environment::skyTop, "", "Sky Top"));
 		t.fields.push_back(MakeField("skyHorizon", &Environment::skyHorizon, "", "Sky Horizon"));
 		t.fields.push_back(MakeField("skyGround", &Environment::skyGround, "", "Sky Ground"));
@@ -661,6 +661,20 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("ambientIntensity", &Environment::ambientIntensity, "", "Ambient Intensity", 0.0f, 2.0f));
 		t.fields.push_back(MakeField("exposure", &Environment::exposure, "", "Exposure", 0.0f, 8.0f));
 		t.fields.push_back(MakeField("whitePoint", &Environment::whitePoint, "", "White Point", 0.1f, 8.0f));
+		t.fields.push_back(MakeField("planetRadius", &Environment::planetRadius, "", "Planet Radius (km)", 1.0f, 1e+05f));
+		t.fields.push_back(MakeField("atmosphereHeight", &Environment::atmosphereHeight, "", "Atmosphere Height (km)", 1.0f, 1000.0f));
+		t.fields.push_back(MakeField("atmoDensity", &Environment::atmoDensity, "", "Atmosphere Density", 0.0f, 10.0f));
+		t.fields.push_back(MakeField("rayleighColor", &Environment::rayleighColor, "", "Rayleigh Color"));
+		t.fields.push_back(MakeField("rayleighAmount", &Environment::rayleighAmount, "", "Rayleigh Amount", 0.0f, 200.0f));
+		t.fields.push_back(MakeField("rayleighHeight", &Environment::rayleighHeight, "", "Rayleigh Height (km)", 0.1f, 50.0f));
+		t.fields.push_back(MakeField("mieAmount", &Environment::mieAmount, "", "Mie Amount", 0.0f, 200.0f));
+		t.fields.push_back(MakeField("mieAbsorption", &Environment::mieAbsorption, "", "Mie Absorption", 0.0f, 200.0f));
+		t.fields.push_back(MakeField("mieHeight", &Environment::mieHeight, "", "Mie Height (km)", 0.1f, 20.0f));
+		t.fields.push_back(MakeField("mieAnisotropy", &Environment::mieAnisotropy, "", "Mie Anisotropy", 0.0f, 0.99f));
+		t.fields.push_back(MakeField("ozoneAmount", &Environment::ozoneAmount, "", "Ozone Amount", 0.0f, 10.0f));
+		t.fields.push_back(MakeField("groundAlbedo", &Environment::groundAlbedo, "", "Ground Albedo"));
+		t.fields.push_back(MakeField("aerialRange", &Environment::aerialRange, "", "Aerial Perspective Range (km)", 1.0f, 1000.0f));
+		t.fields.push_back(MakeField("aerialStrength", &Environment::aerialStrength, "", "Aerial Perspective", 0.0f, 1.0f));
 		t.fields.push_back(MakeField("sunDisk", &Environment::sunDisk, "", "Sun Disk"));
 		t.fields.push_back(MakeField("sunSize", &Environment::sunSize, "", "Sun Size (deg)", 0.05f, 30.0f));
 		t.fields.push_back(MakeField("sunGlow", &Environment::sunGlow, "", "Sun Glow", 0.0f, 4.0f));
@@ -673,6 +687,8 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("moonTexGuid", &Environment::moonTexGuid, "texture", "Moon Texture"));
 		t.fields.push_back(MakeField("moonSize", &Environment::moonSize, "", "Moon Size (deg)", 0.5f, 30.0f));
 		t.fields.push_back(MakeField("moonPhase", &Environment::moonPhase, "", "Moon Phase", 0.0f, 1.0f));
+		t.fields.push_back(MakeField("moonLight", &Environment::moonLight, "", "Moon Light", 0.0f, 5.0f));
+		t.fields.push_back(MakeField("eclipse", &Environment::eclipse, "", "Eclipse", 0.0f, 1.0f));
 		t.fields.push_back(MakeField("clouds", &Environment::clouds, "", "Clouds"));
 		t.fields.push_back(MakeField("cloudCoverage", &Environment::cloudCoverage, "", "Cloud Coverage", 0.0f, 1.0f));
 		t.fields.push_back(MakeField("cloudType", &Environment::cloudType, "", "Cloud Type", 0.0f, 1.0f));

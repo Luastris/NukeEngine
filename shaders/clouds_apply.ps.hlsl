@@ -35,9 +35,9 @@ float4 main(in PSIn i) : SV_Target
     if (dev < 0.99999)
     {   // a surface: the clouds only lie behind it if it is farther than their entry along this ray
         float4 wp = mul(g_ClInvVP, float4(i.uv.x * 2.0 - 1.0, 1.0 - i.uv.y * 2.0, 1.0, 1.0));
-        float3 d  = normalize(wp.xyz / wp.w - g_ClCam.xyz);
+        float3 d  = normalize(wp.xyz / wp.w);   // the direction matrix has no translation (precision far from the origin): no camera subtraction
         float4 fc = mul(g_ClInvVP, float4(0.0, 0.0, 1.0, 1.0));
-        float3 fwd = normalize(fc.xyz / fc.w - g_ClCam.xyz);
+        float3 fwd = normalize(fc.xyz / fc.w);
         float  dist = LinearZ(dev) / max(dot(d, fwd), 1e-4);
         int2   mp = clamp((int2)(i.uv * g_ClScreen.xy), int2(0, 0), (int2)g_ClScreen.xy - 1);
         float  entry = g_CloudDist.Load(int3(mp, 0)).x;

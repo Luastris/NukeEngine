@@ -27,8 +27,8 @@ void main(uint3 id : SV_DispatchThreadID)
     {
         // the clouds' point for this texel, reprojected into last frame
         float4 wp = mul(g_ClInvVP, float4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, 1.0, 1.0));
-        float3 d  = normalize(wp.xyz / wp.w - g_ClCam.xyz);
-        float  md = min(dist.y, g_ClLayer.z);
+        float3 d  = normalize(wp.xyz / wp.w);   // the direction matrix has no translation (precision far from the origin): no camera subtraction
+        float  md = min(dist.y, 5.0e6);   // the mean distance (the 1e9 'no cloud' sentinel capped)
         float3 P  = g_ClCam.xyz + d * md;
         float4 pc = mul(g_ClPrevVP, float4(P, 1.0));
         if (pc.w > 1e-4)

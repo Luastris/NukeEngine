@@ -23,13 +23,16 @@ cbuffer CloudCB
     float4   g_ClScreen;   // march w, h, full w, full h
     float4   g_ClMisc;     // camera near, far, scene is LDR (1) / linear (0), white point
     float4   g_ClShadow;   // shadow map origin x, z, 1 / size, strength
+    float4   g_ClMoon;     // xyz = toward the moon, w = moon light intensity (0 = none)
+    float4   g_ClMoonCol;  // rgb = moon light colour
 };
 
+#include "atmosphere.hlsli"
 static const float CL_PI = 3.14159265;
 static const float CL_SIGMA = 0.05;   // extinction per metre of a full-density cloud (1/m), scaled by g_ClCover.z
 
 // ---- geometry: the cloud layer is a shell around the planet ----------------------------
-float3 CloudPlanetCentre() { return float3(0.0, -g_ClSkyHor.w, 0.0); }   // sea level = y 0
+float3 CloudPlanetCentre() { return float3(g_ClCam.x, -g_ClSkyHor.w, g_ClCam.z); }   // sea level = y 0; the planet sits under the camera (as the atmosphere)
 float  CloudRadiusBottom() { return g_ClSkyHor.w + g_ClLayer.x; }
 float  CloudRadiusTop()    { return g_ClSkyHor.w + g_ClLayer.y; }
 
@@ -73,6 +76,15 @@ bool CloudSegment(float3 o, float3 d, float maxDist, out float tA, out float tB)
         tA = max(u0, 0.0);
         tB = (hitB && b0 > 0.0) ? min(b0, u1) : u1;
     }
+    // the planet itself ends the ray: a ray into the ground never reaches the far side's clouds
+    float g0, g1;
+    if (RaySphere(o, d, c, g_ClSkyHor.w, g0, g1) && g1 > 0.0)
+    {
+        float tG = (g0 > 0.0) ? g0 : g1;
+        if (r >= g_ClSkyHor.w && g0 > 0.0 && tG <= tA) return false;   // outside the planet, the ground comes first
+        if (r < g_ClSkyHor.w) return false;                            // below the surface (a mine, a basement): no sky at all
+        tB = min(tB, tG);
+    }
     tB = min(tB, maxDist);
     return tB > tA;
 }
@@ -107,6 +119,10 @@ float CloudDensity(float3 p, bool detail, out float hf)
     // weather: coverage and type over the map
     float2 wuv = (p.xz + off.xz) / g_ClShape.z;
     float4 wth = g_CloudWeather.SampleLevel(g_CloudWeather_sampler, wuv, 0);
+    {   // a second, 5.8x larger, rotated octave of the same map: the repetition of one period shows from orbit
+        float2 wuv2 = float2(wuv.x * 0.62 - wuv.y * 0.78, wuv.x * 0.78 + wuv.y * 0.62) * 0.173 + 0.37;
+        wth = lerp(wth, g_CloudWeather.SampleLevel(g_CloudWeather_sampler, wuv2, 0), 0.45);
+    }
     // the coverage setting thresholds the weather field; full cover 0.35 above the threshold (soft edges, solid cores)
     float  cov = saturate(Remap(wth.r, 1.0 - g_ClCover.x, 1.35 - g_ClCover.x, 0.0, 1.0)) * saturate(g_ClCover.x * 4.0);
     if (cov <= 0.001) return 0.0;
@@ -167,7 +183,9 @@ float CloudSunOpticalDepth(float3 p, float3 L, float layerThick)
     { float hf; tau += CloudDensity(p + L * (t + layerThick * 0.5), false, hf) * layerThick * 0.4; }
     return tau * CL_SIGMA * g_ClCover.z;
 }
-float3 CloudSunLight(float tau, float mu)
+// The scattered fraction of a directional light at a point: Beer-Lambert with the multi-scatter
+// octaves and the powder term, times the dual-lobe phase. Callers scale by the light's radiance.
+float CloudLightScatter(float tau, float mu)
 {
     float a = g_ClPhase.z, b = g_ClPhase.w;
     float e = 0.0;
@@ -179,7 +197,11 @@ float3 CloudSunLight(float tau, float mu)
         e += ak * beer * powder * CloudPhase(mu, ck);
         ak *= a; bk *= b; ck *= 0.5;
     }
-    return g_ClSunCol.rgb * g_ClSunDir.w * e;
+    return e;
+}
+float3 CloudSunLight(float tau, float mu, float3 sunT)   // sunT = the atmosphere's transmittance to the point (1 = procedural sky)
+{
+    return g_ClSunCol.rgb * g_ClSunDir.w * CloudLightScatter(tau, mu) * sunT;
 }
 // Ambient: the sky's light, more of the zenith on top, more of the horizon (and less) at the bottom.
 float3 CloudAmbient(float hf)

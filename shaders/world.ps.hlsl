@@ -34,8 +34,13 @@ cbuffer FrameCB
     float4 g_Wind; float4 g_Wind2;
     float4 g_Misc;   // x = DDGI probe capture in progress (alpha = distance / y), y = max ray distance
     float4 g_CloudShadow;   // VL3 cloud shadow map: origin x, z, 1/size, strength (0 = none)
+    float4 g_AtmoA;         // physical atmosphere: x = mode (2 = on), y = planet radius Rg (km), z = atmosphere top Rt (km), w = sky-view LUT width
+    float4 g_AtmoB;         // xyz = direction toward the sun, w = sky-view LUT height
 };
 Texture2D<float> g_CloudShadowMap;   // the sun's transmittance through the clouds over the square (Load; white when off)
+Texture2D g_AtmoSkyView;             // the camera's sky-view LUT (sampled with g_GIIrr_sampler: linear clamp)
+Texture2D g_AtmoTrans;               // the atmosphere's transmittance LUT
+#include "atmo_map.hlsli"
 TextureCube  g_Probe;          // scene-captured reflection cubemap (when g_ProbePos.w > 0.5)
 SamplerState g_Probe_sampler;
 
@@ -90,9 +95,31 @@ float RTShadow(float3 origin, float3 L, float maxDist)
 }
 #endif
 
-// Procedural sky colour for a world direction, used for image-based lighting. Must match sky.ps.
+// The planet-centred position (km) of a world point: the planet sits under the camera.
+float3 AtmoKmOf(float3 wpos) { return (wpos - float3(g_CamPos.x, -g_AtmoA.y * 1000.0, g_CamPos.z)) * 0.001; }
+// The sun's transmittance down to a world point (red at the horizon, none through the planet).
+float3 AtmoSunAt(float3 wpos, float3 toLight)
+{
+    float3 p = AtmoKmOf(wpos);
+    float  r = length(p);
+    float  mu = dot(p / max(r, 1e-4), toLight);
+    float2 uv = AtmoTransParamsToUv(g_AtmoA.y, g_AtmoA.z, r, mu);
+    float  rr = max(r, g_AtmoA.y);
+    float  muH = -sqrt(max(1.0 - (g_AtmoA.y * g_AtmoA.y) / (rr * rr), 0.0));   // below the horizon: the planet occludes
+    return g_AtmoTrans.SampleLevel(g_GIIrr_sampler, uv, 0).rgb * smoothstep(muH - 0.004, muH + 0.004, mu);
+}
+// Sky colour for a world direction, used for image-based lighting. Must match sky.ps: the
+// physical atmosphere reads the camera's sky-view LUT (the planet below is the summary ground).
 float3 SkyColor(float3 dir)
 {
+    if (g_AtmoA.x > 1.5)
+    {
+        float3 camKm = AtmoKmOf(g_CamPos.xyz);
+        float2 uv = AtmoSkyViewUvFor(g_AtmoA.y, float2(g_AtmoA.w, g_AtmoB.w), camKm, g_AtmoB.xyz, dir);
+        float4 sv = g_AtmoSkyView.SampleLevel(g_GIIrr_sampler, uv, 0);
+        bool ground = AtmoRaySphere(camKm, dir, g_AtmoA.y) >= 0.0;
+        return sv.rgb + (ground ? g_SkyGround.rgb * g_SkyParams.x * sv.a : 0.0);
+    }
     float up = dir.y;
     float3 c = (up >= 0.0) ? lerp(g_SkyHorizon.rgb, g_SkyTop.rgb, pow(saturate(up), 0.5))
                            : lerp(g_SkyHorizon.rgb, g_SkyGround.rgb, saturate(-up));
@@ -600,6 +627,7 @@ float4 main(in PSIn i, bool isFront : SV_IsFrontFace) : SV_Target
         if ((ndl <= 0.0 && ndlS <= -sssWrap) || atten <= 1e-6) continue;
         float3 H = normalize(V + L);
         float3 radiance = lt.colorIntensity.rgb * lt.colorIntensity.w * atten;
+        if (type < 0.5 && g_AtmoA.x > 1.5) radiance *= AtmoSunAt(i.wpos, L);   // the sun (or the moon) through the physical atmosphere
         float  shadow = 1.0;
         if (g_DrawFlags.x > 0.5)   // receiveShadows
         {

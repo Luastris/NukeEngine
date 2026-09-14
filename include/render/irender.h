@@ -48,10 +48,19 @@ struct NukeSky
     float moonSize = 0.05f;                     // moon angular radius (radians)
     float moonAmount = 0.0f;                     // moon visibility (0 = hidden)
     float moonPhase = 0.5f;                      // 0/1 = new, 0.5 = full (procedural terminator)
+    float eclipse = 1.0e4f;                      // the eclipsing moon's offset from the sun's centre, in sun radii (>= 1000 = none)
     float exposure   = 1.0f;                      // SDR tonemap exposure multiplier
     float whitePoint = 1.0f;                      // SDR tonemap white point: linear value mapped to pure white
     float sunSize    = 0.01745f;                  // sun disc angular radius (radians); the glow and the sun shafts' source follow it
     float sunGlow    = 0.35f;                     // glow around the disc (its own strength, not the light's intensity)
+    // The physical atmosphere (mode 2): the planet under the camera, the medium (Bruneton /
+    // Hillaire), the aerial perspective. Amounts in 1/Mm, heights in km.
+    float planetRadius = 6371.0f, atmosphereHeight = 100.0f, atmoDensity = 1.0f;
+    float rayleighColor[3] = {0.175f, 0.409f, 1.0f}; float rayleighAmount = 33.1f, rayleighHeight = 8.0f;
+    float mieAmount = 3.996f, mieAbsorption = 4.4f, mieHeight = 1.2f, mieAnisotropy = 0.8f;
+    float ozoneAmount = 1.0f;
+    float groundAlbedo[3] = {0.3f, 0.3f, 0.3f};
+    float aerialRange = 40.0f, aerialStrength = 1.0f;
 };
 
 // One post-process effect in a camera's chain: a post shader pipeline + its packed
