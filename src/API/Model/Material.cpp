@@ -66,6 +66,7 @@ Material* Material::Clone() const
 	m->matName     = matName;
 	m->color = color;
 	m->diffuseGuid = diffuseGuid;
+	m->mask        = mask;
 	m->normalGuid  = normalGuid;
 	m->specularGuid= specularGuid;
 	m->metalRoughGuid = metalRoughGuid;

@@ -6,11 +6,7 @@
 void main(inout RTPayload p, in BuiltInTriangleIntersectionAttributes attr)
 {
     RTInstanceData inst = g_Instances[InstanceID()];
-    float a = FetchDynColor(inst, PrimitiveIndex(), attr.barycentrics).a;
-    if (inst.texIndex != 0xFFFFFFFFu)
-    {
-        float2 uv = FetchUV(inst.uvOffset, PrimitiveIndex(), attr.barycentrics);
-        a *= g_MatTex[NonUniformResourceIndex(inst.texIndex)].SampleLevel(g_MatTex_sampler, uv, 0).a;
-    }
+    float a = FetchDynColor(inst, PrimitiveIndex(), attr.barycentrics).a
+            * SampleAlphaMask(inst, FetchUV(inst.uvOffset, PrimitiveIndex(), attr.barycentrics));
     if (a < 0.35) IgnoreHit();
 }

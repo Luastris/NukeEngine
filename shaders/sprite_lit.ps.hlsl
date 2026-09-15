@@ -1,6 +1,7 @@
 // Lit textured sprite (tilemap layers with a normal map): diffuse * tint, Lambert-lit by the scene lights.
 // The tangent basis is constant per batch, since all tiles of one map share a plane.
 Texture2D    g_Sprite;  SamplerState g_Sprite_sampler;
+Texture2D    g_Mask;   SamplerState g_Mask_sampler;   // alpha mask (setSpriteMask), white = none
 Texture2D    g_Normal;  SamplerState g_Normal_sampler;
 
 // g_T/g_B/g_N = the batch plane's world tangent/bitangent/normal.
@@ -17,6 +18,7 @@ struct PSIn { float4 pos : SV_POSITION; float2 uv : TEXCOORD0; float4 col : COLO
 float4 main(in PSIn i) : SV_TARGET
 {
     float4 albedo = g_Sprite.Sample(g_Sprite_sampler, i.uv) * i.col;
+    albedo.a *= g_Mask.Sample(g_Mask_sampler, i.uv).a;
 
     float3 nTS = g_Normal.Sample(g_Normal_sampler, i.uv).xyz * 2.0 - 1.0;
     if (g_N.w > 0.0) nTS.y = -nTS.y;   // OpenGL-authored map: flip green

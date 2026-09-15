@@ -143,6 +143,9 @@ extern "C" { NUKE_ABI_STAMP int nuke_build_debug = 0; }
 //       sunSize/sunGlow, Environment sunSize/sunGlow (sizeof grew). Physical atmosphere: NukeSky
 //       gained the medium block (planetRadius .. aerialStrength), Environment mode Physical + the
 //       atmosphere block (sizeof grew). NukeSky gained eclipse, Environment moonLight/eclipse (sizeof grew).
+//       iRender gained addRTInstanceTinted (appended): per-instance colour for RT instances.
+//       Mesh gained rtSprite (appended, sizeof grew): ray-facing procedural sprites in the TLAS.
+//       iRender gained setSpriteMask (appended); Material gained mask (appended, sizeof grew).
 #define NUKE_ENGINE_ABI 44
 extern "C" { NUKE_ABI_STAMP int nuke_engine_abi = NUKE_ENGINE_ABI; }
 

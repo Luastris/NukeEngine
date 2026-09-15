@@ -27,19 +27,30 @@ struct RTInstanceData
     uint  emTexIndex, specTexIndex; float specularFactor; uint nrmFlipG;   // nrmFlipG: 1 = flip green (OpenGL)
     float4 albedoMetal;     // rgb albedo factor, a = metallic factor
     float4 emissiveRough;   // rgb emissive (pre-multiplied), a = roughness factor
-    // colOffset = byte offset into g_DynCol (0xFFFFFFFF = none); shadowShape = 0 quad / 1 disc / 2 strip.
-    uint  colOffset; uint shadowShape; float shadowAlpha; uint pad0;
+    // colOffset = byte offset into g_DynCol (0xFFFFFFFF = none); shadowShape = 0 quad / 1 disc / 2 strip;
+    // dynPosOffset = byte offset into g_DynPos for a sprite mesh (procedural, ray-facing), else 0xFFFFFFFF.
+    uint  colOffset; uint shadowShape; float shadowAlpha; uint dynPosOffset;
+    uint  maskTexIndex; uint pad1, pad2, pad3;   // bindless alpha mask (Material::mask), 0xFFFFFFFF = none
 };
 StructuredBuffer<RTInstanceData> g_Instances;
 ByteAddressBuffer g_MatBytes;   // per-instance MatCB block, same packing as the raster MatCB
 ByteAddressBuffer g_DynCol;     // per-frame particle colors (float4/vertex)
+#include "rt_sprite.hlsli"      // g_DynPos + the ray-facing sprite hit test
 
 // Surface contract: a shader's Surface(IN, O) fills O; the generated closest-hit lights and recurses it,
 // or outputs O.emissive when O.unlit. The raster path calls the same Surface() from its own harness.
 struct SurfaceIn  { float3 worldPos; float3 worldNormal; float2 uv; float3 viewDir; };
 struct SurfaceOut { float3 albedo; float metallic; float roughness; float3 emissive; float alpha; bool unlit; };
 
-cbuffer RTRefCB { float4x4 g_InvProj; float4x4 g_InvView; float4 g_RTCam; float4 g_RTParams; float4 g_RTWater; float4 g_RTWaterCol; float4 g_RTWaterAbs; };  // g_RTParams = (intensity, maxDist, maxDepth, roughCut); g_RTWater = (level, on, fade, _); g_RTWaterAbs = (absorb.rgb, 1/opacityDepth)
+cbuffer RTRefCB { float4x4 g_InvProj; float4x4 g_InvView; float4 g_RTCam; float4 g_RTParams; float4 g_RTWater; float4 g_RTWaterCol; float4 g_RTWaterAbs;
+                  float4 g_RTWaterCasc; float4 g_RTWaterRip0; float4 g_RTWaterRip1; };
+// g_RTParams = (intensity, maxDist, maxDepth, roughCut); g_RTWater = (level, on, fade, wave band); g_RTWaterAbs = (absorb.rgb, 1/opacityDepth);
+// g_RTWaterCasc = (cascade sizes 0..2, waveScale); g_RTWaterRip0 = (ripple window origin xz, extent, 1/extent); g_RTWaterRip1 = (height scale, sim valid, texel size, detail)
+// The water's wave maps (SetRTWaterMaps): cascade slope maps (xy = slope) + the ripple heightfield; zero textures when no water draws.
+Texture2D g_WaterNrm0; SamplerState g_WaterNrm0_sampler;
+Texture2D g_WaterNrm1; SamplerState g_WaterNrm1_sampler;
+Texture2D g_WaterNrm2; SamplerState g_WaterNrm2_sampler;
+Texture2D<float> g_WaterRipple; SamplerState g_WaterRipple_sampler;
 
 #define MAX_LIGHTS 256   // must match world.ps and the renderer's FrameCB
 #define MAX_SHADOWS 4
@@ -82,7 +93,10 @@ float3 SkyColor(float3 d)
 float RTWaterUnder(float3 a, float3 b)
 {
     if (g_RTWater.y < 0.5) return 0.0;
-    float da = g_RTWater.x - a.y, db = g_RTWater.x - b.y;   // > 0 = below the surface
+    // Below the surface = below the level minus its wave band: a point ON the surface (a
+    // trough the G-pass wrote, a crest) is water, not something seen through it.
+    const float lvl = g_RTWater.x - g_RTWater.w;
+    float da = lvl - a.y, db = lvl - b.y;   // > 0 = below the surface
     float len = length(b - a);
     if (da > 0.0 && db > 0.0)      return len;
     if (da > 0.0 || db > 0.0)      return len * max(da, db) / (abs(da) + abs(db) + 1e-6);
@@ -160,6 +174,21 @@ float4 FetchDynColor(RTInstanceData inst, uint prim, float2 bc)
     float w0 = 1.0 - bc.x - bc.y; uint cb = inst.colOffset + prim * 48u;   // 3 verts * 16 bytes (float4)
     return asfloat(g_DynCol.Load4(cb)) * w0 + asfloat(g_DynCol.Load4(cb + 16u)) * bc.x + asfloat(g_DynCol.Load4(cb + 32u)) * bc.y;
 }
+// Colour of a sprite hit: the quad's a-end (vertex 0) to b-end (vertex 2), ribbons fade along.
+float4 FetchSpriteColor(RTInstanceData inst, uint prim, float along)
+{
+    if (inst.colOffset == 0xFFFFFFFFu) return float4(1.0, 1.0, 1.0, 1.0);
+    uint cb = inst.colOffset + prim * 96u;   // 6 verts * 16 bytes
+    return lerp(asfloat(g_DynCol.Load4(cb)), asfloat(g_DynCol.Load4(cb + 32u)), along);
+}
+// Alpha at a hit: albedo map alpha x the instance's alpha mask (a sprite's Shape over its texture).
+float SampleAlphaMask(RTInstanceData inst, float2 uv)
+{
+    float a = 1.0;
+    if (inst.texIndex  != 0xFFFFFFFFu) a *= g_MatTex[NonUniformResourceIndex(inst.texIndex)].SampleLevel(g_MatTex_sampler, uv, 0).a;
+    if (inst.maskTexIndex != 0xFFFFFFFFu) a *= g_MatTex[NonUniformResourceIndex(inst.maskTexIndex)].SampleLevel(g_MatTex_sampler, uv, 0).a;
+    return a;
+}
 float3 SampleAlbedo(RTInstanceData inst, float2 uv)
 {
     float3 a = inst.albedoMetal.rgb;
@@ -211,24 +240,36 @@ float3 ApplyNormalMap(RTInstanceData inst, uint prim, float2 uv, float3 geomN, f
 float RTShadow(float3 origin, float3 L, float maxD)
 {
     RayDesc r; r.Origin = origin; r.Direction = L; r.TMin = 0.02; r.TMax = maxD;
-    RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> q;
+    RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> q;
     // Reflect mask, not the 0x02 caster bit world.ps uses: mask bits are OR-tested, so
     // "reflect-visible AND casts" cannot be expressed in one trace.
     q.TraceRayInline(g_TLAS, RAY_FLAG_NONE, RT_REFLECT_MASK, r);
-    // Non-opaque candidates (particle quads) get an albedo-alpha test.
+    // Non-opaque candidates (cutout quads) get an albedo-alpha test; procedural candidates are
+    // the sprites, turned toward the shadow ray.
     while (q.Proceed())
+    {
         if (q.CandidateType() == CANDIDATE_NON_OPAQUE_TRIANGLE)
         {
             RTInstanceData inst = g_Instances[q.CandidateInstanceID()];
             uint   prim = q.CandidatePrimitiveIndex();
             float2 bc   = q.CandidateTriangleBarycentrics();
-            float  a    = FetchDynColor(inst, prim, bc).a;
-            if (inst.texIndex != 0xFFFFFFFFu)
-                a *= g_MatTex[NonUniformResourceIndex(inst.texIndex)].SampleLevel(g_MatTex_sampler,
-                         FetchUV(inst.uvOffset, prim, bc), 0).a;
+            float  a    = FetchDynColor(inst, prim, bc).a * SampleAlphaMask(inst, FetchUV(inst.uvOffset, prim, bc));
             if (a >= 0.35) q.CommitNonOpaqueTriangleHit();
         }
-    return (q.CommittedStatus() == COMMITTED_TRIANGLE_HIT) ? 0.0 : 1.0;
+        else if (q.CandidateType() == CANDIDATE_PROCEDURAL_PRIMITIVE)
+        {
+            RTInstanceData inst = g_Instances[q.CandidateInstanceID()];
+            uint prim = q.CandidatePrimitiveIndex();
+            float t, along; float2 uv;
+            if (SpriteHit(inst.dynPosOffset, inst.shadowShape, prim, q.CandidateObjectToWorld3x4(),
+                          q.WorldRayOrigin(), q.WorldRayDirection(), q.RayTMin(), q.CommittedRayT(), t, uv, along))
+            {
+                float a = FetchSpriteColor(inst, prim, along).a * SampleAlphaMask(inst, uv);
+                if (a >= 0.35) q.CommitProceduralPrimitiveHit(t);
+            }
+        }
+    }
+    return (q.CommittedStatus() != COMMITTED_NOTHING) ? 0.0 : 1.0;
 }
 
 // Metallic-roughness PBR, same math as the raster world.ps. `albedo` must be LINEAR (caller does sRGB->linear).

@@ -1,13 +1,14 @@
 #include "rt_common.hlsl"
+#include "rt_water_shade.hlsli"
 
 // Miss: the reflection ray escaped the scene -> sample the environment (probe or analytic sky).
 [shader("miss")]
 void main(inout RTPayload p)
 {
-    // A ray escaping from under water is attenuated by its submerged run.
+    // Water on the way: a ray from above shades the surface it crossed, one escaping from
+    // under water is attenuated by its submerged run (rt_water_shade.hlsli).
     // RayTCurrent() reports TMax in a miss shader; HLSL has no RayTMax() intrinsic.
     p.hitT = RayTCurrent();
-    float3 wT = RTWaterTransRay(WorldRayOrigin(), WorldRayDirection(), RayTCurrent());
-    p.color = EnvSample(WorldRayDirection(), 0.0) * wT
-            + RTWaterLook(WorldRayDirection()) * (1.0 - dot(wT, float3(0.299, 0.587, 0.114)));
+    p.color = RTWaterFinishMiss(WorldRayOrigin(), WorldRayDirection(), RayTCurrent(),
+                                EnvSample(WorldRayDirection(), 0.0), p.depth);
 }

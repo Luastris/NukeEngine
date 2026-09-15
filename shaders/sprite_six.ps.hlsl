@@ -6,6 +6,7 @@
 #include "vol.hlsli"
 Texture2D    g_Sprite;   SamplerState g_Sprite_sampler;    // lightmap A
 Texture2D    g_SpriteB;  SamplerState g_SpriteB_sampler;   // lightmap B
+Texture2D    g_Mask;     SamplerState g_Mask_sampler;      // alpha mask (setSpriteMask), white = none
 Texture2D<float> g_SceneDepth;
 Texture3D<float4> g_VolInteg; SamplerState g_VolInteg_sampler;
 Texture3D<float4> g_VolLight; SamplerState g_VolLight_sampler;
@@ -62,5 +63,6 @@ float4 main(in PSIn i) : SV_TARGET
         float zo = (zs >= 0.99999) ? g_VolRange.y : VolLinearZ(zs);
         c.rgb = VolFogTranslucent(g_VolInteg, g_VolInteg_sampler, c.rgb, uv, zp, zo);
     }
+    c.a *= g_Mask.Sample(g_Mask_sampler, i.uv).a;
     return c;
 }

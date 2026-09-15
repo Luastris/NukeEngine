@@ -12,6 +12,8 @@ Texture2D    g_GBuffer;  SamplerState g_GBuffer_sampler;   // (octN.xy, roughnes
 Texture2D    g_Depth;    SamplerState g_Depth_sampler;     // prepass device depth (R), point
 #ifdef RT_ENABLED
 RaytracingAccelerationStructure g_TLAS;                    // scene TLAS (shadow-caster mask 0x02)
+#include "rt_inst.hlsli"     // g_RTInst: per-instance RT data (sprite footprints)
+#include "rt_sprite.hlsli"   // g_DynPos: sprites turned toward the ray
 #endif
 
 cbuffer AOCB
@@ -294,10 +296,22 @@ float AO_RTAO(float3 Pw, float3 Nw, float radius, int rays, float noise, float n
         float r   = sqrt(u);
         float3 dir = T * (r * cos(ang)) + B * (r * sin(ang)) + Nw * sqrt(max(0.0, 1.0 - u));
         RayDesc ray; ray.Origin = Pw; ray.Direction = dir; ray.TMin = 0.02; ray.TMax = radius;
-        RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> q;
+        RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> q;
         q.TraceRayInline(g_TLAS, RAY_FLAG_NONE, 0x02, ray);
-        while (q.Proceed()) q.CommitNonOpaqueTriangleHit();   // particle quads count as occluders
-        if (q.CommittedStatus() == COMMITTED_TRIANGLE_HIT)
+        while (q.Proceed())   // cutout quads and sprites count as occluders
+        {
+            if (q.CandidateType() == CANDIDATE_PROCEDURAL_PRIMITIVE)
+            {
+                RTInstInfo inst = g_RTInst[q.CandidateInstanceID()];
+                float t, along; float2 uv;
+                if (SpriteHit(inst.dynPosOffset, inst.shadowShape, q.CandidatePrimitiveIndex(), q.CandidateObjectToWorld3x4(),
+                              q.WorldRayOrigin(), q.WorldRayDirection(), q.RayTMin(), q.CommittedRayT(), t, uv, along)
+                    && SpriteInside(inst.shadowShape, uv))
+                    q.CommitProceduralPrimitiveHit(t);
+            }
+            else q.CommitNonOpaqueTriangleHit();
+        }
+        if (q.CommittedStatus() != COMMITTED_NOTHING)
             occl += Falloff(q.CommittedRayT(), radius);
     }
     return 1.0 - occl / rays;

@@ -1,5 +1,7 @@
 #include "rt_common.hlsl"
 
+Texture2D g_Cover;   // sprite coverage over the reflector (sprite_cover.ps): that share of the base stays
+
 // Ray generation: per pixel, find the primary reflector, trace one reflection ray and composite the
 // returned radiance onto the base colour. Further bounces happen inside the closest-hit shader.
 [shader("raygeneration")]
@@ -32,10 +34,17 @@ void main()
     // Re-find the exact primary surface with a camera ray: G-buffer depth drifts on curved
     // surfaces and can place the reflection origin inside the object.
     {
+        // Refine the reflector's point/normal from the TLAS along the primary ray - but only when
+        // the hit IS the visible surface (the same distance, within the depth drift). Anything
+        // else keeps the G-buffer point: a surface the G-buffer holds that is not in the TLAS
+        // (the water's G-pass) sits in front of whatever the ray finds behind it; and a wall the
+        // camera has poked through (nearer than the near plane, so the raster never showed it)
+        // would otherwise become every pixel's reflector - its inside mirrored in the wall opposite.
+        const float gbufT = length(wpos - g_RTCam.xyz);
         RayDesc cray; cray.Origin = g_RTCam.xyz; cray.Direction = V; cray.TMin = 0.0; cray.TMax = 1.0e5;
         RayQuery<RAY_FLAG_CULL_NON_OPAQUE | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> cq;
         cq.TraceRayInline(g_TLAS, RAY_FLAG_NONE, 0xFF, cray); cq.Proceed();
-        if (cq.CommittedStatus() == COMMITTED_TRIANGLE_HIT)
+        if (cq.CommittedStatus() == COMMITTED_TRIANGLE_HIT && abs(cq.CommittedRayT() - gbufT) <= gbufT * 0.01 + 0.05)
         {
             wpos = g_RTCam.xyz + V * cq.CommittedRayT();
             uint ci = cq.CommittedInstanceID();
@@ -59,8 +68,11 @@ void main()
     }
 
     float k = saturate(refl * intensity);
-    // The G-buffer holds no water, so attenuate the reflection by whatever water the
-    // camera -> reflector segment crossed.
+    // Attenuate the reflection by whatever water the camera -> reflector segment crossed
+    // (a point on the surface itself lies inside the water's wave band: not "through" it).
     k *= RTWaterTrans(g_RTCam.xyz, wpos);
+    // A sprite drawn over the reflector (a puff in front of a mirror, above the water) is part
+    // of the base colour, not of the reflector: it keeps its share of the pixel.
+    k *= 1.0 - g_Cover.Load(int3(px, 0)).r;
     g_Output[px] = float4(lerp(base, p.color, k), 1.0);
 }

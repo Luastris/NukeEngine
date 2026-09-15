@@ -6,6 +6,7 @@
 #include "vol.hlsli"
 Texture2D    g_Sprite;
 SamplerState g_Sprite_sampler;
+Texture2D    g_Mask;   SamplerState g_Mask_sampler;   // alpha mask (setSpriteMask), white = none
 Texture2D<float> g_SceneDepth;
 Texture3D<float4> g_VolInteg; SamplerState g_VolInteg_sampler;   // integrated fog columns (T, L)
 Texture3D<float4> g_VolLight; SamplerState g_VolLight_sampler;   // incident light per froxel
@@ -15,6 +16,7 @@ float LinD(float z) { return (g_Soft.z * g_Soft.y) / max(g_Soft.z - z * (g_Soft.
 float4 main(in PSIn i) : SV_TARGET
 {
     float4 c = g_Sprite.Sample(g_Sprite_sampler, i.uv) * i.col;
+    c.a *= g_Mask.Sample(g_Mask_sampler, i.uv).a;
     float zs = g_SceneDepth.Load(int3((int2)i.pos.xy, 0));
     if (g_Soft.w > 0.5)
     {

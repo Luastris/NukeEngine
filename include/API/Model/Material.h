@@ -342,6 +342,7 @@ public:
     std::vector<double>      tweenPrevCyc;     // per-auto-tween trigger crossing detection
     std::vector<std::string> liveTwinsWritten; // masked twin props written last tick
     Texture* mskStamp = nullptr;               // first stamp-mask texture (shader g_MskStamp)
+    Texture* mask = nullptr;                   // alpha mask over diff (sprite Shape x texture); rays alpha-test with it too
     // Fire a material event (scriptable): global, at a UV point, or at a world point. Point
     // info moves the driven masks' centers; global fires skip that (point OPTIONAL for
     // global reactions, required only for localized ones).

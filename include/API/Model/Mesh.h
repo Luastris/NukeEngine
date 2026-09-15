@@ -175,6 +175,9 @@ public:
 	float* rtColorArray = nullptr;   // per-vertex RGBA (4 floats/vert), re-read every frame for rtDynamic meshes
 	// Shadow-ray footprint of non-opaque quads: 0 = full quad, 1 = disc, 2 = strip across u.
 	int rtShadowShape = 0;
+	// Sprite mesh (6-vertex quads, rtDynamic): traced as procedural primitives that turn toward
+	// every ray (mirrors beside the camera saw the camera-facing quads edge-on).
+	bool rtSprite = false;
 
 	// Local-space bounds for frustum culling; lazily computed from vertexArray.
 	float aabbMin[3] = { 0, 0, 0 };

@@ -844,6 +844,17 @@ public:
     // (abi 44, appended). The World re-captures a static reflection probe when this changes.
     virtual int cloudsState() { return 0; }
 
+    // addRTInstance with a per-instance colour: the material's albedo is multiplied by tint.rgb
+    // (mesh-mode particles: their gradient / glow in reflections). Default = untinted.
+    virtual void addRTInstanceTinted(Mesh* mesh, Material* mat, const float pos[3], const float quat[4], const float scale[3],
+                                     const float tint[4], bool inReflections = true, bool castShadows = true)
+    { (void)tint; addRTInstance(mesh, mat, pos, quat, scale, inReflections, castShadows); }
+
+    // Alpha mask for SUBSEQUENT sprite runs (unlit / lit / six-way): the run's alpha is multiplied
+    // by mask.a at the same uv (a particle's built-in Shape over its texture). null = none.
+    // Like setSpriteSoftDepth: set, draw, reset; a change flushes the open batches.
+    virtual void setSpriteMask(Texture* mask) { (void)mask; }
+
     // ABI: new virtuals are appended at the END of the class, NEVER inserted mid-vtable —
     // plugins are separate DLLs built at different times, and an inserted slot shifts every later one.
 };

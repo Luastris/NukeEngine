@@ -1,4 +1,5 @@
 #include "rt_common.hlsl"
+#include "rt_water_shade.hlsli"
 
 // Default closest hit: metallic-roughness PBR for materials without their own "<name>.surf.hlsl",
 // recursing through TraceRay for the specular term.
@@ -41,8 +42,7 @@ void main(inout RTPayload p, in BuiltInTriangleIntersectionAttributes attr)
         traced = p2.color;
     }
     col += SpecFr(hitN, V, rough, albedo, metal, spec) * lerp(traced, env, rough);
-    // Attenuate by any water this segment crossed, and show the water surface itself in its place
-    // (it is not in the TLAS). Each recursion level handles its own segment.
-    float3 wT = RTWaterTrans3(WorldRayOrigin(), hitPos);
-    p.color = col * wT + RTWaterLook(wdir) * (1.0 - dot(wT, float3(0.299, 0.587, 0.114)));
+    // Water this segment crossed: attenuation + the surface itself (rt_water_shade.hlsli).
+    // Each recursion level handles its own segment.
+    p.color = RTWaterFinish(WorldRayOrigin(), wdir, hitPos, col, p.depth);
 }

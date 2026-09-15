@@ -55,29 +55,30 @@ Texture2D    g_ScreenGI;     // screen-space bounce (E / pi), full-res, Load by 
 
 #ifdef RT_ENABLED   // D3D12 + DXR: inline ray-traced shadows (RayQuery, SM6.5) instead of shadow maps
 RaytracingAccelerationStructure g_TLAS;
-// BYTE-MIRROR of the renderer's RTInstanceData (96 bytes); only shadowShape/shadowAlpha are read here,
-// the rest is typed loosely to keep the stride. Change with NukeDiligentImpl.h + rt_common.hlsl.
-struct RTInstInfo
-{
-    uint4  offs;          // nrmOffset, uvOffset, posOffset, matByteOffset
-    uint4  texA;          // texIndex, nrmTexIndex, mrTexIndex, aoTexIndex
-    uint4  texB;          // emTexIndex, specTexIndex, specularFactor(asfloat), nrmFlipG
-    float4 albedoMetal;
-    float4 emissiveRough;
-    uint   colOffset; uint shadowShape; float shadowAlpha; uint pad0;
-};
-StructuredBuffer<RTInstInfo> g_RTInst;
+#include "rt_inst.hlsli"     // g_RTInst: the renderer's per-instance RT data (shadow footprints)
+#include "rt_sprite.hlsli"   // g_DynPos: sprites turned toward the shadow ray
 // Ray-traced shadow toward a light: 1 = lit, 0 = occluded.
 float RTShadow(float3 origin, float3 L, float maxDist)
 {
     RayDesc ray; ray.Origin = origin; ray.Direction = L; ray.TMin = 0.02; ray.TMax = maxDist;
-    RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> q;
+    RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> q;
     // 0x02 = shadow-caster bit of the TLAS instance mask (0x01 = visible in reflections).
     q.TraceRayInline(g_TLAS, RAY_FLAG_NONE, 0x02, ray);
-    // Non-opaque candidates are particle quads: shadowShape selects the footprint (0 quad / 1 disc / 2 strip
+    // Non-opaque candidates are cutout quads: shadowShape selects the footprint (0 quad / 1 disc / 2 strip
     // across u). UV is derived analytically from primitive parity + barycentrics; bindless maps are RT-only.
+    // Procedural candidates are the sprites: the quad faces the shadow ray, same footprint.
     while (q.Proceed())
-        if (q.CandidateType() == CANDIDATE_NON_OPAQUE_TRIANGLE)
+    {
+        if (q.CandidateType() == CANDIDATE_PROCEDURAL_PRIMITIVE)
+        {
+            RTInstInfo inst = g_RTInst[q.CandidateInstanceID()];
+            float t, along; float2 uv;
+            if (SpriteHit(inst.dynPosOffset, inst.shadowShape, q.CandidatePrimitiveIndex(), q.CandidateObjectToWorld3x4(),
+                          q.WorldRayOrigin(), q.WorldRayDirection(), q.RayTMin(), q.CommittedRayT(), t, uv, along)
+                && SpriteInside(inst.shadowShape, uv) && inst.shadowAlpha >= 0.35)
+                q.CommitProceduralPrimitiveHit(t);
+        }
+        else if (q.CandidateType() == CANDIDATE_NON_OPAQUE_TRIANGLE)
         {
             RTInstInfo inst = g_RTInst[q.CandidateInstanceID()];
             float2 bc = q.CandidateTriangleBarycentrics();
@@ -91,7 +92,8 @@ float RTShadow(float3 origin, float3 L, float maxDist)
                         : true;
             if (inside && inst.shadowAlpha >= 0.35) q.CommitNonOpaqueTriangleHit();
         }
-    return (q.CommittedStatus() == COMMITTED_TRIANGLE_HIT) ? 0.0 : 1.0;
+    }
+    return (q.CommittedStatus() != COMMITTED_NOTHING) ? 0.0 : 1.0;
 }
 #endif
 

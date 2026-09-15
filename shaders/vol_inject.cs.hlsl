@@ -92,10 +92,20 @@ float LightVisibility(float3 P, float3 L, int slot, float maxT)
 {
 #ifdef RT_ENABLED
     RayDesc ray; ray.Origin = P; ray.Direction = L; ray.TMin = 0.02; ray.TMax = max(maxT - 0.05, 0.05);
-    RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> q;
+    RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> q;
     q.TraceRayInline(g_TLAS, RAY_FLAG_NONE, 0x02, ray);   // shadow-caster bit; every candidate is non-opaque (TLAS contract)
     while (q.Proceed())
-        if (q.CandidateType() == CANDIDATE_NON_OPAQUE_TRIANGLE)
+    {
+        if (q.CandidateType() == CANDIDATE_PROCEDURAL_PRIMITIVE)   // sprites, turned toward the ray
+        {
+            RTInstanceData inst = g_Instances[q.CandidateInstanceID()];
+            float t, along; float2 uv;
+            if (SpriteHit(inst.dynPosOffset, inst.shadowShape, q.CandidatePrimitiveIndex(), q.CandidateObjectToWorld3x4(),
+                          q.WorldRayOrigin(), q.WorldRayDirection(), q.RayTMin(), q.CommittedRayT(), t, uv, along)
+                && SpriteInside(inst.shadowShape, uv) && inst.shadowAlpha >= 0.35)
+                q.CommitProceduralPrimitiveHit(t);
+        }
+        else if (q.CandidateType() == CANDIDATE_NON_OPAQUE_TRIANGLE)
         {
             RTInstanceData inst = g_Instances[q.CandidateInstanceID()];
             float2 bc = q.CandidateTriangleBarycentrics();
@@ -108,7 +118,8 @@ float LightVisibility(float3 P, float3 L, int slot, float maxT)
                         : true;
             if (inside && inst.shadowAlpha >= 0.35) q.CommitNonOpaqueTriangleHit();
         }
-    return (q.CommittedStatus() == COMMITTED_TRIANGLE_HIT) ? 0.0 : 1.0;
+    }
+    return (q.CommittedStatus() != COMMITTED_NOTHING) ? 0.0 : 1.0;
 #else
     if (slot < 0) return 1.0;
     float4 lp = mul(g_ShadowVP[slot], float4(P, 1.0));
