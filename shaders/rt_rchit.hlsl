@@ -33,6 +33,10 @@ void main(inout RTPayload p, in BuiltInTriangleIntersectionAttributes attr)
     // Specular: recurse into the scene for sharp reflections, blurred env for rough ones.
     float3 R = reflect(wdir, hitN);
     float3 env = ReflEnv(R, rough), traced = env;
+    // A submerged hit's fallback env is the water around it, never the sky / probe: with the
+    // recursion spent, a mirror under water reflected the sky - a bright torn line along the wave
+    // that meets it (the water pixels there see the mirror first).
+    if (RTUnderEye(hitPos)) { env = (g_RTWaterCau1.y > 0.5) ? RTUnderFog(float3(0.0, 0.0, 0.0), 1.0e4, hitPos) : RTUnderAmb(hitPos); traced = env; }
     if (p.depth < (uint)g_RTParams.z)
     {
         RayDesc ray; ray.Origin = hitPos + hitN * 0.08 + R * 0.05; ray.Direction = R; ray.TMin = 0.02;

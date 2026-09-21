@@ -14,7 +14,8 @@ void main()
     if (depth >= 0.99999) { g_Output[px] = float4(base, 1.0); return; }   // sky pixel
 
     float4 gb = g_GBuffer.Load(int3(px, 0));
-    float  rough = gb.z, metal = gb.w;
+    const bool isWater = gb.w < -0.5;   // the water's G-pass flags itself with metal -1 (not in the TLAS)
+    float  rough = gb.z, metal = max(gb.w, 0.0);
     float3 N = OctDecode(gb.xy);
 
     float2 uv = (float2(px) + 0.5) / float2(dim);
@@ -32,7 +33,10 @@ void main()
     if (refl < 0.01 || intensity <= 0.0) { g_Output[px] = float4(base, 1.0); return; }
 
     // Re-find the exact primary surface with a camera ray: G-buffer depth drifts on curved
-    // surfaces and can place the reflection origin inside the object.
+    // surfaces and can place the reflection origin inside the object. Never for the water: it is
+    // not in the TLAS, and where its surface meets a wall the wall behind it sits within the
+    // tolerance - the seam then reflected off the wall's normal (a bright torn line).
+    if (!isWater)
     {
         // Refine the reflector's point/normal from the TLAS along the primary ray - but only when
         // the hit IS the visible surface (the same distance, within the depth drift). Anything
@@ -61,7 +65,9 @@ void main()
     RayDesc ray; ray.Origin = wpos + N * 0.08 + R * 0.05; ray.Direction = R; ray.TMin = 0.02; ray.TMax = maxD;
     RTPayload p; p.color = 0.0; p.depth = 1; p.hitT = maxD;
     TraceRay(g_TLAS, RAY_FLAG_NONE, RT_REFLECT_MASK, 0, 1, 0, ray, p);   // only reflection-visible instances
-    {   // the reflected leg through the fog (the camera -> mirror leg comes with the fog composite)
+    {   // the reflected leg through the froxel fog (the camera -> mirror leg comes with the fog
+        // composite). Fog volumes lie in the water too (silt, sand): the whole leg, over the
+        // water's own fog and never dyed by it.
         float3 amb = (g_SkyParams.y > 0.5) ? (g_SkyTop.rgb + 2.0 * g_SkyHorizon.rgb + g_SkyGround.rgb) * 0.25 * g_SkyParams.x * g_Ambient.w
                                            : g_Ambient.rgb * g_Ambient.w;
         p.color = VolFogSegment(ray.Origin, ray.Origin + R * min(p.hitT, g_VolRange.y), p.color, amb);
@@ -70,9 +76,23 @@ void main()
     float k = saturate(refl * intensity);
     // Attenuate the reflection by whatever water the camera -> reflector segment crossed
     // (a point on the surface itself lies inside the water's wave band: not "through" it).
-    k *= RTWaterTrans(g_RTCam.xyz, wpos);
+    // A submerged camera's leg is the underwater post's (it fogs the composited pixel).
+    if (!RTUnderEye(g_RTCam.xyz)) k *= RTWaterTrans(g_RTCam.xyz, wpos);
     // A sprite drawn over the reflector (a puff in front of a mirror, above the water) is part
     // of the base colour, not of the reflector: it keeps its share of the pixel.
     k *= 1.0 - g_Cover.Load(int3(px, 0)).r;
+    // The LDR path (g_SkyParams.z): the scene is tonemapped + sRGB; the trace is linear
+    // radiance. Mix in linear and re-encode (the same extended Reinhard as world.ps).
+    if (g_SkyParams.z > 0.5)
+    {
+        float W = (g_SkyParams.w > 1e-3) ? g_SkyParams.w : 1.0;
+        float3 lin = pow(max(base, 0.0), 2.2);
+        float3 y = min(lin, 0.999);
+        lin = max(0.5 * W * W * ((y - 1.0) + sqrt((1.0 - y) * (1.0 - y) + 4.0 * y / (W * W))), 0.0);
+        float3 mix = lerp(lin, p.color, k);
+        mix = mix * (1.0 + mix / (W * W)) / (1.0 + mix);
+        g_Output[px] = float4(pow(max(mix, 0.0), 1.0 / 2.2), 1.0);
+        return;
+    }
     g_Output[px] = float4(lerp(base, p.color, k), 1.0);
 }

@@ -30,3 +30,6 @@ float4 g_Hit;
 float4 g_Toon; float4 g_ToonShade;
 // C5 skin/eye/hair: g_Sss = (subsurface, irisDepth, hashedAlpha, 0); g_SssTint = scatter rgb.
 float4 g_Sss; float4 g_SssTint;
+// W5 accumulation: per-slot state displacement, world units at full state (snow/sand pile up as
+// real depth on receiving surfaces; trails carve it). g_OvD0 = slots 0..3, g_OvD1 = slots 4..7.
+float4 g_OvD0; float4 g_OvD1;

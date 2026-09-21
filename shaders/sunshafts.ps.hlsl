@@ -3,7 +3,8 @@
 // that clear air shows on a sunny day. Renderer-core, after the fog composite. Modes:
 // 0 = mask (half res: the sun's disc + halo on sky pixels), 1 = radial blur (32 taps, the start
 // dithered per pixel; run twice - the full reach, then one tap's worth - no ghost copies of the
-// occluder edges), 2 = composite.
+// occluder edges), 3 = a 3x3 box over the blurred shafts (the per-pixel dither averaged out:
+// without it the halo carries a fine cross-hatch), 2 = composite.
 #include "atmosphere.hlsli"   // the physical atmosphere: the source is the sun THROUGH it (none below the horizon, none in space)
 Texture2D g_Source; SamplerState g_Source_sampler;   // scene colour (composite)
 Texture2D g_Depth;  SamplerState g_Depth_sampler;    // prepass device depth (point)
@@ -74,6 +75,16 @@ float4 main(in PSIn i) : SV_Target
             uv += step; w *= g_SSPrm.y;
         }
         return float4(sum / wsum, 1.0);
+    }
+    if (mode == 3)
+    {
+        uint mw, mh; g_Mask.GetDimensions(mw, mh);
+        float2 px = 1.0 / float2(max(mw, 1u), max(mh, 1u));
+        float3 acc = 0.0;
+        [unroll] for (int y = -1; y <= 1; ++y)
+        [unroll] for (int x = -1; x <= 1; ++x)
+            acc += g_Mask.SampleLevel(g_Mask_sampler, i.uv + float2(x, y) * px, 0).rgb;
+        return float4(acc / 9.0, 1.0);
     }
     float3 src = g_Source.Sample(g_Source_sampler, i.uv).rgb;
     // only the smear: the source itself is already in the sky (subtracted, so the sun keeps its size)

@@ -615,6 +615,9 @@ public:
         // [4] droplet duration (s), rest spare. ABI: appended.
         float fx[8] = { 1.0f, 1.6f, 1.0f, 1.0f, 3.0f, 0, 0, 0 };
         int cutExempt = 0;                  // exempt from carving volumes (a compartment must not cut its own water)
+        float tint = 1.0f;                  // in-scatter strength (the Scatter Color alpha): 0 = clear water, 1 = authored. ABI: appended
+        float underFog = 1.0f;              // underwater fog (absorption + in-scatter by distance): 0 = off. ABI: appended
+        float underWobble = 1.0f;           // underwater refraction wobble of the seen world: 0 = off. ABI: appended
     };
     virtual void setWaterParams(const NukeWaterParams& p) {}
     virtual void drawWaterSurface(const NukeWaterSurface& s) {}   // camera pass, after opaques
@@ -854,6 +857,16 @@ public:
     // by mask.a at the same uv (a particle's built-in Shape over its texture). null = none.
     // Like setSpriteSoftDepth: set, draw, reset; a change flushes the open batches.
     virtual void setSpriteMask(Texture* mask) { (void)mask; }
+
+    // Rain on the camera lens for THIS frame (call every frame while it rains): rate = drops
+    // per second landing on the lens, amount = the wet-film distortion strength (0 = off),
+    // drainSeconds = how long a drop takes to run off. The renderer keeps one film per camera;
+    // a water module wets the same film when the camera dives.
+    virtual void setLensRain(float rate, float amount, float drainSeconds) { (void)rate; (void)amount; (void)drainSeconds; }
+    // W5 ground trails: this frame's footprints of grounded movers (x, z, radius, weight per
+    // entry, nearest first) pressed into the accumulated layer (snow/sand), and how fast fresh
+    // fall refills the tracks (fraction per second; 0 = they stay). Once per live frame.
+    virtual void setGroundTrails(const float* xzrw, int count, float fillPerSec) { (void)xzrw; (void)count; (void)fillPerSec; }
 
     // ABI: new virtuals are appended at the END of the class, NEVER inserted mid-vtable —
     // plugins are separate DLLs built at different times, and an inserted slot shifts every later one.

@@ -1815,6 +1815,13 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("Condition", &Surface::Condition));
 		Reflect_SetMethodDoc("Surface", "Condition", "", "state");
 		t.methods.push_back(MakeMethod("ClearConditions", &Surface::ClearConditions));
+		t.methods.push_back(MakeMethod("SetConditionSky", &Surface::SetConditionSky));
+		Reflect_SetMethodDoc("Surface", "SetConditionSky", "A condition FROM THE SKY (rain wets, snow settles, dust blows in) reaches only surfaces open to it: the renderer gates the GLOBAL value by its top-down sky-occlusion capture (roofs shelter; undersides never catch it). Per-atom overrides and painted masks are explicit and never gated. SetCondition(state, 0) clears the flag with the state.", "state,fromSky");
+		t.methods.push_back(MakeMethod("ConditionFromSky", &Surface::ConditionFromSky));
+		Reflect_SetMethodDoc("Surface", "ConditionFromSky", "", "state");
+		t.methods.push_back(MakeMethod("SetTrailFill", &Surface::SetTrailFill));
+		Reflect_SetMethodDoc("Surface", "SetTrailFill", "Ground trails (W5): grounded movers press their footprints into the accumulated layer (the renderer's carve map). Fill = fraction of a track fresh fall refills per second (weather-driven; 0 = tracks stay until the layer goes).", "perSecond");
+		t.methods.push_back(MakeMethod("TrailFill", &Surface::TrailFill));
 		t.methods.push_back(MakeMethod("ValueAt", &Surface::ValueAt));
 		Reflect_SetMethodDoc("Surface", "ValueAt", "Effective value for an atom at a world point: nearest-ancestor SurfaceState override (else the global), maxed with every SurfaceMask along the ancestor chain.", "atom,state,worldPos");
 		t.methods.push_back(MakeMethod("Footstep", &Surface::Footstep));

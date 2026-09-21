@@ -43,14 +43,18 @@ struct SurfaceIn  { float3 worldPos; float3 worldNormal; float2 uv; float3 viewD
 struct SurfaceOut { float3 albedo; float metallic; float roughness; float3 emissive; float alpha; bool unlit; };
 
 cbuffer RTRefCB { float4x4 g_InvProj; float4x4 g_InvView; float4 g_RTCam; float4 g_RTParams; float4 g_RTWater; float4 g_RTWaterCol; float4 g_RTWaterAbs;
-                  float4 g_RTWaterCasc; float4 g_RTWaterRip0; float4 g_RTWaterRip1; };
-// g_RTParams = (intensity, maxDist, maxDepth, roughCut); g_RTWater = (level, on, fade, wave band); g_RTWaterAbs = (absorb.rgb, 1/opacityDepth);
+                  float4 g_RTWaterCasc; float4 g_RTWaterRip0; float4 g_RTWaterRip1; float4 g_RTWaterCau; float4 g_RTWaterCau1; };
+// g_RTCam = (camera xyz, game clock); g_RTParams = (intensity, maxDist, maxDepth, roughCut); g_RTWater = (level, on, fade, wave band); g_RTWaterAbs = (absorb.rgb, 1/opacityDepth);
 // g_RTWaterCasc = (cascade sizes 0..2, waveScale); g_RTWaterRip0 = (ripple window origin xz, extent, 1/extent); g_RTWaterRip1 = (height scale, sim valid, texel size, detail)
+// g_RTWaterCau = (photon tile centre xz, uv scale, strength); g_RTWaterCau1 = (sharpness, underwater fog on, tint = Scatter Color alpha, 0)
 // The water's wave maps (SetRTWaterMaps): cascade slope maps (xy = slope) + the ripple heightfield; zero textures when no water draws.
 Texture2D g_WaterNrm0; SamplerState g_WaterNrm0_sampler;
+Texture2D g_SkyMap;    SamplerState g_SkyMap_sampler;   // the sky map (skymap.hlsli; g_Misc.z = live)
+#include "skymap.hlsli"
 Texture2D g_WaterNrm1; SamplerState g_WaterNrm1_sampler;
 Texture2D g_WaterNrm2; SamplerState g_WaterNrm2_sampler;
 Texture2D<float> g_WaterRipple; SamplerState g_WaterRipple_sampler;
+Texture2D<float> g_WaterCaustic; SamplerState g_WaterCaustic_sampler;   // the photon tile (SetRTWaterCaustic; density 1 = neutral)
 
 #define MAX_LIGHTS 256   // must match world.ps and the renderer's FrameCB
 #define MAX_SHADOWS 4
@@ -61,6 +65,8 @@ cbuffer FrameCB   // identical layout to world.ps / worldFrameCB
     float4x4 g_ShadowVP[MAX_SHADOWS]; float4 g_ShadowParams;
     float4 g_SkyTop; float4 g_SkyHorizon; float4 g_SkyGround; float4 g_SkyParams;
     float4 g_ProbePos; float4 g_ProbeParams; float4 g_ProbeBox;
+    float4 g_Wind; float4 g_Wind2;
+    float4 g_Misc;   // z = the sky map is live (skymap.hlsli)
 };
 // Dynamic GI (DDGI): the diffuse ambient of a hit reads the probe grid where it covers the point,
 // so a reflection carries the same bounced light as the raster view. One declaration for every
@@ -119,17 +125,32 @@ float3 RTWaterTrans3(float3 a, float3 b)
 float3 RTWaterTransRay(float3 o, float3 d, float tMax)
 {
     if (g_RTWater.y < 0.5) return float3(1.0, 1.0, 1.0);
-    float below = g_RTWater.x - o.y;
+    float below = (g_RTWater.x - g_RTWater.w) - o.y;   // the wave band counts as the surface, not as "under"
     if (below <= 0.0) return float3(1.0, 1.0, 1.0);  // starts above: an escaping ray stays above
     float t = (d.y > 1e-4) ? min((g_RTWater.x - o.y) / d.y, tMax) : tMax;
     return exp(-g_RTWaterAbs.rgb * (max(t, 0.0) * 6.0 * g_RTWaterAbs.w));
 }
 
-float3 EnvSample(float3 dir, float rough)   // probe (parallax-free), analytic sky, or flat ambient when sky is off
+// ---- The submerged eye. A ray that STARTS under the level (an underwater mirror, a reflected
+// leg that dived) sees by the underwater post's law (waterunder.ps): extinction = absorption +
+// scattering over Opacity Depth, in-scatter = the scatter colour lit by the column's ambient.
+// "Under" reaches up through the wave band: the drawn surface rides above the rest level by
+// up to the band, and a wall's pixels between the level and a crest are under water too (they
+// mirrored the dry world otherwise - a torn bright line along every crest meeting a mirror).
+bool RTUnderEye(float3 o) { return g_RTWater.y > 0.5 && o.y < g_RTWater.x + g_RTWater.w; }
+
+float3 EnvSample(float3 dir, float rough)   // probe (parallax-free), the sky map, analytic sky, or flat ambient when sky is off
 {
     if (g_ProbePos.w > 0.5) return g_Probe.SampleLevel(g_Probe_sampler, dir, saturate(rough) * g_ProbeParams.y).rgb * g_ProbeParams.x;
+    if (g_Misc.z > 0.5) return SkyMapSample(g_SkyMap, g_SkyMap_sampler, dir, rough);
     if (g_SkyParams.y > 0.5) return SkyColor(dir);
     return g_Ambient.rgb;
+}
+// A ray that left the scene: the sky map is exact there (clouds included), the probe is not.
+float3 EnvMiss(float3 dir)
+{
+    if (g_Misc.z > 0.5) return SkyMapSample(g_SkyMap, g_SkyMap_sampler, dir, 0.0);
+    return EnvSample(dir, 0.0);
 }
 
 // What a ray sees of the water surface it crossed: sky mirrored about the horizontal plane,

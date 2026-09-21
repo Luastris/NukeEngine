@@ -10,5 +10,5 @@ void main(inout RTPayload p)
     // RayTCurrent() reports TMax in a miss shader; HLSL has no RayTMax() intrinsic.
     p.hitT = RayTCurrent();
     p.color = RTWaterFinishMiss(WorldRayOrigin(), WorldRayDirection(), RayTCurrent(),
-                                EnvSample(WorldRayDirection(), 0.0), p.depth);
+                                EnvMiss(WorldRayDirection()), p.depth);
 }

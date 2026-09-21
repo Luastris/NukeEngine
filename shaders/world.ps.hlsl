@@ -5,12 +5,14 @@
 // g_Disp = (POM depth uv-space 0=off, tess displacement m, mid level, reserved).
 // Overlay slots (states + static layers): g_Ov = (value, threshold, feather, topOnly);
 // g_OvT = tint rgba; g_OvP = (metallic target -1=keep, roughness target -1=keep, mask3D channel
-// -1=none, flags 1=albedo 2=normal 4=MR 8=mask2D 16=flipG); g_OvM0..2 = world->mask uvw rows;
+// -1=none, flags 1=albedo 2=normal 4=MR 8=mask2D 16=flipG 32=from the sky); g_OvM0..2 = world->mask uvw rows;
 // g_OvMQ = (mask resolution, hasMask3D, 0, 0).
 cbuffer MatCB {
 #include "matcb_std.hlsli"
 };
 #include "nuke_material.hlsli"
+#include "skyocc.hlsli"   // sky-occlusion capture: from-sky conditions settle only under open sky
+#include "trails.hlsli"   // ground trails: movers carve the accumulated layer
 // BRDF pack: g_Brdf1 = (clearCoat, coatRoughness, anisotropy, sheen);
 // g_Brdf2 = (translucency, ior, iridescence, iridescenceThickness);
 // g_Brdf3 = (sheen tint rgb, hasFlowMap); g_Brdf4 = (translucency tint rgb, refraction on/off).
@@ -40,7 +42,9 @@ cbuffer FrameCB
 Texture2D<float> g_CloudShadowMap;   // the sun's transmittance through the clouds over the square (Load; white when off)
 Texture2D g_AtmoSkyView;             // the camera's sky-view LUT (sampled with g_GIIrr_sampler: linear clamp)
 Texture2D g_AtmoTrans;               // the atmosphere's transmittance LUT
+Texture2D g_SkyMap;                  // the sky map with the clouds (skymap.hlsli; g_Misc.z = live; g_GIIrr_sampler)
 #include "atmo_map.hlsli"
+#include "skymap.hlsli"
 TextureCube  g_Probe;          // scene-captured reflection cubemap (when g_ProbePos.w > 0.5)
 SamplerState g_Probe_sampler;
 
@@ -110,10 +114,12 @@ float3 AtmoSunAt(float3 wpos, float3 toLight)
     float  muH = -sqrt(max(1.0 - (g_AtmoA.y * g_AtmoA.y) / (rr * rr), 0.0));   // below the horizon: the planet occludes
     return g_AtmoTrans.SampleLevel(g_GIIrr_sampler, uv, 0).rgb * smoothstep(muH - 0.004, muH + 0.004, mu);
 }
-// Sky colour for a world direction, used for image-based lighting. Must match sky.ps: the
-// physical atmosphere reads the camera's sky-view LUT (the planet below is the summary ground).
-float3 SkyColor(float3 dir)
+// Sky colour for a world direction, used for image-based lighting: the sky map when it is live
+// (clouds included; `rough` picks the mip), else sky.ps's own terms - the physical atmosphere
+// reads the camera's sky-view LUT (the planet below is the summary ground).
+float3 SkyColorRough(float3 dir, float rough)
 {
+    if (g_Misc.z > 0.5) return SkyMapSample(g_SkyMap, g_GIIrr_sampler, dir, rough);
     if (g_AtmoA.x > 1.5)
     {
         float3 camKm = AtmoKmOf(g_CamPos.xyz);
@@ -127,6 +133,7 @@ float3 SkyColor(float3 dir)
                            : lerp(g_SkyHorizon.rgb, g_SkyGround.rgb, saturate(-up));
     return c * g_SkyParams.x;
 }
+float3 SkyColor(float3 dir) { return SkyColorRough(dir, 0.75); }   // the diffuse lobe: well blurred
 Texture2DArray          g_Shadow;
 SamplerComparisonState  g_Shadow_sampler;
 
@@ -284,10 +291,12 @@ float OvMask3D(float3 wpos, float chan)
 float OvWeight(float4 ov, float4 ovp, uint flags, float mask2d, float3 wpos, float3 ng)
 {
     float v = ov.x;
+    if (flags & 32u) v *= SkyGate(wpos, ng);   // from the sky: the GLOBAL value stops under roofs (the painted mask does not)
     if (g_OvMQ.y > 0.5 && ovp.z >= 0.0) v = max(v, OvMask3D(wpos, ovp.z));
     if (flags & 8u) v *= mask2d;
     float w = smoothstep(ov.y, ov.y + max(ov.z, 1e-3), v);
     if (ov.w > 0.0) { float up = saturate(ng.y); w *= lerp(1.0, up * up, ov.w); }
+    if (flags & 32u) w *= TrailCover(wpos);   // tracks pressed down to the surface show it
     return w;
 }
 
@@ -556,6 +565,13 @@ float4 main(in PSIn i, bool isFront : SV_IsFrontFace) : SV_Target
         if (anyN)
             N = PerturbNormal(N, normalize(nTS), ddx(i.wpos), ddy(i.wpos), ddx(i.uv), ddy(i.uv));
     }
+    // W5 trails: the walls of footprints in the accumulated layer tilt the normal by the carved
+    // depth (the slots' displacement), so plain draws show the tracks' relief without tessellation.
+    [branch] if (g_Trail.w > 0.0)
+    {
+        float depth = dot(float4(ovW[0], ovW[1], ovW[2], ovW[3]), g_OvD0) + dot(float4(ovW[4], ovW[5], ovW[6], ovW[7]), g_OvD1);
+        [branch] if (depth > 0.0) { float2 tg = TrailGrad(i.wpos) * depth; N = normalize(N + float3(tg.x, 0.0, tg.y)); }
+    }
     float3 swpos = i.wpos + N * g_ShadowParams.y;   // normal-offset bias: sample shadows slightly off the surface
 
     // Anisotropy tangent frame (cotangent trick), rotated by the flow map when present.
@@ -754,7 +770,7 @@ float4 main(in PSIn i, bool isFront : SV_IsFrontFace) : SV_Target
         else
         {
             irr = SkyColor(N);
-            env = lerp(SkyColor(R), avg, rough);
+            env = (g_Misc.z > 0.5) ? SkyColorRough(R, rough) : lerp(SkyColor(R), avg, rough);
         }
         float3 Fr  = F0 + (max(float3(1.0 - rough, 1.0 - rough, 1.0 - rough), F0) - F0) * pow(1.0 - ndv, 5.0);
         float3 kd  = (1.0 - Fr) * (1.0 - metallic);

@@ -8,6 +8,9 @@ cbuffer MatCB {
 };
 #define NUKE_MAT_NO_TEX
 #include "nuke_material.hlsli"
+#include "skyocc.hlsli"    // W5: from-sky states pile up under open sky only
+#include "trails.hlsli"    // W5: movers carve the accumulated layer
+#include "ovaccum.hlsli"
 Texture2D    g_Height;
 SamplerState g_Height_sampler;
 
@@ -68,6 +71,15 @@ PSIn main(PatchTess pt, float3 b : SV_DomainLocation, const OutputPatch<HSOut, 3
         dMid   = lerp(dMid,   g_DispT.z, mtw);
     }
     pos += nrm * ((h - dMid) * dScale) * fade;
+    // W5 accumulation: from-sky states pile up as real depth along the normal - each slot's
+    // displacement at full state by the state's weight, less what trails have carved.
+    {
+        float3 wp0 = mul(g_World, float4(pos, 1.0)).xyz;
+        float3 wn  = mul((float3x3)g_World, nrm);
+        float  nl  = max(length(wn), 1e-4);
+        float  acc = OvAccumAll(wp0, wn / nl);
+        [branch] if (acc > 0.0) pos += nrm * (acc * (1.0 - TrailCarve(wp0)) * fade / nl);   // meters -> local units
+    }
 
     PSIn o;
     o.pos  = mul(g_WVP,   float4(pos, 1.0));

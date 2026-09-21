@@ -101,6 +101,19 @@ public:
 	[[nuke::func]] static void   SetCondition(const std::string& state, double value);   // 0 removes
 	[[nuke::func]] static double Condition(const std::string& state);
 	[[nuke::func]] static void   ClearConditions();
+	// A condition FROM THE SKY (rain wets, snow settles, dust blows in) reaches only surfaces open
+	// to it: the renderer gates the GLOBAL value by its top-down sky-occlusion capture (roofs
+	// shelter; undersides never catch it). Per-atom overrides and painted masks are explicit and
+	// never gated. SetCondition(state, 0) clears the flag with the state.
+	[[nuke::func]] static void   SetConditionSky(const std::string& state, bool fromSky);
+	[[nuke::func]] static bool   ConditionFromSky(const std::string& state);
+	static bool AnyConditionFromSky();   // a sky-gated condition is live: the renderer captures
+	// Ground trails (W5): grounded movers press their footprints into the accumulated layer
+	// (the renderer's carve map). Fill = fraction of a track fresh fall refills per second
+	// (weather-driven; 0 = tracks stay until the layer goes).
+	[[nuke::func]] static void   SetTrailFill(double perSecond);
+	[[nuke::func]] static double TrailFill();
+	static void PushTrails(class World* w, class iRender* r);   // World::Render, live worlds only
 	// EDITOR PREVIEW conditions: override Condition() for live preview but are NEVER
 	// serialized — the material editor's simulator must not leak weather into saved worlds.
 	static void SetConditionPreview(const std::string& state, double value);   // < 0 clears the key

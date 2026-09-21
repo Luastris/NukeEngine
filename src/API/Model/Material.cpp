@@ -732,17 +732,20 @@ void Material::PushRenderProps()
 	// g_Ov  = (value, threshold, feather, topOnly) — state slots carry the GLOBAL condition
 	//         value here; per-atom overrides and the painted mask are patched per draw.
 	// g_OvT = tint rgba; g_OvP = (metallic target, roughness target, mask3D channel, flags).
-	// flags: 1 = albedo map, 2 = normal map, 4 = MR map, 8 = 2D mask map, 16 = flip normal green.
+	// flags: 1 = albedo map, 2 = normal map, 4 = MR map, 8 = 2D mask map, 16 = flip normal green,
+	// 32 = the condition comes from the sky (the renderer gates it by sky occlusion: roofs shelter).
 	static const auto kOvV = []{ std::array<std::string, kOverlaySlots> a; for (int i = 0; i < kOverlaySlots; ++i) a[i] = "g_Ov"  + std::to_string(i); return a; }();
 	static const auto kOvT = []{ std::array<std::string, kOverlaySlots> a; for (int i = 0; i < kOverlaySlots; ++i) a[i] = "g_OvT" + std::to_string(i); return a; }();
 	static const auto kOvP = []{ std::array<std::string, kOverlaySlots> a; for (int i = 0; i < kOverlaySlots; ++i) a[i] = "g_OvP" + std::to_string(i); return a; }();
 	liveOvCount = 0;
+	liveStateDisp = 0.0f;
+	float ovD[kOverlaySlots] = {};   // W5: accumulation depth per slot (g_OvD0/1), states only
 	auto slotProps = [&](int i, Texture* alb, Texture* nrm, Texture* mrT, Texture* mask,
 	                     const Color& tint, float metal, float rough,
-	                     float value, float threshold, float feather, float topOnly)
+	                     float value, float threshold, float feather, float topOnly, bool fromSky = false)
 	{
 		const float flags = (alb ? 1.0f : 0.0f) + (nrm ? 2.0f : 0.0f) + (mrT ? 4.0f : 0.0f)
-		                  + (mask ? 8.0f : 0.0f) + ((nrm && nrm->invertGreen) ? 16.0f : 0.0f);
+		                  + (mask ? 8.0f : 0.0f) + ((nrm && nrm->invertGreen) ? 16.0f : 0.0f) + (fromSky ? 32.0f : 0.0f);
 		props[kOvV[i]] = { value, threshold, feather, topOnly };
 		props[kOvT[i]] = { (float)tint.r, (float)tint.g, (float)tint.b, (float)tint.a };
 		props[kOvP[i]] = { metal, rough, -1.0f, flags };
@@ -764,8 +767,12 @@ void Material::PushRenderProps()
 		const int i = liveOvCount++;
 		liveOv[i] = { s.albedo, s.normal, s.mrTex, nullptr, s.state };
 		slotProps(i, s.albedo, s.normal, s.mrTex, nullptr, s.color, s.metallic, s.roughness,
-		          (float)Surface::Condition(s.state), s.threshold, s.feather, s.topOnly);
+		          (float)Surface::Condition(s.state), s.threshold, s.feather, s.topOnly, Surface::ConditionFromSky(s.state));
+		ovD[i] = std::max(s.displace, 0.0f);
+		if (ovD[i] > 0.0f && Surface::Condition(s.state) > 0.0) liveStateDisp = std::max(liveStateDisp, ovD[i]);
 	}
+	props["g_OvD0"] = { ovD[0], ovD[1], ovD[2], ovD[3] };
+	props["g_OvD1"] = { ovD[4], ovD[5], ovD[6], ovD[7] };
 	// Unused slots that once had props must go inert (a removed layer may not linger).
 	for (int i = liveOvCount; i < kOverlaySlots; ++i)
 		if (props.count(kOvV[i]))

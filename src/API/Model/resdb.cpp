@@ -310,6 +310,7 @@ static bool RendererInternalShader(const std::string& name)
 	    || name == "grid"                                                  // analytic editor grid pass
 	    || name == "cursor"                                                // software cursor pass
 	    || name == "gbuffer"                                               // SSR/TAA prepass
+	    || name.rfind("trails", 0) == 0                                    // W5 ground-trail map passes
 	    || name.rfind("hiz", 0) == 0 || name == "occl"                     // Hi-Z occlusion
 	    || name == "meshcost"                                              // mesh-cost debug view
 	    || name == "giprobe"                                               // DDGI Debug Probes spheres

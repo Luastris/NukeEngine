@@ -19,6 +19,8 @@ Texture2D    g_Ov0MR; Texture2D g_Ov0Mask;
 OVG_DECL(1) OVG_DECL(2) OVG_DECL(3) OVG_DECL(4) OVG_DECL(5) OVG_DECL(6) OVG_DECL(7)
 Texture2D    g_Mask3D;       // painted SurfaceMask flipbook (see world.ps)
 Texture2D    g_DetailNrm;    // high-frequency detail normal (shares g_Ov0Nrm_sampler)
+#include "skyocc.hlsli"      // sky-occlusion capture (from-sky conditions), as in world.ps
+#include "trails.hlsli"      // ground trails, as in world.ps
 
 // The material UV transform, shared by every projection plane (identical to world.ps).
 float2 ApplyUVT(float2 uv)
@@ -57,10 +59,12 @@ float OvMask3D(float3 wpos, float chan)
 float OvWeight(float4 ov, float4 ovp, uint flags, float mask2d, float3 wpos, float3 ng)
 {
     float v = ov.x;
+    if (flags & 32u) v *= SkyGate(wpos, ng);
     if (g_OvMQ.y > 0.5 && ovp.z >= 0.0) v = max(v, OvMask3D(wpos, ovp.z));
     if (flags & 8u) v *= mask2d;
     float w = smoothstep(ov.y, ov.y + max(ov.z, 1e-3), v);
     if (ov.w > 0.0) { float up = saturate(ng.y); w *= lerp(1.0, up * up, ov.w); }
+    if (flags & 32u) w *= TrailCover(wpos);
     return w;
 }
 
@@ -170,6 +174,11 @@ void main(PSIn i, out PSOut o)
         OVG_NRM(0) OVG_NRM(1) OVG_NRM(2) OVG_NRM(3) OVG_NRM(4) OVG_NRM(5) OVG_NRM(6) OVG_NRM(7)
         if (anyN)
             N = PerturbNormal(N, normalize(nTS), ddx(i.wpos), ddy(i.wpos), ddx(i.uv), ddy(i.uv));
+    }
+    [branch] if (g_Trail.w > 0.0)   // W5 trail walls (identical to world.ps)
+    {
+        float depth = dot(float4(ovW[0], ovW[1], ovW[2], ovW[3]), g_OvD0) + dot(float4(ovW[4], ovW[5], ovW[6], ovW[7]), g_OvD1);
+        [branch] if (depth > 0.0) { float2 tg = TrailGrad(i.wpos) * depth; N = normalize(N + float3(tg.x, 0.0, tg.y)); }
     }
     o.gbuf = float4(OctEncode(N), rough, metallic);
 

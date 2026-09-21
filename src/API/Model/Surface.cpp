@@ -1,4 +1,5 @@
 #include "API/Model/Surface.h"
+#include <set>
 #include "API/Model/Atom.h"
 #include "API/Model/Transform.h"
 #include "API/Model/World.h"
@@ -9,6 +10,9 @@
 #include "API/Model/AudioSource.h"
 #include "API/Model/Decal.h"
 #include "API/Model/Physics.h"
+#include "API/Model/Camera.h"
+#include "API/Model/CharacterController.h"
+#include "API/Model/Collider.h"
 #include "API/Model/Prefab.h"
 #include "API/Model/Rigidbody.h"
 #include "API/Model/Wind.h"
@@ -19,6 +23,7 @@
 #include <render/irender.h>
 #include <nlohmann/json.hpp>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstring>
 #include <functional>
@@ -30,6 +35,7 @@ namespace nuke {
 
 // ---- global condition table + live component registries -----------------------------------
 static std::map<std::string, float>       g_conditions;
+static std::set<std::string>              g_condSky;   // conditions that come from the sky (renderer-gated)
 static std::map<Atom*, SurfaceState*>     g_states;   // one override per atom (last Init wins)
 static std::vector<SurfaceMask*>          g_masks;
 
@@ -310,8 +316,81 @@ float SurfaceMask::Sample(const Vector3& worldPos, const std::string& state)
 void Surface::SetCondition(const std::string& state, double value)
 {
 	if (state.empty()) return;
-	if (value <= 0.0) { g_conditions.erase(state); return; }
+	if (value <= 0.0) { g_conditions.erase(state); g_condSky.erase(state); return; }
 	g_conditions[state] = (float)std::min(value, 1.0);
+}
+
+void Surface::SetConditionSky(const std::string& state, bool fromSky)
+{
+	if (state.empty()) return;
+	if (fromSky) g_condSky.insert(state); else g_condSky.erase(state);
+}
+bool Surface::ConditionFromSky(const std::string& state) { return g_condSky.count(state) != 0; }
+
+// ---- ground trails --------------------------------------------------------------------------
+static double g_trailFill = 0.0;
+void   Surface::SetTrailFill(double perSecond) { g_trailFill = std::max(perSecond, 0.0); }
+double Surface::TrailFill() { return g_trailFill; }
+
+// Footprints of grounded bodies: a CharacterController standing on ground, or a Collider body
+// (box/sphere/capsule: its bounding disc) whose bottom rests within a step of the ground below
+// (raycast down, its own body ignored). Nearest to the camera first: the renderer takes what
+// its stamp buffer holds. Only while a sky-borne layer exists - nothing to carve otherwise.
+static void GatherTrails(bc::list<Atom*>& list, const Vector3& cam, std::vector<std::pair<float, std::array<float, 4>>>& out)
+{
+	for (Atom* a : list)
+	{
+		if (!a) continue;
+		if (!a->children.empty()) GatherTrails(a->children, cam, out);
+		Transform& tf = a->GetTransform();
+		const Vector3 P = tf.globalPosition();
+		const Vector3 scl = tf.globalScale();
+		const float sxz = (float)std::max(std::fabs(scl.x), std::fabs(scl.z)), sy = (float)std::fabs(scl.y);
+		float radius = 0.0f, halfH = 0.0f; Vector3 center = P; bool grounded = false;
+		if (CharacterController* cc = a->GetComponent<CharacterController>())
+		{
+			if (!cc->enabled) continue;
+			radius = std::max(0.05f, cc->radius * sxz);
+			halfH  = std::max(0.2f, cc->height * sy) * 0.5f;
+			center = Vector3(P.x + cc->capsuleOffset.x * scl.x, P.y + cc->capsuleOffset.y * scl.y + (cc->pivot == 0 ? halfH : 0.0f), P.z + cc->capsuleOffset.z * scl.z);
+			grounded = cc->IsGrounded();
+		}
+		else if (Collider* col = a->GetComponent<Collider>())
+		{
+			if (!col->enabled || col->shape == Collider::S_Mesh || !a->GetComponent<Rigidbody>()) continue;
+			if (col->shape == Collider::S_Sphere)       { radius = col->radius * sxz; halfH = col->radius * sy; }
+			else if (col->shape == Collider::S_Capsule) { radius = col->radius * sxz; halfH = (float)(col->halfHeight * sy + col->radius * sy); }
+			else { radius = (float)std::max(std::fabs(col->halfExtents.x * scl.x), std::fabs(col->halfExtents.z * scl.z)); halfH = (float)std::fabs(col->halfExtents.y * scl.y); }
+			if (Physics::Available() && Physics::RaycastIgnore(center, Vector3(0, -1, 0), halfH + 0.12, a)) grounded = true;
+		}
+		else continue;
+		if (!grounded || radius <= 0.0f) continue;
+		const float dx = (float)(center.x - cam.x), dz = (float)(center.z - cam.z);
+		out.push_back({ dx * dx + dz * dz, { (float)center.x, (float)center.z, radius, 1.0f } });
+	}
+}
+
+void Surface::PushTrails(World* w, iRender* r)
+{
+	if (!w || !r) return;
+	static std::vector<std::pair<float, std::array<float, 4>>> found;
+	static std::vector<float> packed;
+	found.clear(); packed.clear();
+	if (AnyConditionFromSky())
+	{
+		Vector3 cam;
+		if (Camera* c = w->GetMainCamera()) if (c->transform) cam = c->transform->globalPosition();
+		GatherTrails(w->GetHierarchy(), cam, found);
+		std::sort(found.begin(), found.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+		packed.reserve(found.size() * 4);
+		for (const auto& f : found) packed.insert(packed.end(), f.second.begin(), f.second.end());
+	}
+	r->setGroundTrails(packed.empty() ? nullptr : packed.data(), (int)(packed.size() / 4), (float)g_trailFill);
+}
+bool Surface::AnyConditionFromSky()
+{
+	for (const std::string& st : g_condSky) if (g_conditions.count(st)) return true;
+	return false;
 }
 
 // Editor preview conditions live in their OWN map: they override reads but never serialize
@@ -335,7 +414,7 @@ void Surface::SetConditionPreview(const std::string& state, double value)
 
 void Surface::ClearConditionPreviews() { g_condPreview.clear(); }
 
-void Surface::ClearConditions() { g_conditions.clear(); }
+void Surface::ClearConditions() { g_conditions.clear(); g_condSky.clear(); }
 
 double Surface::ValueAt(Atom* atom, const std::string& state, const Vector3& worldPos)
 {
@@ -393,17 +472,20 @@ void Surface::SaveJson(nlohmann::json& j)
 	nlohmann::json s = nlohmann::json::object();
 	for (const auto& kv : g_conditions) s[kv.first] = kv.second;
 	j["surface"] = s;
+	if (!g_condSky.empty()) { nlohmann::json a = nlohmann::json::array(); for (const std::string& st : g_condSky) a.push_back(st); j["surfaceSky"] = a; }
 }
 
 void Surface::LoadJson(const nlohmann::json& j)
 {
-	g_conditions.clear();
+	g_conditions.clear(); g_condSky.clear();
+	if (j.contains("surfaceSky") && j["surfaceSky"].is_array())
+		for (const auto& v : j["surfaceSky"]) if (v.is_string()) g_condSky.insert(v.get<std::string>());
 	if (!j.contains("surface") || !j["surface"].is_object()) return;
 	for (auto it = j["surface"].begin(); it != j["surface"].end(); ++it)
 		if (it.value().is_number()) g_conditions[it.key()] = (float)it.value().get<double>();
 }
 
-void Surface::ResetDefaults() { g_conditions.clear(); }
+void Surface::ResetDefaults() { g_conditions.clear(); g_condSky.clear(); }
 
 void Surface::Register(SurfaceState* s)   { if (s && s->atom) g_states[s->atom] = s; }
 void Surface::Unregister(SurfaceState* s)
@@ -431,6 +513,7 @@ void Surface::PushDrawContext(Atom* a, Material* m)
 	if (!m) return;
 	if (m->liveOvCount <= 0 || !a) { m->liveDrawSet = false; return; }
 	m->liveDrawSet    = true;
+	m->liveDrawNoSky  = 0;
 	m->liveDrawMask3D = nullptr;
 	m->liveDrawMaskRes = 0.0f;
 	// Nearest enabled SurfaceMask along the ancestor chain covers the draw.
@@ -453,7 +536,7 @@ void Surface::PushDrawContext(Atom* a, Material* m)
 		for (Atom* p = a; p; p = p->parent)
 		{
 			auto it = g_states.find(p);
-			if (it != g_states.end()) { float ov; if (it->second->Value(st, ov)) { v = ov; break; } }
+			if (it != g_states.end()) { float ov; if (it->second->Value(st, ov)) { v = ov; m->liveDrawNoSky |= (unsigned char)(1u << i); break; } }
 		}
 		m->liveDrawValue[i] = v;
 		if (mask)

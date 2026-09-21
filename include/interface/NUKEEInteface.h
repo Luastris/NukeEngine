@@ -146,6 +146,14 @@ extern "C" { NUKE_ABI_STAMP int nuke_build_debug = 0; }
 //       iRender gained addRTInstanceTinted (appended): per-instance colour for RT instances.
 //       Mesh gained rtSprite (appended, sizeof grew): ray-facing procedural sprites in the TLAS.
 //       iRender gained setSpriteMask (appended); Material gained mask (appended, sizeof grew).
+//       iRender gained setLensRain (appended): the lens film moved into the renderer (water injects, weather rains).
+//       Material gained liveDrawNoSky (appended, sizeof grew); Surface conditions gained a from-sky flag
+//       (g_OvP flag 32): the renderer gates such states by its sky-occlusion capture (roofs shelter).
+//       Material gained liveStateDisp (appended); iRender gained setGroundTrails (appended): W5 accumulation
+//       depth (g_OvD0/1 in the std MatCB block) + the renderer's trail carve map.
+//       NukeWaterSurface gained tint (appended): the water's Tint Strength; the renderer's sky map (skymap.hlsli)
+//       is the sky for reflections / IBL (FrameCB g_Misc.z = live; native Frame gained skyMapSRV, appended).
+//       NukeWaterSurface gained underFog + underWobble (appended): per-effect underwater switches.
 #define NUKE_ENGINE_ABI 44
 extern "C" { NUKE_ABI_STAMP int nuke_engine_abi = NUKE_ENGINE_ABI; }
 

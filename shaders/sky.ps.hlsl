@@ -6,12 +6,12 @@ cbuffer SkyCB
 {
     float4x4 g_InvVP;   // inverse(view*proj): clip -> world
     float4 g_CamPos;    // xyz = camera, w = sky mode (1 = procedural, 2 = physical)
-    float4 g_Top; float4 g_Horizon; float4 g_Ground;   // g_Top.w = the eclipsing moon's offset from the sun (sun radii; >= 1000 = none)
+    float4 g_Top; float4 g_Horizon; float4 g_Ground;   // g_Top.w = the eclipsing moon's offset from the sun (sun radii; >= 1000 = none); g_Ground.w = tonemap white point (LDR path)
     float4 g_Params;    // x = skyIntensity, y = sunIntensity
     float4 g_SunDir;    // xyz = direction the sun light travels, w = disc angular radius (radians)
     float4 g_SunCol;    // rgb = sun colour, w = glow strength
-    float4 g_MoonDir;   // xyz = direction toward the moon
-    float4 g_MoonParams;// x = amount (0 = hidden), y = angular radius (radians), z = phase (0/1 new, .5 full)
+    float4 g_MoonDir;   // xyz = direction toward the moon, w = the boundless ocean's level (g_Horizon.w = 1 when one is live)
+    float4 g_MoonParams;// x = amount (0 = hidden), y = angular radius (radians), z = phase (0/1 new, .5 full), w = scene is LDR (the sky tonemaps itself)
 };
 Texture2D    g_StarTex;            // optional equirectangular star panorama (g_Params.w = 1 when bound)
 SamplerState g_StarTex_sampler;
@@ -37,7 +37,16 @@ float4 main(in PSIn i) : SV_Target
         float3 camKm = AtmoToKm(g_CamPos.xyz);
         float  tG = AtmoRaySphere(camKm, dir, AtmoRg());
         ground = tG >= 0.0;
-        if (ground) sky += AtmoGroundRadiance(camKm + dir * tG, sv.a);
+        if (ground)
+        {
+            // A boundless ocean (the camera above OR under it): the planet below the horizon IS the sea, and at
+            // grazing the sea is the sky mirrored (the ocean mesh's far edge stops short of the
+            // horizon by a sliver; the planet's ground showed there as a bright line).
+            if (g_Horizon.w > 0.5)
+                sky += AtmoSkyView(float3(dir.x, -dir.y, dir.z)).rgb * sv.a;
+            else
+                sky += AtmoGroundRadiance(camKm + dir * tG, sv.a);
+        }
         else
         {
             trans = AtmoViewTransmittance(camKm, dir);
@@ -115,6 +124,14 @@ float4 main(in PSIn i) : SV_Target
         sky += sunTerm;
     }
 
-    // Authored in display space: emitted raw, with no tonemap or gamma applied here.
+    // The procedural gradient is authored in display space: emitted raw. The physical sky is
+    // linear radiance: on the LDR path (RGBA8 scene, post is passthrough) it tonemaps itself
+    // exactly like world.ps (extended Reinhard, white point, sRGB), else the post pass does.
+    if (g_CamPos.w > 1.5 && g_MoonParams.w > 0.5)
+    {
+        float W = max(g_Ground.w, 1e-3);
+        sky = sky * (1.0 + sky / (W * W)) / (1.0 + sky);
+        sky = pow(max(sky, 0.0), 1.0 / 2.2);
+    }
     return float4(sky, 1.0);
 }

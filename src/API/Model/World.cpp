@@ -2192,6 +2192,8 @@ void World::Render(iRender* r)
 	// LiveMaterial auto-foliage: surfaces whose material carries foliage entries grow them
 	// (transient components). Render-phase so it runs in BOTH edit mode and PIE.
 	if (!auxiliary) Surface::DriveFoliage(this);
+	// W5 ground trails: footprints of grounded movers -> the renderer's carve map.
+	if (!auxiliary) Surface::PushTrails(this, r);
 	// Fire visual/debris spawns queue on the game tick and land here (same rule as hit spawns).
 	if (!auxiliary) Fire::Drain(this);
 

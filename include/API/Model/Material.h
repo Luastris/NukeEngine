@@ -36,7 +36,7 @@ struct NUKEENGINE_API LiveState
 	float threshold = 0.0f;            // state value where the blend starts
 	float feather   = 0.25f;           // blend width past the threshold
 	float topOnly   = 0.0f;            // 0 = uniform, 1 = up-facing surfaces only (snow/dust settle)
-	float displace  = 0.0f;            // displacement contribution at full state (world units)
+	float displace  = 0.0f;            // accumulation depth at full state (world units): real relief under tessellation, trails carve it
 	// Spatial shaping (terrain today): states never blanket the world uniformly.
 	float hMin = 0.0f, hMax = 0.0f;    // world-Y band the state lives in (hMax <= hMin = whole range)
 	float hFeather = 8.0f;             // band edge softness (world units) — the snowline fades
@@ -431,6 +431,13 @@ public:
     bool             SaveToFile(const std::string& path) const;
     static Material* LoadFromFile(const std::string& path);
     static Material* LoadFromString(const std::string& text);   // packed content
+
+    // Per-draw overlay context (appended): bit per slot = this draw's value is an explicit
+    // SurfaceState override, so the renderer lifts the from-sky gate (g_OvP flag 32) for it.
+    unsigned char liveDrawNoSky = 0;
+    // W5 (appended): the deepest active state displacement (state value > 0) - the renderer
+    // tessellates the draw so the accumulated layer is real depth (world.ds / terrain DS).
+    float liveStateDisp = 0.0f;
 };
 }  // namespace nuke
 
