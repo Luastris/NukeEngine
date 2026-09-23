@@ -154,6 +154,8 @@ extern "C" { NUKE_ABI_STAMP int nuke_build_debug = 0; }
 //       NukeWaterSurface gained tint (appended): the water's Tint Strength; the renderer's sky map (skymap.hlsli)
 //       is the sky for reflections / IBL (FrameCB g_Misc.z = live; native Frame gained skyMapSRV, appended).
 //       NukeWaterSurface gained underFog + underWobble (appended): per-effect underwater switches.
+//       R3/E2: new component PostFXVolume (API/Model/PostFXVolume.h; no layout change elsewhere); the renderer
+//       gained the dof / motionblur / exposure built-in post stages (chain names, no interface change).
 #define NUKE_ENGINE_ABI 44
 extern "C" { NUKE_ABI_STAMP int nuke_engine_abi = NUKE_ENGINE_ABI; }
 

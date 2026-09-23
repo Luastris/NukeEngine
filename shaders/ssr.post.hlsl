@@ -64,7 +64,8 @@ float4 main(in PSIn i) : SV_Target
     if (depth >= 0.99999) return float4(base, 1.0);            // sky / no geometry
 
     float4 gb = g_GBuffer.Sample(g_GBuffer_sampler, i.uv);
-    float rough = gb.z, metal = max(gb.w, 0.0);   // -1 = the water's flag (watergbuf.ps): a dielectric here
+    if (gb.w < -0.5) return float4(base, 1.0);                 // the water's flag (watergbuf.ps): it shades its own reflections
+    float rough = gb.z, metal = gb.w;
     float3 Nw = OctDecode(gb.xy);
 
     float3 vpos = ViewPosFromUV(i.uv, depth);

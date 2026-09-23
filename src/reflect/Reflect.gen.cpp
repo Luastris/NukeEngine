@@ -39,6 +39,7 @@
 #include "API/Model/PairedAnim.h"
 #include "API/Model/Physics.h"
 #include "API/Model/PoseClone.h"
+#include "API/Model/PostFXVolume.h"
 #include "API/Model/PostProcess.h"
 #include "API/Model/Prefab.h"
 #include "API/Model/Profiler.h"
@@ -1333,6 +1334,29 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("PairOf", &PoseClone::PairOf));
 		Reflect_SetMethodDoc("PoseClone", "PairOf", "The source bone driving a target bone, \"\" when unpaired.", "targetBone");
 		t.create = []() -> void* { return new PoseClone(); };
+	}
+	{
+		TypeInfo& t = TypeOf<PostFXVolume>();
+		t.base = "Component";
+		t.category = "Rendering";
+		t.fields.push_back(MakeField("shape", &PostFXVolume::shape, "", "Shape", 0.0f, 0.0f, "Sphere,Box"));
+		t.fields.push_back(MakeField("radius", &PostFXVolume::radius, "", "Radius"));
+		t.fields.push_back(MakeField("halfExtents", &PostFXVolume::halfExtents, "", "Half Extents"));
+		t.fields.push_back(MakeField("priority", &PostFXVolume::priority, "", "Priority"));
+		t.fields.back().tip = "Higher wins where volumes overlap (blended in ascending order).";
+		t.fields.push_back(MakeField("blendDistance", &PostFXVolume::blendDistance, "", "Blend Distance"));
+		t.fields.back().tip = "Metres outside the shape over which the influence fades to nothing.";
+		t.fields.push_back(MakeField("weight", &PostFXVolume::weight, "", "Weight", 0.0f, 1.0f));
+		t.fields.back().tip = "Full influence inside the shape (1 = the volume's values replace the camera's).";
+		t.fields.push_back(MakeField("overrideExposure", &PostFXVolume::overrideExposure, "", "Override Exposure"));
+		t.fields.back().tip = "Blend the SDR tonemap exposure toward the value below (HDR projects).";
+		t.fields.push_back(MakeField("exposure", &PostFXVolume::exposure, "", "Exposure", 0.0f, 8.0f));
+		t.fields.push_back(MakeField("overrideWhitePoint", &PostFXVolume::overrideWhitePoint, "", "Override White Point"));
+		t.fields.back().tip = "Blend the SDR tonemap white point toward the value below.";
+		t.fields.push_back(MakeField("whitePoint", &PostFXVolume::whitePoint, "", "White Point", 0.1f, 8.0f));
+		t.fields.push_back(MakeField("effectsData", &PostFXVolume::effectsData));
+		t.fields.back().hidden = true;
+		t.create = []() -> void* { return new PostFXVolume(); };
 	}
 	{
 		TypeInfo& t = TypeOf<PostProcess>();

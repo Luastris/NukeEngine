@@ -14,6 +14,8 @@
 #include "API/Model/Light.h"
 #include "API/Model/Environment.h"
 #include "API/Model/PostProcess.h"
+#include "API/Model/PostFXVolume.h"
+#include "API/Model/Math.h"   // ScaleExtents / ScaleRadius (volume gizmos follow the atom scale)
 #include "API/Model/Shader.h"
 #include "API/Model/ReflectionProbe.h"
 #include "API/Model/Time.h"
@@ -2104,6 +2106,24 @@ static void EmitSelectionGizmos(Atom* a)
 		}
 	}
 
+	if (PostFXVolume* pv = a->GetComponent<PostFXVolume>())
+	{
+		const Color c(0.85, 0.55, 1.0, 1.0);   // post-fx volumes: violet bounds (+ the blend band, dim)
+		const Vector3 scl = t.globalScale();
+		if (pv->shape == 0)
+		{
+			DebugDraw::WireSphere(pos, ScaleRadius(pv->radius, scl), c);
+			if (pv->blendDistance > 0.0f) DebugDraw::WireSphere(pos, ScaleRadius(pv->radius, scl) + pv->blendDistance, Color(c.r, c.g, c.b, 0.35));
+		}
+		else
+		{
+			const Vector3 he = ScaleExtents(pv->halfExtents, scl);
+			DebugDraw::WireBox(pos, he, rot, c);
+			if (pv->blendDistance > 0.0f)
+				DebugDraw::WireBox(pos, Vector3(he.x + pv->blendDistance, he.y + pv->blendDistance, he.z + pv->blendDistance), rot, Color(c.r, c.g, c.b, 0.35));
+		}
+	}
+
 	if (WindZone* wz = a->GetComponent<WindZone>())
 	{
 		const Color c(0.35, 0.9, 0.75, 1.0);   // wind zones: teal bounds + direction/radial arrows
@@ -2335,8 +2355,9 @@ void World::Render(iRender* r)
 	// setLights comes after the Environment block: the eclipse dims the sun, the moon adds a light.
 
 	// Environment (sky + ambient): first Environment component, default sky if none.
+	NukeSky sky;   // kept for the camera loop: a PostFXVolume re-sets the tonemap exposure per camera
+	bool skyPerCamera = false;   // a camera's volume override re-set the sky; the next camera restores it
 	{
-		NukeSky sky;
 		if (Environment* env = FindEnvironment(*hierarchy))
 		{
 			sky.mode = env->mode;
@@ -2903,6 +2924,18 @@ void World::Render(iRender* r)
 		std::vector<std::vector<float>> ppBlobs; std::vector<uint64_t> ppHandles;
 		bool hasSSR = false;   // needs the G-buffer prepass
 		bool hasTAA = false;   // needs the depth prepass + camera jitter
+		// PostFX volumes (E2) touching this camera, weakest priority first: each blends its
+		// overrides over the camera's values by its weight at the camera position.
+		std::vector<std::pair<PostFXVolume*, float>> vols;
+		auto atomLive = [](Atom* a) { for (; a; a = a->parent) if (!a->enabled) return false; return true; };
+		if (!auxiliary)
+			for (PostFXVolume* v : PostFXVolume::All())
+			{
+				if (!v || !v->enabled || !v->atom || !atomLive(v->atom)) continue;
+				const float wgt = v->WeightAt(cp);
+				if (wgt > 0.0005f) vols.emplace_back(v, wgt);
+			}
+		std::stable_sort(vols.begin(), vols.end(), [](const auto& a, const auto& b) { return a.first->priority < b.first->priority; });
 		for (PostProcess* pp : pps)
 			if (pp->transform == cam->transform)
 			{
@@ -2914,6 +2947,7 @@ void World::Render(iRender* r)
 					if (!sh || !sh->isPost || sh->rendererHandle == 0) continue;
 					if (sh->name == "ssr" || sh->name == "rtreflect") hasSSR = true;
 					if (sh->name == "musicvis") hasSSR = true;   // samples G-buffer normals + depth
+					if (sh->name == "dof" || sh->name == "motionblur") hasSSR = true;   // depth / velocity of the prepass
 					if (sh->name == "taa") hasTAA = true;
 					std::vector<float> blob(64, 0.0f);   // 256-byte PostParams
 					for (const ShaderProp& sp : sh->props)
@@ -2925,8 +2959,21 @@ void World::Render(iRender* r)
 						// and defaults never apply to them.
 						float sys[4];
 						if (sp.name.compare(0, 6, "g_Nuke") == 0 && Audio::SystemParam(sp.name, sys)) v = sys;
+						float val[4] = { v[0], v[1], v[2], v[3] };
+						// The volumes' overrides of this effect (matched by shader), by weight.
+						for (auto& vw : vols)
+						{
+							vw.first->EnsureParsed();
+							for (const PostEffect& ov : vw.first->effects)
+							{
+								if (!ov.enabled || ov.shaderGuid != e.shaderGuid) continue;
+								auto oit = ov.props.find(sp.name);
+								if (oit == ov.props.end()) continue;
+								for (int c = 0; c < 4; ++c) val[c] += (oit->second[c] - val[c]) * vw.second;
+							}
+						}
 						for (int c = 0; c < sp.components && (sp.offset / 4 + c) < 64; ++c)
-							blob[sp.offset / 4 + c] = v[c];
+							blob[sp.offset / 4 + c] = val[c];
 					}
 					ppHandles.push_back(sh->rendererHandle); ppBlobs.push_back(std::move(blob));
 				}
@@ -2936,6 +2983,16 @@ void World::Render(iRender* r)
 		for (size_t k = 0; k < ppHandles.size(); ++k)   // blobs are stable now -> safe to take .data()
 		{ ppStages[k].pipeline = ppHandles[k]; ppStages[k].params = ppBlobs[k].data(); ppStages[k].paramFloats = 64; }
 		r->setPostChain(ppStages.empty() ? nullptr : ppStages.data(), (int)ppStages.size());
+		{   // The volumes' tonemap overrides (SDR exposure / white point) for THIS camera.
+			NukeSky skyCam = sky;
+			bool touched = false;
+			for (auto& vw : vols)
+			{
+				if (vw.first->overrideExposure)   { skyCam.exposure   += (vw.first->exposure   - skyCam.exposure)   * vw.second; touched = true; }
+				if (vw.first->overrideWhitePoint) { skyCam.whitePoint += (vw.first->whitePoint - skyCam.whitePoint) * vw.second; touched = true; }
+			}
+			if (touched || skyPerCamera) { r->setSky(skyCam); skyPerCamera = touched; }   // restore the frame's values after a touched camera
+		}
 
 		r->setCameraTAA(hasTAA);   // enable jitter + history for this camera
 
