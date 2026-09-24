@@ -103,6 +103,18 @@ void main(PSIn i, out PSOut o)
     else
         // LiveMaterial UV transform (identical to world.ps so all passes sample in step).
         i.uv = ApplyUVT(i.uv);
+    // Coverage mode (g_Params2.z, the upscaler's reactive mask): a transparent / additive draw
+    // over a copy of the opaque depth writes how much of the pixel it paints into the id target
+    // (the colour and velocity targets are scratch here). Transparent = its alpha; additive
+    // never hides the surface, its glow just has no motion of its own: a flat share.
+    if (g_Params2.z > 0.5)
+    {
+        float ca = g_Color.a;
+        if (g_Params.x > 0.5) ca *= g_Tex.Sample(g_Tex_sampler, i.uv).a;
+        if (g_Params2.z > 1.5) ca = ca > 0.02 ? 0.6 : 0.0;
+        o.gbuf = 0.0; o.velocity = 0.0; o.objId = saturate(ca);
+        return;
+    }
     // Cutout + luma-wipe holes must not leave SSR normals or TAA velocities behind.
     if (g_UVT2.z > 0.0)
         clip(g_WipeMask.Sample(g_WipeMask_sampler, i.uv).r - g_UVT2.z);

@@ -72,6 +72,21 @@ struct NukePostStage
     int          paramFloats = 0;  // number of floats in `params` (PostParams cbuffer, /4 = float4 count)
 };
 
+// 4.2: the renderer's upscaling / frame-generation status for the back-buffer camera. Vendors in
+// nuke::UpscaleMode numbering (config.h): 0 none, 2 DLSS, 3 FSR, 4 XeSS, 5 FSR 1.
+struct NukeUpscaleStatus
+{
+    int   upscaler = 0, quality = 0;            // the running upscaler + its UpscaleQuality tier (0 = none)
+    int   renderW = 0, renderH = 0, outW = 0, outH = 0;   // internal render size -> output size
+    int   generator = 0, generatedFrames = 0;   // the attached frame generator's vendor + generated frames per rendered one
+    float presentsPerFrame = 0.0f;              // measured presents per rendered frame (0 = not yet)
+    float renderedFps = 0.0f;                   // the renderer's own rendered-frame rate
+    unsigned offeredUpscalers  = 0;             // bit (1 << vendor): the upscalers this GPU / build offers
+    unsigned offeredGenerators = 0;             // bit (1 << vendor): the frame generators
+    char  upscalerName[64] = {};                // the variant ("NGX: DLSS 310.3.0", "FFX: FSR 3.1 (Vulkan)", ...)
+    char  generatorName[32] = {};               // "DLSS-G", "FSR FG", "XeSS-FG"
+};
+
 // Backend-neutral camera description for one render pass; the renderer builds the
 // view/projection matrices itself from these POD fields.
 struct NukeCameraDesc
@@ -868,6 +883,15 @@ public:
     // fall refills the tracks (fraction per second; 0 = they stay). Once per live frame.
     virtual void setGroundTrails(const float* xzrw, int count, float fillPerSec) { (void)xzrw; (void)count; (void)fillPerSec; }
 
+    // 4.2: the transparent / additive draws into the prepass's coverage (the upscaler's reactive
+    // mask). Inside beginGBufferPass..endGBufferPass, after the opaque draws: begin binds the
+    // coverage target over a copy of the opaque depth, the renderGBuffer* calls in between paint
+    // their alpha, end restores. A no-op when no temporal upscaler runs this pass. (ABI: appended)
+    virtual void beginGBufferCoverage() {}
+    virtual void endGBufferCoverage() {}
+    // 4.2: what runs for the back-buffer camera + what this GPU / backend / build can offer
+    // (Game.ActiveUpscaler / UpscaleInfo / UpscalerAvailable). (ABI: appended, ABI 45)
+    virtual void getUpscaleStatus(NukeUpscaleStatus* out) { (void)out; }
     // ABI: new virtuals are appended at the END of the class, NEVER inserted mid-vtable —
     // plugins are separate DLLs built at different times, and an inserted slot shifts every later one.
 };

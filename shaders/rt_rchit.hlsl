@@ -41,12 +41,12 @@ void main(inout RTPayload p, in BuiltInTriangleIntersectionAttributes attr)
     {
         RayDesc ray; ray.Origin = hitPos + hitN * 0.08 + R * 0.05; ray.Direction = R; ray.TMin = 0.02;
         ray.TMax = (g_RTParams.y > 0.5) ? g_RTParams.y : 1000.0;
-        RTPayload p2; p2.color = 0.0; p2.depth = p.depth + 1;
+        RTPayload p2; p2.color = 0.0; p2.depth = p.depth + 1; p2.rough = 0.0; p2.flags = 0u;
         TraceRay(g_TLAS, RAY_FLAG_NONE, RT_REFLECT_MASK, 0, 1, 0, ray, p2);   // only reflection-visible instances
         traced = p2.color;
     }
     col += SpecFr(hitN, V, rough, albedo, metal, spec) * lerp(traced, env, rough);
     // Water this segment crossed: attenuation + the surface itself (rt_water_shade.hlsli).
     // Each recursion level handles its own segment.
-    p.color = RTWaterFinish(WorldRayOrigin(), wdir, hitPos, col, p.depth);
+    p.color = RTWaterFinish(WorldRayOrigin(), wdir, hitPos, col, p.depth, p.flags);
 }

@@ -128,6 +128,9 @@ target_link_libraries(NukeEngine PUBLIC
     ${_nuke_zlib}
     gdeflate::gdeflate
     ${CMAKE_DL_LIBS})
+if(APPLE)
+    target_link_libraries(NukeEngine PRIVATE "-framework CoreServices")   # FSEvents (FileIndex)
+endif()
 
 # The historical run-dir layout (x64/<Config> on Windows): the editor, player and every
 # module's deploy step navigate relative to it, so the tree stays uniform across platforms.

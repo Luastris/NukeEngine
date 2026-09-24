@@ -16,6 +16,25 @@ template<> struct NukeEnumInfo<WindowMode>
 	static const char* Name() { return "WindowMode"; }
 	static void Register() { Reflect_RegisterEnum("WindowMode", { "Windowed", "BorderlessFullscreen", "ExclusiveFullscreen" }); }
 };
+// 4.2: the upscaling / frame-generation enums (config.h); labels = the enumerators, by value.
+template<> struct NukeEnumInfo<UpscaleMode>
+{
+	static constexpr bool reflected = true;
+	static const char* Name() { return "UpscaleMode"; }
+	static void Register() { Reflect_RegisterEnum("UpscaleMode", { "Off", "Auto", "DLSS", "FSR", "XeSS", "FSR1" }); }
+};
+template<> struct NukeEnumInfo<UpscaleQuality>
+{
+	static constexpr bool reflected = true;
+	static const char* Name() { return "UpscaleQuality"; }
+	static void Register() { Reflect_RegisterEnum("UpscaleQuality", { "Native", "Quality", "Balanced", "Performance", "UltraPerformance" }); }
+};
+template<> struct NukeEnumInfo<FrameGeneration>
+{
+	static constexpr bool reflected = true;
+	static const char* Name() { return "FrameGeneration"; }
+	static void Register() { Reflect_RegisterEnum("FrameGeneration", { "Off", "X2", "X3", "X4", "X5", "X6" }); }
+};
 
 // Game-side runtime facade over the host: current world, world switching, play state, window,
 // savegames, quitting. Behaves sensibly in both hosts (editor PIE and Player).
@@ -98,6 +117,32 @@ public:
 	// Texture streaming: mip-pool VRAM budget in MB (0 = off). Live; persisted like the other
 	// window/config settings. Streamed textures keep a low-mip tail and stream detail by distance.
 	[[nuke::func]] static void SetTextureStreaming(double budgetMB);
+
+	// --- UPSCALING + FRAME GENERATION (4.2) ----
+	// The game's choice over its cameras' chains: the vendor upscaler (DLSS / FSR / XeSS / FSR 1,
+	// Auto = the best this GPU offers), the quality tier, sharpening and frame generation (DLSS-G /
+	// FSR FG / XeSS-FG after the upscaler's vendor; the GPU caps the multiplier). Applied live to
+	// every game camera (a chain without an "upscale" stage gets one), persisted with the window
+	// settings. A vendor this GPU cannot do falls to the next honest tier - ActiveUpscaler tells.
+	[[nuke::func]] static void SetUpscaleMode(UpscaleMode mode);
+	[[nuke::func]] static void SetUpscaleQuality(UpscaleQuality quality);
+	[[nuke::func]] static void SetUpscaleSharpness(double sharpness);         // 0..1
+	[[nuke::func]] static void SetFrameGeneration(FrameGeneration multiplier);
+	[[nuke::func]] static void ResetUpscaling();                              // back to the chains' own stages
+	[[nuke::func]] static bool            UpscalingSet();        // the game's choice is in effect (false = the chains decide)
+	[[nuke::func]] static UpscaleMode     GetUpscaleMode();      // the choice (what a settings menu shows)
+	[[nuke::func]] static UpscaleQuality  GetUpscaleQuality();
+	[[nuke::func]] static double          GetUpscaleSharpness();
+	[[nuke::func]] static FrameGeneration GetFrameGeneration();
+	// What actually runs on the back buffer (the renderer's answer, never Auto):
+	[[nuke::func]] static UpscaleMode     ActiveUpscaler();          // Off = none this frame
+	[[nuke::func]] static UpscaleMode     ActiveFrameGenerator();    // the generator's vendor; Off = none attached
+	[[nuke::func]] static FrameGeneration ActiveFrameGeneration();   // the live multiplier (the GPU may cap the asked one)
+	[[nuke::func]] static double          PresentedFps();            // rendered FPS x the measured presents per rendered frame
+	[[nuke::func]] static std::string     UpscaleInfo();             // one line: variant, render -> output size, generator, FPS
+	// What this GPU / backend / build offers (for a settings menu to grey out the rest):
+	[[nuke::func]] static bool UpscalerAvailable(UpscaleMode mode);            // Auto / Off = any / true
+	[[nuke::func]] static bool FrameGenerationAvailable(UpscaleMode vendor);   // the generator of that vendor (Auto = any)
 	// One stats line: "streamed=N resident=X.XMB full=Y.YMB saved=Z.ZMB" (probes/console).
 	[[nuke::func]] static std::string TextureStreamInfo();
 

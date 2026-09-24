@@ -11,6 +11,7 @@
 #include <boost/thread/mutex.hpp>
 #include <boost/thread/condition_variable.hpp>
 #include "API/Model/Jobs.h"      // Stopping(): background scans bail on shutdown
+#include "API/Model/FileIndex.h" // the content root's live index (WatchContent)
 #include "API/Model/Prefab.h"   // PrefabGuid (register prefab guid<->path)
 #include "API/Model/NukeRig.h"  // C1 canonical rig + rename presets (builtins)
 #include "render/irender.h"
@@ -504,6 +505,13 @@ void ResDB::HotReloadAssets(iRender* r)
 			std::cout << "[ResDB]\thot-reloaded material " << bfs::path(p).filename().string() << std::endl;
 		}
 	}
+	PushMaterialsToWorld(changed);
+}
+
+// A reloaded material template into every live-world clone of it (MeshRenderer instances): a
+// saved .numat must reach the surfaces already standing in the world, not only future clones.
+void ResDB::PushMaterialsToWorld(const std::vector<Material*>& changed)
+{
 	AppInstance* app = AppInstance::GetSingleton();
 	if (!changed.empty() && app && app->currentWorld)
 	{
@@ -724,16 +732,192 @@ void ResDB::LoadContentDir(const std::string& dir)
 {
 	boost::system::error_code ec;
 	if (!bfs::exists(dir, ec)) return;
+	contentScanning = true;
 	std::vector<std::pair<std::string, std::string>> items;
-	for (bfs::recursive_directory_iterator it(dir, ec), end; it != end; it.increment(ec))
+	// A watched root: its snapshot IS the file list (one walk, ever). Otherwise the disk.
+	std::string rel;
+	const std::string rootName = FileIndex::Get().RootOf(dir, &rel);
+	std::shared_ptr<const FileIndex::Snapshot> snap = (!rootName.empty() && rel.empty()) ? FileIndex::Get().Get(rootName) : nullptr;
+	if (snap)
 	{
-		if (ec) break;
-		if (Jobs::Stopping()) return;   // let Shutdown's join return
-		if (bfs::is_directory(it->path())) continue;
-		items.push_back({ std::string(), it->path().string() });
+		for (const FileIndex::Entry& e : snap->entries)
+			if (!e.isDir) items.push_back({ std::string(), bfs::path(snap->Abs(e)).make_preferred().string() });
 	}
+	else
+		for (bfs::recursive_directory_iterator it(dir, ec), end; it != end; it.increment(ec))
+		{
+			if (ec) break;
+			if (Jobs::Stopping()) { contentScanning = false; return; }   // let Shutdown's join return
+			if (bfs::is_directory(it->path())) continue;
+			items.push_back({ std::string(), it->path().string() });
+		}
 	LoadContentItems(items);
+	// The changes that arrived during the scan apply after it, on the main thread.
+	Jobs::RunOnMain([this]()
+	{
+		contentScanning = false;
+		std::vector<PendingChange> p; p.swap(fsPending);
+		for (const PendingChange& c : p) OnFileChanged(c.abs, c.kind, c.isDir);
+	});
 }
+
+// ---- the live index (WatchContent) ---------------------------------------------------------------
+
+void ResDB::WatchContent(const std::string& contentDir, const std::string& shadersDir)
+{
+	FileIndex& fi = FileIndex::Get();
+	if (!contentDir.empty()) fi.Watch("content", contentDir);
+	if (!shadersDir.empty()) fi.Watch("shaders", shadersDir);
+	if (fsSub) return;
+	fsSub = fi.Subscribe("", [this](const FileIndex::Change& c)
+	{
+		if (c.rootName != "content" && c.rootName != "shaders") return;
+		const std::string root = FileIndex::Get().RootDir(c.rootName);
+		if (root.empty()) return;
+		OnFileChanged(bfs::path(root + "/" + c.rel).make_preferred().string(), (int)c.kind, c.isDir);
+	});
+}
+
+void ResDB::OnFileChanged(const std::string& abs, int kind, bool isDir)
+{
+	if (contentScanning) { fsPending.push_back({ abs, kind, isDir }); return; }
+	AppInstance* app = AppInstance::GetSingleton();
+	iRender* r = app ? app->render : nullptr;
+	if (isDir)
+	{
+		if (kind != 1) return;   // a new folder: its files arrive as their own changes
+		// A folder gone: every asset registered under it leaves the DB.
+		const std::string pfx = abs + (abs.empty() || abs.back() == bfs::path::preferred_separator ? "" : std::string(1, bfs::path::preferred_separator));
+		std::vector<std::string> guids;
+		for (auto& kv : guidByPath) if (kv.first.compare(0, pfx.size(), pfx) == 0) guids.push_back(kv.second);
+		for (const std::string& g : guids) RemoveByGuid(g);
+		if (!guids.empty()) std::cout << "[ResDB]\tfolder removed on disk: " << guids.size() << " asset(s) left the DB" << std::endl;
+		return;
+	}
+	std::string ext = bfs::path(abs).extension().string();
+	for (char& ch : ext) ch = (char)tolower((unsigned char)ch);
+	if (kind == 1)   // removed
+	{
+		const std::string g = GuidForPath(abs);
+		if (g.empty()) return;
+		RemoveByGuid(g);
+		std::cout << "[ResDB]\tremoved on disk: " << bfs::path(abs).filename().string() << std::endl;
+		return;
+	}
+	if (ext == ".hlsl")
+	{
+		if (!HotReloadPath(abs, r)) RegisterShaderPath(abs, r);
+		return;
+	}
+	if (kind == 0 || GuidForPath(abs).empty())   // added, or a rewrite of something never registered
+	{
+		LoadContentFile(abs);
+		if (r) CreateRenderTextures(r);
+		return;
+	}
+	HotReloadPath(abs, r);   // modified: textures / materials reload in place, the rest keeps its loaded state
+}
+
+bool ResDB::HotReloadPath(const std::string& p, iRender* r)
+{
+	boost::system::error_code ec;
+	if (!bfs::exists(p, ec)) return false;
+	// shaders: the pair (either half) or a post shader
+	for (Shader* s : shaders)
+	{
+		if (!s) continue;
+		const bool mine = (!s->psPath.empty() && bfs::path(s->psPath) == bfs::path(p)) || (!s->vsPath.empty() && bfs::path(s->vsPath) == bfs::path(p));
+		if (!mine) continue;
+		if (!r) return true;
+		if (s->isPost)
+		{
+			Shader* fresh = Shader::LoadPostShader(s->name, s->psPath);
+			if (!fresh) return true;
+			s->psSource = fresh->psSource; s->psTime = fresh->psTime; s->props = fresh->props; s->includeProps = fresh->includeProps;
+			delete fresh;
+			uint64_t h = r->createPostPipeline(s->name.c_str(), s->psSource.c_str());
+			if (h) { s->rendererHandle = h; std::cout << "[ResDB]\thot-reloaded post shader '" << s->name << "' -> handle " << h << std::endl; }
+			return true;
+		}
+		Shader* fresh = Shader::LoadPair(s->name, s->vsPath, s->psPath);
+		if (!fresh) return true;
+		s->vsSource = fresh->vsSource; s->psSource = fresh->psSource; s->vsTime = fresh->vsTime; s->psTime = fresh->psTime;
+		s->props = fresh->props; s->includeProps = fresh->includeProps;
+		delete fresh;
+		uint64_t h = (!s->hsSource.empty() && !s->dsSource.empty()
+		              ? r->createShaderPipelineTess(s->name.c_str(), s->vsSource.c_str(), s->psSource.c_str(), s->hsSource.c_str(), s->dsSource.c_str())
+		              : r->createShaderPipeline(s->name.c_str(), s->vsSource.c_str(), s->psSource.c_str()));
+		if (h) { s->rendererHandle = h; std::cout << "[ResDB]\thot-reloaded shader '" << s->name << "' -> handle " << h << std::endl; }
+		return true;
+	}
+	const std::string guid = GuidForPath(p);
+	if (guid.empty()) return false;
+	long long mt = (long long)bfs::last_write_time(p, ec); if (ec) mt = 0;
+	if (auto it = texByGuid.find(guid); it != texByGuid.end())
+	{
+		Texture* t = it->second;
+		if (!t || t->renderTexture) return true;
+		assetMtime[p] = mt;
+		if (Texture* fresh = Texture::LoadFromFile(p))
+		{
+			t->width = fresh->width; t->height = fresh->height; t->format = fresh->format;
+			t->mipCount = fresh->mipCount; t->pixels = std::move(fresh->pixels);
+			delete fresh;
+			if (r) r->invalidateTexture(t);
+			std::cout << "[ResDB]\thot-reloaded texture " << bfs::path(p).filename().string() << std::endl;
+		}
+		return true;
+	}
+	if (auto it = matByGuid.find(guid); it != matByGuid.end())
+	{
+		Material* m = it->second;
+		if (!m) return true;
+		assetMtime[p] = mt;
+		if (Material* fresh = Material::LoadFromFile(p))
+		{
+			ApplyMatTemplate(m, fresh);
+			delete fresh;
+			std::vector<Material*> changed{ m };
+			PushMaterialsToWorld(changed);
+			std::cout << "[ResDB]\thot-reloaded material " << bfs::path(p).filename().string() << std::endl;
+		}
+		return true;
+	}
+	return false;
+}
+
+// A shader file that appeared on disk: the pair once both halves exist, a post shader on its own.
+void ResDB::RegisterShaderPath(const std::string& abs, iRender* r)
+{
+	const bfs::path p(abs);
+	const std::string fn = p.filename().string();
+	auto ends = [&](const std::string& suf) { return fn.size() > suf.size() && fn.compare(fn.size() - suf.size(), suf.size(), suf) == 0; };
+	Shader* s = nullptr;
+	if (ends(".post.hlsl"))
+	{
+		const std::string name = fn.substr(0, fn.size() - 10);
+		if (shaderByGuid.count(name)) return;
+		s = Shader::LoadPostShader(name, abs);
+		if (!s) return;
+		RegisterShader(s); SetAssetPath(name, abs);
+		if (r) { uint64_t h = r->createPostPipeline(s->name.c_str(), s->psSource.c_str()); if (h) s->rendererHandle = h; }
+	}
+	else if (ends(".vs.hlsl") || ends(".ps.hlsl"))
+	{
+		const std::string name = fn.substr(0, fn.size() - 8);
+		if (shaderByGuid.count(name)) return;
+		const bfs::path vs = p.parent_path() / (name + ".vs.hlsl"), ps = p.parent_path() / (name + ".ps.hlsl");
+		boost::system::error_code ec;
+		if (!bfs::exists(vs, ec) || !bfs::exists(ps, ec)) return;   // the other half comes as its own change
+		s = Shader::LoadPair(name, vs.string(), ps.string());
+		if (!s) return;
+		RegisterShader(s); SetAssetPath(name, vs.string());
+		if (r) { uint64_t h = r->createShaderPipeline(s->name.c_str(), s->vsSource.c_str(), s->psSource.c_str()); if (h) s->rendererHandle = h; }
+	}
+	else return;
+	std::cout << "[ResDB]\tshader appeared on disk: '" << s->name << "'" << std::endl;
+}
+
 
 // Packed runtime: the same registration pass over the Package layer stack. Raw overlay files
 // load from disk; pak entries load from MEMORY (no SetAssetPath: there is no file to locate).

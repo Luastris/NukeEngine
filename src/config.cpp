@@ -186,6 +186,16 @@ int Config::effectivePhysicsCore() const
     return cores > 0 ? cores - 1 : -2;
 }
 
+// The ["upscale"] words (index = the UpscaleMode / UpscaleQuality value).
+static const char* const kUpscaleModes[6]     = { "off", "auto", "dlss", "fsr", "xess", "fsr1" };
+static const char* const kUpscaleQualities[5] = { "native", "quality", "balanced", "performance", "ultra" };
+static int UpscaleWordIndex(std::string w, const char* const* words, int n, int fallback)
+{
+    for (char& c : w) c = (char)tolower((unsigned char)c);
+    for (int i = 0; i < n; ++i) if (w == words[i]) return i;
+    return fallback;
+}
+
 void Config::reload(Config* instance)
 {
     boost::system::error_code ec;
@@ -275,6 +285,22 @@ void Config::reload(Config* instance)
         instance->ioGpuDecompression = io.value("gpuDecompression", instance->ioGpuDecompression);
     }
 
+    // 4.2: the game's upscaling choice, as words a user can read and edit.
+    instance->upscale = NukeUpscale();
+    if (root.contains("upscale") && root["upscale"].is_object())
+    {
+        const json& u = root["upscale"];
+        NukeUpscale& up = instance->upscale;
+        up.set       = true;
+        up.mode      = UpscaleWordIndex(u.value("mode",    std::string("auto")),    kUpscaleModes,     6, up.mode);
+        up.quality   = UpscaleWordIndex(u.value("quality", std::string("quality")), kUpscaleQualities, 5, up.quality);
+        up.sharpness = u.value("sharpness", up.sharpness);
+        const std::string fgw = u.value("frameGen", std::string("off"));
+        up.frameGen = (fgw.size() == 2 && (fgw[0] == 'x' || fgw[0] == 'X') && fgw[1] >= '2' && fgw[1] <= '6') ? fgw[1] - '1' : 0;
+        if (up.sharpness < 0.0f) up.sharpness = 0.0f;
+        if (up.sharpness > 1.0f) up.sharpness = 1.0f;
+    }
+
     if (root.contains("raytracing") && root["raytracing"].is_object())
     {
         const json& rt = root["raytracing"];
@@ -332,6 +358,16 @@ void Config::saveWindowTo(const std::string& path)
     w["hideFromCapture"] = window.hideFromCapture;
     w["textureStreamMB"] = window.textureStreamMB;
     w["fpsLimit"]        = window.fpsLimit;
+    // 4.2: the game's upscaling choice rides with the window block (words, see the loader).
+    if (upscale.set)
+    {
+        json& u = root["upscale"];
+        u["mode"]      = kUpscaleModes[std::max(0, std::min(5, upscale.mode))];
+        u["quality"]   = kUpscaleQualities[std::max(0, std::min(4, upscale.quality))];
+        u["sharpness"] = upscale.sharpness;
+        u["frameGen"]  = upscale.frameGen > 0 ? "x" + std::to_string(std::min(5, upscale.frameGen) + 1) : std::string("off");
+    }
+    else root.erase("upscale");
 
     bfs::ofstream out(cfg, std::ios::trunc);
     if (!out) { cout << PREFIX_CONF << "saveWindow: cannot write " << path << endl; return; }

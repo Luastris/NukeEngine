@@ -136,6 +136,11 @@ public:
 	// LoadFromString/Clear, the OnGUI sweep). RECURSIVE so a script may re-enter.
 	void LockGame();
 	void UnlockGame();
+	// Hierarchy version: bumped by every structural change (add / insert / remove / reparent /
+	// rename / enable / component add-remove) in any world, so views cache their per-atom row
+	// data and rebuild it only when something changed, never per frame.
+	static uint64_t HierarchyVersion();
+	static void     BumpHierarchy();
 
 private:
 	boost::recursive_mutex gameLock;

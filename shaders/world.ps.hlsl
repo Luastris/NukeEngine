@@ -38,6 +38,7 @@ cbuffer FrameCB
     float4 g_CloudShadow;   // VL3 cloud shadow map: origin x, z, 1/size, strength (0 = none)
     float4 g_AtmoA;         // physical atmosphere: x = mode (2 = on), y = planet radius Rg (km), z = atmosphere top Rt (km), w = sky-view LUT width
     float4 g_AtmoB;         // xyz = direction toward the sun, w = sky-view LUT height
+    float4 g_MipBias;       // x = material texture LOD bias: log2(internal / output size) under an upscaler, 0 otherwise
 };
 Texture2D<float> g_CloudShadowMap;   // the sun's transmittance through the clouds over the square (Load; white when off)
 Texture2D g_AtmoSkyView;             // the camera's sky-view LUT (sampled with g_GIIrr_sampler: linear clamp)
@@ -252,7 +253,7 @@ float3 Hash3(float2 c)
 float4 SampleAntiTile(Texture2D t, SamplerState smp, float2 uv)
 {
     float amount = g_Var.x;
-    if (amount <= 0.0) return t.Sample(smp, uv);
+    if (amount <= 0.0) return t.SampleBias(smp, uv, g_MipBias.x);
     float scale = max(g_Var.y, 1e-3);
     float2 cf = uv / scale;
     float2 cA = floor(cf), cB = floor(cf + 0.5);
@@ -262,7 +263,7 @@ float4 SampleAntiTile(Texture2D t, SamplerState smp, float2 uv)
     float wA = saturate(1.0 - 2.0 * max(fA.x, fA.y));
     float wB = saturate(1.0 - 2.0 * max(fB.x, fB.y));
     float w = wA / max(wA + wB, 1e-4);
-    return lerp(t.Sample(smp, uv + offB), t.Sample(smp, uv + offA), w);
+    return lerp(t.SampleBias(smp, uv + offB, g_MipBias.x), t.SampleBias(smp, uv + offA, g_MipBias.x), w);
 }
 
 // Painted-mask channel at a world position; 0 outside the mask box. Manual trilinear Z: the
@@ -424,7 +425,7 @@ float4 main(in PSIn i, bool isFront : SV_IsFrontFace) : SV_Target
 #define OV_WEIGHT(N) \
     ovF[N] = (uint)(g_OvP##N.w + 0.5); ovW[N] = 0.0; \
     [branch] if (g_Ov##N.x > 0.0 || g_OvP##N.z >= 0.0) \
-        ovW[N] = OvWeight(g_Ov##N, g_OvP##N, ovF[N], (ovF[N] & 8u) ? g_Ov##N##Mask.Sample(g_Ov0Alb_sampler, i.uv).r : 1.0, i.wpos, ovNg);
+        ovW[N] = OvWeight(g_Ov##N, g_OvP##N, ovF[N], (ovF[N] & 8u) ? g_Ov##N##Mask.SampleBias(g_Ov0Alb_sampler, i.uv, g_MipBias.x).r : 1.0, i.wpos, ovNg);
     OV_WEIGHT(0) OV_WEIGHT(1) OV_WEIGHT(2) OV_WEIGHT(3)
     OV_WEIGHT(4) OV_WEIGHT(5) OV_WEIGHT(6) OV_WEIGHT(7)
     // Slots COMBINE: oversubscribed weights share the pixel proportionally instead of the
@@ -465,9 +466,9 @@ float4 main(in PSIn i, bool isFront : SV_IsFrontFace) : SV_Target
     if (g_Params.x > 0.5)
     {
         [branch] if (varF & 1u)
-            base *= g_Tex.Sample(g_Tex_sampler, triUVx) * triW.x
-                  + g_Tex.Sample(g_Tex_sampler, triUVy) * triW.y
-                  + g_Tex.Sample(g_Tex_sampler, triUVz) * triW.z;
+            base *= g_Tex.SampleBias(g_Tex_sampler, triUVx, g_MipBias.x) * triW.x
+                  + g_Tex.SampleBias(g_Tex_sampler, triUVy, g_MipBias.x) * triW.y
+                  + g_Tex.SampleBias(g_Tex_sampler, triUVz, g_MipBias.x) * triW.z;
         else
             base *= SampleAntiTile(g_Tex, g_Tex_sampler, i.uv);
     }
@@ -492,7 +493,7 @@ float4 main(in PSIn i, bool isFront : SV_IsFrontFace) : SV_Target
     const uint detF = (uint)(g_Det.z + 0.5);
     [branch] if (g_Det.y > 0.0 && (detF & 1u))
     {
-        float3 d = g_Detail.Sample(g_Ov0Alb_sampler, i.uv * g_Det.x).rgb;
+        float3 d = g_Detail.SampleBias(g_Ov0Alb_sampler, i.uv * g_Det.x, g_MipBias.x).rgb;
         albedo = lerp(albedo, saturate(albedo * d * 2.0), g_Det.y);
     }
 
@@ -500,7 +501,7 @@ float4 main(in PSIn i, bool isFront : SV_IsFrontFace) : SV_Target
 #define OV_ALBEDO(N) \
     [branch] if (ovW[N] > 0.001) \
     { \
-        float3 oa = (ovF[N] & 1u) ? pow(max(g_Ov##N##Alb.Sample(g_Ov0Alb_sampler, i.uv).rgb, 0.0), 2.2) : float3(1.0, 1.0, 1.0); \
+        float3 oa = (ovF[N] & 1u) ? pow(max(g_Ov##N##Alb.SampleBias(g_Ov0Alb_sampler, i.uv, g_MipBias.x).rgb, 0.0), 2.2) : float3(1.0, 1.0, 1.0); \
         albedo = lerp(albedo, oa * pow(max(g_OvT##N.rgb, 0.0), 2.2), ovW[N] * saturate(g_OvT##N.a)); \
     }
     OV_ALBEDO(0) OV_ALBEDO(1) OV_ALBEDO(2) OV_ALBEDO(3)
@@ -510,14 +511,14 @@ float4 main(in PSIn i, bool isFront : SV_IsFrontFace) : SV_Target
     float rough    = clamp(g_Params.w, 0.04, 1.0);
     if (g_Params2.x > 0.5)                                  // metallic-roughness map wins (glTF G/B)
     {
-        float3 m = g_MetalRough.Sample(g_MetalRough_sampler, i.uv).rgb;
+        float3 m = g_MetalRough.SampleBias(g_MetalRough_sampler, i.uv, g_MipBias.x).rgb;
         rough = clamp(m.g, 0.04, 1.0); metallic = saturate(m.b);
     }
     // Overlay metal/rough: the slot's MR map wins; otherwise its scalar targets (-1 = keep).
 #define OV_MR(N) \
     [branch] if (ovW[N] > 0.001) \
     { \
-        if (ovF[N] & 4u) { float3 m = g_Ov##N##MR.Sample(g_Ov0Alb_sampler, i.uv).rgb; rough = lerp(rough, clamp(m.g, 0.04, 1.0), ovW[N]); metallic = lerp(metallic, saturate(m.b), ovW[N]); } \
+        if (ovF[N] & 4u) { float3 m = g_Ov##N##MR.SampleBias(g_Ov0Alb_sampler, i.uv, g_MipBias.x).rgb; rough = lerp(rough, clamp(m.g, 0.04, 1.0), ovW[N]); metallic = lerp(metallic, saturate(m.b), ovW[N]); } \
         else { if (g_OvP##N.x >= 0.0) metallic = lerp(metallic, saturate(g_OvP##N.x), ovW[N]); \
                if (g_OvP##N.y >= 0.0) rough    = lerp(rough, clamp(g_OvP##N.y, 0.04, 1.0), ovW[N]); } \
     }
@@ -529,7 +530,7 @@ float4 main(in PSIn i, bool isFront : SV_IsFrontFace) : SV_Target
         rough    = lerp(rough, clamp(g_ParamsT.y, 0.04, 1.0), mtw);
     }
 
-    float3 specF = g_Params2.w * g_Spec.Sample(g_Spec_sampler, i.uv).rgb;   // KHR specular: factor x spec map
+    float3 specF = g_Params2.w * g_Spec.SampleBias(g_Spec_sampler, i.uv, g_MipBias.x).rgb;   // KHR specular: factor x spec map
 
     float3 V = normalize(g_CamPos.xyz - i.wpos);
     float3 N = normalize(i.nrm);
@@ -542,7 +543,7 @@ float4 main(in PSIn i, bool isFront : SV_IsFrontFace) : SV_Target
         bool anyN = false;
         if (abs(g_Params.y) > 0.5)
         {
-            float2 nxy = g_Normal.Sample(g_Normal_sampler, i.uv).rg * 2.0 - 1.0;
+            float2 nxy = g_Normal.SampleBias(g_Normal_sampler, i.uv, g_MipBias.x).rg * 2.0 - 1.0;
             if (g_Params.y > 0.0) nxy.y = -nxy.y;
             nTS = float3(nxy, sqrt(saturate(1.0 - dot(nxy, nxy))));
             anyN = true;
@@ -550,14 +551,14 @@ float4 main(in PSIn i, bool isFront : SV_IsFrontFace) : SV_Target
         // Detail normal: added in tangent space at the detail tiling, scaled by strength.
         [branch] if (g_Det.y > 0.0 && (detF & 2u))
         {
-            float2 dxy = g_DetailNrm.Sample(g_Ov0Alb_sampler, i.uv * g_Det.x).rg * 2.0 - 1.0;
+            float2 dxy = g_DetailNrm.SampleBias(g_Ov0Alb_sampler, i.uv * g_Det.x, g_MipBias.x).rg * 2.0 - 1.0;
             if (detF & 4u) dxy.y = -dxy.y;
             nTS = normalize(float3(nTS.xy + dxy * g_Det.y, nTS.z)); anyN = true;
         }
 #define OV_NRM(N) \
         [branch] if (ovW[N] > 0.001 && (ovF[N] & 2u)) \
         { \
-            float2 oxy = g_Ov##N##Nrm.Sample(g_Ov0Alb_sampler, i.uv).rg * 2.0 - 1.0; \
+            float2 oxy = g_Ov##N##Nrm.SampleBias(g_Ov0Alb_sampler, i.uv, g_MipBias.x).rg * 2.0 - 1.0; \
             if (ovF[N] & 16u) oxy.y = -oxy.y; \
             nTS = lerp(nTS, float3(oxy, sqrt(saturate(1.0 - dot(oxy, oxy)))), ovW[N]); anyN = true; \
         }
@@ -586,7 +587,7 @@ float4 main(in PSIn i, bool isFront : SV_IsFrontFace) : SV_Target
         anisoT = normalize(anisoT + float3(1e-5, 0.0, 0.0));
         [branch] if (g_Brdf3.w > 0.5)
         {
-            float2 f = g_Flow.Sample(g_Ov0Alb_sampler, i.uv).rg * 2.0 - 1.0;
+            float2 f = g_Flow.SampleBias(g_Ov0Alb_sampler, i.uv, g_MipBias.x).rg * 2.0 - 1.0;
             float3 B0 = normalize(cross(N, anisoT));
             anisoT = normalize(anisoT * f.x + B0 * f.y + float3(1e-5, 0.0, 0.0));
         }
@@ -722,7 +723,7 @@ float4 main(in PSIn i, bool isFront : SV_IsFrontFace) : SV_Target
         }
     }
 
-    float ao = (g_Params2.y > 0.5) ? g_Occlusion.Sample(g_Occlusion_sampler, i.uv).r : 1.0;
+    float ao = (g_Params2.y > 0.5) ? g_Occlusion.SampleBias(g_Occlusion_sampler, i.uv, g_MipBias.x).r : 1.0;
     {   // screen-space AO (ambient/IBL only); the 1x1 white fallback must not be Load-ed by pixel
         uint aoW, aoH; g_ScreenAO.GetDimensions(aoW, aoH);
         if (aoW > 1) ao *= g_ScreenAO.Load(int3((int2)i.pos.xy, 0)).r;
@@ -784,7 +785,7 @@ float4 main(in PSIn i, bool isFront : SV_IsFrontFace) : SV_Target
     float3 emissive = g_Emissive2.rgb * g_Emissive2.w;
     [branch] if (g_EmisT.w > 0.5)   // masked emissive tween (rgb premultiplied by intensity)
         emissive = lerp(emissive, g_EmisT.rgb, NukeMaskW((int)(g_EmisT.w - 0.5), i.uv, i.wpos, g_MskStamp, g_Ov0Alb_sampler));
-    if (g_Params2.z > 0.5) emissive *= g_Emissive.Sample(g_Emissive_sampler, i.uv).rgb;
+    if (g_Params2.z > 0.5) emissive *= g_Emissive.SampleBias(g_Emissive_sampler, i.uv, g_MipBias.x).rgb;
     // Luma-wipe burn edge: the band just above the dissolve threshold glows within the feather.
     if (wipeTh > 0.0 && g_UVT2.w > 0.0)
     {

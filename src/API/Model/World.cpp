@@ -2,6 +2,7 @@
 // steady_clock::now inside the engine DLL.
 #define BOOST_CHRONO_HEADER_ONLY
 #include <boost/chrono.hpp>
+#include <boost/atomic.hpp>
 #include "API/Model/World.h"
 #include "API/Model/JsonDoc.h"
 #include <memory>
@@ -60,6 +61,7 @@
 #include "API/Model/Mesh.h"
 #include "API/Model/Texture.h"
 #include "API/Model/resdb.h"
+#include "config.h"   // the game's upscaling choice (Game.SetUpscale*) over the chains' upscale stage
 #include "API/Model/UnknownComponent.h"
 #include "API/Model/Package.h"   // mod component-type substitutions ("replaces")
 #include "API/Model/Prefab.h"
@@ -356,9 +358,15 @@ bc::list<Atom*>& World::GetHierarchy()
 	return *hierarchy;
 }
 
+static boost::atomic<uint64_t> g_hierVersion(1);
+uint64_t World::HierarchyVersion() { return g_hierVersion.load(boost::memory_order_relaxed); }
+void     World::BumpHierarchy()    { g_hierVersion.fetch_add(1, boost::memory_order_relaxed); }
+
 void World::Add(Atom* atom)
 {
+	boost::recursive_mutex::scoped_lock lock(gameLock);
 	hierarchy->push_back(atom);
+	BumpHierarchy();
 }
 
 Atom* World::CreateAtom(const std::string& name)
@@ -1361,6 +1369,35 @@ static void DrawGBuffer(std::vector<DrawItem>& items, iRender* r, bool cull)
 		}
 }
 
+// The transparent / additive items into the prepass coverage (the upscaler's reactive mask):
+// the same prepass entry points, the renderer paints their alpha instead of the G-buffer.
+static void DrawGBufferCoverage(std::vector<DrawItem>& items, std::vector<InstancedMesh*>& ims, iRender* r, bool cull)
+{
+	float vp[16]; if (cull) CameraVP(r, vp);
+	r->beginGBufferCoverage();
+	for (auto& it : items)
+		if (it.anyBlend && !(cull && FrustumCull(it, vp)))
+		{
+			PushLiveContext(it);
+			if (it.matCount > 1)
+				r->renderGBufferObjectMulti(it.mesh, it.mats, it.matCount, it.pos, it.quat, it.scale,
+				                            it.hasPrev ? it.prevPos : nullptr, it.hasPrev ? it.prevQuat : nullptr, it.hasPrev ? it.prevScale : nullptr, 1);
+			else if (it.blend == 1 || it.blend == 2)
+				r->renderGBufferObject(it.mesh, it.mat, it.pos, it.quat, it.scale,
+				                       it.hasPrev ? it.prevPos : nullptr, it.hasPrev ? it.prevQuat : nullptr, it.hasPrev ? it.prevScale : nullptr);
+		}
+	for (InstancedMesh* im : ims)
+	{
+		if (!im->mat || (im->mat->blendMode != 1 && im->mat->blendMode != 2)) continue;
+		if (!im->EnsureRenderReady(r)) continue;
+		if (im->mat->liveOvCount > 0) Surface::PushDrawContext(im->atom, im->mat);
+		for (const InstancedMesh::Chunk& c : im->chunks)
+			if (!(cull && CullAABB(c.mn, c.mx, vp)))
+				r->renderGBufferInstanced(im->mesh, im->mat, im->gpuBuf, c.first, c.count);
+	}
+	r->endGBufferCoverage();
+}
+
 // Draws the OPAQUE part of a gathered scene. The transparent part runs as its own pass
 // (DrawCollectedTransparent) AFTER every opaque draw — instanced sets included — so the
 // refraction snapshot sees the whole opaque scene and nothing opaque lands over glass.
@@ -2152,10 +2189,34 @@ static void EmitSelectionGizmos(Atom* a)
 	}
 }
 
+// 4.2: the game's upscaling choice (Game.SetUpscale*, config ["upscale"]) over the upscale
+// stage's params. The shader numbers its modes 0 Auto .. 4 FSR 1 = UpscaleMode - 1 (Off skips
+// the stage before this is reached).
+static void UpscaleOverride(const NukeUpscale& up, const std::string& prop, float val[4])
+{
+	if (prop == "g_Mode")                val[0] = (float)(up.mode - (int)UpscaleMode::Auto);
+	else if (prop == "g_Quality")        val[0] = (float)up.quality;
+	else if (prop == "g_Sharpness")      val[0] = up.sharpness;
+	else if (prop == "g_FrameGen")       val[0] = up.frameGen > 0 ? 1.0f : 0.0f;
+	else if (prop == "g_FrameGenFrames") val[0] = (float)std::max(1, up.frameGen);
+}
+
+// The built-in "upscale" post shader: the stage added to a game camera's chain that has none
+// while the game asks for upscaling.
+static Shader* UpscaleStageShader()
+{
+	for (Shader* sh : ResDB::getSingleton()->shaders)
+		if (sh && sh->isPost && sh->rendererHandle && sh->name == "upscale") return sh;
+	return nullptr;
+}
+
 void World::Render(iRender* r)
 {
 	if (!r) return;
 	Profiler::Scope profScope("render");   // CPU side of the render pass
+	// The draw walks the hierarchy: hold the game lock so the fixed-update thread (scripts
+	// creating / reparenting / destroying atoms) can't mutate the lists underneath it.
+	boost::recursive_mutex::scoped_lock gameGuard(gameLock);
 
 	// Live profiler line, ~2x/s, real world only.
 	if (!auxiliary)
@@ -2924,6 +2985,7 @@ void World::Render(iRender* r)
 		std::vector<std::vector<float>> ppBlobs; std::vector<uint64_t> ppHandles;
 		bool hasSSR = false;   // needs the G-buffer prepass
 		bool hasTAA = false;   // needs the depth prepass + camera jitter
+		bool hasUpscale = false;   // the upscale stage: the transparent draws also go into the prepass coverage (reactive mask)
 		// PostFX volumes (E2) touching this camera, weakest priority first: each blends its
 		// overrides over the camera's values by its weight at the camera position.
 		std::vector<std::pair<PostFXVolume*, float>> vols;
@@ -2936,6 +2998,10 @@ void World::Render(iRender* r)
 				if (wgt > 0.0005f) vols.emplace_back(v, wgt);
 			}
 		std::stable_sort(vols.begin(), vols.end(), [](const auto& a, const auto& b) { return a.first->priority < b.first->priority; });
+		// The game's upscaling choice (Game.SetUpscale*) over this camera's upscale stage: game
+		// cameras only, the editor viewport keeps its own.
+		const NukeUpscale& upCfg = Config::getSingleton()->upscale;
+		const bool upOverride = upCfg.set && !auxiliary && !cam->editorCamera;
 		for (PostProcess* pp : pps)
 			if (pp->transform == cam->transform)
 			{
@@ -2945,10 +3011,12 @@ void World::Render(iRender* r)
 					if (!e.enabled) continue;
 					Shader* sh = ResDB::getSingleton()->GetShader(e.shaderGuid);
 					if (!sh || !sh->isPost || sh->rendererHandle == 0) continue;
+					if (upOverride && sh->name == "upscale" && upCfg.mode == (int)UpscaleMode::Off) continue;   // switched off by the game
 					if (sh->name == "ssr" || sh->name == "rtreflect") hasSSR = true;
 					if (sh->name == "musicvis") hasSSR = true;   // samples G-buffer normals + depth
 					if (sh->name == "dof" || sh->name == "motionblur") hasSSR = true;   // depth / velocity of the prepass
-					if (sh->name == "taa") hasTAA = true;
+					if (sh->name == "taa" || sh->name == "upscale") hasTAA = true;   // upscale: the temporal reconstruction wants the same depth + velocity + jitter
+					if (sh->name == "upscale") hasUpscale = true;
 					std::vector<float> blob(64, 0.0f);   // 256-byte PostParams
 					for (const ShaderProp& sp : sh->props)
 					{
@@ -2972,12 +3040,27 @@ void World::Render(iRender* r)
 								for (int c = 0; c < 4; ++c) val[c] += (oit->second[c] - val[c]) * vw.second;
 							}
 						}
+						if (upOverride && sh->name == "upscale") UpscaleOverride(upCfg, sp.name, val);
 						for (int c = 0; c < sp.components && (sp.offset / 4 + c) < 64; ++c)
 							blob[sp.offset / 4 + c] = val[c];
 					}
 					ppHandles.push_back(sh->rendererHandle); ppBlobs.push_back(std::move(blob));
 				}
 				break;
+			}
+		if (upOverride && upCfg.mode != (int)UpscaleMode::Off && !hasUpscale)
+			if (Shader* sh = UpscaleStageShader())   // the game asks for upscaling and this chain has no stage: one at the end
+			{
+				std::vector<float> blob(64, 0.0f);
+				for (const ShaderProp& sp : sh->props)
+				{
+					float val[4] = { sp.def[0], sp.def[1], sp.def[2], sp.def[3] };
+					UpscaleOverride(upCfg, sp.name, val);
+					for (int c = 0; c < sp.components && (sp.offset / 4 + c) < 64; ++c)
+						blob[sp.offset / 4 + c] = val[c];
+				}
+				hasTAA = true; hasUpscale = true;
+				ppHandles.push_back(sh->rendererHandle); ppBlobs.push_back(std::move(blob));
 			}
 		std::vector<NukePostStage> ppStages(ppHandles.size());
 		for (size_t k = 0; k < ppHandles.size(); ++k)   // blobs are stable now -> safe to take .data()
@@ -3027,6 +3110,7 @@ void World::Render(iRender* r)
 			DrawInstancedGBuffer(camInstSets, r, settings.frustumCull);
 			// Hook geometry (terrain...) must be in the prepass too, or decals/SSR miss it.
 			DrawComponentHooks(*hierarchy, r, RenderPhase::GBuffer, camMask);
+			if (hasUpscale) DrawGBufferCoverage(gitems, camInstSets, r, settings.frustumCull);   // the reactive mask's transparents
 			r->endGBufferPass();
 		}
 
@@ -3553,6 +3637,7 @@ static void DeleteSubtree(Atom* a)
 
 void World::RemoveAtomById(long id)
 {
+	boost::recursive_mutex::scoped_lock lock(gameLock);
 	Atom* a = GetById(id);
 	if (!a) return;
 	// The editor selection may point INTO this subtree (stream parking removes atoms mid-PIE
@@ -3571,14 +3656,17 @@ void World::RemoveAtomById(long id)
 	if (a->parent) a->parent->children.remove(a);
 	else           hierarchy->remove(a);
 	DeleteSubtree(a);
+	BumpHierarchy();
 }
 
 void World::InsertAtom(Atom* a, long parentId, int index)
 {
 	if (!a) return;
+	boost::recursive_mutex::scoped_lock lock(gameLock);
 	Atom* parent = parentId ? GetById(parentId) : nullptr;
 	a->parent = parent;
 	bc::list<Atom*>& lst = parent ? parent->children : *hierarchy;
+	BumpHierarchy();
 	if (index < 0 || index >= (int)lst.size()) { lst.push_back(a); return; }
 	auto it = lst.begin();
 	std::advance(it, index);
@@ -4290,6 +4378,7 @@ void World::Clear()
 		if ((*it)->GetName() == "Editor Camera") ++it;
 		else it = hierarchy->erase(it);
 	}
+	BumpHierarchy();
 }
 
 static bool IsDescendantOf(Atom* node, Atom* maybeAncestor)
@@ -4303,10 +4392,12 @@ void World::Reparent(Atom* a, Atom* newParent)
 {
 	if (!a || a == newParent) return;
 	if (newParent && (newParent == a || IsDescendantOf(newParent, a))) return;   // would create a cycle
+	boost::recursive_mutex::scoped_lock lock(gameLock);
 	if (a->parent) a->parent->children.remove(a);
 	else           hierarchy->remove(a);
 	if (newParent) { newParent->children.push_back(a); a->parent = newParent; }
 	else           { hierarchy->push_back(a);          a->parent = nullptr;   }
+	BumpHierarchy();
 }
 
 void World::ReparentBefore(Atom* a, Atom* sibling)
@@ -4314,12 +4405,14 @@ void World::ReparentBefore(Atom* a, Atom* sibling)
 	if (!a || !sibling || a == sibling) return;
 	Atom* newParent = sibling->parent;
 	if (newParent && (newParent == a || IsDescendantOf(newParent, a))) return;   // cycle
+	boost::recursive_mutex::scoped_lock lock(gameLock);
 	if (a->parent) a->parent->children.remove(a);
 	else           hierarchy->remove(a);
 	bc::list<Atom*>& lst = newParent ? newParent->children : *hierarchy;
 	auto it = std::find(lst.begin(), lst.end(), sibling);
 	lst.insert(it, a);
 	a->parent = newParent;
+	BumpHierarchy();
 }
 
 void World::SaveToFile(const std::string& path)

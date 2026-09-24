@@ -21,5 +21,5 @@ void main(inout RTPayload p, in SpriteAttr attr)
     albedo       *= dc.rgb;
     float3 emiss  = inst.emissiveRough.rgb * SampleEmissiveMap(inst, uv) * dc.rgb * dc.a;
     float3 col    = ShadeSurface(hitPos, hitN, -wdir, albedo, metal, rough, emiss, ao, spec);
-    p.color = RTWaterFinish(WorldRayOrigin(), wdir, hitPos, col, p.depth);
+    p.color = RTWaterFinish(WorldRayOrigin(), wdir, hitPos, col, p.depth, p.flags);
 }

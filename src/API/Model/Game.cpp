@@ -230,6 +230,101 @@ void Game::SetTextureStreaming(double budgetMB)
 		r->setTextureStreaming((long long)mb << 20);
 }
 
+// ---- upscaling + frame generation (4.2) ----
+// The choice lives in Config ["upscale"] and World::Render reads it every frame (the upscale
+// stage's params of every game camera), so a change applies with the next frame in both hosts.
+static void ApplyUpscaling()
+{
+	Config::getSingleton()->upscale.set = true;
+	SaveGameWindow();
+}
+
+void Game::SetUpscaleMode(UpscaleMode mode)
+{
+	const int m = (int)mode;
+	Config::getSingleton()->upscale.mode = (m < 0 || m > (int)UpscaleMode::FSR1) ? (int)UpscaleMode::Auto : m;
+	ApplyUpscaling();
+}
+
+void Game::SetUpscaleQuality(UpscaleQuality quality)
+{
+	const int q = (int)quality;
+	Config::getSingleton()->upscale.quality = (q < 0 || q > (int)UpscaleQuality::UltraPerformance) ? (int)UpscaleQuality::Quality : q;
+	ApplyUpscaling();
+}
+
+void Game::SetUpscaleSharpness(double sharpness)
+{
+	Config::getSingleton()->upscale.sharpness = (float)std::max(0.0, std::min(1.0, sharpness));
+	ApplyUpscaling();
+}
+
+void Game::SetFrameGeneration(FrameGeneration multiplier)
+{
+	const int f = (int)multiplier;
+	Config::getSingleton()->upscale.frameGen = (f < 0 || f > (int)FrameGeneration::X6) ? (int)FrameGeneration::Off : f;
+	ApplyUpscaling();
+}
+
+void Game::ResetUpscaling()
+{
+	Config::getSingleton()->upscale = NukeUpscale();
+	SaveGameWindow();
+}
+
+bool            Game::UpscalingSet()        { return Config::getSingleton()->upscale.set; }
+UpscaleMode     Game::GetUpscaleMode()      { return (UpscaleMode)Config::getSingleton()->upscale.mode; }
+UpscaleQuality  Game::GetUpscaleQuality()   { return (UpscaleQuality)Config::getSingleton()->upscale.quality; }
+double          Game::GetUpscaleSharpness() { return Config::getSingleton()->upscale.sharpness; }
+FrameGeneration Game::GetFrameGeneration()  { return (FrameGeneration)Config::getSingleton()->upscale.frameGen; }
+
+static NukeUpscaleStatus UpscaleStatus()
+{
+	NukeUpscaleStatus st;
+	if (iRender* r = AppInstance::GetSingleton()->render) r->getUpscaleStatus(&st);
+	return st;
+}
+
+UpscaleMode     Game::ActiveUpscaler()        { return (UpscaleMode)UpscaleStatus().upscaler; }
+UpscaleMode     Game::ActiveFrameGenerator()  { return (UpscaleMode)UpscaleStatus().generator; }
+FrameGeneration Game::ActiveFrameGeneration() { const NukeUpscaleStatus st = UpscaleStatus(); return st.generator ? (FrameGeneration)std::min(st.generatedFrames, (int)FrameGeneration::X6) : FrameGeneration::Off; }
+double          Game::PresentedFps()          { const NukeUpscaleStatus st = UpscaleStatus(); return st.renderedFps * (st.presentsPerFrame > 0.0f ? st.presentsPerFrame : 1.0f); }
+
+std::string Game::UpscaleInfo()
+{
+	const NukeUpscaleStatus st = UpscaleStatus();
+	static const char* kQ[5] = { "Native", "Quality", "Balanced", "Performance", "Ultra Performance" };
+	std::string out;
+	if (st.upscaler) out = std::string(st.upscalerName) + " " + kQ[std::max(0, std::min(4, st.quality))] + " " + std::to_string(st.renderW) + "x" + std::to_string(st.renderH) + " -> " + std::to_string(st.outW) + "x" + std::to_string(st.outH);
+	else out = "no upscaling";
+	if (st.generator)
+	{
+		char buf[96];
+		snprintf(buf, sizeof buf, " | %s x%d (%.2f presents/frame)", st.generatorName, st.generatedFrames + 1, st.presentsPerFrame);
+		out += buf;
+	}
+	else out += " | no frame generation";
+	char fps[48];
+	snprintf(fps, sizeof fps, " | %.0f rendered -> %.0f presented FPS", st.renderedFps, st.renderedFps * (st.presentsPerFrame > 0.0f ? st.presentsPerFrame : 1.0f));
+	return out + fps;
+}
+
+bool Game::UpscalerAvailable(UpscaleMode mode)
+{
+	const unsigned bits = UpscaleStatus().offeredUpscalers;
+	if (mode == UpscaleMode::Off) return true;
+	if (mode == UpscaleMode::Auto) return bits != 0;
+	return (bits >> (int)mode) & 1u;
+}
+
+bool Game::FrameGenerationAvailable(UpscaleMode vendor)
+{
+	const unsigned bits = UpscaleStatus().offeredGenerators;
+	if (vendor == UpscaleMode::Off) return false;
+	if (vendor == UpscaleMode::Auto) return bits != 0;
+	return (bits >> (int)vendor) & 1u;
+}
+
 std::string Game::TextureStreamInfo()
 {
 	long long resident = 0, saved = 0; int count = 0;

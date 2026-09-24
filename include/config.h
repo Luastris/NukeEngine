@@ -15,6 +15,48 @@ enum class WindowMode : int
     ExclusiveFullscreen  = 2,   // real fullscreen; the monitor switches to the window's resolution
 };
 
+// 4.2: the typed upscaling / frame-generation API (Game.SetUpscaleMode & co). Reflected enums
+// (NukeEnumInfo in Game.h): scripts and C# see them by name, never as numbers.
+enum class UpscaleMode : int
+{
+    Off  = 0,   // no upscaling (the upscale stage is skipped)
+    Auto = 1,   // the best this GPU offers: its own vendor's first, then the cross-vendor ones
+    DLSS = 2,   // NVIDIA DLSS (NGX); falls to the next tier where it is not offered
+    FSR  = 3,   // AMD FSR 3.1 / 4 (any GPU)
+    XeSS = 4,   // Intel XeSS (any SM 6.4 GPU)
+    FSR1 = 5,   // FSR 1 (spatial; the last resort, any GPU)
+};
+enum class UpscaleQuality : int
+{
+    Native           = 0,   // output size (DLAA for the temporal ones)
+    Quality          = 1,   // 1.5x
+    Balanced         = 2,   // 1.7x
+    Performance      = 3,   // 2x
+    UltraPerformance = 4,   // 3x
+};
+// Presented frames per rendered one: DLSS-G / FSR FG / XeSS-FG after the upscaler's vendor;
+// the GPU caps it (FSR / XeSS generate one, DLSS-G up to five on the GPUs that can).
+enum class FrameGeneration : int
+{
+    Off = 0,
+    X2  = 1,   // = the generated frames per rendered one
+    X3  = 2,
+    X4  = 3,
+    X5  = 4,
+    X6  = 5,
+};
+
+// The game's upscaling choice (Game.SetUpscale* / SetFrameGeneration), persisted to
+// config/main.json ["upscale"] beside the window block. `set` false = nothing chosen: every
+// camera's own chain decides (Game.ResetUpscaling returns to that).
+struct NukeUpscale{
+    bool  set       = false;
+    int   mode      = (int)UpscaleMode::Auto;        // UpscaleMode
+    int   quality   = (int)UpscaleQuality::Quality;  // UpscaleQuality
+    float sharpness = 0.0f;                          // 0..1 where the mode supports it
+    int   frameGen  = (int)FrameGeneration::Off;     // FrameGeneration
+};
+
 struct NukeWindow{
     int w = 1280, h = 720;
     std::string mainFont;
@@ -160,6 +202,7 @@ public:
     // ABI: Config is cross-DLL — new fields go LAST, and any growth bumps NUKE_ENGINE_ABI.
     int  jobCoreBudget = 0;
     std::string splashVideo;     // splash .nuvid, content-relative ("splashVideo"; "" = none)
+    NukeUpscale upscale{};       // 4.2: the game's upscaling / frame-generation choice ("upscale"; ABI 45)
 	void reload(Config* instance);
 	// Physics-thread core after auto-resolution: -2 don't pin, -1 auto = last budget core.
 	int effectivePhysicsCore() const;

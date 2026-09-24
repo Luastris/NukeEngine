@@ -12,14 +12,21 @@
 #define RT_WATER_SHADE_HLSLI
 
 // The wave normal at a surface point: the three cascades (distance-faded like water.ps) + the
-// ripple sim's central differences over its window.
-float3 RTWaterNormal(float3 P)
+// ripple sim's central differences over its window. `d` = the ray that reached P: the cascades
+// are read at the mip the pixel's footprint on the surface asks for (the raster path gets this
+// from its derivatives) - at mip 0 the fine cascades alias at range, the reflected rays scatter
+// under the plane and the horizon smears into streaks.
+float3 RTWaterNormal(float3 P, float3 d)
 {
     float4 c = g_RTWaterCasc;   // cascade sizes, waveScale (slope scale)
-    float4 n0 = g_WaterNrm0.SampleLevel(g_WaterNrm0_sampler, P.xz / c.x, 0);
-    float4 n1 = g_WaterNrm1.SampleLevel(g_WaterNrm1_sampler, P.xz / c.y, 0);
-    float4 n2 = g_WaterNrm2.SampleLevel(g_WaterNrm2_sampler, P.xz / c.z, 0);
     float dist = length(P - g_RTCam.xyz);
+    const float foot = dist * g_RTWaterCol.w / max(abs(d.y), 0.05);   // metres per pixel on the surface, the grazing stretch included
+    const float l0 = log2(max(foot / (c.x / 256.0), 1.0));
+    const float l1 = log2(max(foot / (c.y / 256.0), 1.0));
+    const float l2 = log2(max(foot / (c.z / 256.0), 1.0));
+    float4 n0 = g_WaterNrm0.SampleLevel(g_WaterNrm0_sampler, P.xz / c.x, l0);
+    float4 n1 = g_WaterNrm1.SampleLevel(g_WaterNrm1_sampler, P.xz / c.y, l1);
+    float4 n2 = g_WaterNrm2.SampleLevel(g_WaterNrm2_sampler, P.xz / c.z, l2);
     float f1 = 0.25 + 0.75 * exp(-dist / 500.0);
     float f2 = 0.15 + 0.85 * exp(-dist / 120.0);
     float2 slope = (n0.xy + n1.xy * f1 + n2.xy * f2) * c.w;
@@ -65,7 +72,7 @@ bool RTWaterCrossAbove(float3 o, float3 d, float tMax, out float3 P)
 // attenuated), lumT = its transmittance (0 = nothing came through), depth = the ray's recursion.
 float3 RTWaterShade(float3 P, float3 d, float3 beyond, float lumT, uint depth)
 {
-    float3 N = RTWaterNormal(P);
+    float3 N = RTWaterNormal(P, d);
     float3 V = -d;
     float  F = 0.02 + 0.98 * pow(1.0 - saturate(dot(N, V)), 5.0);
     float3 R = reflect(d, N);
@@ -75,7 +82,7 @@ float3 RTWaterShade(float3 P, float3 d, float3 beyond, float lumT, uint depth)
     {
         RayDesc ray; ray.Origin = P + N * 0.05 + R * 0.05; ray.Direction = R; ray.TMin = 0.02;
         ray.TMax = (g_RTParams.y > 0.5) ? g_RTParams.y : 1000.0;
-        RTPayload p2; p2.color = 0.0; p2.depth = depth + 1; p2.hitT = ray.TMax;
+        RTPayload p2; p2.color = 0.0; p2.depth = depth + 1; p2.hitT = ray.TMax; p2.rough = 0.1; p2.flags = RT_PAY_SURFACE;   // into the air off the surface
         TraceRay(g_TLAS, RAY_FLAG_NONE, RT_REFLECT_MASK, 0, 1, 0, ray, p2);
         refl = p2.color;
     }
@@ -179,7 +186,7 @@ float3 RTWaterCaustic(float3 hitPos, float3 col, float run)
 // exact Fresnel of the interface (total internal reflection past the critical angle).
 float3 RTWaterShadeBelow(float3 P, float3 d, uint depth)
 {
-    float3 N = RTWaterNormal(P);                  // up
+    float3 N = RTWaterNormal(P, d);               // up
     const float eta = 1.333;                      // n_water / n_air
     float  ci  = saturate(dot(d, N));             // cos of incidence, from below
     float  st2 = eta * eta * (1.0 - ci * ci);     // sin^2 of the transmitted angle
@@ -196,7 +203,7 @@ float3 RTWaterShadeBelow(float3 P, float3 d, uint depth)
         if (depth < (uint)g_RTParams.z)
         {
             RayDesc ray; ray.Origin = P + N * 0.05; ray.Direction = Tdir; ray.TMin = 0.02; ray.TMax = maxD;
-            RTPayload p2; p2.color = 0.0; p2.depth = depth + 1; p2.hitT = ray.TMax;
+            RTPayload p2; p2.color = 0.0; p2.depth = depth + 1; p2.hitT = ray.TMax; p2.rough = 0.0; p2.flags = RT_PAY_SURFACE;   // the transmitted leg is in the air
             TraceRay(g_TLAS, RAY_FLAG_NONE, RT_REFLECT_MASK, 0, 1, 0, ray, p2);
             above = p2.color;
         }
@@ -209,7 +216,7 @@ float3 RTWaterShadeBelow(float3 P, float3 d, uint depth)
         if (depth < (uint)g_RTParams.z)
         {
             RayDesc ray; ray.Origin = P - N * 0.05; ray.Direction = R; ray.TMin = 0.02; ray.TMax = maxD;
-            RTPayload p2; p2.color = 0.0; p2.depth = depth + 1; p2.hitT = ray.TMax;
+            RTPayload p2; p2.color = 0.0; p2.depth = depth + 1; p2.hitT = ray.TMax; p2.rough = 0.0; p2.flags = 0u;   // back down: under water
             TraceRay(g_TLAS, RAY_FLAG_NONE, RT_REFLECT_MASK, 0, 1, 0, ray, p2);   // its own tail fogs the run
             below = p2.color;
         }
@@ -230,8 +237,9 @@ float3 RTUnderLeg(float3 o, float3 d, float run, bool crossed, float3 P, float3 
 }
 
 // The tail of every hit shader: `col` was shaded at hitPos, reached along d from o.
-float3 RTWaterFinish(float3 o, float3 d, float3 hitPos, float3 col, uint depth)
+float3 RTWaterFinish(float3 o, float3 d, float3 hitPos, float3 col, uint depth, uint flags)
 {
+    if (flags & RT_PAY_SURFACE) return col;   // left the surface into the air (its foot is inside the wave band, not under water)
     if (RTUnderEye(o))
     {
         float len = length(hitPos - o);
@@ -246,8 +254,9 @@ float3 RTWaterFinish(float3 o, float3 d, float3 hitPos, float3 col, uint depth)
     return col * wT + RTWaterLook(d) * (1.0 - lumT);
 }
 // The miss shader's tail: `env` is the environment the ray escaped to after tMax.
-float3 RTWaterFinishMiss(float3 o, float3 d, float tMax, float3 env, uint depth)
+float3 RTWaterFinishMiss(float3 o, float3 d, float tMax, float3 env, uint depth, uint flags)
 {
+    if (flags & RT_PAY_SURFACE) return env;   // left the surface into the air: the sky, nothing crossed
     if (RTUnderEye(o))
     {
         // Heading up it always meets the surface (the plane is boundless); heading down it

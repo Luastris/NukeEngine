@@ -594,17 +594,24 @@ void AppInstance::FixedThread()
 	cout << "[AppInstance]\tfixed-update thread stopped" << endl;
 }
 
+// The thread object lives here (no AppInstance layout change): Stop JOINS it, so no fixed step is
+// still inside physics / scripts while the modules shut down behind it (Jolt's shutdown steps the
+// system itself — two concurrent steps hang it).
+static boost::thread g_fixedThread;
+
 void AppInstance::StartFixedThread()
 {
 	if (fixedThreadRun) return;
 	fixedThreadRun = true;
-	boost::thread fxt(boost::bind(&AppInstance::FixedThread, this));
+	if (g_fixedThread.joinable()) g_fixedThread.join();   // a previous incarnation that was only flagged
+	g_fixedThread = boost::thread(boost::bind(&AppInstance::FixedThread, this));
 	cout << "[AppInstance]\tfixed-update thread started" << endl;
 }
 
 void AppInstance::StopFixedThread()
 {
 	fixedThreadRun = false;
+	if (g_fixedThread.joinable() && g_fixedThread.get_id() != boost::this_thread::get_id()) g_fixedThread.join();
 }
 
 void AppInstance::PushWindow(const char* key, boost::function<void()> fWindow) {

@@ -62,8 +62,18 @@ void main()
 
     float  maxD = (g_RTParams.y > 0.5) ? g_RTParams.y : 1000.0;
     float3 R = reflect(V, N);
+    // The water: the reflected leg stays above the plane and the escaping ray's sky blurs with
+    // distance, both as water.ps does - a leg that dives re-shades the surface at its own foot,
+    // a mirror-sharp horizon row under animated wave normals is a field of flickering streaks.
+    float  lobeRough = 0.0;
+    if (isWater)
+    {
+        if (R.y < 0.02) R = normalize(float3(R.x, 0.02, R.z));
+        const float dist = length(wpos - g_RTCam.xyz);
+        lobeRough = clamp(0.05 + (1.0 - exp(-dist / 260.0)) * 0.13, 0.05, 0.3);   // WaterReflRough (nukewater_slope.hlsl)
+    }
     RayDesc ray; ray.Origin = wpos + N * 0.08 + R * 0.05; ray.Direction = R; ray.TMin = 0.02; ray.TMax = maxD;
-    RTPayload p; p.color = 0.0; p.depth = 1; p.hitT = maxD;
+    RTPayload p; p.color = 0.0; p.depth = 1; p.hitT = maxD; p.rough = lobeRough; p.flags = isWater ? RT_PAY_SURFACE : 0u;
     TraceRay(g_TLAS, RAY_FLAG_NONE, RT_REFLECT_MASK, 0, 1, 0, ray, p);   // only reflection-visible instances
     {   // the reflected leg through the froxel fog (the camera -> mirror leg comes with the fog
         // composite). Fog volumes lie in the water too (silt, sand): the whole leg, over the

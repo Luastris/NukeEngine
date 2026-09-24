@@ -16,6 +16,7 @@
 #include <boost/container/list.hpp>
 #include <memory>
 #include <map>
+#include <boost/atomic.hpp>
 #include <string>
 
 namespace nuke {
@@ -144,7 +145,29 @@ public:
     void RemoveByGuid(const std::string& guid);
     void UnlinkGuid(const std::string& guid);
 
+    // The content root through the engine's FileIndex: the folders register ("content", "shaders"),
+    // LoadContentDir / LoadShadersDir read the index instead of walking the disk, and every change
+    // afterwards - a file added, deleted or rewritten by anyone, editor or not - reaches the DB on the
+    // main thread: new assets register, deleted ones leave, rewritten textures / materials / shaders /
+    // input maps hot-reload. Hosts call it BEFORE the boot scan (editor and Player alike); `shadersDir`
+    // = the engine's built-in shader folder ("" = none). Changes that land while the scan still runs
+    // wait for it. (ABI 46: appended state.)
+    void WatchContent(const std::string& contentDir, const std::string& shadersDir);
+    // One path's change (0 added, 1 removed, 2 modified = FileIndex::ChangeKind): the reaction above.
+    void OnFileChanged(const std::string& absPath, int kind, bool isDir);
+    // Hot-reload ONE registered path (texture / material / shader pair / post shader). False = not one.
+    bool HotReloadPath(const std::string& absPath, iRender* r);
+
 	std::shared_ptr<uint> loadTexture(const std::string& name);
+private:
+    // FileIndex plumbing (WatchContent): the subscription, the scan gate and what arrived meanwhile.
+    long long fsSub = 0;
+    boost::atomic<bool> contentScanning{false};
+    struct PendingChange { std::string abs; int kind; bool isDir; };
+    std::vector<PendingChange> fsPending;
+    void RegisterShaderPath(const std::string& absPath, iRender* r);   // a NEW .vs/.ps/.post.hlsl on disk
+    void PushMaterialsToWorld(const std::vector<Material*>& changed);  // a reloaded template into the live clones
+
 };
 }  // namespace nuke
 

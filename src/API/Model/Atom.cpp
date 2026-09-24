@@ -1,5 +1,6 @@
 #include "API/Model/Atom.h"
 #include "API/Model/Time.h"
+#include "API/Model/World.h"   // BumpHierarchy: views cache rows on the hierarchy version
 #include "interface/AppInstance.h"
 #include "reflect/ReflectBind.h"
 #include <iostream>
@@ -29,6 +30,7 @@ void Atom::SetRuntimeHidden(Atom* a, bool on)
 {
 	if (!a) return;
 	if (on) HiddenAtoms().insert(a); else HiddenAtoms().erase(a);
+	World::BumpHierarchy();
 }
 
 bool Atom::RuntimeHidden(const Atom* a)
@@ -58,6 +60,7 @@ std::string Atom::GetTag()
 void Atom::SetName(const std::string& name)
 {
 	this->name = name;
+	World::BumpHierarchy();
 }
 
 void Atom::SetTag(const std::string& tag)
@@ -80,7 +83,7 @@ void Atom::SetPersistent(bool on) { persistent = on; }
 bool Atom::IsPersistent()         { return persistent; }
 
 // No eager side effects: every consumer gates on the flag per frame.
-void Atom::SetEnabled(bool on) { enabled = on; }
+void Atom::SetEnabled(bool on) { enabled = on; World::BumpHierarchy(); }
 bool Atom::IsEnabled()         { return enabled; }
 bool Atom::IsFolder()          { return folder; }
 void Atom::SetAlwaysLoaded(bool on) { alwaysLoaded = on; }
@@ -93,6 +96,7 @@ Transform& Atom::GetTransform()
 
 void Atom::AddComponent(Component* cmp) {
 	cmp->Init(this);
+	World::BumpHierarchy();
 }
 
 void Atom::Init(Atom* parent)
@@ -158,6 +162,7 @@ Atom* Atom::GetParent()
 void Atom::AddChild(Atom* newChild) {
 	children.push_back(newChild);
 	newChild->parent = this;
+	World::BumpHierarchy();
 }
 
 void Atom::Reset() {}

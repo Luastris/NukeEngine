@@ -1,7 +1,12 @@
 // Shared RT reflection code: payload, bindless geometry/material fetch, environment and the PBR model.
 // The renderer CONCATENATES this ahead of rt_rgen / rt_rmiss / rt_rchit (it is not #included).
 
-struct RTPayload { float3 color; uint depth; float hitT; };   // color = reflected radiance; depth = current recursion depth; hitT = hit distance (TMax on a miss)
+struct RTPayload { float3 color; uint depth; float hitT; float rough; uint flags; };   // color = reflected radiance; depth = current recursion depth; hitT = hit distance (TMax on a miss); rough = the lobe's roughness (the sky blurs by it on a miss; 0 = mirror)
+// flags: RT_PAY_SURFACE = the ray left the WATER SURFACE into the air (a water pixel's reflection, the crossing's
+// reflected leg, the transmitted leg from below). Its origin sits inside the wave band, which RTUnderEye reads as
+// "under water": without the flag the miss / hit tails shade it as a submerged ray surfacing - the sky through the
+// refracted leg, a field of flickering streaks, objects fogged as if seen from below.
+#define RT_PAY_SURFACE 1u
 
 // TLAS instance-mask bit for "visible in reflections". Default instance Mask = 0xFF;
 // excluded = 0xFF & ~RT_REFLECT_BIT. Both color and shadow rays inside a reflection use this mask.
@@ -45,6 +50,7 @@ struct SurfaceOut { float3 albedo; float metallic; float roughness; float3 emiss
 cbuffer RTRefCB { float4x4 g_InvProj; float4x4 g_InvView; float4 g_RTCam; float4 g_RTParams; float4 g_RTWater; float4 g_RTWaterCol; float4 g_RTWaterAbs;
                   float4 g_RTWaterCasc; float4 g_RTWaterRip0; float4 g_RTWaterRip1; float4 g_RTWaterCau; float4 g_RTWaterCau1; };
 // g_RTCam = (camera xyz, game clock); g_RTParams = (intensity, maxDist, maxDepth, roughCut); g_RTWater = (level, on, fade, wave band); g_RTWaterAbs = (absorb.rgb, 1/opacityDepth);
+// g_RTWaterCol = (scatter x tint, w = the pixel's angular size in radians: the wave maps' mip by footprint);
 // g_RTWaterCasc = (cascade sizes 0..2, waveScale); g_RTWaterRip0 = (ripple window origin xz, extent, 1/extent); g_RTWaterRip1 = (height scale, sim valid, texel size, detail)
 // g_RTWaterCau = (photon tile centre xz, uv scale, strength); g_RTWaterCau1 = (sharpness, underwater fog on, tint = Scatter Color alpha, 0)
 // The water's wave maps (SetRTWaterMaps): cascade slope maps (xy = slope) + the ripple heightfield; zero textures when no water draws.
@@ -147,11 +153,15 @@ float3 EnvSample(float3 dir, float rough)   // probe (parallax-free), the sky ma
     return g_Ambient.rgb;
 }
 // A ray that left the scene: the sky map is exact there (clouds included), the probe is not.
-float3 EnvMiss(float3 dir)
+// `rough` = the lobe's roughness (payload): a water pixel's reflection at range is a blurred
+// sky, as water.ps draws it - at mip 0 every grazing ray reads the map's horizon row and the
+// waves smear it into flickering streaks.
+float3 EnvMiss(float3 dir, float rough)
 {
-    if (g_Misc.z > 0.5) return SkyMapSample(g_SkyMap, g_SkyMap_sampler, dir, 0.0);
-    return EnvSample(dir, 0.0);
+    if (g_Misc.z > 0.5) return SkyMapSample(g_SkyMap, g_SkyMap_sampler, dir, rough);
+    return EnvSample(dir, rough);
 }
+float3 EnvMiss(float3 dir) { return EnvMiss(dir, 0.0); }
 
 // What a ray sees of the water surface it crossed: sky mirrored about the horizontal plane,
 // Fresnel-mixed with the body's scatter colour.

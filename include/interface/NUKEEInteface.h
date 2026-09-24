@@ -156,7 +156,22 @@ extern "C" { NUKE_ABI_STAMP int nuke_build_debug = 0; }
 //       NukeWaterSurface gained underFog + underWobble (appended): per-effect underwater switches.
 //       R3/E2: new component PostFXVolume (API/Model/PostFXVolume.h; no layout change elsewhere); the renderer
 //       gained the dof / motionblur / exposure built-in post stages (chain names, no interface change).
-#define NUKE_ENGINE_ABI 44
+//       (44 should have ended with the materials / LateUpdate work; DDGI, volumetrics, atmosphere, weather, water
+//       and R3/E2 rode on it by my mistake - one number per FEATURE from here on.)
+//   45: 4.2 upscalers (2026-09-24). iRender gained beginGBufferCoverage / endGBufferCoverage (appended):
+//       the transparent / additive draws into the prepass coverage = the reactive mask of the temporal
+//       upscalers. The "upscale" built-in post stage (DLSS via NGX, FSR 3.1/4 via the FidelityFX API, XeSS,
+//       FSR 1); render scale = internal vs output size in the camera pass; FrameCB gained g_MipBias (appended).
+//       Same feature, same number: frame generation (DLSS-G / FSR FG / XeSS-FG, D3D12 + Vulkan) and the typed
+//       API - Config gained `upscale` (NukeUpscale, appended), iRender gained getUpscaleStatus (appended),
+//       config.h gained the UpscaleMode / UpscaleQuality / FrameGeneration enums (Game.SetUpscaleMode & co).
+//   46: the file index (2026-09-25). nuke::FileIndex (API/Model/FileIndex.h): every host folder scanned once and
+//       kept current by the OS (ReadDirectoryChangesW / inotify / FSEvents), immutable snapshots for the readers,
+//       changes on the main thread + the "fs.changed" event. ResDB gained WatchContent / OnFileChanged /
+//       HotReloadPath and its subscription state (appended): the boot scan reads the index, later edits reach
+//       the DB live. The editor's per-frame disk walks (browser, settings, pickers) and the mtime polls
+//       (hot reload, C#) read the index instead.
+#define NUKE_ENGINE_ABI 46
 extern "C" { NUKE_ABI_STAMP int nuke_engine_abi = NUKE_ENGINE_ABI; }
 
 namespace nuke {

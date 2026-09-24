@@ -377,11 +377,11 @@ float3 Spawn(uint i, float k, int spawnKind, int pushField)
 [numthreads(8, 8, 4)]
 void main(uint3 id : SV_DispatchThreadID, uint gi : SV_GroupIndex, uint3 gid : SV_GroupID)
 {
-    const int   pass = (int)g_FlRes.w;
+    const int   stage = (int)g_FlRes.w;   // "pass" is an FXC keyword
     const float dt   = g_FlBox.w;
     const float3 cs  = g_FlMisc.yzw;
     const uint  N    = (uint)g_FlSplat.w;
-    if (pass == 4)   // parcels move (one thread per parcel)
+    if (stage == 4)   // parcels move (one thread per parcel)
     {
         const uint i = gid.x * 256u + gi;
         if (i >= N) return;
@@ -408,7 +408,7 @@ void main(uint3 id : SV_DispatchThreadID, uint gi : SV_GroupIndex, uint3 gid : S
         if (P1.x > 0.0) InterlockedAdd(g_Ledger[(uint)g_FlCounts.w * 2 + 1], (uint)(P1.x * 256.0 + 0.5));   // the weights' sum: the splat is normalised to it
         return;
     }
-    if (pass == 6)   // parcels splat: a soft clump, its shape a piece of the clump noise drifting in time (one thread per parcel)
+    if (stage == 6)   // parcels splat: a soft clump, its shape a piece of the clump noise drifting in time (one thread per parcel)
     {
         const uint i = gid.x * 256u + gi;
         if (i >= N) return;
@@ -444,7 +444,7 @@ void main(uint3 id : SV_DispatchThreadID, uint gi : SV_GroupIndex, uint3 gid : S
 
     const int3 c = (int3)id;
     const uint cur = (uint)g_FlCounts.w, prv = (cur + 2u) % 3u, nxt = (cur + 1u) % 3u;
-    if (pass == 5)   // splat grid: clear; the resting amount of this step (what the parcels are normalised to)
+    if (stage == 5)   // splat grid: clear; the resting amount of this step (what the parcels are normalised to)
     {
         if (!InsideS(c)) return;
         g_Acc[c] = 0u;
@@ -454,7 +454,7 @@ void main(uint3 id : SV_DispatchThreadID, uint gi : SV_GroupIndex, uint3 gid : S
         if (rest > 0.0) InterlockedAdd(g_Ledger[cur * 2], (uint)(rest * 16.0 + 0.5));
         return;
     }
-    if (pass == 7)   // splat grid: resolve -> the fog the froxels sample (each parcel a fixed share, no pumping while some fade)
+    if (stage == 7)   // splat grid: resolve -> the fog the froxels sample (each parcel a fixed share, no pumping while some fade)
     {
         if (!InsideS(c)) return;
         float restSum = (float)g_Ledger[prv * 2] / 16.0;    // last frame's (one frame behind, changes slowly)
@@ -467,7 +467,7 @@ void main(uint3 id : SV_DispatchThreadID, uint gi : SV_GroupIndex, uint3 gid : S
     const float3 p   = CellPos(c);
     float3 solidVel;
     const bool solid = Solid(p, solidVel);
-    if (pass == 0)   // velocity: advect, then the forces
+    if (stage == 0)   // velocity: advect, then the forces
     {
         if (solid) { g_VelOut[c] = float4(solidVel, 0.0); return; }
         float3 v;
@@ -497,7 +497,7 @@ void main(uint3 id : SV_DispatchThreadID, uint gi : SV_GroupIndex, uint3 gid : S
         }
         g_VelOut[c] = float4(v, 0.0);
     }
-    else if (pass == 1)   // divergence of the advected velocity; pressure starts at zero
+    else if (stage == 1)   // divergence of the advected velocity; pressure starts at zero
     {
         if (solid) { g_DivOut[c] = 0.0; g_PrsOut[c] = 0.0; return; }
         float3 vxp = VelAt(c + int3(1, 0, 0)), vxm = VelAt(c - int3(1, 0, 0));
@@ -507,7 +507,7 @@ void main(uint3 id : SV_DispatchThreadID, uint gi : SV_GroupIndex, uint3 gid : S
         g_DivOut[c] = div;
         g_PrsOut[c] = 0.0;
     }
-    else if (pass == 2)   // Jacobi: anisotropic Poisson step, open outside, solid faces closed
+    else if (stage == 2)   // Jacobi: anisotropic Poisson step, open outside, solid faces closed
     {
         if (solid) { g_PrsOut[c] = 0.0; return; }
         float own = g_PrsIn[c];
@@ -517,7 +517,7 @@ void main(uint3 id : SV_DispatchThreadID, uint gi : SV_GroupIndex, uint3 gid : S
                   + (PrsAt(c + int3(0, 0, 1), own) + PrsAt(c - int3(0, 0, 1), own)) * iz;
         g_PrsOut[c] = (sum - g_DivIn[c]) / (2.0 * (ix + iy + iz));
     }
-    else if (pass == 3)   // project: subtract the pressure gradient (solids keep the body's velocity)
+    else if (stage == 3)   // project: subtract the pressure gradient (solids keep the body's velocity)
     {
         if (solid) { g_VelOut[c] = float4(solidVel, 0.0); return; }
         float3 v = g_VelIn[c].xyz;
@@ -531,7 +531,7 @@ void main(uint3 id : SV_DispatchThreadID, uint gi : SV_GroupIndex, uint3 gid : S
     // bodies' wakes) plus the Force Fields' drift - by MacCormack advection; a diverging drift
     // thins it, a converging one packs it; it relaxes toward the resting medium (Refill fills
     // a hole, Dissipation thins packed fog). Steps at the air's rate.
-    else if (pass == 8)   // MacCormack step 1: the plain forward advection -> g_DensOut (the scratch)
+    else if (stage == 8)   // MacCormack step 1: the plain forward advection -> g_DensOut (the scratch)
     {
         float fwd = 0.0;
         float3 sv;
@@ -545,7 +545,7 @@ void main(uint3 id : SV_DispatchThreadID, uint gi : SV_GroupIndex, uint3 gid : S
         }
         g_DensOut[c] = fwd;
     }
-    else if (pass == 9)   // MacCormack step 2, continuity, relaxation
+    else if (stage == 9)   // MacCormack step 2, continuity, relaxation
     {
         if (solid) { g_DensOut[c] = 0.0; g_RhoOut[c] = 0.0; return; }   // the body occupies the cell
         const float rest = RestDensity(p);
