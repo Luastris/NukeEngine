@@ -178,7 +178,11 @@ extern "C" { NUKE_ABI_STAMP int nuke_build_debug = 0; }
 //       time cache + GetTimeScale (appended); Time gained localScale (appended) + LocalScale / LocalScope;
 //       iPhysics gained setBodyTimeScale (vtable END); Rigidbody gained its last-pushed scale (appended).
 //       TimeVolume component (API/Model/TimeVolume.h): dt x Time Scale inside a shape per domain.
-#define NUKE_ENGINE_ABI 48
+//   49: shader hot reload (2026-09-25). iRender gained reloadShader (vtable END): ResDB pushes a changed
+//       engine shader / include and the renderer rebuilds its dependents in the background; the renderer's
+//       native seam gained shader-owner recording + module reloaders (NukeWater). Rope/Cloth/Ragdoll/Vehicle
+//       gained their last-pushed time scale (appended, part of 48's feature).
+#define NUKE_ENGINE_ABI 49
 extern "C" { NUKE_ABI_STAMP int nuke_engine_abi = NUKE_ENGINE_ABI; }
 
 namespace nuke {

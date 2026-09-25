@@ -30,7 +30,8 @@ target_include_directories(NukeEngine PUBLIC
 
 target_compile_definitions(NukeEngine PRIVATE
     NUKEENGINE_EXPORTS
-    GLM_ENABLE_EXPERIMENTAL)
+    GLM_ENABLE_EXPERIMENTAL
+    NUKE_ENGINE_SHADER_SRC_DIR="${CMAKE_CURRENT_SOURCE_DIR}/shaders")   # dev checkout: shader hot reload from the repo
 
 if(WIN32)
     # The defines the retired vcxproj carried (WIN32 spelled out: parts of the tree test the

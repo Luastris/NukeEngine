@@ -166,6 +166,9 @@ private:
     struct PendingChange { std::string abs; int kind; bool isDir; };
     std::vector<PendingChange> fsPending;
     void RegisterShaderPath(const std::string& absPath, iRender* r);   // a NEW .vs/.ps/.post.hlsl on disk
+    // A changed engine shader / include: re-push its text (setShaderSource) and ask the renderer to
+    // rebuild the dependents (reloadShader). Names as LoadBuiltinShaders: stem, includes keep the file name.
+    void PushShaderSource(const std::string& absPath, iRender* r);
     void PushMaterialsToWorld(const std::vector<Material*>& changed);  // a reloaded template into the live clones
 
 };

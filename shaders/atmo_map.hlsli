@@ -8,22 +8,27 @@
 static const float AT_PI = 3.14159265;
 
 // Nearest positive ray/sphere hit distance (sphere at the origin), -1 if none.
+// (single exit: FXC flags early returns as "potentially uninitialized")
 float AtmoRaySphere(float3 o, float3 d, float r)
 {
     float b = dot(o, d), c = dot(o, o) - r * r;
     float h = b * b - c;
-    if (h < 0.0) return -1.0;
-    h = sqrt(h);
-    float t0 = -b - h, t1 = -b + h;
-    if (t0 < 0.0 && t1 < 0.0) return -1.0;
-    return (t0 < 0.0) ? t1 : t0;
+    float res = -1.0;
+    if (h >= 0.0)
+    {
+        h = sqrt(h);
+        float t0 = -b - h, t1 = -b + h;
+        res = (t0 >= 0.0) ? t0 : ((t1 >= 0.0) ? t1 : -1.0);
+    }
+    return res;
 }
 float AtmoRaySphereFar(float3 o, float3 d, float r)   // the far hit (exit), -1 if none
 {
     float b = dot(o, d), c = dot(o, o) - r * r;
     float h = b * b - c;
-    if (h < 0.0) return -1.0;
-    return -b + sqrt(h);
+    float res = -1.0;
+    if (h >= 0.0) res = -b + sqrt(h);
+    return res;
 }
 
 float2 AtmoSubUvToUnit(float2 uv, float2 res) { return (uv - 0.5 / res) * (res / (res - 1.0)); }
@@ -100,7 +105,9 @@ float2 AtmoSkyViewUvFor(float Rg, float2 res, float3 camKm, float3 sun, float3 d
     float3 up = camKm / viewHeight;
     float3 s = sun - up * dot(sun, up);
     float sl = length(s);
-    float3 sunT = (sl > 1e-4) ? s / sl : (abs(up.y) < 0.9 ? normalize(cross(up, float3(0, 1, 0))) : float3(1, 0, 0));
+    float3 alt = cross(up, float3(0, 1, 0));   // division-free fallback (FXC folds both ternary arms)
+    alt = (abs(up.y) < 0.9) ? alt * rsqrt(max(dot(alt, alt), 1e-8)) : float3(1, 0, 0);
+    float3 sunT = (sl > 1e-4) ? s / max(sl, 1e-4) : alt;
     float viewZenithCos = dot(dir, up);
     float3 dt = dir - up * viewZenithCos;
     float dl = length(dt);

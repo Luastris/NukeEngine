@@ -43,10 +43,10 @@ bool RaySphere(float3 o, float3 d, float3 c, float r, out float t0, out float t1
     float  b  = dot(oc, d);
     float  cc = dot(oc, oc) - r * r;
     float  h  = b * b - cc;
-    if (h < 0.0) { t0 = t1 = 0.0; return false; }
-    h = sqrt(h);
-    t0 = -b - h; t1 = -b + h;
-    return true;
+    t0 = 0.0; t1 = 0.0;
+    bool hit = h >= 0.0;   // single exit: FXC flags early returns as "potentially uninitialized"
+    if (hit) { h = sqrt(h); t0 = -b - h; t1 = -b + h; }
+    return hit;
 }
 // The stretch of the ray inside the layer: [tA, tB], false if none (camera below, inside or
 // above the layer; a ray from above that misses the bottom shell crosses the top twice).
@@ -59,10 +59,11 @@ bool CloudSegment(float3 o, float3 d, float maxDist, out float tA, out float tB)
     bool hitB = RaySphere(o, d, c, rb, b0, b1);
     bool hitT = RaySphere(o, d, c, rt, u0, u1);
     tA = 0.0; tB = 0.0;
+    bool ok = true;   // single exit: FXC flags early returns as "potentially uninitialized"
     if (r < rb)
     {   // below the layer: from the bottom shell to the top shell
-        if (!hitT) return false;
-        tA = max(b1, 0.0); tB = u1;
+        if (!hitT) ok = false;
+        else { tA = max(b1, 0.0); tB = u1; }
     }
     else if (r < rt)
     {   // inside the layer: from here to whichever shell comes first (the bottom only if the ray dips into it)
@@ -72,21 +73,20 @@ bool CloudSegment(float3 o, float3 d, float maxDist, out float tA, out float tB)
     }
     else
     {   // above the layer
-        if (!hitT || u1 <= 0.0) return false;
-        tA = max(u0, 0.0);
-        tB = (hitB && b0 > 0.0) ? min(b0, u1) : u1;
+        if (!hitT || u1 <= 0.0) ok = false;
+        else { tA = max(u0, 0.0); tB = (hitB && b0 > 0.0) ? min(b0, u1) : u1; }
     }
     // the planet itself ends the ray: a ray into the ground never reaches the far side's clouds
     float g0, g1;
-    if (RaySphere(o, d, c, g_ClSkyHor.w, g0, g1) && g1 > 0.0)
+    if (ok && RaySphere(o, d, c, g_ClSkyHor.w, g0, g1) && g1 > 0.0)
     {
         float tG = (g0 > 0.0) ? g0 : g1;
-        if (r >= g_ClSkyHor.w && g0 > 0.0 && tG <= tA) return false;   // outside the planet, the ground comes first
-        if (r < g_ClSkyHor.w) return false;                            // below the surface (a mine, a basement): no sky at all
+        if (r >= g_ClSkyHor.w && g0 > 0.0 && tG <= tA) ok = false;   // outside the planet, the ground comes first
+        if (r < g_ClSkyHor.w) ok = false;                            // below the surface (a mine, a basement): no sky at all
         tB = min(tB, tG);
     }
     tB = min(tB, maxDist);
-    return tB > tA;
+    return ok && tB > tA;
 }
 
 // ---- the density field ---------------------------------------------------------------

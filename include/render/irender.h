@@ -896,6 +896,10 @@ public:
     // 4.2: what runs for the back-buffer camera + what this GPU / backend / build can offer
     // (Game.ActiveUpscaler / UpscaleInfo / UpscalerAvailable). (ABI: appended, ABI 45)
     virtual void getUpscaleStatus(NukeUpscaleStatus* out) { (void)out; }
+    // Shader hot reload: a source pushed under `name` (setShaderSource) changed on disk. Every
+    // pipeline compiled from it, or from a file that #includes it, rebuilds in the background;
+    // draws keep the old one until the new one lands. (ABI: appended, ABI 49)
+    virtual void reloadShader(const char* name) { (void)name; }
     // ABI: new virtuals are appended at the END of the class, NEVER inserted mid-vtable —
     // plugins are separate DLLs built at different times, and an inserted slot shifts every later one.
 };

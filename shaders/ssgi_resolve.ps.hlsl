@@ -35,10 +35,14 @@ float3 OctDecode(float2 e)
 float LinearZ(float2 uv)
 {
     float d = g_Depth.Sample(g_Depth_sampler, uv).r;
-    if (d >= 0.99999) return 1e8;
-    float4 clip = float4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, d, 1.0);
-    float4 v = mul(g_InvProj, clip);
-    return abs(v.z / v.w);
+    float z = 1e8;   // sky; single exit (FXC flags early returns as "potentially uninitialized")
+    if (d < 0.99999)
+    {
+        float4 clip = float4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, d, 1.0);
+        float4 v = mul(g_InvProj, clip);
+        z = abs(v.z / v.w);
+    }
+    return z;
 }
 float3 NormalAt(float2 uv) { return OctDecode(g_GBuffer.Sample(g_GBuffer_sampler, uv).xy); }
 float SurfaceWeight(float zc, float3 nc, float zn, float3 nn)

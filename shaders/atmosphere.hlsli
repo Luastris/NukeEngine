@@ -88,7 +88,9 @@ void AtmoCameraFrame(out float3 camKm, out float viewHeight, out float3 up, out 
     up = camKm / viewHeight;
     float3 s = g_AtSun.xyz - up * dot(g_AtSun.xyz, up);
     float sl = length(s);
-    sunTangent = (sl > 1e-4) ? s / sl : (abs(up.y) < 0.9 ? normalize(cross(up, float3(0, 1, 0))) : float3(1, 0, 0));
+    float3 alt = cross(up, float3(0, 1, 0));   // division-free fallback (FXC folds both ternary arms)
+    alt = (abs(up.y) < 0.9) ? alt * rsqrt(max(dot(alt, alt), 1e-8)) : float3(1, 0, 0);
+    sunTangent = (sl > 1e-4) ? s / max(sl, 1e-4) : alt;
 }
 // The sky along a world direction from the camera: rgb = in-scatter (sun + sky intensity
 // applied), a = transmittance to the end of the ray (the ground or the top of the atmosphere).
@@ -117,25 +119,27 @@ AtmoResult AtmoIntegrate(float3 o, float3 d, float3 sun, float tMax, int steps, 
     res.L = 0.0; res.T = 1.0; res.fms = 0.0; res.tEnd = 0.0; res.ground = false;
     float Rg = AtmoRg(), Rt = AtmoRt();
     float t0 = 0.0;
+    bool ok = true;   // single exit: FXC flags early returns as "potentially uninitialized"
     if (length(o) > Rt)
     {   // outside: enter the atmosphere first
         float tIn = AtmoRaySphere(o, d, Rt);
-        if (tIn < 0.0) return res;
-        t0 = tIn;
-        if (tMax >= 0.0 && tMax <= t0) return res;
+        if (tIn < 0.0) ok = false;
+        t0 = max(tIn, 0.0);
+        if (tMax >= 0.0 && tMax <= t0) ok = false;
     }
     float tTop = AtmoRaySphereFar(o, d, Rt);
     float tGround = AtmoRaySphere(o, d, Rg);
     float t1 = tTop;
     if (tGround >= 0.0 && tGround < t1) { t1 = tGround; res.ground = true; }
     if (tMax >= 0.0 && tMax < t1) { t1 = tMax; res.ground = false; }
-    if (t1 <= t0) return res;
-    res.tEnd = t1;
+    if (t1 <= t0) ok = false;
+    if (!ok) { res.ground = false; t1 = t0; steps = 0; }   // nothing to integrate: the loop runs zero times
+    res.tEnd = ok ? t1 : 0.0;
     float mu = dot(d, sun);
     float phR = msOnly ? 1.0 / (4.0 * AT_PI) : AtmoPhaseR(mu);
     float phM = msOnly ? 1.0 / (4.0 * AT_PI) : AtmoPhaseM(mu);
     float3 T = 1.0, L = 0.0, fms = 0.0;
-    float dt = (t1 - t0) / (float)steps;
+    float dt = (t1 - t0) / (float)max(steps, 1);
     float t = t0 + dt * 0.3;
     [loop] for (int i = 0; i < steps; ++i)
     {

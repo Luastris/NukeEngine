@@ -18,6 +18,7 @@
 #include "interface/AppInstance.h"   // GuidForContentPath: content root + ResolveContent
 #include "input/Input.h"         // .nuinput content -> gameplay input system
 #include <boost/filesystem.hpp>
+#include <boost/filesystem/fstream.hpp>   // PushShaderSource reads the changed shader text
 #include <iostream>
 
 namespace nuke {
@@ -768,10 +769,18 @@ void ResDB::WatchContent(const std::string& contentDir, const std::string& shade
 	FileIndex& fi = FileIndex::Get();
 	if (!contentDir.empty()) fi.Watch("content", contentDir);
 	if (!shadersDir.empty()) fi.Watch("shaders", shadersDir);
+#ifdef NUKE_ENGINE_SHADER_SRC_DIR
+	// Dev checkout: the repo's shader sources hot-reload straight from the editor's save, no build
+	// needed (the build deploys the same text later — an unchanged push is a no-op in the renderer).
+	{
+		boost::system::error_code ec;
+		if (!shadersDir.empty() && bfs::is_directory(NUKE_ENGINE_SHADER_SRC_DIR, ec)) fi.Watch("shaders-src", NUKE_ENGINE_SHADER_SRC_DIR);
+	}
+#endif
 	if (fsSub) return;
 	fsSub = fi.Subscribe("", [this](const FileIndex::Change& c)
 	{
-		if (c.rootName != "content" && c.rootName != "shaders") return;
+		if (c.rootName != "content" && c.rootName != "shaders" && c.rootName != "shaders-src") return;
 		const std::string root = FileIndex::Get().RootDir(c.rootName);
 		if (root.empty()) return;
 		OnFileChanged(bfs::path(root + "/" + c.rel).make_preferred().string(), (int)c.kind, c.isDir);
@@ -804,9 +813,15 @@ void ResDB::OnFileChanged(const std::string& abs, int kind, bool isDir)
 		std::cout << "[ResDB]\tremoved on disk: " << bfs::path(abs).filename().string() << std::endl;
 		return;
 	}
-	if (ext == ".hlsl")
+	if (ext == ".hlsl" || ext == ".hlsli")
 	{
-		if (!HotReloadPath(abs, r)) RegisterShaderPath(abs, r);
+		// The engine's own shaders (deployed folder or the dev source folder): the renderer gets the
+		// new text and rebuilds whatever compiled from it. Material / post shaders also refresh their
+		// ResDB pipeline below; project shaders under content/ only do that.
+		const std::string shadersRoot = FileIndex::Get().RootDir("shaders"), srcRoot = FileIndex::Get().RootDir("shaders-src");
+		auto under = [&](const std::string& root) { return !root.empty() && abs.size() > root.size() && bfs::path(abs).parent_path() == bfs::path(root); };
+		if (r && (under(shadersRoot) || under(srcRoot))) PushShaderSource(abs, r);
+		if (ext == ".hlsl" && !HotReloadPath(abs, r)) RegisterShaderPath(abs, r);
 		return;
 	}
 	if (kind == 0 || GuidForPath(abs).empty())   // added, or a rewrite of something never registered
@@ -905,7 +920,7 @@ void ResDB::RegisterShaderPath(const std::string& abs, iRender* r)
 	else if (ends(".vs.hlsl") || ends(".ps.hlsl"))
 	{
 		const std::string name = fn.substr(0, fn.size() - 8);
-		if (shaderByGuid.count(name)) return;
+		if (shaderByGuid.count(name) || RendererInternalShader(name)) return;   // renderer passes are not materials
 		const bfs::path vs = p.parent_path() / (name + ".vs.hlsl"), ps = p.parent_path() / (name + ".ps.hlsl");
 		boost::system::error_code ec;
 		if (!bfs::exists(vs, ec) || !bfs::exists(ps, ec)) return;   // the other half comes as its own change
@@ -916,6 +931,20 @@ void ResDB::RegisterShaderPath(const std::string& abs, iRender* r)
 	}
 	else return;
 	std::cout << "[ResDB]\tshader appeared on disk: '" << s->name << "'" << std::endl;
+}
+
+void ResDB::PushShaderSource(const std::string& abs, iRender* r)
+{
+	if (!r) return;
+	const bfs::path p(abs);
+	bfs::ifstream f(p, std::ios::binary);
+	if (!f) return;
+	const std::string src((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+	if (src.empty()) return;   // an editor's save-in-progress (truncate, then write): the write comes as its own change
+	const std::string name = p.extension() == ".hlsli" ? p.filename().string() : p.stem().string();
+	r->setShaderSource(name.c_str(), src.c_str());
+	r->reloadShader(name.c_str());
+	std::cout << "[ResDB]\tshader source '" << name << "' changed on disk (" << src.size() << " bytes) -> renderer reload" << std::endl;
 }
 
 
