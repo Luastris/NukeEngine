@@ -106,6 +106,10 @@ struct NukeCameraDesc
     uint64_t cameraId = 0;                      // stable id of the camera (its atom): keys the per-camera temporal state
                                                 // (TAA / AO history, occlusion views) — two cameras on one target no longer
                                                 // share one history. 0 = anonymous (falls back to the target). (abi 44, appended)
+    float    panini = 0.0f;                     // 0 = rectilinear; >0 = cylindrical Panini view of strength d (1 = full): wide
+                                                // FOV without stretched edges. The renderer over-scans the rectilinear render
+                                                // and remaps the final image; fov keeps its meaning at the centre. (abi 47, appended)
+    float    paniniVertical = 0.5f;             // 1 = rectilinear vertical (straight horizontals), 0 = cylindrical. (abi 47, appended)
 };
 
 // Froxel volumetric lighting / fog (World::Settings): a global height-fog medium lit by the

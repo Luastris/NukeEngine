@@ -171,7 +171,10 @@ extern "C" { NUKE_ABI_STAMP int nuke_build_debug = 0; }
 //       HotReloadPath and its subscription state (appended): the boot scan reads the index, later edits reach
 //       the DB live. The editor's per-frame disk walks (browser, settings, pickers) and the mtime polls
 //       (hot reload, C#) read the index instead.
-#define NUKE_ENGINE_ABI 46
+//   47: honest wide FOV (2026-09-25). Camera gained `panini` (cylindrical Panini projection strength, appended);
+//       NukeCameraDesc gained `panini` (appended). The renderer over-scans the rectilinear pass and remaps the
+//       final LDR image (panini.ps) before the HUD; Camera::ScreenRayDir follows the same mapping.
+#define NUKE_ENGINE_ABI 47
 extern "C" { NUKE_ABI_STAMP int nuke_engine_abi = NUKE_ENGINE_ABI; }
 
 namespace nuke {

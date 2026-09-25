@@ -401,7 +401,7 @@ bool NukeReflectInit() {
 		t.fields.back().tip = "Invert mouse Y in free-fly mode";
 		t.fields.push_back(MakeField("r_width", &Camera::r_width));
 		t.fields.push_back(MakeField("r_height", &Camera::r_height));
-		t.fields.push_back(MakeField("fov", &Camera::fov, "", "FOV"));
+		t.fields.push_back(MakeField("fov", &Camera::fov, "", "FOV", 1.0f, 170.0f));
 		t.fields.back().tip = "Vertical field of view, degrees (perspective projection)";
 		t.fields.push_back(MakeField("_near", &Camera::_near, "", "Near"));
 		t.fields.back().tip = "Near clip plane distance — nothing closer is drawn";
@@ -413,6 +413,10 @@ bool NukeReflectInit() {
 		t.fields.back().tip = "Half-height of the orthographic view, world units";
 		t.fields.push_back(MakeField("projTransition", &Camera::projTransition, "", "Proj Transition"));
 		t.fields.back().tip = "Ease speed of the perspective/orthographic switch; 0 = instant";
+		t.fields.push_back(MakeField("panini", &Camera::panini, "", "Panini", 0.0f, 1.0f));
+		t.fields.back().tip = "Wide-FOV view without stretched edges: 0 = rectilinear, 1 = full Panini (cylindrical) projection";
+		t.fields.push_back(MakeField("paniniVertical", &Camera::paniniVertical, "", "Panini Vertical", 0.0f, 1.0f));
+		t.fields.back().tip = "1 = straight horizontals (near walls arc, edge objects taller), 0 = cylindrical (horizontals bow, proportions kept); 0.5 balances both";
 		t.fields.push_back(MakeField("layerMask", &Camera::layerMask, "", "Layer Mask"));
 		t.fields.back().tip = "Which render layers this camera draws (layers are named in Project Settings > Layers; atoms pick theirs via the Layer field)";
 		t.fields.back().widget = "layers";

@@ -410,9 +410,29 @@ Vector3 Camera::ScreenRayDir(double px, double py)
 	const double thf = std::tan((double)fov * 0.5 * 0.017453292519943295);
 	Vector3 u = viewValid ? viewUp : transform->up();
 	Vector3 r(f.y * u.z - f.z * u.y, f.z * u.x - f.x * u.z, f.x * u.y - f.y * u.x);
-	Vector3 d(f.x + ndcx * thf * (w / h) * r.x + ndcy * thf * u.x,
-	          f.y + ndcx * thf * (w / h) * r.y + ndcy * thf * u.y,
-	          f.z + ndcx * thf * (w / h) * r.z + ndcy * thf * u.z);
+	// Rectilinear: the pixel's direction is (xr, yr, 1) in view space. Panini (the renderer's
+	// remap, see panini.ps): the pixel is a point of the cylindrical image; invert it to the
+	// azimuth/elevation and take the same view-space direction.
+	double xr = ndcx * thf * (w / h), yr = ndcy * thf;
+	const double dP = std::min(1.0, std::max(0.0, (double)panini)) * (1.0 - std::min(1.0, std::max(0.0, (double)projBlend)));
+	if (dP > 1e-4)
+	{
+		const double tanH = thf * (w / h), phiMax = std::atan(tanH);
+		const double xMax = (dP + 1.0) / (dP + std::cos(phiMax)) * std::sin(phiMax);
+		const double x = ndcx * xMax, y = ndcy * thf;
+		const double a = x / (dP + 1.0), a2 = a * a;
+		const double cosPhi = (-a2 * dP + std::sqrt(std::max(0.0, a2 * (1.0 - dP * dP) + 1.0))) / (a2 + 1.0);
+		const double sinPhi = a * (dP + cosPhi);
+		const double S = (dP + 1.0) / (dP + cosPhi);
+		// Vertical: y = S tan(theta) (1 + s (1/cos(phi) - 1)), s = v d/(d+1) (v = 1: rectilinear vertical).
+		const double v = std::min(1.0, std::max(0.0, (double)paniniVertical)), s = v * dP / (dP + 1.0);
+		const double tanTheta = y / (S * (1.0 + s * (1.0 / cosPhi - 1.0)));
+		xr = sinPhi / cosPhi;
+		yr = tanTheta / cosPhi;
+	}
+	Vector3 d(f.x + xr * r.x + yr * u.x,
+	          f.y + xr * r.y + yr * u.y,
+	          f.z + xr * r.z + yr * u.z);
 	const double len = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
 	if (len > 1e-12) { d.x /= len; d.y /= len; d.z /= len; }
 	return d;

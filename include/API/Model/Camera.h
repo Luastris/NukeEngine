@@ -33,14 +33,22 @@ public:
 	Texture renderTex;
 	[[nuke::prop]] int r_width = 640;
 	[[nuke::prop]] int r_height = 480;
-    [[nuke::prop(label="FOV", tip="Vertical field of view, degrees (perspective projection)")]] float fov = 90;
-    [[nuke::prop(label="Near", tip="Near clip plane distance — nothing closer is drawn")]] float _near = 0.3f;
+    [[nuke::prop(min=1, max=170, label="FOV", tip="Vertical field of view, degrees (perspective projection)")]] float fov = 90;
+    [[nuke::prop(min=0.001, label="Near", tip="Near clip plane distance — nothing closer is drawn")]] float _near = 0.3f;
     [[nuke::prop(label="Far", tip="Far clip plane distance — nothing farther is drawn")]] float _far = 10000;
     // Perspective uses fov, orthographic uses orthoSize (half-height in world units);
     // projTransition is the ease speed toward the target (0 = instant), blended in World::Render.
     [[nuke::prop(label="Projection", enum="Perspective,Orthographic", tip="Perspective uses FOV; Orthographic uses Ortho Size")]] Projection projection = Projection::Perspective;
-    [[nuke::prop(label="Ortho Size", tip="Half-height of the orthographic view, world units")]] float orthoSize = 5.0f;
-    [[nuke::prop(label="Proj Transition", tip="Ease speed of the perspective/orthographic switch; 0 = instant")]] float projTransition = 8.0f;
+    [[nuke::prop(min=0.001, label="Ortho Size", tip="Half-height of the orthographic view, world units")]] float orthoSize = 5.0f;
+    [[nuke::prop(min=0, label="Proj Transition", tip="Ease speed of the perspective/orthographic switch; 0 = instant")]] float projTransition = 8.0f;
+    // Honest wide FOV: a cylindrical Panini view. 0 = plain rectilinear (edges stretch as the FOV
+    // grows), 1 = full Panini (straight verticals stay straight, edge objects keep their size; the
+    // view WIDENS instead). FOV keeps its meaning at the centre of the image. Perspective only.
+    [[nuke::prop(min=0, max=1, label="Panini", tip="Wide-FOV view without stretched edges: 0 = rectilinear, 1 = full Panini (cylindrical) projection")]] float panini = 0.0f;
+    // How the vertical axis follows the Panini horizontal: 1 = rectilinear vertical (lines at one
+    // depth stay straight, but near walls receding in depth arc and edge objects come out taller),
+    // 0 = pure cylindrical (proportions kept, horizontal lines bow into a smile). 0.5 = the balance.
+    [[nuke::prop(min=0, max=1, label="Panini Vertical", tip="1 = straight horizontals (near walls arc, edge objects taller), 0 = cylindrical (horizontals bow, proportions kept); 0.5 balances both")]] float paniniVertical = 0.5f;
     float projBlend = 0.0f;        // runtime 0=perspective..1=orthographic (eased; not serialized)
     bool  projBlendInit = false;   // first frame snaps the blend to the target (no open-time animation)
     // Render-layer mask: bit i = render atoms with Atom::layer == i (nuke::Layers). -1 = everything.

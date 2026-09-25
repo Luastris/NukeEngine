@@ -2964,6 +2964,8 @@ void World::Render(iRender* r)
 		d.farZ  = cam->_far;
 		d.editorCamera = cam->editorCamera ? 1 : 0;
 		d.cameraId = cam->atom ? (uint64_t)cam->atom->id.id : 0;
+		d.panini = std::min(1.0f, std::max(0.0f, cam->panini));   // perspective only: scaled by the ortho blend below
+		d.paniniVertical = std::min(1.0f, std::max(0.0f, cam->paniniVertical));
 		// Ease the projection blend toward the target (Perspective 0 / Orthographic 1).
 		{
 			float tgt = (cam->projection == Projection::Orthographic) ? 1.0f : 0.0f;
@@ -2978,6 +2980,7 @@ void World::Render(iRender* r)
 			}
 			d.ortho     = cam->projBlend;
 			d.orthoSize = cam->orthoSize;
+			d.panini   *= 1.0f - cam->projBlend;   // the Panini view fades out with the perspective
 		}
 
 		// This camera's post chain: the effects on the PostProcess component sharing its transform.
