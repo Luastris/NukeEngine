@@ -69,6 +69,7 @@ public:
 	// garment edge would lag the top by a frame. The late pass re-writes the sheet with the
 	// fresh globals.
 	void LateUpdate() override;
+	TimeDomain timeDomain() const override { return TimeDomain::Physics; }
 
 	// Drop the sim and rebuild from the current pose (after prop edits that change the sheet).
 	[[nuke::func]] void Rebuild();
@@ -145,6 +146,8 @@ private:
 	bool   m_havePrev = false;
 	int  m_numSim = 0;
 	bool m_failed = false;             // bad setup: stop retrying every step
+	float m_lastTimeScale = 1.0f;      // local time (TimeVolume): what the body was last told
+	int   m_dbgTicks = 0;              // NUKE_CLOTH_DEBUG: this sheet's fixed-step count
 };
 
 }  // namespace nuke

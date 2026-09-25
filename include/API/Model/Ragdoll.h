@@ -85,6 +85,7 @@ public:
 	void FixedUpdate() override;
 	void Pause() override;
 	void Reset() override;
+	TimeDomain timeDomain() const override { return TimeDomain::Physics; }
 
 	[[nuke::func]] void SetMode(double m);          // 0 Off / 1 Full / 2 Powered / 3 Partial
 	[[nuke::func]] double GetMode();
@@ -116,6 +117,7 @@ private:
 	void Activate(SkinnedMeshRenderer* smr);
 	void Deactivate();
 	bool InPartial(const Skeleton* sk, int bone) const;
+	float lastTimeScale = 1.0f;   // local time (TimeVolume): what the bodies were last told
 };
 
 }  // namespace nuke

@@ -1,5 +1,6 @@
 #include "API/Model/Physics.h"
 #include "API/Model/Rigidbody.h"
+#include "API/Model/Time.h"
 #include "API/Model/Collider.h"
 #include "API/Model/Atom.h"
 #include "interface/Services.h"
@@ -82,7 +83,16 @@ Vector3 Rigidbody::AngularVelocity()
 
 void Rigidbody::Destroy()     {}
 void Rigidbody::Update()      {}
-void Rigidbody::FixedUpdate() {}
+// Local time (TimeVolume): the physics-domain multiplier this atom ticks with reaches the body
+// (the provider scales its velocities / gravity per step). Pushed on change and on a new body.
+void Rigidbody::FixedUpdate()
+{
+	const float s = (float)Time::LocalScale();
+	const uint64_t b = SiblingBody(atom);
+	if (!b) { lastTimeBody = 0; lastTimeScale = 1.0f; return; }
+	if (b == lastTimeBody && s == lastTimeScale) return;
+	if (iPhysics* p = Physics::Scene()) { p->setBodyTimeScale(b, s); lastTimeBody = b; lastTimeScale = s; }
+}
 void Rigidbody::Pause()       {}
 void Rigidbody::Reset()       {}
 

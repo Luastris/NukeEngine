@@ -126,6 +126,15 @@ public:
 	// DEFERRED destruction: the subtree is deleted at the end of the current Update.
 	[[nuke::func]] void Destroy();
 
+	// Local time (TimeVolume): the multipliers this atom's components tick with, one per
+	// TimeDomain (1 = normal), cached per frame by the tick. GetTimeScale = the Logic domain's
+	// (what a script's dt is multiplied by). ABI: data appended at the END (engine abi 48).
+	float localTimeScale[5] = { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f };
+	unsigned long long localTimeFrame = ~0ull;
+	[[nuke::func]] double GetTimeScale();
+	// The multipliers for this frame (computed once, then cached).
+	const float* LocalTimeScales();
+
 private:
 
 };

@@ -41,6 +41,7 @@ public:
 	void Init(Atom* parent) override;
 	void Destroy() override;
 	void Update() override;
+	TimeDomain timeDomain() const override { return TimeDomain::Audio; }
 	void FixedUpdate() override;
 	void Pause() override;
 	void Reset() override;

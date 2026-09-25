@@ -87,6 +87,14 @@ void Vehicle::FixedUpdate()
 	if (!handle) { Build(); if (!handle) return; }
 	iPhysics* ph = Physics::Scene();
 	if (!ph) return;
+	// Local time (TimeVolume): the chassis body (and with it the engine/brakes/suspension in the
+	// provider) follows this atom's physics clock.
+	const float s = (float)Time::LocalScale();
+	if (s != lastTimeScale)
+	{
+		if (Collider* chassis = atom->GetComponent<Collider>())
+			if (chassis->bodyId) { ph->setBodyTimeScale(chassis->bodyId, s); lastTimeScale = s; }
+	}
 	if (readInput)
 	{
 		inF = Input::Value(throttleAction);

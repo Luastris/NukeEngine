@@ -1,5 +1,6 @@
 #include "API/Model/Physics.h"
 #include "API/Model/Ragdoll.h"
+#include "API/Model/Time.h"
 #include "API/Model/Atom.h"
 #include "API/Model/Mesh.h"
 #include "API/Model/Skeleton.h"
@@ -214,7 +215,16 @@ void Ragdoll::Init(Atom* parent)
 }
 
 void Ragdoll::Destroy() { Deactivate(); }
-void Ragdoll::FixedUpdate() {}
+// Local time (TimeVolume): every ragdoll body follows this atom's physics clock.
+void Ragdoll::FixedUpdate()
+{
+	const float s = (float)Time::LocalScale();
+	if (bodiesRt.empty() || s == lastTimeScale) return;
+	iPhysics* ph = Phys();
+	if (!ph) return;
+	for (const BodyRt& b : bodiesRt) if (b.body) ph->setBodyTimeScale(b.body, s);
+	lastTimeScale = s;
+}
 void Ragdoll::Pause() {}
 void Ragdoll::Reset()
 {
@@ -289,6 +299,7 @@ void Ragdoll::Activate(SkinnedMeshRenderer* smr)
 {
 	iPhysics* ph = Phys();
 	if (!ph || !smr || !smr->skeleton || !EnsureDef(smr)) return;
+	lastTimeScale = 1.0f;   // fresh bodies run at real time until the first tick pushes ours
 	Skeleton* sk = smr->skeleton;
 	const std::vector<float>& g = smr->Globals();
 	if (g.size() < sk->bones.size() * 16) return;

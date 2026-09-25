@@ -94,6 +94,7 @@ public:
 	void Init(Atom* parent) override;
 	void Destroy() override {}
 	void Update() override;
+	TimeDomain timeDomain() const override { return TimeDomain::Animation; }
 	void FixedUpdate() override {}
 	void Pause() override {}
 

@@ -373,6 +373,11 @@ public:
 	// indexed as in the desc's invBind). hardSkin snaps every vertex onto its skinned
 	// position — call once right after create, then feed each step with hardSkin=false.
 	virtual void setSoftBodyJoints(uint64_t sb, const float* joints16, int numJoints, bool hardSkin) = 0;
+
+	// Local time (TimeVolume): this body advances s x per step - its velocities are scaled in
+	// and out around the solve and its gravity by s^2; 0 = frozen in place, 1 = normal (the
+	// default, drops the record). ABI: appended at the END of the vtable (engine abi 48).
+	virtual void setBodyTimeScale(uint64_t /*body*/, float /*s*/) {}
 };
 
 }  // namespace nuke

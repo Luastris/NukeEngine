@@ -12,6 +12,7 @@
 #include "API/Model/Skeleton.h"
 #include "API/Model/Ragdoll.h"
 #include "API/Model/Physics.h"
+#include "API/Model/Time.h"
 #include "API/Model/Wind.h"
 #include "API/Model/resdb.h"
 #include "service/iPhysics.h"
@@ -182,7 +183,7 @@ bool Cloth::EnsureBody()
 	if (!mr) { m_failed = true; return false; }
 	m_smr = dynamic_cast<SkinnedMeshRenderer*>(mr);
 	Mesh* src = !mr->meshGuid.empty() ? ResDB::getSingleton()->GetMesh(mr->meshGuid) : mr->mesh;
-	if (!src || !src->vertexArray || src->numVerts < 3 || !src->indexArray || src->numIndices < 3)
+	if (!src || !src->vertexArray || src->numVerts < 3 || src->TriCount() < 1)
 		return false;   // mesh may still be loading - retry next step
 	m_srcMesh = src;
 	const int n = src->numVerts;
@@ -256,13 +257,14 @@ bool Cloth::EnsureBody()
 	}
 	m_numSim = (int)m_simToRender.size();
 
-	// Sim triangles (welded, degenerates dropped).
+	// Sim triangles (welded, degenerates dropped). LOD0 only; soup meshes (builtin, script-built) too.
 	m_simTris.clear();
-	for (int i = 0; i + 2 < src->numIndices; i += 3)
+	const int triCount = src->TriCount();
+	for (int tri = 0; tri < triCount; ++tri)
 	{
-		const int a0 = m_renderToSim[src->indexArray[i + 0]];
-		const int a1 = m_renderToSim[src->indexArray[i + 1]];
-		const int a2 = m_renderToSim[src->indexArray[i + 2]];
+		const int a0 = m_renderToSim[src->TriIndex(tri, 0)];
+		const int a1 = m_renderToSim[src->TriIndex(tri, 1)];
+		const int a2 = m_renderToSim[src->TriIndex(tri, 2)];
 		if (a0 == a1 || a1 == a2 || a0 == a2) continue;
 		m_simTris.push_back((unsigned int)a0);
 		m_simTris.push_back((unsigned int)a1);
@@ -559,6 +561,7 @@ bool Cloth::EnsureBody()
 	m_body = phys->createSoftBody(d);
 	if (!m_body) { m_failed = true; return false; }
 	m_scene = phys;
+	m_lastTimeScale = 1.0f;   // a fresh body runs at real time until the first tick pushes ours
 	if (m_skinnedMode)   // snap onto the current pose before the first step
 	{
 		const glm::mat4 world = AtomWorld(atom);
@@ -1099,13 +1102,25 @@ void Cloth::FixedUpdate()
 {
 	if (!enabled || !EnsureBody()) return;
 	iPhysics* phys = m_scene;
+	// Local time (TimeVolume): the sheet follows this atom's physics clock. The body proxies are
+	// kinematic and ride the (already scaled) animation — they need nothing.
+	const float timeScale = (float)Time::LocalScale();
+	if (timeScale != m_lastTimeScale) { phys->setBodyTimeScale(m_body, timeScale); m_lastTimeScale = timeScale; }
 	static const bool dbgTick = std::getenv("NUKE_CLOTH_DEBUG") != nullptr;
 	if (dbgTick)
 	{
-		static int calls = 0;
-		if (++calls <= 3 || calls % 60 == 0)
+		const int calls = ++m_dbgTicks;
+		if (calls <= 3 || calls % 60 == 0)
+		{
+			double meanY = 0.0;   // last step's sim height (free sheets: world)
+			if (m_numSim > 0 && m_simPos.size() == (size_t)m_numSim * 3)
+			{
+				for (int s = 0; s < m_numSim; ++s) meanY += m_simPos[s * 3 + 1];
+				meanY /= m_numSim;
+			}
 			std::cout << "[ClothDbg]\ttick #" << calls << " '" << atom->GetName()
-			          << "' body=" << m_body << std::endl;
+			          << "' body=" << m_body << " meanY=" << meanY << " scale=" << timeScale << std::endl;
+		}
 	}
 
 	// 1) The result of THIS step (the world steps physics before component FixedUpdates).
@@ -1224,7 +1239,7 @@ void Cloth::FixedUpdate()
 		c /= (float)m_numSim;
 		if (m_skinnedMode) c += glm::make_vec3(m_curAnchor);
 		const Vector3 wv = Wind::Sample(Vector3(c.x, c.y, c.z));
-		const float dt = 1.0f / 60.0f;   // fixed cadence (see World::FixedUpdate)
+		const float dt = (1.0f / 60.0f) * timeScale;   // fixed cadence (see World::FixedUpdate), in local time
 		const float dv[3] = { (float)wv.x * dt, (float)wv.y * dt, (float)wv.z * dt };
 		if (dv[0] != 0.0f || dv[1] != 0.0f || dv[2] != 0.0f)
 			phys->addSoftBodyVelocity(m_body, dv);

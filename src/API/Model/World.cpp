@@ -16,6 +16,7 @@
 #include "API/Model/Environment.h"
 #include "API/Model/PostProcess.h"
 #include "API/Model/PostFXVolume.h"
+#include "API/Model/TimeVolume.h"
 #include "API/Model/Math.h"   // ScaleExtents / ScaleRadius (volume gizmos follow the atom scale)
 #include "API/Model/Shader.h"
 #include "API/Model/ReflectionProbe.h"
@@ -2140,6 +2141,24 @@ static void EmitSelectionGizmos(Atom* a)
 				}
 			};
 			ring(ax, ay, he.x, he.y); ring(ay, az, he.y, he.z); ring(az, ax, he.z, he.x);
+		}
+	}
+
+	if (TimeVolume* tv = a->GetComponent<TimeVolume>())
+	{
+		const Color c(1.0, 0.8, 0.2, 1.0);   // time volumes: gold bounds (+ the blend band, dim)
+		const Vector3 scl = t.globalScale();
+		if (tv->shape == 0)
+		{
+			DebugDraw::WireSphere(pos, ScaleRadius(tv->radius, scl), c);
+			if (tv->blendDistance > 0.0f) DebugDraw::WireSphere(pos, ScaleRadius(tv->radius, scl) + tv->blendDistance, Color(c.r, c.g, c.b, 0.35));
+		}
+		else
+		{
+			const Vector3 he = ScaleExtents(tv->halfExtents, scl);
+			DebugDraw::WireBox(pos, he, rot, c);
+			if (tv->blendDistance > 0.0f)
+				DebugDraw::WireBox(pos, Vector3(he.x + tv->blendDistance, he.y + tv->blendDistance, he.z + tv->blendDistance), rot, Color(c.r, c.g, c.b, 0.35));
 		}
 	}
 

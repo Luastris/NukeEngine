@@ -1,6 +1,7 @@
 // AudioSource — component driver over the audio service; voice lifetime follows play mode.
 #include "API/Model/AudioSource.h"
 #include "API/Model/Audio.h"
+#include "API/Model/Time.h"
 #include "API/Model/Atom.h"
 #include "API/Model/Transform.h"
 #include "interface/Services.h"
@@ -72,7 +73,8 @@ void AudioSource::Update()
 	}
 	// Live inspector edits reach the playing voice.
 	if (volume != lastVolume) { a->setVoiceVolume(voice, volume); lastVolume = volume; }
-	if (pitch  != lastPitch)  { a->setVoicePitch(voice, pitch);  lastPitch  = pitch; }
+	const float effPitch = pitch * (float)Time::LocalScale();   // local time (TimeVolume) bends the pitch
+	if (effPitch != lastPitch) { a->setVoicePitch(voice, effPitch); lastPitch = effPitch; }
 }
 
 void AudioSource::FixedUpdate() {}

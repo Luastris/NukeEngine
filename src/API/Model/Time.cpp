@@ -20,6 +20,19 @@ namespace nuke {
 double Time::Elapsed()       { return getSingleton()->elapsed; }
 double Time::Delta()         { return getSingleton()->gameDelta; }
 double Time::UnscaledDelta() { return getSingleton()->delta; }
+double Time::LocalScale()    { return getSingleton()->localScale; }
+
+Time::LocalScope::LocalScope(double s)
+{
+	Time* t = getSingleton();
+	d = t->delta; gd = t->gameDelta; ls = t->localScale;
+	t->delta = d * s; t->gameDelta = gd * s; t->localScale = ls * s;
+}
+Time::LocalScope::~LocalScope()
+{
+	Time* t = getSingleton();
+	t->delta = d; t->gameDelta = gd; t->localScale = ls;
+}
 
 double Time::TotalGameSeconds() { return getSingleton()->totalgt; }
 double Time::TimeOfDay()        { return getSingleton()->tod; }

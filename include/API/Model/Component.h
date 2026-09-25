@@ -22,6 +22,8 @@ struct TypeInfo;   // reflection
 // (terrain...) must submit it there too via renderGBufferObject, or screen-space effects that
 // reconstruct surfaces from the prepass (decals, SSR) cannot land on them.
 enum class RenderPhase { Opaque = 0, Transparent = 1, Overlay = 2, RTScene = 3, GBuffer = 4 };
+// The clock domains a TimeVolume can scale separately (Component::timeDomain). APPEND-ONLY.
+enum class TimeDomain { Logic = 0, Animation = 1, Physics = 2, Particles = 3, Audio = 4 };
 
 // A dynamic, per-instance property value (e.g. a script's exported var). Pure data.
 // AtomRef references a live atom by STABLE id (never a name), so serialization travels by id.
@@ -110,6 +112,12 @@ public:
 	// Second traversal of the tick, after EVERY component's Update ran (animators have
 	// committed their poses). ABI: appended at the END of the vtable (engine abi 44).
 	virtual void LateUpdate() {}
+
+	// Which clock a TimeVolume scales this component with (its "Logic / Animation / Physics /
+	// Particles / Audio" switches): Update / LateUpdate / FixedUpdate run under Time::delta,
+	// gameDelta and localScale multiplied by that domain's factor. Default: Logic (scripts,
+	// movers, everything else). ABI: appended at the END of the vtable (engine abi 48).
+	virtual TimeDomain timeDomain() const { return TimeDomain::Logic; }
 
 	// Derived/generated component (e.g. LiveMaterial auto-foliage): never serialized with the
 	// world or prefabs — its owner recreates it. ABI: data appended at the END (engine abi 18).

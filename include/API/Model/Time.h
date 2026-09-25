@@ -21,6 +21,16 @@ public:
 	// GAME frame delta: real delta × time scale (Game.SetTimeScale) — what gameplay reads.
 	[[nuke::func]] static double Delta();
 	[[nuke::func]] static double UnscaledDelta();  // real seconds since the previous frame (UI/editor)
+	// The local time multiplier of the component being ticked (TimeVolume; 1 outside any volume).
+	// delta / gameDelta already include it; fixed-step code multiplies its own dt by it.
+	[[nuke::func]] static double LocalScale();
+	// RAII: multiplies delta / gameDelta / localScale for the components of one atom (the tick).
+	struct NUKEENGINE_API LocalScope
+	{
+		double d, gd, ls;
+		explicit LocalScope(double s);
+		~LocalScope();
+	};
 
 	// --- game calendar (reflected getters; state saves with the world) ---
 	[[nuke::func]] static double TotalGameSeconds();  // game seconds since the calendar start
@@ -100,6 +110,10 @@ public:
 
 private:
 	double secCarry = 0.0;   // fractional game-second accumulator for Advance()
+
+	// TimeVolume: the multiplier of the component being ticked (delta / gameDelta already carry it).
+	// ABI: data appended at the END (engine abi 48).
+	double localScale = 1.0;
 };
 
 }  // namespace nuke

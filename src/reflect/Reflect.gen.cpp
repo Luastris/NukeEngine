@@ -63,6 +63,7 @@
 #include "API/Model/Surface.h"
 #include "API/Model/Texture.h"
 #include "API/Model/Time.h"
+#include "API/Model/TimeVolume.h"
 #include "API/Model/Transform.h"
 #include "API/Model/VariantSet.h"
 #include "API/Model/Vehicle.h"
@@ -315,6 +316,7 @@ bool NukeReflectInit() {
 		Reflect_SetMethodDoc("Atom", "AddChild", "", "newChild");
 		t.methods.push_back(MakeMethod("Destroy", &Atom::Destroy));
 		Reflect_SetMethodDoc("Atom", "Destroy", "DEFERRED destruction: the subtree is deleted at the end of the current Update.", "");
+		t.methods.push_back(MakeMethod("GetTimeScale", &Atom::GetTimeScale));
 	}
 	{
 		TypeInfo& t = TypeOf<Audio>();
@@ -1919,6 +1921,8 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("Delta", &Time::Delta));
 		Reflect_SetMethodDoc("Time", "Delta", "GAME frame delta: real delta × time scale (Game.SetTimeScale) — what gameplay reads.", "");
 		t.methods.push_back(MakeMethod("UnscaledDelta", &Time::UnscaledDelta));
+		t.methods.push_back(MakeMethod("LocalScale", &Time::LocalScale));
+		Reflect_SetMethodDoc("Time", "LocalScale", "The local time multiplier of the component being ticked (TimeVolume; 1 outside any volume). delta / gameDelta already include it; fixed-step code multiplies its own dt by it.", "");
 		t.methods.push_back(MakeMethod("TotalGameSeconds", &Time::TotalGameSeconds));
 		Reflect_SetMethodDoc("Time", "TotalGameSeconds", "--- game calendar (reflected getters; state saves with the world) ---", "");
 		t.methods.push_back(MakeMethod("TimeOfDay", &Time::TimeOfDay));
@@ -1936,6 +1940,37 @@ bool NukeReflectInit() {
 		Reflect_SetMethodDoc("Time", "SetGameToReal", "", "gameSecondsPerRealSecond");
 		t.methods.push_back(MakeMethod("SetDate", &Time::SetDate));
 		Reflect_SetMethodDoc("Time", "SetDate", "Set the calendar date/time (mapgen/scenario start). Resets TotalGameSeconds to 0.", "year,month,day,hour,minute");
+	}
+	{
+		TypeInfo& t = TypeOf<TimeVolume>();
+		t.base = "Component";
+		t.category = "World";
+		t.fields.push_back(MakeField("shape", &TimeVolume::shape, "", "Shape", 0.0f, 0.0f, "Sphere,Box"));
+		t.fields.push_back(MakeField("radius", &TimeVolume::radius, "", "Radius"));
+		t.fields.push_back(MakeField("halfExtents", &TimeVolume::halfExtents, "", "Half Extents"));
+		t.fields.push_back(MakeField("priority", &TimeVolume::priority, "", "Priority"));
+		t.fields.back().tip = "Higher wins where volumes overlap (blended in ascending order).";
+		t.fields.push_back(MakeField("blendDistance", &TimeVolume::blendDistance, "", "Blend Distance"));
+		t.fields.back().tip = "Metres outside the shape over which the influence fades to nothing.";
+		t.fields.push_back(MakeField("weight", &TimeVolume::weight, "", "Weight", 0.0f, 1.0f));
+		t.fields.back().tip = "Full influence inside the shape (1 = time inside runs exactly at Time Scale).";
+		t.fields.push_back(MakeField("timeScale", &TimeVolume::timeScale, "", "Time Scale"));
+		t.fields.back().tip = "0 = frozen, below 1 slow motion, above 1 fast forward; multiplies the global Game.TimeScale.";
+		t.fields.push_back(MakeField("affectLogic", &TimeVolume::affectLogic, "", "Logic"));
+		t.fields.back().tip = "Scripts, movers, splines - every component not in the domains below";
+		t.fields.push_back(MakeField("affectAnimation", &TimeVolume::affectAnimation, "", "Animation"));
+		t.fields.back().tip = "Animators, spring bones, paired animation";
+		t.fields.push_back(MakeField("affectPhysics", &TimeVolume::affectPhysics, "", "Physics"));
+		t.fields.back().tip = "Rigid bodies inside: velocities and gravity scaled per body";
+		t.fields.push_back(MakeField("affectParticles", &TimeVolume::affectParticles, "", "Particles"));
+		t.fields.back().tip = "Particle emitters inside";
+		t.fields.push_back(MakeField("affectAudio", &TimeVolume::affectAudio, "", "Audio"));
+		t.fields.back().tip = "Pitch of the sound sources inside";
+		t.fields.push_back(MakeField("exemptCameras", &TimeVolume::exemptCameras, "", "Exempt Cameras"));
+		t.fields.back().tip = "Atoms carrying a Camera keep normal time";
+		t.fields.push_back(MakeField("exemptTag", &TimeVolume::exemptTag, "", "Exempt Tag"));
+		t.fields.back().tip = "Atoms with this tag, and everything under them, keep normal time (the player in a frozen world)";
+		t.create = []() -> void* { return new TimeVolume(); };
 	}
 	{
 		TypeInfo& t = TypeOf<Transform>();

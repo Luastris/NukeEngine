@@ -2,6 +2,7 @@
 // visual (tube / repeated links / auto-rigged source mesh). See Rope.h.
 #include "API/Model/Physics.h"
 #include "API/Model/Rope.h"
+#include "API/Model/Time.h"
 #include "API/Model/Atom.h"
 #include "API/Model/Collider.h"
 #include "API/Model/DebugDraw.h"
@@ -202,12 +203,23 @@ void Rope::Build()
 	if (attachStart || pinStart) startPin = TieEnd(0, attachStart, nodes.front());
 	if (attachEnd || pinEnd)     endPin   = TieEnd(n - 1, attachEnd, nodes.back());
 	built = true;
+	lastTimeScale = 1.0f;   // fresh bodies run at real time until the first tick pushes ours
 }
 
 void Rope::FixedUpdate()
 {
 	if (!atom || !Game::IsPlaying()) return;
 	if (!built) Build();
+	// Local time (TimeVolume): every segment body follows this atom's physics clock.
+	const float s = (float)Time::LocalScale();
+	if (built && s != lastTimeScale)
+	{
+		if (iPhysics* ph = Physics::Scene())
+		{
+			for (const Seg& sg : segs) if (sg.body) ph->setBodyTimeScale(sg.body, s);
+			lastTimeScale = s;
+		}
+	}
 }
 
 // ---- runtime API --------------------------------------------------------------------------

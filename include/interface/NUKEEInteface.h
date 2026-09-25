@@ -174,7 +174,11 @@ extern "C" { NUKE_ABI_STAMP int nuke_build_debug = 0; }
 //   47: honest wide FOV (2026-09-25). Camera gained `panini` (cylindrical Panini projection strength, appended);
 //       NukeCameraDesc gained `panini` (appended). The renderer over-scans the rectilinear pass and remaps the
 //       final LDR image (panini.ps) before the HUD; Camera::ScreenRayDir follows the same mapping.
-#define NUKE_ENGINE_ABI 47
+//   48: time volumes (2026-09-25). Component gained timeDomain() (vtable END); Atom gained the per-domain local
+//       time cache + GetTimeScale (appended); Time gained localScale (appended) + LocalScale / LocalScope;
+//       iPhysics gained setBodyTimeScale (vtable END); Rigidbody gained its last-pushed scale (appended).
+//       TimeVolume component (API/Model/TimeVolume.h): dt x Time Scale inside a shape per domain.
+#define NUKE_ENGINE_ABI 48
 extern "C" { NUKE_ABI_STAMP int nuke_engine_abi = NUKE_ENGINE_ABI; }
 
 namespace nuke {

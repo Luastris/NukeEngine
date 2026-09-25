@@ -37,6 +37,9 @@ public:
 	void Destroy() override;
 	void Update() override;
 	void FixedUpdate() override;
+	TimeDomain timeDomain() const override { return TimeDomain::Physics; }
+	float    lastTimeScale = 1.0f;   // local time (TimeVolume): what the body was last told
+	uint64_t lastTimeBody  = 0;
 	void Pause() override;
 	void Reset() override;
 };

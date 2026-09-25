@@ -1,5 +1,6 @@
 #include "API/Model/Atom.h"
 #include "API/Model/Time.h"
+#include "API/Model/TimeVolume.h"   // local time: per-domain multipliers around each component tick
 #include "API/Model/World.h"   // BumpHierarchy: views cache rows on the hierarchy version
 #include "interface/AppInstance.h"
 #include "reflect/ReflectBind.h"
@@ -112,12 +113,24 @@ void Atom::FixedUpdate()
 		if (child)
 			child->FixedUpdate();
 	}
+	const float* ts = TimeVolume::Any() ? LocalTimeScales() : nullptr;
 	for (auto cmp : components)
 	{
-		if (cmp && cmp->enabled)
-			cmp->FixedUpdate();
+		if (!cmp || !cmp->enabled) continue;
+		if (ts) { Time::LocalScope sc(ts[(int)cmp->timeDomain()]); cmp->FixedUpdate(); }
+		else cmp->FixedUpdate();
 	}
 }
+
+// Local time (TimeVolume): the multipliers this frame, computed once per atom, then cached.
+const float* Atom::LocalTimeScales()
+{
+	const unsigned long long frame = Time::getSingleton()->frame;
+	if (localTimeFrame != frame) { TimeVolume::ScalesFor(this, localTimeScale); localTimeFrame = frame; }
+	return localTimeScale;
+}
+double Atom::GetTimeScale() { return TimeVolume::Any() ? (double)LocalTimeScales()[(int)TimeDomain::Logic] : 1.0; }
+
 void Atom::Update()
 {
 	if (!enabled) return;   // whole subtree off
@@ -128,12 +141,14 @@ void Atom::Update()
 	}
 	// tickEvery N = run every Nth frame, staggered by id so they don't all spike on one frame.
 	const unsigned long long frame = Time::getSingleton()->frame;
+	const float* ts = TimeVolume::Any() ? LocalTimeScales() : nullptr;   // local time: per-domain multipliers
 	for (auto cmp : components)
 	{
 		if (!cmp || !cmp->enabled) continue;
 		if (cmp->tickEvery > 1 && (frame + (unsigned long long)cmp->id.id) % (unsigned long long)cmp->tickEvery != 0)
 			continue;
-		cmp->Update();
+		if (ts) { Time::LocalScope sc(ts[(int)cmp->timeDomain()]); cmp->Update(); }
+		else cmp->Update();
 	}
 }
 
@@ -145,8 +160,13 @@ void Atom::LateUpdate()
 		if (child)
 			child->LateUpdate();
 	}
+	const float* ts = TimeVolume::Any() ? LocalTimeScales() : nullptr;
 	for (auto cmp : components)
-		if (cmp && cmp->enabled) cmp->LateUpdate();
+	{
+		if (!cmp || !cmp->enabled) continue;
+		if (ts) { Time::LocalScope sc(ts[(int)cmp->timeDomain()]); cmp->LateUpdate(); }
+		else cmp->LateUpdate();
+	}
 }
 
 void Atom::SetParent(Atom* newparent) {
