@@ -59,6 +59,10 @@ public:
 	Vector3 kinVelEma;      // smoothed velocity of incoming writes (m/s, world)
 	Vector3 kinAngVelEma;   // smoothed angular velocity of writes (rad/s, axis*rate)
 
+	// What the live body was last told (driver-owned): the collider's friction / restitution,
+	// overridden by the sibling material's Friction / Bounciness - re-pushed when either edits.
+	float bodyFriction = -1.0f, bodyRestitution = -1.0f;
+
 	Collider();
 	void Init(Atom* parent) override;
 	void Destroy() override;

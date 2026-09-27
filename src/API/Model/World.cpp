@@ -54,6 +54,7 @@
 #include "API/Model/Audio.h"
 #include "API/Model/AudioListener.h"
 #include <cmath>
+#include <cstdlib>   // getenv (NUKE_BODY_DEBUG)
 #include <map>
 #include <set>
 #define GLM_ENABLE_EXPERIMENTAL
@@ -508,6 +509,20 @@ void World::Update()
 
 // --- fixed-step physics driver (no-op without an iPhysics provider) ---
 
+// The surface response a collider's body runs with: the collider's friction / restitution,
+// overridden by the sibling material's Friction / Bounciness (>= 0). The provider combines
+// the two bodies' values per contact.
+static void SurfaceResponse(Atom* atom, const Collider* col, float& friction, float& restitution)
+{
+	friction = col->friction; restitution = col->restitution;
+	if (MeshRenderer* smr = atom->GetComponent<MeshRenderer>())
+		if (smr->mat)
+		{
+			if (smr->mat->liveFriction >= 0.0f) friction    = smr->mat->liveFriction;
+			if (smr->mat->liveBounce   >= 0.0f) restitution = smr->mat->liveBounce;
+		}
+}
+
 // Lazily creates each Collider's physics body and drives kinematic bodies from the Transform.
 // Fills `bodyMap` (bodyId -> Collider) for contact-event dispatch after the step.
 static void SyncBodies(bc::list<Atom*>& gos, iPhysics* p, std::map<uint64_t, Collider*>& bodyMap, float dt,
@@ -576,15 +591,13 @@ static void SyncBodies(bc::list<Atom*>& gos, iPhysics* p, std::map<uint64_t, Col
 				const float rScale = (float)std::max(fabs(scl.x), std::max(fabs(scl.y), fabs(scl.z)));
 				d.radius     = col->radius * rScale;
 				d.halfHeight = col->halfHeight * (float)fabs(scl.y);
-				d.friction    = col->friction;
-				d.restitution = col->restitution;
-				// LiveMaterial surface identity: material friction/bounciness beat the collider's.
-				if (MeshRenderer* smr = atom->GetComponent<MeshRenderer>())
-					if (smr->mat)
-					{
-						if (smr->mat->liveFriction >= 0.0f) d.friction    = smr->mat->liveFriction;
-						if (smr->mat->liveBounce   >= 0.0f) d.restitution = smr->mat->liveBounce;
-					}
+				SurfaceResponse(atom, col, d.friction, d.restitution);   // collider values, material overrides
+				col->bodyFriction = d.friction; col->bodyRestitution = d.restitution;
+				if (d.friction != col->friction || d.restitution != col->restitution)
+					std::cout << "[World]\t\t\tsurface of '" << atom->name << "' from its material: friction " << d.friction << ", restitution " << d.restitution << std::endl;
+				if (std::getenv("NUKE_BODY_DEBUG"))
+					std::cout << "[World]\t\t\tbody of '" << atom->name << "': shape " << d.shape << " half (" << d.halfExtents[0] << ", " << d.halfExtents[1] << ", " << d.halfExtents[2]
+					          << ") r " << d.radius << " at (" << d.pos[0] << ", " << d.pos[1] << ", " << d.pos[2] << ") motion " << d.motion << std::endl;
 				d.isTrigger   = col->isTrigger;
 				d.convex      = col->convex;
 				d.motion = rb ? (rb->isKinematic ? 2 : 1) : 0;
@@ -637,6 +650,17 @@ static void SyncBodies(bc::list<Atom*>& gos, iPhysics* p, std::map<uint64_t, Col
 			}
 			else if (col->bodyId)
 			{
+				// Surface response follows edits (inspector, material swap, script) - pushed on change.
+				{
+					float fr = 0.0f, re = 0.0f;
+					SurfaceResponse(atom, col, fr, re);
+					if (fr != col->bodyFriction || re != col->bodyRestitution)
+					{
+						p->setBodyFriction(col->bodyId, fr, re);
+						col->bodyFriction = fr; col->bodyRestitution = re;
+						std::cout << "[World]\t\t\tsurface of '" << atom->name << "': friction " << fr << ", restitution " << re << std::endl;
+					}
+				}
 				Vector3 pos = t.globalPosition();
 				Quaternion rot = t.globalRotation();
 				float fp[3] = { (float)pos.x, (float)pos.y, (float)pos.z };

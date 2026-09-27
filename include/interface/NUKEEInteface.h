@@ -182,7 +182,10 @@ extern "C" { NUKE_ABI_STAMP int nuke_build_debug = 0; }
 //       engine shader / include and the renderer rebuilds its dependents in the background; the renderer's
 //       native seam gained shader-owner recording + module reloaders (NukeWater). Rope/Cloth/Ragdoll/Vehicle
 //       gained their last-pushed time scale (appended, part of 48's feature).
-#define NUKE_ENGINE_ABI 49
+//   50: material friction (2026-09-27). iPhysics gained setBodyFriction (vtable END); Collider gained its
+//       last-pushed friction / restitution (appended): the material's Friction / Bounciness reach the live
+//       body on change, not only at creation.
+#define NUKE_ENGINE_ABI 50
 extern "C" { NUKE_ABI_STAMP int nuke_engine_abi = NUKE_ENGINE_ABI; }
 
 namespace nuke {

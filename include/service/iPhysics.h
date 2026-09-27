@@ -378,6 +378,12 @@ public:
 	// and out around the solve and its gravity by s^2; 0 = frozen in place, 1 = normal (the
 	// default, drops the record). ABI: appended at the END of the vtable (engine abi 48).
 	virtual void setBodyTimeScale(uint64_t /*body*/, float /*s*/) {}
+
+	// Surface response of a live body: friction (0 = ice, 1+ = rubber; the provider combines
+	// the pair's values per contact - Jolt: geometric mean) and restitution [0..1]. The world
+	// pushes the collider's values, overridden by the material's Friction / Bounciness, on
+	// change. ABI: appended at the END of the vtable (engine abi 50).
+	virtual void setBodyFriction(uint64_t /*body*/, float /*friction*/, float /*restitution*/) {}
 };
 
 }  // namespace nuke
