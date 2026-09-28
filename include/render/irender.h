@@ -3,6 +3,7 @@
 #include <boost/function.hpp>
 #include <cstdint>
 #include <vector>
+#include <memory>   // NukeFogFluidCpu snapshots (getFogFluidCpu)
 #include <API/Model/Transform.h>
 #include <API/Model/Mesh.h>
 #include "UIDrawData.h"
@@ -159,6 +160,19 @@ struct NukeFogVolumeDesc
     float fluidTurbulence = 0.3f;        // curl-noise stirring, m/s
     float fluidRefill = 0.5f;            // 1/s toward the resting field
     float fluidDissipation = 0.1f;       // 1/s density loss
+};
+
+// A fluid volume's fields on the CPU (iRender::getFogFluidCpu, abi 52): the air velocity of the
+// last step (box-local metres per second, one xyz per cell, cells centred on a `vr` grid over
+// the box) and the fog fullness (0..1 on its own `rr` grid). Immutable once published.
+struct NukeFogFluidCpu
+{
+    unsigned long long id = 0;                    // NukeFogVolumeDesc::id
+    float pos[3] = {0, 0, 0};                     // the box: centre, half extents, local -> world rotation
+    float halfExt[3] = {1, 1, 1};
+    float rot[4] = {0, 0, 0, 1};
+    int   vr[3] = {0, 0, 0}; std::vector<float> vel;   // vr[0]*vr[1]*vr[2] cells x 3
+    int   rr[3] = {0, 0, 0}; std::vector<float> rho;   // rr[0]*rr[1]*rr[2] cells
 };
 
 // A body moving through the fog: a solid the fluid volumes' medium parts around and follows
@@ -900,6 +914,10 @@ public:
     // pipeline compiled from it, or from a file that #includes it, rebuilds in the background;
     // draws keep the old one until the new one lands. (ABI: appended, ABI 49)
     virtual void reloadShader(const char* name) { (void)name; }
+    // Fluid fog readback: CPU copies of the fluid volumes' air velocity and fog fullness, a frame
+    // or two old (staging copy + fence), for the particle sim's Fog Drag. The renderer keeps the
+    // copies flowing only while someone asks. (ABI: appended, ABI 52)
+    virtual void getFogFluidCpu(std::vector<std::shared_ptr<const NukeFogFluidCpu>>& out) { out.clear(); }
     // ABI: new virtuals are appended at the END of the class, NEVER inserted mid-vtable —
     // plugins are separate DLLs built at different times, and an inserted slot shifts every later one.
 };

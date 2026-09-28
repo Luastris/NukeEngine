@@ -188,7 +188,9 @@ extern "C" { NUKE_ABI_STAMP int nuke_build_debug = 0; }
 //   51: particle curves over life (2026-09-27). reflect::Field gained `section` (appended; the inspector opens
 //       titled groups from [[nuke::prop(section="...")]]). ParticleEmitter (NukeVFX) gained the Over Life curve
 //       set (speed/gravity/drag/wind/force fields/rotation/stretch/trail width/light/light radius).
-#define NUKE_ENGINE_ABI 51
+//   52: fog drags particles (2026-09-28). iRender gained getFogFluidCpu (vtable END) + NukeFogFluidCpu; ForceFieldSnap
+//       gained `inner` (appended); ParticleEmitter (NukeVFX) gained Fog Drag (+ its Over Life curve).
+#define NUKE_ENGINE_ABI 52
 extern "C" { NUKE_ABI_STAMP int nuke_engine_abi = NUKE_ENGINE_ABI; }
 
 namespace nuke {

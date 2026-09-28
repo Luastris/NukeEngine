@@ -80,6 +80,7 @@ void ForceField::Snapshot(std::vector<ForceFieldSnap>& out)
 		ForceFieldSnap s; s.mode = f->mode; s.center[0] = (float)c.x; s.center[1] = (float)c.y; s.center[2] = (float)c.z;
 		s.axis[0] = (float)u.x; s.axis[1] = (float)u.y; s.axis[2] = (float)u.z; s.pull = std::max(-1.0f, std::min(1.0f, f->vortexPull));
 		s.radius = f->radius > 0.01f ? f->radius : 0.01f; s.strength = f->strength; s.falloff = f->falloff;
+		s.inner = std::max(0.0f, f->vortexInner);
 		out.push_back(s);
 	}
 }

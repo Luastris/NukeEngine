@@ -9,7 +9,7 @@
 namespace nuke {
 
 // A frame snapshot of one field, for simulations that must not touch the registry from jobs.
-struct ForceFieldSnap { int mode; float center[3]; float radius; float strength; float falloff; float axis[3]; float pull; };   // axis = the vortex axis; pull = in (+) / out (-)
+struct ForceFieldSnap { int mode; float center[3]; float radius; float strength; float falloff; float axis[3]; float pull; float inner; };   // axis = the vortex axis; pull = in (+) / out (-); inner = the funnel's solid core radius (0 = 15% of radius)
 
 // Local force volume: attract / repel / vortex / turbulence inside a sphere, additive, on any
 // atom. A general mechanic: particles, fluid fog and foliage bend all read it (the field submits
