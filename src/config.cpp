@@ -256,6 +256,10 @@ void Config::reload(Config* instance)
         win.hideFromCapture = w.value("hideFromCapture", win.hideFromCapture);
         win.textureStreamMB = w.value("textureStreamMB", win.textureStreamMB);
         win.fpsLimit        = w.value("fpsLimit",        win.fpsLimit);
+        win.language        = w.value("language",        win.language);
+        win.fontFallbacks.clear();
+        if (w.contains("fontFallbacks") && w["fontFallbacks"].is_array())
+            for (const json& f : w["fontFallbacks"]) if (f.is_string()) win.fontFallbacks.push_back(f.get<std::string>());
         cout << PREFIX_CONF << "Window size = [" << win.w << "x" << win.h << "]  backend="
              << (win.backend == 1 ? "D3D12" : win.backend == 2 ? "Vulkan" : "D3D11") << endl;
         cout << PREFIX_CONF << "FONT IS " << win.mainFont << endl;
@@ -358,6 +362,8 @@ void Config::saveWindowTo(const std::string& path)
     w["hideFromCapture"] = window.hideFromCapture;
     w["textureStreamMB"] = window.textureStreamMB;
     w["fpsLimit"]        = window.fpsLimit;
+    if (!window.language.empty()) w["language"] = window.language; else w.erase("language");
+    if (!window.fontFallbacks.empty()) w["fontFallbacks"] = window.fontFallbacks; else w.erase("fontFallbacks");
     // 4.2: the game's upscaling choice rides with the window block (words, see the loader).
     if (upscale.set)
     {

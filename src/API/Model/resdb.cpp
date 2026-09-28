@@ -17,6 +17,7 @@
 #include "render/irender.h"
 #include "interface/AppInstance.h"   // GuidForContentPath: content root + ResolveContent
 #include "input/Input.h"         // .nuinput content -> gameplay input system
+#include "API/Model/Loc.h"       // localization/<lang>.json content -> string tables
 #include <boost/filesystem.hpp>
 #include <boost/filesystem/fstream.hpp>   // PushShaderSource reads the changed shader text
 #include <iostream>
@@ -357,6 +358,21 @@ void ResDB::LoadShadersDir(const std::string& dir)
 	}
 }
 
+const std::string* ResDB::Font(const std::string& rel) const
+{
+	auto it = fontByRel.find(bfs::path(rel).generic_string());
+	return it == fontByRel.end() ? nullptr : &it->second;
+}
+
+void ResDB::RegisterFont(const std::string& rel, const std::string& bytes)
+{
+	if (rel.empty() || bytes.empty()) return;
+	const std::string key = bfs::path(rel).generic_string();
+	const bool fresh = !fontByRel.count(key);
+	fontByRel[key] = bytes;
+	if (fresh) std::cout << "[ResDB]\tloaded font '" << key << "' (" << bytes.size() / 1024 << " KB)" << std::endl;
+}
+
 void ResDB::SetAssetPath(const std::string& guid, const std::string& path)
 {
 	if (guid.empty() || path.empty()) return;
@@ -599,10 +615,17 @@ struct ScanDecoded { Mesh* mesh = nullptr; Texture* tex = nullptr; AnimClip* cli
 bool HeavyExt(const std::string& ext) { return ext == ".nutex" || ext == ".numesh" || ext == ".nuanim" || ext == ".nuskel"; }
 // Everything LoadContentEntry registers. Other pak entries (terrain bakes, audio, scripts,
 // worlds) are read by their own systems on demand — inflating them here would only cost boot time.
+// A string table: content/localization/<lang>.json (the stem is the language code).
+bool LocTablePath(const bfs::path& p)
+{
+	return p.extension() == ".json" && p.parent_path().filename() == "localization";
+}
+bool FontExt(const std::string& ext) { return ext == ".ttf" || ext == ".otf" || ext == ".ttc"; }
 bool EntryExt(const std::string& ext)
 {
 	static const char* kExts[] = { ".numesh", ".numat", ".nutex", ".nuinput", ".nuanim", ".nuskel",
-	                               ".nubonemap", ".nusm", ".nublend", ".nuseq", ".nurag", ".nuprefab" };
+	                               ".nubonemap", ".nusm", ".nublend", ".nuseq", ".nurag", ".nuprefab",
+	                               ".ttf", ".otf", ".ttc" };
 	for (const char* e : kExts) if (ext == e) return true;
 	return false;
 }
@@ -671,7 +694,7 @@ void ResDB::LoadContentItems(const std::vector<std::pair<std::string, std::strin
 		if (!d.heavy)
 		{
 			if (!disk.empty()) { LoadContentFile(disk); continue; }
-			if (!EntryExt(bfs::path(rel).extension().string())) continue;
+			if (!EntryExt(bfs::path(rel).extension().string()) && !LocTablePath(bfs::path(rel))) continue;
 			std::string bytes;
 			if (Package::Read(rel, bytes)) LoadContentEntry(rel, bytes);
 			continue;
@@ -769,6 +792,13 @@ void ResDB::WatchContent(const std::string& contentDir, const std::string& shade
 	FileIndex& fi = FileIndex::Get();
 	if (!contentDir.empty()) fi.Watch("content", contentDir);
 	if (!shadersDir.empty()) fi.Watch("shaders", shadersDir);
+	if (!shadersDir.empty())
+	{
+		// The run root's fonts/ (beside shaders/): the "fonts" root, keys "fonts/<file>".
+		boost::system::error_code ec;
+		const bfs::path fonts = bfs::absolute(bfs::path(shadersDir)).parent_path() / "fonts";
+		if (bfs::is_directory(fonts, ec)) fi.Watch("fonts", fonts.string());
+	}
 #ifdef NUKE_ENGINE_SHADER_SRC_DIR
 	// Dev checkout: the repo's shader sources hot-reload straight from the editor's save, no build
 	// needed (the build deploys the same text later — an unchanged push is a no-op in the renderer).
@@ -780,7 +810,7 @@ void ResDB::WatchContent(const std::string& contentDir, const std::string& shade
 	if (fsSub) return;
 	fsSub = fi.Subscribe("", [this](const FileIndex::Change& c)
 	{
-		if (c.rootName != "content" && c.rootName != "shaders" && c.rootName != "shaders-src") return;
+		if (c.rootName != "content" && c.rootName != "shaders" && c.rootName != "shaders-src" && c.rootName != "fonts") return;
 		const std::string root = FileIndex::Get().RootDir(c.rootName);
 		if (root.empty()) return;
 		OnFileChanged(bfs::path(root + "/" + c.rel).make_preferred().string(), (int)c.kind, c.isDir);
@@ -807,6 +837,7 @@ void ResDB::OnFileChanged(const std::string& abs, int kind, bool isDir)
 	for (char& ch : ext) ch = (char)tolower((unsigned char)ch);
 	if (kind == 1)   // removed
 	{
+		if (LocTablePath(bfs::path(abs))) { Loc::RemoveTable(bfs::path(abs).stem().string()); return; }
 		const std::string g = GuidForPath(abs);
 		if (g.empty()) return;
 		RemoveByGuid(g);
@@ -953,11 +984,12 @@ void ResDB::PushShaderSource(const std::string& abs, iRender* r)
 void ResDB::LoadContentPackaged()
 {
 	std::vector<std::pair<std::string, std::string>> items;
-	for (const std::string& rel : Package::List("content/"))
-	{
-		if (Jobs::Stopping()) return;   // let Shutdown's join return
-		items.push_back({ rel, Package::ResolveRead(rel) });   // raw overlay wins, else the pak entry
-	}
+	for (const char* prefix : { "content/", "fonts/" })   // engine fonts/ ride in the pak like shaders/
+		for (const std::string& rel : Package::List(prefix))
+		{
+			if (Jobs::Stopping()) return;   // let Shutdown's join return
+			items.push_back({ rel, Package::ResolveRead(rel) });   // raw overlay wins, else the pak entry
+		}
 	LoadContentItems(items);
 }
 
@@ -991,6 +1023,11 @@ void ResDB::LoadContentEntry(const std::string& rel, const std::string& bytes)
 		RegisterTexture(tx);
 		std::cout << "[ResDB]	loaded texture '" << tx->guid << "' (pak)" << std::endl;
 	}
+	else if (LocTablePath(p))   // string table -> Loc, not a GUID'd asset
+	{
+		Loc::LoadTable(stem, bytes, "");
+	}
+	else if (FontExt(ext.string())) RegisterFont(rel, bytes);
 	else if (ext == ".nuinput")
 	{
 		std::string mrel = rel;
@@ -1148,6 +1185,22 @@ void ResDB::LoadContentFile(const std::string& path)
 		RegisterTexture(tx);
 		SetAssetPath(tx->guid, path);
 		std::cout << "[ResDB]	loaded texture '" << tx->guid << "' (" << tx->width << "x" << tx->height << ")" << std::endl;
+	}
+	else if (FontExt(ext.string()))   // font -> the DB by its pak-relative key ("<root>/<rel>")
+	{
+		std::string rel;
+		const std::string root = FileIndex::Get().RootOf(path, &rel);
+		const std::string key = root.empty() ? p.filename().string() : root + "/" + bfs::path(rel).generic_string();
+		std::string bytes;
+		{ bfs::ifstream f(p, std::ios::binary); if (f) bytes.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()); }
+		if (bytes.empty()) { std::cout << "[ResDB]\tfailed to load " << p.filename().string() << std::endl; return; }
+		RegisterFont(key, bytes);
+	}
+	else if (LocTablePath(p))   // string table -> Loc, not a GUID'd asset (a rewrite reloads it)
+	{
+		std::string text;
+		{ bfs::ifstream f(p, std::ios::binary); if (f) text.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()); }
+		Loc::LoadTable(p.stem().string(), text, path);
 	}
 	else if (ext == ".nuinput")   // input map -> Input system, not a GUID'd asset
 	{

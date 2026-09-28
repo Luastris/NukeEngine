@@ -159,6 +159,13 @@ public:
     bool HotReloadPath(const std::string& absPath, iRender* r);
 
 	std::shared_ptr<uint> loadTexture(const std::string& name);
+
+    // Fonts (.ttf/.otf/.ttc) are DB assets like everything else: the run root's fonts/ (dev tree,
+    // watched as the "fonts" root) and the pak's fonts/ + content/ entries register by their
+    // pak-relative key ("fonts/OpenSansLight.ttf" - the config's window.mainFont / fontFallbacks
+    // spelling); the GUI takes the bytes from here. nullptr = not (yet) loaded.
+    const std::string* Font(const std::string& rel) const;
+    void               RegisterFont(const std::string& rel, const std::string& bytes);
 private:
     // FileIndex plumbing (WatchContent): the subscription, the scan gate and what arrived meanwhile.
     long long fsSub = 0;
@@ -170,7 +177,7 @@ private:
     // rebuild the dependents (reloadShader). Names as LoadBuiltinShaders: stem, includes keep the file name.
     void PushShaderSource(const std::string& absPath, iRender* r);
     void PushMaterialsToWorld(const std::vector<Material*>& changed);  // a reloaded template into the live clones
-
+    std::map<std::string, std::string> fontByRel;   // ABI 54 (appended): font bytes by pak-relative key
 };
 }  // namespace nuke
 

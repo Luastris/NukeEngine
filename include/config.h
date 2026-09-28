@@ -3,6 +3,7 @@
 #include <boost/filesystem/path.hpp>
 #include "NukeAPI.h"
 #include <string>
+#include <vector>
 
 namespace nuke {
 
@@ -89,6 +90,11 @@ struct NukeWindow{
     bool  hideFromCapture = false;  // invisible to screen capture ("hideFromCapture"; Windows/macOS)
     int   textureStreamMB = 0;      // mip-streaming VRAM budget, MB ("textureStreamMB"; 0 = off)
     int   fpsLimit        = 0;      // frame cap ("fpsLimit"; 0 = uncapped; vsync applies on top)
+    // 7.8 localization (appended). "language": the string-table code Loc starts in ("" = en);
+    // "fontFallbacks": TTF/OTF paths merged after mainFont in that order (CJK / Arabic / ... coverage;
+    // relative = run root), in the editor and the runtime GUI alike.
+    std::string language;
+    std::vector<std::string> fontFallbacks;
 };
 
 // Engine-wide ray-tracing reflection quality, persisted to config/main.json ["raytracing"].

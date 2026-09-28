@@ -30,6 +30,7 @@
 #include "API/Model/Joints.h"
 #include "API/Model/Layers.h"
 #include "API/Model/Light.h"
+#include "API/Model/Loc.h"
 #include "API/Model/Log.h"
 #include "API/Model/Material.h"
 #include "API/Model/MediumVolume.h"
@@ -1144,6 +1145,25 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("spotBlend", &Light::spotBlend, "", "Spot Blend"));
 		t.fields.push_back(MakeField("castShadows", &Light::castShadows, "", "Cast Shadows"));
 		t.create = []() -> void* { return new Light(); };
+	}
+	{
+		TypeInfo& t = TypeOf<Loc>();
+		t.base = "Object";
+		t.methods.push_back(MakeMethod("Get", &Loc::Get));
+		Reflect_SetMethodDoc("Loc", "Get", "", "key");
+		t.methods.push_back(MakeMethod("Format", &Loc::Format));
+		Reflect_SetMethodDoc("Loc", "Format", "Get + placeholders. `args` is JSON: an object fills {name}, an array fills {0} {1} ...; any other text is the single argument {0}. \"{{\" / \"}}\" print braces. Unknown names stay as written.", "key,args");
+		t.methods.push_back(MakeMethod("Has", &Loc::Has));
+		Reflect_SetMethodDoc("Loc", "Has", "", "key");
+		t.methods.push_back(MakeMethod("Language", &Loc::Language));
+		t.methods.push_back(MakeMethod("SetLanguage", &Loc::SetLanguage));
+		Reflect_SetMethodDoc("Loc", "SetLanguage", "", "lang");
+		t.methods.push_back(MakeMethod("LanguageCount", &Loc::LanguageCount));
+		t.methods.push_back(MakeMethod("LanguageAt", &Loc::LanguageAt));
+		Reflect_SetMethodDoc("Loc", "LanguageAt", "", "i");
+		t.methods.push_back(MakeMethod("LanguageName", &Loc::LanguageName));
+		Reflect_SetMethodDoc("Loc", "LanguageName", "", "lang");
+		t.methods.push_back(MakeMethod("Version", &Loc::Version));
 	}
 	{
 		TypeInfo& t = TypeOf<Log>();

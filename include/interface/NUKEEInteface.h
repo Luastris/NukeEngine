@@ -193,7 +193,11 @@ extern "C" { NUKE_ABI_STAMP int nuke_build_debug = 0; }
 //   53: P2 destruction (2026-09-28). Mesh gained the baked fracture block (appended; .numesh v8); MeshRenderer
 //       gained the piece view (fracturePiece/Pieces/Seed, appended); new Destructible + DebrisPiece components;
 //       Fracture gained the piece cache (FracturePieces / FracturePieceMesh).
-#define NUKE_ENGINE_ABI 53
+//   54: localization (2026-09-28). NukeWindow gained `language` + `fontFallbacks` (appended): the string-table
+//       language Loc starts in and the font fallback chain (editor + runtime GUI); new reflected Loc facade
+//       (API/Model/Loc.h) fed by ResDB from content/localization/<lang>.json (disk, pak, hot reload); ResDB
+//       gained the font table (appended; .ttf/.otf/.ttc are DB assets, Font / RegisterFont).
+#define NUKE_ENGINE_ABI 54
 extern "C" { NUKE_ABI_STAMP int nuke_engine_abi = NUKE_ENGINE_ABI; }
 
 namespace nuke {
