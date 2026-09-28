@@ -5,6 +5,7 @@
 #include <istream>
 #include "Transform.h"
 #include "Material.h"
+#include "Fracture.h"   // baked Voronoi pieces (P2)
 #include <assimp/mesh.h>
 #include <boost/container/list.hpp>
 #include <memory>
@@ -178,6 +179,13 @@ public:
 	// Sprite mesh (6-vertex quads, rtDynamic): traced as procedural primitives that turn toward
 	// every ray (mirrors beside the camera saw the camera-facing quads edge-on).
 	bool rtSprite = false;
+
+	// ---- P2 pre-fracture (v8, appended) ------------------------------------------------------
+	// Voronoi pieces baked into the asset (Destructible > "Bake pieces into mesh"): the runtime
+	// swaps to them without cutting. Keyed by pieces/seed - other settings cut at runtime.
+	int      fracturePieces = 0;
+	unsigned fractureSeed   = 0;
+	std::vector<FracturePiece> fracture;   // empty = not baked (unit scale, source local frame)
 
 	// Local-space bounds for frustum culling; lazily computed from vertexArray.
 	float aabbMin[3] = { 0, 0, 0 };

@@ -852,7 +852,7 @@ Mesh* Mesh::CreateCapsule() {
 //    sections + LODs + material slots.
 namespace {
 	const char  kMagic[8] = { 'N','U','M','E','S','H','\0','\0' };
-	const uint32_t kVersion = 7;   // v5 skelGuid; v6 morph targets; v7 import-time materials
+	const uint32_t kVersion = 8;   // v5 skelGuid; v6 morph targets; v7 import-time materials; v8 baked fracture pieces
 	template <class T> void wr(bfs::ofstream& o, const T& v) { o.write((const char*)&v, sizeof(T)); }
 	template <class T> void rd(std::istream& i, T& v)       { i.read((char*)&v, sizeof(T)); }
 	void wrStr(bfs::ofstream& o, const std::string& s) { uint32_t n = (uint32_t)s.size(); wr(o, n); if (n) o.write(s.data(), n); }
@@ -921,6 +921,18 @@ bool Mesh::SaveToFile(const std::string& path) const
 	// --- v7: import-time material per SLOT ----------------------------------------------------
 	uint32_t dm = (uint32_t)defaultMats.size(); wr(o, dm);
 	for (const std::string& g : defaultMats) wrStr(o, g);
+	// --- v8: baked fracture pieces (Destructible) ------------------------------------------------
+	int32_t fpc = fracturePieces; wr(o, fpc);
+	uint32_t fseed = fractureSeed; wr(o, fseed);
+	uint32_t fn = (uint32_t)fracture.size(); wr(o, fn);
+	for (const FracturePiece& fp : fracture)
+	{
+		uint32_t nv = (uint32_t)(fp.verts.size() / 3); wr(o, nv);
+		if (nv) { o.write((const char*)fp.verts.data(), sizeof(float) * 3 * nv); o.write((const char*)fp.normals.data(), sizeof(float) * 3 * nv); o.write((const char*)fp.uvs.data(), sizeof(float) * 2 * nv); }
+		uint32_t sv = (uint32_t)fp.surfVerts; wr(o, sv);
+		float c[3] = { (float)fp.centroid.x, (float)fp.centroid.y, (float)fp.centroid.z }; o.write((const char*)c, sizeof(c));
+		float h[3] = { (float)fp.halfExtents.x, (float)fp.halfExtents.y, (float)fp.halfExtents.z }; o.write((const char*)h, sizeof(h));
+	}
 	return (bool)o;
 }
 
@@ -1062,6 +1074,27 @@ Mesh* Mesh::LoadFromStream(std::istream& i)
 		uint32_t dm = 0; rd(i, dm);
 		if (dm <= 4096)
 			for (uint32_t k = 0; k < dm && i; ++k) m->defaultMats.push_back(rdStr(i));
+	}
+	if (version >= 8)
+	{
+		int32_t fpc = 0; rd(i, fpc); m->fracturePieces = fpc;
+		uint32_t fseed = 0; rd(i, fseed); m->fractureSeed = fseed;
+		uint32_t fn = 0; rd(i, fn);
+		if (fn <= 4096)
+			for (uint32_t k = 0; k < fn && i; ++k)
+			{
+				FracturePiece fp;
+				uint32_t nv = 0; rd(i, nv);
+				if (nv > 0 && nv <= 4u * 1024u * 1024u)
+				{
+					fp.verts.resize((size_t)nv * 3); fp.normals.resize((size_t)nv * 3); fp.uvs.resize((size_t)nv * 2);
+					i.read((char*)fp.verts.data(), sizeof(float) * 3 * nv); i.read((char*)fp.normals.data(), sizeof(float) * 3 * nv); i.read((char*)fp.uvs.data(), sizeof(float) * 2 * nv);
+				}
+				uint32_t sv = 0; rd(i, sv); fp.surfVerts = sv;
+				float c[3], h[3]; i.read((char*)c, sizeof(c)); i.read((char*)h, sizeof(h));
+				fp.centroid = Vector3(c[0], c[1], c[2]); fp.halfExtents = Vector3(h[0], h[1], h[2]);
+				m->fracture.push_back(std::move(fp));
+			}
 	}
 	if (!i && !i.eof()) { delete m; return nullptr; }
 	return m;

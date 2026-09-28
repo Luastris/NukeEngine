@@ -12,13 +12,21 @@ void MeshRenderer::Init(Atom* parent) {
 	transform = &parent->GetTransform();
 	parent->components.push_back(this);
 	// Clone the material asset into an owned instance so edits never touch the .numat.
-	if (!mesh && !meshGuid.empty()) mesh = ResDB::getSingleton()->GetMesh(meshGuid);
+	if (fracturePiece >= 0) ResolvePieceMesh();
+	else if (!mesh && !meshGuid.empty()) mesh = ResDB::getSingleton()->GetMesh(meshGuid);
 	if (!mat && !matGuid.empty())
 	{
 		Material* asset = ResDB::getSingleton()->GetMaterial(matGuid);
 		if (asset) mat = asset->Clone();
 	}
 	ResolveMaterials();
+}
+
+void MeshRenderer::ResolvePieceMesh()
+{
+	if (fracturePiece < 0 || meshGuid.empty()) return;
+	Mesh* src = ResDB::getSingleton()->GetMesh(meshGuid);
+	mesh = src ? FracturePieceMesh(src, fracturePieces, (uint32_t)fractureSeed, fracturePiece) : nullptr;
 }
 
 void MeshRenderer::ResolveMaterials()

@@ -73,6 +73,9 @@ struct NukeContactEvent
 	int   phase = 0;                 // 0 = begin (enter), 1 = end (exit)
 	float point[3]  = { 0, 0, 0 };   // world contact point (begin only; zeros on end)
 	float normal[3] = { 0, 0, 0 };   // world contact normal, from A to B (begin only)
+	// Closing speed of the two surfaces along the normal AT the moment of contact (begin only,
+	// before the solver resolves it - what a break threshold must read). ABI: appended (engine abi 53).
+	float speed = 0.0f;
 };
 
 // Character controller: a virtual kinematic capsule (not a rigid body) driven by a desired

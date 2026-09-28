@@ -36,6 +36,14 @@ public:
     float prevPos[3] = {0,0,0}, prevQuat[4] = {0,0,0,1}, prevScale[3] = {1,1,1};
     bool  hasPrev = false;
 
+    // P2 piece view (appended): this renderer draws ONE Voronoi piece of `meshGuid` - piece
+    // `fracturePiece` of the `fracturePieces`/`fractureSeed` cut (FracturePieceMesh). Saves and
+    // loads like any other renderer, so broken structures survive a save.
+    [[nuke::prop(hidden)]] int fracturePiece  = -1;
+    [[nuke::prop(hidden)]] int fracturePieces = 0;
+    [[nuke::prop(hidden)]] int fractureSeed   = 0;
+    void ResolvePieceMesh();   // meshGuid + piece -> mesh (no-op when fracturePiece < 0)
+
 	MeshRenderer();
 
 	void Init(Atom* parent);

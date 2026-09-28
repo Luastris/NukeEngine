@@ -4,7 +4,9 @@
 #include "API/Model/Mesh.h"
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
+#include <map>
 
 namespace nuke {
 
@@ -280,6 +282,55 @@ bool FractureMesh(const Mesh* src, const Vector3& scale, int pieces, uint32_t se
 		out.push_back(std::move(piece));
 	}
 	return !out.empty();
+}
+
+// ---- the piece cache (Destructible / MeshRenderer piece views) -----------------------------
+namespace {
+	struct PieceSet { std::vector<FracturePiece> pieces; std::vector<Mesh*> meshes; };
+	struct PieceKey { const Mesh* src; int pieces; uint32_t seed; bool operator<(const PieceKey& o) const { return src != o.src ? src < o.src : (pieces != o.pieces ? pieces < o.pieces : seed < o.seed); } };
+	std::map<PieceKey, PieceSet> gPieceSets;   // game thread
+}
+
+const std::vector<FracturePiece>* FracturePieces(Mesh* src, int pieces, uint32_t seed)
+{
+	if (!src || pieces < 2) return nullptr;
+	// baked into the asset with the same settings: no cutting
+	if (src->fracturePieces == pieces && src->fractureSeed == seed && !src->fracture.empty()) return &src->fracture;
+	const PieceKey key{ src, pieces, seed };
+	auto it = gPieceSets.find(key);
+	if (it != gPieceSets.end()) return it->second.pieces.empty() ? nullptr : &it->second.pieces;
+	PieceSet& set = gPieceSets[key];
+	FractureMesh(src, Vector3(1, 1, 1), pieces, seed, set.pieces);
+	return set.pieces.empty() ? nullptr : &set.pieces;
+}
+
+Mesh* FracturePieceMesh(Mesh* src, int pieces, uint32_t seed, int index)
+{
+	const std::vector<FracturePiece>* ps = FracturePieces(src, pieces, seed);
+	if (!ps || index < 0 || index >= (int)ps->size()) return nullptr;
+	PieceSet& set = gPieceSets[PieceKey{ src, pieces, seed }];   // baked pieces get their meshes here too
+	if (set.meshes.size() != ps->size()) set.meshes.assign(ps->size(), nullptr);
+	if (set.meshes[index]) return set.meshes[index];
+	const FracturePiece& fp = (*ps)[index];
+	Mesh* pm = new Mesh();
+	std::snprintf(pm->name, sizeof(pm->name), "%s piece %d", src->name, index);
+	pm->numVerts = (int)(fp.verts.size() / 3);
+	pm->vertexArray = new float[fp.verts.size()];   std::memcpy(pm->vertexArray, fp.verts.data(), fp.verts.size() * sizeof(float));
+	pm->normalArray = new float[fp.normals.size()]; std::memcpy(pm->normalArray, fp.normals.data(), fp.normals.size() * sizeof(float));
+	pm->uvArray = new float[fp.uvs.size()];         std::memcpy(pm->uvArray, fp.uvs.data(), fp.uvs.size() * sizeof(float));
+	// two sections: the original surface (slot 0) and the cut caps (slot 1 - the inside material)
+	pm->numIndices = pm->numVerts;
+	pm->indexArray = new uint32_t[pm->numIndices];
+	for (int i = 0; i < pm->numIndices; ++i) pm->indexArray[i] = (uint32_t)i;
+	const uint32_t sv = (uint32_t)std::min(fp.surfVerts, (size_t)pm->numVerts);
+	pm->sections.clear();
+	if (sv > 0) pm->sections.push_back({ 0, sv, 0 });
+	if (sv < (uint32_t)pm->numVerts) pm->sections.push_back({ sv, (uint32_t)pm->numVerts - sv, 1 });
+	pm->numSlots = 2;
+	pm->boundsValid = false;
+	++pm->version;
+	set.meshes[index] = pm;
+	return pm;
 }
 
 }  // namespace nuke

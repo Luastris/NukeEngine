@@ -38,6 +38,7 @@
 #include "API/Model/InstancedMesh.h"
 #include "API/Model/Wind.h"
 #include "API/Model/Fire.h"
+#include "API/Model/Destructible.h"
 #include "API/Model/PairedAnim.h"
 #include "API/Model/Surface.h"
 #include "interface/WorldHooks.h"
@@ -429,6 +430,7 @@ void World::Tick()
 	}
 	PairedAnim::Tick(this);   // paired-animation sessions: drift sync + lifetime, post-traversal
 	Fire::Tick(this);         // fire spread/burn-out (throttled scans; kill switch inside)
+	Destructible::Tick(this, (float)Time::Delta());   // debris budgets + queued kicks
 }
 
 WorldScope::WorldScope(World* w)
@@ -958,6 +960,12 @@ static void DispatchContacts(iPhysics* p, const std::map<uint64_t, Collider*>& b
 			};
 			notify(aa, ab);
 			notify(ab, aa);
+			// P2: a hard enough hit breaks a destructible (or one of its standing pieces).
+			if (enter && !trigger)
+			{
+				Destructible::Contact(aa, ab, ev[i].speed, ev[i].point, ev[i].normal);
+				Destructible::Contact(ab, aa, ev[i].speed, ev[i].point, ev[i].normal);
+			}
 		}
 		if (n < 128) break;
 	}
@@ -2320,6 +2328,7 @@ void World::Render(iRender* r)
 	if (!auxiliary) Surface::PushTrails(this, r);
 	// Fire visual/debris spawns queue on the game tick and land here (same rule as hit spawns).
 	if (!auxiliary) Fire::Drain(this);
+	if (!auxiliary) Destructible::Drain(this);   // P2 breaks queued by the fixed step's contacts / scripts
 
 	// Editor gizmos for the selection; lines live for one frame.
 	{

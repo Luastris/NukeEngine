@@ -18,6 +18,7 @@
 #include "API/Model/Collider.h"
 #include "API/Model/DebugDraw.h"
 #include "API/Model/Decal.h"
+#include "API/Model/Destructible.h"
 #include "API/Model/DevConsole.h"
 #include "API/Model/Environment.h"
 #include "API/Model/Events.h"
@@ -645,6 +646,53 @@ bool NukeReflectInit() {
 		t.create = []() -> void* { return new Decal(); };
 	}
 	{
+		TypeInfo& t = TypeOf<Destructible>();
+		t.base = "Component";
+		t.category = "Physics";
+		t.fields.push_back(MakeField("pieces", &Destructible::pieces, "", "Pieces"));
+		t.fields.back().tip = "Voronoi pieces the mesh breaks into (bake them into the mesh below; otherwise cut once at first use).";
+		t.fields.push_back(MakeField("seed", &Destructible::seed, "", "Seed"));
+		t.fields.push_back(MakeField("breakSpeed", &Destructible::breakSpeed, "", "Break Speed"));
+		t.fields.back().tip = "Impact speed (m/s, relative, along the contact normal) that breaks it. 0 = any touch.";
+		t.fields.push_back(MakeField("impactRadius", &Destructible::impactRadius, "", "Impact Radius"));
+		t.fields.back().tip = "Pieces whose centre lies within this distance of the hit fly off (the nearest one always does). Metres.";
+		t.fields.push_back(MakeField("structural", &Destructible::structural, "", "Structural"));
+		t.fields.back().tip = "The remaining pieces stay a structure: static bodies joined to their neighbours; a group that loses every support (touching ground / another static body) collapses. Off = everything flies at once.";
+		t.fields.push_back(MakeField("kick", &Destructible::kick, "", "Kick"));
+		t.fields.back().tip = "Impulse given to the pieces that fly off, x their mass, along the hit and outward.";
+		t.fields.push_back(MakeField("debrisLifetime", &Destructible::debrisLifetime, "", "Debris Lifetime"));
+		t.fields.back().tip = "Seconds a flying piece lives (0 = forever).";
+		t.fields.push_back(MakeField("debrisSleep", &Destructible::debrisSleep, "", "Debris Sleep"));
+		t.fields.back().tip = "Seconds a flying piece may lie still before it is removed (0 = never).";
+		t.fields.push_back(MakeField("debrisMax", &Destructible::debrisMax, "", "Debris Max"));
+		t.fields.back().tip = "Flying pieces this atom keeps alive at once; the oldest goes first (0 = all).";
+		t.fields.push_back(MakeField("broken", &Destructible::broken));
+		t.fields.back().hidden = true;
+		t.fields.push_back(MakeField("heldPieces", &Destructible::heldPieces));
+		t.fields.back().hidden = true;
+		t.methods.push_back(MakeMethod("Break", &Destructible::Break));
+		Reflect_SetMethodDoc("Destructible", "Break", "---- script surface ----", "worldPoint,radius");
+		t.methods.push_back(MakeMethod("Shatter", &Destructible::Shatter));
+		t.methods.push_back(MakeMethod("PieceCount", &Destructible::PieceCount));
+		t.methods.push_back(MakeMethod("HeldCount", &Destructible::HeldCount));
+		t.methods.push_back(MakeMethod("DebrisCount", &Destructible::DebrisCount));
+		t.methods.push_back(MakeMethod("SetMaxDebris", &Destructible::SetMaxDebris));
+		Reflect_SetMethodDoc("Destructible", "SetMaxDebris", "", "n");
+		t.create = []() -> void* { return new Destructible(); };
+	}
+	{
+		TypeInfo& t = TypeOf<DebrisPiece>();
+		t.base = "Component";
+		t.category = "Physics";
+		t.fields.push_back(MakeField("owner", &DebrisPiece::owner));
+		t.fields.back().hidden = true;
+		t.fields.push_back(MakeField("piece", &DebrisPiece::piece));
+		t.fields.back().hidden = true;
+		t.fields.push_back(MakeField("flying", &DebrisPiece::flying));
+		t.fields.back().hidden = true;
+		t.create = []() -> void* { return new DebrisPiece(); };
+	}
+	{
 		TypeInfo& t = TypeOf<Console>();
 		t.base = "Object";
 		t.methods.push_back(MakeMethod("SetEnabled", &Console::SetEnabled));
@@ -1237,6 +1285,12 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("matGuid", &MeshRenderer::matGuid, "material", "Material"));
 		t.fields.push_back(MakeField("matGuids", &MeshRenderer::matGuids, "material", "Materials"));
 		t.fields.push_back(MakeField("inReflections", &MeshRenderer::inReflections, "", "In Reflections"));
+		t.fields.push_back(MakeField("fracturePiece", &MeshRenderer::fracturePiece));
+		t.fields.back().hidden = true;
+		t.fields.push_back(MakeField("fracturePieces", &MeshRenderer::fracturePieces));
+		t.fields.back().hidden = true;
+		t.fields.push_back(MakeField("fractureSeed", &MeshRenderer::fractureSeed));
+		t.fields.back().hidden = true;
 		t.methods.push_back(MakeMethod("GetMaterial", &MeshRenderer::GetMaterial));
 		Reflect_SetMethodDoc("MeshRenderer", "GetMaterial", "Scriptable access to the LIVE material INSTANCE this renderer draws (slot 0 = the whole mesh / first section): trigger events, set params, read props — on THIS surface only, the shared asset stays untouched. Null until the world resolves it.", "slot");
 		t.create = []() -> void* { return new MeshRenderer(); };

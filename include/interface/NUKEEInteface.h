@@ -190,7 +190,10 @@ extern "C" { NUKE_ABI_STAMP int nuke_build_debug = 0; }
 //       set (speed/gravity/drag/wind/force fields/rotation/stretch/trail width/light/light radius).
 //   52: fog drags particles (2026-09-28). iRender gained getFogFluidCpu (vtable END) + NukeFogFluidCpu; ForceFieldSnap
 //       gained `inner` (appended); ParticleEmitter (NukeVFX) gained Fog Drag (+ its Over Life curve).
-#define NUKE_ENGINE_ABI 52
+//   53: P2 destruction (2026-09-28). Mesh gained the baked fracture block (appended; .numesh v8); MeshRenderer
+//       gained the piece view (fracturePiece/Pieces/Seed, appended); new Destructible + DebrisPiece components;
+//       Fracture gained the piece cache (FracturePieces / FracturePieceMesh).
+#define NUKE_ENGINE_ABI 53
 extern "C" { NUKE_ABI_STAMP int nuke_engine_abi = NUKE_ENGINE_ABI; }
 
 namespace nuke {

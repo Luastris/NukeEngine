@@ -29,6 +29,14 @@ struct FracturePiece
 NUKEENGINE_API bool FractureMesh(const Mesh* src, const Vector3& scale, int pieces,
                                  uint32_t seed, std::vector<FracturePiece>& out);
 
+// The pieces of a mesh asset at unit scale (Destructible): the mesh's BAKED pieces when they
+// were baked with this pieces/seed, else cut once and cached for the process. Null when the
+// mesh can't be fractured.
+NUKEENGINE_API const std::vector<FracturePiece>* FracturePieces(Mesh* src, int pieces, uint32_t seed);
+// Piece `index` as a drawable Mesh (two sections: surface, cut caps -> slots 0 / 1); owned by the
+// cache, shared by every renderer showing that piece. Null when out of range.
+NUKEENGINE_API Mesh* FracturePieceMesh(Mesh* src, int pieces, uint32_t seed, int index);
+
 }  // namespace nuke
 
 #endif // !NUKEE_FRACTURE_H
