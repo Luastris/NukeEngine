@@ -149,6 +149,9 @@ struct Field {
     // net field on an atom's components and streams it (server-authoritative). Purely a hint;
     // the engine itself never reads it.
     bool net = false;
+    // [[nuke::prop(section="...")]] — the inspector opens a titled section here; the fields that
+    // follow (until the next section) sit under it. ABI: appended (engine abi 51).
+    std::string section;
 };
 
 // One reflected value crossing the scripting boundary. `type` says which member is valid:

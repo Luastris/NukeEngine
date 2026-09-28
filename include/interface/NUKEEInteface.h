@@ -185,7 +185,10 @@ extern "C" { NUKE_ABI_STAMP int nuke_build_debug = 0; }
 //   50: material friction (2026-09-27). iPhysics gained setBodyFriction (vtable END); Collider gained its
 //       last-pushed friction / restitution (appended): the material's Friction / Bounciness reach the live
 //       body on change, not only at creation.
-#define NUKE_ENGINE_ABI 50
+//   51: particle curves over life (2026-09-27). reflect::Field gained `section` (appended; the inspector opens
+//       titled groups from [[nuke::prop(section="...")]]). ParticleEmitter (NukeVFX) gained the Over Life curve
+//       set (speed/gravity/drag/wind/force fields/rotation/stretch/trail width/light/light radius).
+#define NUKE_ENGINE_ABI 51
 extern "C" { NUKE_ABI_STAMP int nuke_engine_abi = NUKE_ENGINE_ABI; }
 
 namespace nuke {
