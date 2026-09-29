@@ -313,6 +313,8 @@ Texture* Texture::LoadFromMemory(const std::string& data)
 	return LoadFromStream(i);
 }
 
+int Texture::FormatVersion() { return (int)kVersion; }
+
 Texture* Texture::LoadFromStream(std::istream& i, bool headerOnly)
 {
 	char magic[8]; i.read(magic, 8);

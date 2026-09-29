@@ -173,6 +173,8 @@ AnimClip* AnimClip::LoadFromMemory(const std::string& data)
 	return LoadFromStream(i);
 }
 
+int AnimClip::FormatVersion() { return (int)kVersion; }
+
 AnimClip* AnimClip::LoadFromStream(std::istream& i)
 {
 	char magic[8]; i.read(magic, 8);

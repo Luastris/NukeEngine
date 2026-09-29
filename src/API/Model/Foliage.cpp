@@ -1,4 +1,5 @@
 #include "API/Model/Foliage.h"
+#include "API/Model/Quality.h"   // density scales with the preset
 #include "API/Model/MeshRenderer.h"
 #include "API/Model/Atom.h"
 #include "API/Model/Noise.h"
@@ -86,6 +87,7 @@ void Foliage::SyncBendParams(bool force)
 
 bool Foliage::EnsureRenderReady(iRender* r)
 {
+	if (qualityVer != Quality::Version()) { const bool first = qualityVer == 0; qualityVer = Quality::Version(); if (!first) Rebuild(); }   // the preset changed: re-scatter
 	EnsureDecoded();
 	SyncBendParams(false);   // mesh resolves inside the base call; a swap syncs next frame
 	return InstancedMesh::EnsureRenderReady(r);
@@ -142,7 +144,7 @@ void Foliage::Scatter(const Vector3& brushPos, float brushR, float densMul)
 			glm::vec3 mx = glm::max(A, glm::max(B, C)) + brushR;
 			if (bp.x < mn.x || bp.x > mx.x || bp.y < mn.y || bp.y > mx.y || bp.z < mn.z || bp.z > mx.z) return;
 		}
-		const float expect = area * density * densMul * wMul;
+		const float expect = area * density * densMul * wMul * Quality::FoliageScale();
 		int cnt = (int)expect;
 		if (rng.Next() < expect - (float)cnt) ++cnt;
 		for (int k = 0; k < cnt; ++k)

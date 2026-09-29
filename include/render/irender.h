@@ -165,6 +165,14 @@ struct NukeFogVolumeDesc
 // A fluid volume's fields on the CPU (iRender::getFogFluidCpu, abi 52): the air velocity of the
 // last step (box-local metres per second, one xyz per cell, cells centred on a `vr` grid over
 // the box) and the fog fullness (0..1 on its own `rr` grid). Immutable once published.
+struct NukeAdapterInfo
+{
+    char   name[128] = {};
+    double memoryMB  = 0.0;     // dedicated (local) video memory
+    bool   discrete  = false;
+    bool   rayTracing = false;  // the hardware can, whatever window.rayTracing says
+};
+
 struct NukeFogFluidCpu
 {
     unsigned long long id = 0;                    // NukeFogVolumeDesc::id
@@ -918,6 +926,11 @@ public:
     // or two old (staging copy + fence), for the particle sim's Fog Drag. The renderer keeps the
     // copies flowing only while someone asks. (ABI: appended, ABI 52)
     virtual void getFogFluidCpu(std::vector<std::shared_ptr<const NukeFogFluidCpu>>& out) { out.clear(); }
+    // The GPU this device runs on (after init): name, dedicated memory, discrete, ray-tracing capable
+    // regardless of the config switch. False = no device yet / unknown. (PT3 presets autodetect; ABI 56)
+    virtual bool getAdapterInfo(NukeAdapterInfo& out) { (void)out; return false; }
+    // Scales the adaptive displacement tessellation factor (1 = as authored, 0 = off). (ABI 56)
+    virtual void setTessellationScale(float scale) { (void)scale; }
     // ABI: new virtuals are appended at the END of the class, NEVER inserted mid-vtable —
     // plugins are separate DLLs built at different times, and an inserted slot shifts every later one.
 };

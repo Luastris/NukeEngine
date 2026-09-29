@@ -1,5 +1,6 @@
 #include "API/Model/Physics.h"
 #include "API/Model/Ragdoll.h"
+#include "API/Model/Migrations.h"
 #include "API/Model/Time.h"
 #include "API/Model/Atom.h"
 #include "API/Model/Mesh.h"
@@ -31,6 +32,7 @@ std::string RagdollDef::ToString() const
 {
 	nlohmann::json j;
 	j["type"] = "Ragdoll";
+	j["version"] = Migrations::FormatVersion("ragdoll");
 	j["guid"] = guid;
 	j["name"] = name;
 	j["skelGuid"] = skelGuid;
@@ -54,6 +56,7 @@ RagdollDef* RagdollDef::FromString(const std::string& json)
 	try
 	{
 		nlohmann::json j = nlohmann::json::parse(json);
+		if (!Migrations::Upgrade("ragdoll", j, nullptr)) return nullptr;
 		RagdollDef* r = new RagdollDef();
 		r->guid = j.value("guid", "");
 		r->name = j.value("name", "");

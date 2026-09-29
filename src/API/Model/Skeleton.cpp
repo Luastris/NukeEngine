@@ -1,4 +1,5 @@
 #include "API/Model/Skeleton.h"
+#include "API/Model/Migrations.h"
 #include <nlohmann/json.hpp>
 #include <boost/filesystem.hpp>
 #include <boost/filesystem/fstream.hpp>
@@ -47,7 +48,7 @@ std::string Skeleton::ToString() const
 {
 	json j;
 	j["type"]    = "Skeleton";
-	j["version"] = 1;
+	j["version"] = Migrations::FormatVersion("skeleton");
 	j["guid"]    = guid;
 	j["name"]    = name;
 	json jb = json::array();
@@ -89,6 +90,7 @@ std::string Skeleton::ToString() const
 Skeleton* Skeleton::FromString(const std::string& data)
 {
 	json j = json::parse(data, nullptr, false);
+	if (!j.is_discarded() && !Migrations::Upgrade("skeleton", j, nullptr)) return nullptr;
 	if (j.is_discarded() || j.value("type", "") != "Skeleton") return nullptr;
 	Skeleton* s = new Skeleton();
 	s->guid = j.value("guid", "");

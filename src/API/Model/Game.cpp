@@ -1,4 +1,5 @@
 #include "API/Model/Game.h"
+#include "API/Model/Migrations.h"   // savegame header {engine, format, game}
 #include "API/Model/JsonDoc.h"
 #include "API/Model/World.h"
 #include "API/Model/Time.h"
@@ -81,7 +82,12 @@ bool Game::SaveGame(const std::string& slot)
 	bfs::path file = dir / (slot + ".nusave");
 	bfs::ofstream f(file, std::ios::binary);
 	if (!f) { std::cout << "[Game]\t\tSaveGame: cannot write " << file.string() << std::endl; return false; }
-	f << app->currentWorld->SaveToString();   // triggers OnBeforeSave across all components
+	// The world document + the "save" header: engine release, world format, the game's own data
+	// version (Migrations.SetGameVersion) - a load runs the upgrade chain against it.
+	nlohmann::json doc = nlohmann::json::parse(app->currentWorld->SaveToString(), nullptr, false);   // SaveToString runs OnBeforeSave across all components
+	if (doc.is_discarded()) { std::cout << "[Game]\t\tSaveGame: the world did not serialize" << std::endl; return false; }
+	doc["save"] = Migrations::SaveHeader();
+	f << doc.dump(2);
 	std::cout << "[Game]\t\tsaved '" << slot << "' -> " << file.string() << std::endl;
 	return true;
 }

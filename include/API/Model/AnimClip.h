@@ -84,6 +84,7 @@ public:
 	// Native asset format (.nuanim): binary, same header style as .numesh.
 	bool             SaveToFile(const std::string& path) const;
 	static AnimClip* LoadFromFile(const std::string& path);
+	static int       FormatVersion();   // the .nuanim version this build writes
 	static AnimClip* LoadFromMemory(const std::string& data);   // packed content (3.2)
 	static AnimClip* LoadFromStream(std::istream& i);
 };

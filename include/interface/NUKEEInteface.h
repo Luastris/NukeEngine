@@ -200,7 +200,11 @@ extern "C" { NUKE_ABI_STAMP int nuke_build_debug = 0; }
 //   55: cvar registry (2026-09-29). Config gained `cvars` (appended; config/main.json ["cvars"] = the archived
 //       values); new reflected Cvars facade (API/Model/Cvar.h): stored / bound typed variables, OnChange hooks,
 //       "cvar.changed"; the dev console reads / sets / lists / completes them; the editor's Cvars panel.
-#define NUKE_ENGINE_ABI 55
+//   56: scalability presets (2026-09-29). iRender gained getAdapterInfo + setTessellationScale (vtable END) +
+//       NukeAdapterInfo; Config gained `quality` (appended; ["quality"] = preset / overrides / adapter); Foliage
+//       gained its quality stamp (appended); new reflected Quality facade (API/Model/Quality.h) capping the
+//       authored settings at push time. Also (no layout change): Migrations facade + Cvars q.*.
+#define NUKE_ENGINE_ABI 56
 extern "C" { NUKE_ABI_STAMP int nuke_engine_abi = NUKE_ENGINE_ABI; }
 
 namespace nuke {

@@ -4,6 +4,8 @@
 #include <boost/chrono.hpp>
 #include <boost/atomic.hpp>
 #include "API/Model/World.h"
+#include "API/Model/Migrations.h"   // format / component data upgrades on load, stamps on save
+#include "API/Model/Quality.h"      // PT3 presets cap the authored settings at push time
 #include "API/Model/JsonDoc.h"
 #include <memory>
 #include <functional>
@@ -502,8 +504,26 @@ void World::Update()
 		path.swap(app->pendingSaveLoad);
 		std::cout << "[World]\t\t\t" << "Game.LoadGame -> '" << path << "'" << std::endl;
 		app->FlushWorldActivation();   // a still-growing world completes before the save replaces it
-		suppressPersistOnce = true;    // the save is the full state; persistent atoms would duplicate
-		LoadFromFile(path);
+		std::string data;
+		{
+			boost::filesystem::ifstream f(boost::filesystem::path(path), std::ios::binary);
+			if (f) data.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
+		}
+		json doc = ParseDoc(data);
+		std::vector<std::string> log;
+		if (doc.is_discarded() || !doc.is_object() || !Migrations::UpgradeSave(doc, &log))
+		{
+			// An unreadable or NEWER save is never guessed at: refused, the world stays as it is.
+			const std::string why = doc.is_discarded() ? "not a valid save" : (log.empty() ? "refused" : log.back());
+			std::cout << "[World]\t\t\t" << "Game.LoadGame refused: " << why << std::endl;
+			Events::EmitEngine("save.refused", why);
+		}
+		else
+		{
+			for (const std::string& s : log) std::cout << "[Migrations]\t" << s << std::endl;   // what the chain did to this save
+			suppressPersistOnce = true;    // the save is the full state; persistent atoms would duplicate
+			LoadFromJson(doc);
+		}
 	}
 	app->ApplyAsyncWorldLoad();      // staged async world swaps in here (traversal done, lock held)
 	app->ContinueWorldActivation();  // budgeted slice of a still-growing world
@@ -2463,7 +2483,7 @@ void World::Render(iRender* r)
 	// AUXILIARY worlds (asset previews) inherit the live world's global shadow settings —
 	// their default 2048 must not fight the main world's res every frame (map rebuild thrash).
 	if (!auxiliary)
-		r->setShadowSettings(settings.shadowRes, settings.shadowDistance, settings.shadowDepthBias,
+		r->setShadowSettings(Quality::CapShadowRes(settings.shadowRes), settings.shadowDistance * Quality::ShadowDistanceScale(), settings.shadowDepthBias,
 		                     settings.shadowNormalBias, settings.shadowSoftness);
 	// setLights comes after the Environment block: the eclipse dims the sun, the moon adds a light.
 
@@ -2588,7 +2608,7 @@ void World::Render(iRender* r)
 			cl.forwardScatter = env->cloudForwardScatter; cl.backScatter = env->cloudBackScatter;
 			cl.multiScatter = env->cloudMultiScatter; cl.multiScatterFalloff = env->cloudMultiScatterFalloff; cl.silverLining = env->cloudSilverLining;
 			cl.shadows = env->cloudShadows ? 1 : 0; cl.shadowStrength = env->cloudShadowStrength; cl.shadowArea = env->cloudShadowArea;
-			cl.quality = (int)env->cloudQuality; cl.maxDistance = env->cloudMaxDistance;
+			cl.quality = Quality::CapClouds((int)env->cloudQuality); cl.maxDistance = env->cloudMaxDistance;
 		}
 		r->setClouds(cl);
 	}
@@ -2843,7 +2863,7 @@ void World::Render(iRender* r)
 		// view shifts the grid by whole cells, so the renderer keeps every probe's history and
 		// only re-seeds the cells that came into range.
 		std::vector<NukeGIVolumeDesc> descs;
-		if (!auxiliary && settings.giEnabled)
+		if (!auxiliary && Quality::GIEnabled(settings.giEnabled))
 		{
 			NukeGIVolumeDesc d;
 			d.id = 1;
@@ -2895,11 +2915,11 @@ void World::Render(iRender* r)
 	s_cullFrozen = !auxiliary && AppInstance::GetSingleton()->freezeCulling;
 	if (!s_cullFrozen) s_frozenVP.clear();
 	r->setOcclusionCulling(settings.occlusionCull && !auxiliary, s_cullFrozen);
-	r->setAmbientOcclusion(auxiliary ? 0 : settings.aoQuality, settings.aoRadius, settings.aoIntensity, settings.aoPower);
-	r->setScreenGI(auxiliary ? 0 : settings.ssgiQuality, settings.ssgiRadius, settings.ssgiIntensity);
+	r->setAmbientOcclusion(auxiliary ? 0 : Quality::CapAO(settings.aoQuality), settings.aoRadius, settings.aoIntensity, settings.aoPower);
+	r->setScreenGI(auxiliary ? 0 : Quality::CapSSGI(settings.ssgiQuality), settings.ssgiRadius, settings.ssgiIntensity);
 	{
 		NukeVolumetricsDesc vd;
-		vd.quality = auxiliary ? 0 : settings.volQuality;
+		vd.quality = auxiliary ? 0 : Quality::CapVolumetrics(settings.volQuality);
 		vd.density = settings.volDensity; vd.heightBase = settings.volHeightBase; vd.heightFalloff = settings.volHeightFalloff;
 		for (int k = 0; k < 3; ++k) vd.albedo[k] = settings.volAlbedo[k];
 		vd.anisotropy = settings.volAnisotropy; vd.maxDistance = settings.volMaxDistance;
@@ -3067,6 +3087,7 @@ void World::Render(iRender* r)
 					Shader* sh = ResDB::getSingleton()->GetShader(e.shaderGuid);
 					if (!sh || !sh->isPost || sh->rendererHandle == 0) continue;
 					if (upOverride && sh->name == "upscale" && upCfg.mode == (int)UpscaleMode::Off) continue;   // switched off by the game
+					if (!Quality::KeepPostStage(sh->name.c_str())) continue;   // the preset drops RT reflections / motion blur / DoF
 					if (sh->name == "ssr" || sh->name == "rtreflect") hasSSR = true;
 					if (sh->name == "musicvis") hasSSR = true;   // samples G-buffer normals + depth
 					if (sh->name == "dof" || sh->name == "motionblur") hasSSR = true;   // depth / velocity of the prepass
@@ -3313,6 +3334,7 @@ static void SaveAtom(Atom* atom, json& j)
 		c->OnBeforeSave();                       // live-state components re-encode into their props first
 		json cj;
 		cj["type"] = ti->name;
+		if (const int dv = Migrations::ComponentVersion(ti->name)) cj["v"] = dv;   // data version (declared types only)
 		SaveObject(*ti, c, cj["props"]);
 		// Material instance overrides save with the world; the referenced .numat asset is never
 		// modified by world edits.
@@ -3415,8 +3437,12 @@ static Atom* LoadAtom(const json& j)
 			LoadObject(*tti, &t, j["transform"]);
 	}
 	if (j.contains("components"))
-		for (const json& cj : j["components"])
+		for (const json& cjRaw : j["components"])
 		{
+			// A declared data version: the registered steps rewrite the component before it is read.
+			json cjUp; const json* cjp = &cjRaw;
+			if (Migrations::ComponentVersion(cjRaw.value("type", std::string()))) { cjUp = cjRaw; Migrations::UpgradeComponent(cjUp, nullptr); cjp = &cjUp; }
+			const json& cj = *cjp;
 			std::string type = ResolveComponentType(cj.value("type", std::string()));
 			TypeInfo* ti = Registry_Find(type);
 			if (ti && ti->create && IsTypeActive(type))
@@ -3550,6 +3576,7 @@ bool SavePrefab(Atom* root, const std::string& path)
 	Atom* prevRoot = g_prefabSaveRoot;
 	g_prefabSaveRoot = root;
 	SaveAtom(root, j);
+	j["version"] = Migrations::FormatVersion("prefab");
 	g_prefabSaveRoot = prevRoot;
 	--g_prefabSave;
 	boost::filesystem::path p(path);
@@ -3584,6 +3611,7 @@ Atom* LoadPrefabFromString(const std::string& text)
 {
 	json j = ParseDoc(text);
 	if (j.is_discarded()) return nullptr;
+	if (!Migrations::Upgrade("prefab", j, nullptr)) { std::cout << "[World]\t\t\t" << "prefab refused: newer than this engine" << std::endl; return nullptr; }
 	Atom* a = LoadAtom(j);
 	std::map<unsigned long, unsigned long> ids;
 	RegenIds(a, ids);                    // instances must not share the prefab's saved ids
@@ -3827,7 +3855,7 @@ std::string World::SaveToString()
 {
 	json j;
 	j["type"] = "World";
-	j["version"] = 1;
+	j["version"] = Migrations::FormatVersion("world");
 	j["name"] = name;
 	j["settings"] = settings.ToJson();
 	// Capture the live calendar + pending event schedule so a savegame resumes at the exact
@@ -4280,6 +4308,15 @@ void World::LoadFromString(const std::string& data)
 
 void World::LoadFromJson(const json& j)
 {
+	if (Migrations::Pending("world", j))
+	{
+		// An older document: the steps rewrite a copy, then it loads as current. Newer: refused.
+		json u = j;
+		std::vector<std::string> log;
+		if (!Migrations::Upgrade("world", u, &log)) { std::cout << "[World]\t\t\t" << "load refused: " << (log.empty() ? "unknown format" : log.back()) << std::endl; return; }
+		LoadFromJson(u);
+		return;
+	}
 	LoadHeaderFromJson(j);
 	if (j.contains("atoms"))
 		for (const json& gj : j["atoms"])

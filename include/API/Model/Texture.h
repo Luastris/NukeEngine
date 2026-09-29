@@ -120,6 +120,7 @@ public:
     // images into this so nothing references the source at runtime.
     bool            SaveToFile(const std::string& path) const;
     static Texture* LoadFromFile(const std::string& path);
+    static int      FormatVersion();   // the .nutex version this build writes
     static Texture* LoadFromMemory(const std::string& data);   // packed content (3.2)
     static Texture* LoadFromStream(std::istream& i, bool headerOnly = false);
     // Header-only load of a cooked pak entry: pixels stay in the pak (see pakSource).

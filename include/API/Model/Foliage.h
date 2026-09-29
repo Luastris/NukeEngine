@@ -52,6 +52,7 @@ private:
 	Atom* SurfaceRoot();
 	float MeshHeight();                          // resolved mesh local AABB height (bend norm)
 	void  SyncBendParams(bool force);
+	int qualityVer = 0;   // Quality::Version() the scatter was built for (ABI 56, appended)
 };
 
 }  // namespace nuke

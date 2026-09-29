@@ -270,6 +270,16 @@ void Config::reload(Config* instance)
 
     instance->physicsCore  = root.value("physicsCore",  instance->physicsCore);
     instance->logToConsole = root.value("logToConsole", instance->logToConsole);
+    instance->quality = NukeQuality();
+    if (root.contains("quality") && root["quality"].is_object())
+    {
+        const json& q = root["quality"];
+        instance->quality.set = true;
+        instance->quality.preset  = q.value("preset", std::string("High"));
+        instance->quality.adapter = q.value("adapter", std::string());
+        if (q.contains("overrides") && q["overrides"].is_object())
+            for (auto& kv : q["overrides"].items()) if (kv.value().is_number_integer()) instance->quality.overrides[kv.key()] = kv.value().get<int>();
+    }
     instance->cvars.clear();
     if (root.contains("cvars") && root["cvars"].is_object())
         for (auto& kv : root["cvars"].items())
@@ -369,6 +379,15 @@ void Config::saveWindowTo(const std::string& path)
     if (!window.language.empty()) w["language"] = window.language; else w.erase("language");
     if (!window.fontFallbacks.empty()) w["fontFallbacks"] = window.fontFallbacks; else w.erase("fontFallbacks");
     if (!cvars.empty()) root["cvars"] = cvars; else root.erase("cvars");
+    if (quality.set)
+    {
+        json& q = root["quality"];
+        q = json::object();
+        q["preset"] = quality.preset;
+        if (!quality.overrides.empty()) q["overrides"] = quality.overrides;
+        if (!quality.adapter.empty()) q["adapter"] = quality.adapter;
+    }
+    else root.erase("quality");
     // 4.2: the game's upscaling choice rides with the window block (words, see the loader).
     if (upscale.set)
     {

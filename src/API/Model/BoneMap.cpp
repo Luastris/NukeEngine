@@ -1,4 +1,5 @@
 #include "API/Model/BoneMap.h"
+#include "API/Model/Migrations.h"
 #include "API/Model/resdb.h"
 #include <nlohmann/json.hpp>
 #include <boost/filesystem.hpp>
@@ -15,7 +16,7 @@ bool BoneMap::SaveToFile(const std::string& path) const
 {
 	json j;
 	j["type"] = "BoneMap";
-	j["version"] = 1;
+	j["version"] = Migrations::FormatVersion("bonemap");
 	j["guid"] = guid;
 	json m = json::object();
 	for (const auto& kv : map) m[kv.first] = kv.second;
@@ -37,6 +38,7 @@ BoneMap* BoneMap::LoadFromFile(const std::string& path)
 BoneMap* BoneMap::LoadFromString(const std::string& text, const std::string& name)
 {
 	json j = json::parse(text, nullptr, false);
+	if (!j.is_discarded() && !Migrations::Upgrade("bonemap", j, nullptr)) return nullptr;
 	if (j.is_discarded()) { std::cout << "[BoneMap]\tbad json" << std::endl; return nullptr; }
 	if (j.value("type", "") != "BoneMap") return nullptr;
 	BoneMap* b = new BoneMap();
@@ -52,7 +54,7 @@ std::string BoneMap::Template()
 {
 	json j;
 	j["type"] = "BoneMap";
-	j["version"] = 1;
+	j["version"] = Migrations::FormatVersion("bonemap");
 	j["guid"] = ResDB::NewGuid();
 	j["map"] = { { "sourceBoneName", "targetBoneName" } };
 	return j.dump(2) + "\n";

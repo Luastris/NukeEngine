@@ -106,6 +106,13 @@ struct NukeRT{
     float roughCutoff = 0.6f;     // reflections fade out toward this roughness (sharp RT = smooth surfaces)
 };
 
+struct NukeQuality{
+    bool set = false;                        // a "quality" block exists in the config
+    std::string preset;                      // Low / Medium / High / Ultra
+    std::map<std::string, int> overrides;    // feature -> tier
+    std::string adapter;                     // the GPU the preset was detected for ("" = chosen by hand)
+};
+
 struct confUiVec{
       int x,y;
 };
@@ -213,6 +220,9 @@ public:
     // Archived console variables ("cvars": {name: value-as-text}; ABI 55). Cvars::Register(..Archive)
     // reads its start value here, a Set writes it back; saveWindow persists the block.
     std::map<std::string, std::string> cvars;
+    // PT3 scalability ("quality"; ABI 56): the preset, per-feature overrides and the adapter the
+    // autodetect ran on (another GPU re-detects). Absent = autodetect on the first boot.
+    NukeQuality quality{};
 	void reload(Config* instance);
 	// Physics-thread core after auto-resolution: -2 don't pin, -1 auto = last budget core.
 	int effectivePhysicsCore() const;

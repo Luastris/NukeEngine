@@ -1,4 +1,5 @@
 #include "API/Model/Sequence.h"
+#include "API/Model/Migrations.h"
 #include <nlohmann/json.hpp>
 #include <boost/filesystem/fstream.hpp>
 #include <sstream>
@@ -44,6 +45,7 @@ std::string Sequence::ToString() const
 {
 	nlohmann::json j;
 	j["type"] = "Sequence";
+	j["version"] = Migrations::FormatVersion("sequence");
 	j["guid"] = guid;
 	j["name"] = name;
 	j["duration"] = duration;
@@ -103,6 +105,7 @@ Sequence* Sequence::FromString(const std::string& json)
 	try
 	{
 		nlohmann::json j = nlohmann::json::parse(json);
+		if (!Migrations::Upgrade("sequence", j, nullptr)) return nullptr;
 		Sequence* s = new Sequence();
 		s->guid = j.value("guid", "");
 		s->name = j.value("name", "");

@@ -1,4 +1,5 @@
 #include "API/Model/AnimSM.h"
+#include "API/Model/Migrations.h"
 #include <nlohmann/json.hpp>
 #include <boost/filesystem/fstream.hpp>
 #include <sstream>
@@ -100,6 +101,7 @@ std::string AnimSM::ToString() const
 {
 	nlohmann::json j;
 	j["type"] = "AnimSM";
+	j["version"] = Migrations::FormatVersion("animsm");
 	j["guid"] = guid;
 	j["name"] = name;
 	nlohmann::json ps = nlohmann::json::array();
@@ -132,6 +134,7 @@ AnimSM* AnimSM::FromString(const std::string& json)
 	try
 	{
 		nlohmann::json j = nlohmann::json::parse(json);
+		if (!Migrations::Upgrade("animsm", j, nullptr)) return nullptr;
 		AnimSM* m = new AnimSM();
 		m->guid = j.value("guid", "");
 		m->name = j.value("name", "");

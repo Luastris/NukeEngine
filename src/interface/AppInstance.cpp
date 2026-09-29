@@ -4,6 +4,7 @@
 #include "interface/AssetCreators.h"
 #include "API/Model/World.h"
 #include "API/Model/JsonDoc.h"
+#include "API/Model/Migrations.h"
 #include "API/Model/Time.h"      // fixed-thread cadence scales with Game.SetTimeScale
 #include "API/Model/Package.h"   // packed-content resolve (3.2)
 #include "API/Model/Jobs.h"      // async world load runs on the engine pool
@@ -193,6 +194,12 @@ bool AppInstance::StartWorldLoadAsync(const std::string& relPath)
 		{
 			asyncLoadState = 3;
 			std::cout << "[World]\t\t\t" << "async load: '" << relPath << "' is not valid JSON" << std::endl;
+			return;
+		}
+		if (Migrations::Pending("world", *doc) && !Migrations::Upgrade("world", *doc, nullptr))
+		{
+			asyncLoadState = 3;
+			std::cout << "[World]\t\t\t" << "async load: '" << relPath << "' needs a newer engine" << std::endl;
 			return;
 		}
 		// Streamed split world in EDIT mode: the whole world is editable, so fold the cell files

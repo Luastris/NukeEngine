@@ -949,6 +949,8 @@ Mesh* Mesh::LoadFromMemory(const std::string& data)
 	return LoadFromStream(i);
 }
 
+int Mesh::FormatVersion() { return (int)kVersion; }
+
 Mesh* Mesh::LoadFromStream(std::istream& i)
 {
 	char magic[8]; i.read(magic, 8);

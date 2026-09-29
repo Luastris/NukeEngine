@@ -1,4 +1,5 @@
 #include "API/Model/BlendSpace.h"
+#include "API/Model/Migrations.h"
 #include <nlohmann/json.hpp>
 #include <boost/filesystem/fstream.hpp>
 #include <algorithm>
@@ -78,6 +79,7 @@ std::string BlendSpace::ToString() const
 {
 	nlohmann::json j;
 	j["type"] = "BlendSpace";
+	j["version"] = Migrations::FormatVersion("blendspace");
 	j["guid"] = guid;
 	j["name"] = name;
 	j["dims"] = dims;
@@ -100,6 +102,7 @@ BlendSpace* BlendSpace::FromString(const std::string& json)
 	try
 	{
 		nlohmann::json j = nlohmann::json::parse(json);
+		if (!Migrations::Upgrade("blendspace", j, nullptr)) return nullptr;
 		BlendSpace* b = new BlendSpace();
 		b->guid   = j.value("guid", "");
 		b->name   = j.value("name", "");

@@ -1,4 +1,5 @@
 #include "API/Model/Material.h"
+#include "API/Model/Migrations.h"
 #include "API/Model/Surface.h"
 #include "API/Model/Time.h"   // event-started tween instances stamp their start   // global condition values for the overlay-state slots
 #include "API/Model/resdb.h"
@@ -941,6 +942,7 @@ Material* Material::LoadFromFile(const std::string& path)
 Material* Material::LoadFromString(const std::string& text)
 {
 	json j = json::parse(text, nullptr, false);
+	if (!j.is_discarded() && !Migrations::Upgrade("material", j, nullptr)) return nullptr;
 	if (j.is_discarded()) return nullptr;
 
 	Material* m = new Material();

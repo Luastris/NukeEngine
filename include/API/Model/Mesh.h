@@ -256,6 +256,7 @@ public:
 	// The GUID is stored inside the file; ResDB indexes by it.
 	bool         SaveToFile(const std::string& path) const;
 	static Mesh* LoadFromFile(const std::string& path);
+	static int   FormatVersion();   // the .numesh version this build writes
 	static Mesh* LoadFromMemory(const std::string& data);   // packed content — no disk copy
 	static Mesh* LoadFromStream(std::istream& i);
 };

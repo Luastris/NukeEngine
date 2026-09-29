@@ -37,6 +37,7 @@
 #include "API/Model/MediumVolume.h"
 #include "API/Model/Mesh.h"
 #include "API/Model/MeshRenderer.h"
+#include "API/Model/Migrations.h"
 #include "API/Model/MotionMatcher.h"
 #include "API/Model/Noise.h"
 #include "API/Model/PairedAnim.h"
@@ -46,6 +47,7 @@
 #include "API/Model/PostProcess.h"
 #include "API/Model/Prefab.h"
 #include "API/Model/Profiler.h"
+#include "API/Model/Quality.h"
 #include "API/Model/Ragdoll.h"
 #include "API/Model/Rand.h"
 #include "API/Model/RectAnchor.h"
@@ -1344,6 +1346,22 @@ bool NukeReflectInit() {
 		t.create = []() -> void* { return new MeshRenderer(); };
 	}
 	{
+		TypeInfo& t = TypeOf<Migrations>();
+		t.base = "Object";
+		t.methods.push_back(MakeMethod("SetGameVersion", &Migrations::SetGameVersion));
+		Reflect_SetMethodDoc("Migrations", "SetGameVersion", "---- script surface ----", "version");
+		t.methods.push_back(MakeMethod("GameVersion", &Migrations::GameVersion));
+		t.methods.push_back(MakeMethod("UpgradeContent", &Migrations::UpgradeContent));
+		Reflect_SetMethodDoc("Migrations", "UpgradeContent", "Batch-upgrade a content tree; apply=false only reports. Returns the report text (also LastReport).", "dir,apply");
+		t.methods.push_back(MakeMethod("LastReportText", &Migrations::LastReportText));
+		t.methods.push_back(MakeMethod("Backup", &Migrations::Backup));
+		Reflect_SetMethodDoc("Migrations", "Backup", "Back up the project (its content root + project file) into `backupDir`: the files the last report would rewrite, or the whole content tree. Writes nubackup.json there. Returns \"\" or the error.", "backupDir,wholeProject");
+		t.methods.push_back(MakeMethod("Restore", &Migrations::Restore));
+		Reflect_SetMethodDoc("Migrations", "Restore", "Put a backup's files back where they came from (nubackup.json says where). \"\" or the error.", "backupDir");
+		t.methods.push_back(MakeMethod("DefaultBackupDir", &Migrations::DefaultBackupDir));
+		Reflect_SetMethodDoc("Migrations", "DefaultBackupDir", "The default backup folder for this project: beside the project folder, \"<name>-backup-<engine>-<date>\".", "");
+	}
+	{
 		TypeInfo& t = TypeOf<MotionMatcher>();
 		t.base = "Component";
 		t.category = "Animation";
@@ -1518,6 +1536,26 @@ bool NukeReflectInit() {
 		Reflect_SetMethodDoc("Profiler", "ShowGraph", "", "on");
 		t.methods.push_back(MakeMethod("FpsShown", &Profiler::FpsShown));
 		t.methods.push_back(MakeMethod("GraphShown", &Profiler::GraphShown));
+	}
+	{
+		TypeInfo& t = TypeOf<Quality>();
+		t.base = "Object";
+		t.methods.push_back(MakeMethod("SetPreset", &Quality::SetPreset));
+		Reflect_SetMethodDoc("Quality", "SetPreset", "", "name");
+		t.methods.push_back(MakeMethod("Preset", &Quality::Preset));
+		t.methods.push_back(MakeMethod("Set", &Quality::Set));
+		Reflect_SetMethodDoc("Quality", "Set", "", "feature,tier");
+		t.methods.push_back(MakeMethod("Get", &Quality::Get));
+		Reflect_SetMethodDoc("Quality", "Get", "", "feature");
+		t.methods.push_back(MakeMethod("Reset", &Quality::Reset));
+		Reflect_SetMethodDoc("Quality", "Reset", "", "feature");
+		t.methods.push_back(MakeMethod("Features", &Quality::Features));
+		t.methods.push_back(MakeMethod("Describe", &Quality::Describe));
+		Reflect_SetMethodDoc("Quality", "Describe", "", "feature");
+		t.methods.push_back(MakeMethod("Autodetect", &Quality::Autodetect));
+		t.methods.push_back(MakeMethod("AdapterName", &Quality::AdapterName));
+		t.methods.push_back(MakeMethod("AdapterMemoryMB", &Quality::AdapterMemoryMB));
+		t.methods.push_back(MakeMethod("AdapterRayTracing", &Quality::AdapterRayTracing));
 	}
 	{
 		TypeInfo& t = TypeOf<RagdollDef>();
