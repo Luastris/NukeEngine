@@ -270,6 +270,10 @@ void Config::reload(Config* instance)
 
     instance->physicsCore  = root.value("physicsCore",  instance->physicsCore);
     instance->logToConsole = root.value("logToConsole", instance->logToConsole);
+    instance->cvars.clear();
+    if (root.contains("cvars") && root["cvars"].is_object())
+        for (auto& kv : root["cvars"].items())
+            instance->cvars[kv.key()] = kv.value().is_string() ? kv.value().get<std::string>() : kv.value().dump();
     instance->gpuValidation = root.value("gpuValidation", instance->gpuValidation);
     instance->devConsole = root.value("devConsole", instance->devConsole);
     instance->splashVideo = root.value("splashVideo", instance->splashVideo);
@@ -364,6 +368,7 @@ void Config::saveWindowTo(const std::string& path)
     w["fpsLimit"]        = window.fpsLimit;
     if (!window.language.empty()) w["language"] = window.language; else w.erase("language");
     if (!window.fontFallbacks.empty()) w["fontFallbacks"] = window.fontFallbacks; else w.erase("fontFallbacks");
+    if (!cvars.empty()) root["cvars"] = cvars; else root.erase("cvars");
     // 4.2: the game's upscaling choice rides with the window block (words, see the loader).
     if (upscale.set)
     {

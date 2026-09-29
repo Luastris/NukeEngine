@@ -1,4 +1,5 @@
 #include "API/Model/DevConsole.h"
+#include "API/Model/Cvar.h"
 #include "API/Model/Log.h"
 #include "API/Model/Package.h"
 #include "config.h"
@@ -180,7 +181,7 @@ std::string Help(const std::string& arg)
 	std::ostringstream o;
 	if (arg.empty())
 	{
-		o << "commands: Type.Method args... | help <Type> | anything else runs as Lua\ntypes:";
+		o << "commands: Type.Method args... | help <Type> | <cvar> [value] | cvars [prefix] | anything else runs as Lua\ntypes:";
 		for (TypeInfo* ti : Registry_All())
 			if (TypeHasStatics(ti)) o << " " << ti->name;
 		return o.str();
@@ -233,6 +234,12 @@ void BuildSuggestions(const char* bufC, std::vector<std::string>& lines, std::ve
 		return;
 	}
 	size_t total = 0;
+	// cvars first: "r." / "g.time" - name + value line, Tab puts "name " in the buffer
+	for (const std::string& n : Cvars::Names(buf))
+	{
+		++total;
+		if (cands.size() < 8) { cands.push_back(n + " "); lines.push_back(Cvars::Describe(n)); }
+	}
 	const size_t dot = buf.find('.');
 	if (dot == std::string::npos)
 	{
@@ -246,7 +253,7 @@ void BuildSuggestions(const char* bufC, std::vector<std::string>& lines, std::ve
 	else
 	{
 		TypeInfo* ti = FindTypeCI(buf.substr(0, dot));
-		if (!ti) return;
+		if (!ti) { if (total > cands.size()) lines.push_back("... (" + std::to_string(total - cands.size()) + " more)"); return; }
 		const std::string mpfx = buf.substr(dot + 1);
 		for (const Method& m : ti->methods)
 			if (m.isStatic && StartsWithCI(m.name, mpfx))
@@ -288,6 +295,32 @@ std::string Console::Execute(const std::string& rawLine)
 		std::string h = Help(tk.size() > 1 ? tk[1] : "");
 		Log::Write(LOG_INFO, "Console", h);
 		return h;
+	}
+
+	// A cvar: `name` prints it, `name value` sets it (the console's cheat gate applies).
+	if (Cvars::Has(tk[0]))
+	{
+		if (tk.size() == 1)
+		{
+			std::string d = Cvars::Describe(tk[0]);
+			Log::Write(LOG_INFO, "Console", d);
+			return d;
+		}
+		std::string v = tk[1];
+		for (size_t i = 2; i < tk.size(); ++i) v += " " + tk[i];
+		std::string err;
+		if (!Cvars::SetFrom(tk[0], v, true, &err)) { Log::Write(LOG_WARN, "Console", err); return err; }
+		std::string r = tk[0] + " = " + Cvars::Get(tk[0]);
+		Log::Write(LOG_INFO, "Console", r);
+		return r;
+	}
+	if (tk[0] == "cvars")
+	{
+		std::string out;
+		for (const std::string& n : Cvars::Names(tk.size() > 1 ? tk[1] : "")) out += Cvars::Describe(n) + "\n";
+		if (!out.empty()) out.pop_back(); else out = "no cvars" + (tk.size() > 1 ? " starting with " + tk[1] : std::string());
+		Log::Write(LOG_INFO, "Console", out);
+		return out;
 	}
 
 	// Type.Method over the reflection registry.

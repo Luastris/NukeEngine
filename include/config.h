@@ -4,6 +4,7 @@
 #include "NukeAPI.h"
 #include <string>
 #include <vector>
+#include <map>
 
 namespace nuke {
 
@@ -209,6 +210,9 @@ public:
     int  jobCoreBudget = 0;
     std::string splashVideo;     // splash .nuvid, content-relative ("splashVideo"; "" = none)
     NukeUpscale upscale{};       // 4.2: the game's upscaling / frame-generation choice ("upscale"; ABI 45)
+    // Archived console variables ("cvars": {name: value-as-text}; ABI 55). Cvars::Register(..Archive)
+    // reads its start value here, a Set writes it back; saveWindow persists the block.
+    std::map<std::string, std::string> cvars;
 	void reload(Config* instance);
 	// Physics-thread core after auto-resolution: -2 don't pin, -1 auto = last budget core.
 	int effectivePhysicsCore() const;

@@ -197,7 +197,10 @@ extern "C" { NUKE_ABI_STAMP int nuke_build_debug = 0; }
 //       language Loc starts in and the font fallback chain (editor + runtime GUI); new reflected Loc facade
 //       (API/Model/Loc.h) fed by ResDB from content/localization/<lang>.json (disk, pak, hot reload); ResDB
 //       gained the font table (appended; .ttf/.otf/.ttc are DB assets, Font / RegisterFont).
-#define NUKE_ENGINE_ABI 54
+//   55: cvar registry (2026-09-29). Config gained `cvars` (appended; config/main.json ["cvars"] = the archived
+//       values); new reflected Cvars facade (API/Model/Cvar.h): stored / bound typed variables, OnChange hooks,
+//       "cvar.changed"; the dev console reads / sets / lists / completes them; the editor's Cvars panel.
+#define NUKE_ENGINE_ABI 55
 extern "C" { NUKE_ABI_STAMP int nuke_engine_abi = NUKE_ENGINE_ABI; }
 
 namespace nuke {

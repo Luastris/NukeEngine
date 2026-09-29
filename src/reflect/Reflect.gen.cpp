@@ -16,6 +16,7 @@
 #include "API/Model/Clock.h"
 #include "API/Model/Cloth.h"
 #include "API/Model/Collider.h"
+#include "API/Model/Cvar.h"
 #include "API/Model/DebugDraw.h"
 #include "API/Model/Decal.h"
 #include "API/Model/Destructible.h"
@@ -605,6 +606,33 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("friction", &Collider::friction, "", "Friction", 0.0f, 1.0f));
 		t.fields.push_back(MakeField("restitution", &Collider::restitution, "", "Restitution", 0.0f, 1.0f));
 		t.create = []() -> void* { return new Collider(); };
+	}
+	{
+		TypeInfo& t = TypeOf<Cvars>();
+		t.base = "Object";
+		t.methods.push_back(MakeMethod("Register", &Cvars::Register));
+		Reflect_SetMethodDoc("Cvars", "Register", "Register a stored cvar; the type comes from the default: true/false -> bool, an integer -> int, a number -> float, else string. Returns false when the name is taken. `archive` = persist.", "name,defaultValue,description,archive");
+		t.methods.push_back(MakeMethod("Has", &Cvars::Has));
+		Reflect_SetMethodDoc("Cvars", "Has", "", "name");
+		t.methods.push_back(MakeMethod("Get", &Cvars::Get));
+		Reflect_SetMethodDoc("Cvars", "Get", "", "name");
+		t.methods.push_back(MakeMethod("GetNumber", &Cvars::GetNumber));
+		Reflect_SetMethodDoc("Cvars", "GetNumber", "", "name");
+		t.methods.push_back(MakeMethod("GetBool", &Cvars::GetBool));
+		Reflect_SetMethodDoc("Cvars", "GetBool", "", "name");
+		t.methods.push_back(MakeMethod("Set", &Cvars::Set));
+		Reflect_SetMethodDoc("Cvars", "Set", "", "name,value");
+		t.methods.push_back(MakeMethod("SetNumber", &Cvars::SetNumber));
+		Reflect_SetMethodDoc("Cvars", "SetNumber", "", "name,value");
+		t.methods.push_back(MakeMethod("Reset", &Cvars::Reset));
+		Reflect_SetMethodDoc("Cvars", "Reset", "", "name");
+		t.methods.push_back(MakeMethod("Default", &Cvars::Default));
+		Reflect_SetMethodDoc("Cvars", "Default", "", "name");
+		t.methods.push_back(MakeMethod("Describe", &Cvars::Describe));
+		Reflect_SetMethodDoc("Cvars", "Describe", "", "name");
+		t.methods.push_back(MakeMethod("Count", &Cvars::Count));
+		t.methods.push_back(MakeMethod("NameAt", &Cvars::NameAt));
+		Reflect_SetMethodDoc("Cvars", "NameAt", "", "i");
 	}
 	{
 		TypeInfo& t = TypeOf<DebugDraw>();
