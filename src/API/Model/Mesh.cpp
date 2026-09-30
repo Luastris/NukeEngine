@@ -2,7 +2,6 @@
 #include <meshoptimizer.h>
 #include <iostream>
 #include <sstream>
-#include <assimp/scene.h>
 #include <algorithm>
 #include <array>
 #include <functional>
@@ -11,6 +10,7 @@
 #include <set>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <boost/filesystem/fstream.hpp>
 
 namespace nuke { namespace bfs = boost::filesystem; }
@@ -83,267 +83,39 @@ float Mesh::RaycastUV(const Vector3& ro, const Vector3& rd, float& u, float& v) 
 	return (float)bestT;
 }
 
-// assimp matrices are ROW-major; glm/our storage is COLUMN-major -> transpose on copy.
-static void AiToCol16(const aiMatrix4x4& m, float out[16])
+// The shared indexed builder (see Mesh.h for the contract): merges the source parts into one
+// sectioned, skinned, morph-carrying, cache-optimized, LOD-chained mesh.
+Mesh* Mesh::Build(const MeshSource& src, std::vector<int>* outSlotMats)
 {
-	const float* s = &m.a1;                       // row-major 4x4
-	for (int r = 0; r < 4; ++r)
-		for (int c = 0; c < 4; ++c)
-			out[c * 4 + r] = s[r * 4 + c];
-}
+	Mesh* m = new Mesh();
+	strncpy(m->name, src.name.c_str(), sizeof(m->name) - 1);
+	m->name[sizeof(m->name) - 1] = 0;
 
-// Build the merged skeleton for a set of meshes: every bone node + every node on the
-// root->bone paths (clips animate intermediates too), in DFS pre-order so parent < child.
-static void BuildSkeleton(const std::vector<aiMesh*>& meshes, const aiScene* sc,
-                          std::vector<MeshBone>& outBones, std::map<std::string, int>& outIndex)
-{
-	std::set<const aiNode*> needed;
-	for (aiMesh* mesh : meshes)
-		for (unsigned int b = 0; b < mesh->mNumBones; ++b)
-		{
-			const aiNode* n = sc->mRootNode->FindNode(mesh->mBones[b]->mName);
-			for (; n; n = n->mParent) needed.insert(n);   // the bone + all ancestors
-		}
-	if (needed.empty()) return;
-
-	std::vector<const aiNode*> boneNodes;
-	struct Walker
-	{
-		std::set<const aiNode*>& needed;
-		std::vector<MeshBone>&   bones;
-		std::map<std::string, int>& index;
-		std::vector<const aiNode*>& nodes;
-		void Walk(const aiNode* n, int parent)
-		{
-			int self = parent;
-			if (needed.count(n))
-			{
-				MeshBone mb;
-				mb.name   = n->mName.C_Str();
-				mb.parent = parent;
-				for (int k = 0; k < 16; ++k) mb.invBind[k] = (k % 5 == 0) ? 1.0f : 0.0f;   // identity until aiBone fills it
-				aiVector3D p, s; aiQuaternion r;
-				n->mTransformation.Decompose(s, r, p);
-				mb.localPos[0] = p.x; mb.localPos[1] = p.y; mb.localPos[2] = p.z;
-				mb.localRot[0] = r.x; mb.localRot[1] = r.y; mb.localRot[2] = r.z; mb.localRot[3] = r.w;
-				mb.localScale[0] = s.x; mb.localScale[1] = s.y; mb.localScale[2] = s.z;
-				self = (int)bones.size();
-				index[mb.name] = self;
-				bones.push_back(mb);
-				nodes.push_back(n);
-			}
-			for (unsigned int c = 0; c < n->mNumChildren; ++c) Walk(n->mChildren[c], self);
-		}
-	} w{ needed, outBones, outIndex, boneNodes };
-	w.Walk(sc->mRootNode, -1);
-
-	const size_t nb = outBones.size();
-	std::vector<aiMatrix4x4> offs(nb);          // identity default
-	std::vector<aiMatrix4x4> stampG(nb);        // node global of the mesh that stamped the bone
-	std::vector<char>        realIB(nb, 0);     // bone got an aiBone offset matrix
-
-	// Node global per mesh: assimp offsets transform MESH-space verts into bone space, so a
-	// mesh node's own transform is baked into them — anchoring the skeleton in scene space
-	// below needs it back (a glTF Body node offset by hip height sank the whole rig).
-	std::map<const aiMesh*, aiMatrix4x4> meshGlobal;
-	if (sc && sc->mRootNode)
-	{
-		std::function<void(const aiNode*, const aiMatrix4x4&)> walkG =
-			[&](const aiNode* n, const aiMatrix4x4& parent)
-		{
-			const aiMatrix4x4 g = parent * n->mTransformation;
-			for (unsigned int mi = 0; mi < n->mNumMeshes; ++mi)
-			{
-				const aiMesh* am = sc->mMeshes[n->mMeshes[mi]];
-				if (!meshGlobal.count(am)) meshGlobal[am] = g;
-			}
-			for (unsigned int c = 0; c < n->mNumChildren; ++c) walkG(n->mChildren[c], g);
-		};
-		walkG(sc->mRootNode, aiMatrix4x4());
-	}
-
-	// Canonical inverse binds: meshes may DISAGREE per bone (outfit-variant exports bake every
-	// mesh in its own pose) — the largest skin (the body) stamps first and wins; a mesh that
-	// disagrees keeps its own binds embedded at import and the skinning palette prefers those.
-	std::vector<aiMesh*> order(meshes);
-	std::stable_sort(order.begin(), order.end(),
-	                 [](const aiMesh* a, const aiMesh* b) { return a->mNumBones > b->mNumBones; });
-	int conflicts = 0;
-	for (aiMesh* mesh : order)
-		for (unsigned int b = 0; b < mesh->mNumBones; ++b)
-		{
-			auto it = outIndex.find(mesh->mBones[b]->mName.C_Str());
-			if (it == outIndex.end()) continue;
-			if (realIB[it->second])
-			{
-				const float* have = &offs[it->second].a1;
-				const float* mine = &mesh->mBones[b]->mOffsetMatrix.a1;
-				for (int k = 0; k < 16; ++k)
-					if (std::fabs(have[k] - mine[k]) > 1e-3f) { ++conflicts; break; }
-				continue;
-			}
-			AiToCol16(mesh->mBones[b]->mOffsetMatrix, outBones[it->second].invBind);
-			offs[it->second] = mesh->mBones[b]->mOffsetMatrix;
-			auto gi = meshGlobal.find(mesh);
-			if (gi != meshGlobal.end()) stampG[it->second] = gi->second;
-			realIB[it->second] = 1;
-		}
-	if (conflicts > 0)
-		std::cout << "[Import]\t" << conflicts << " inverse bind(s) disagree between meshes "
-		             "(per-mesh bake poses) - largest skin wins, others carry their own" << std::endl;
-
-	// RECONCILE bind with the inverse binds. The vertices are baked in the pose the offset
-	// matrices describe; when the node hierarchy rests in a DIFFERENT pose (lossy exports:
-	// Poiyomi->VRM converts bake meshes without re-posing the armature), a bind-posed
-	// palette is not identity and the skin explodes on first ApplyPose. The bake world of a
-	// bone in SCENE space is meshGlobal * inverse(offset) (assimp offsets are mesh-relative);
-	// when the node rest drifts from that, rebuild the bind locals from the bake — bones
-	// without an aiBone (helper ancestors, leaf ends) keep their node transforms.
-	{
-		std::vector<aiMatrix4x4> fwd(nb);
-		for (size_t i = 0; i < nb; ++i)
-		{
-			const aiMatrix4x4& L = boneNodes[i]->mTransformation;
-			fwd[i] = outBones[i].parent >= 0 ? fwd[outBones[i].parent] * L : L;
-		}
-		std::vector<aiMatrix4x4> bake(nb);
-		for (size_t i = 0; i < nb; ++i)
-		{
-			if (realIB[i]) { bake[i] = offs[i]; bake[i].Inverse(); bake[i] = stampG[i] * bake[i]; }
-			else           bake[i] = fwd[i];
-		}
-		bool mismatch = false;
-		for (size_t i = 0; i < nb && !mismatch; ++i)
-		{
-			if (!realIB[i]) continue;
-			const float* a1 = &bake[i].a1;
-			const float* f1 = &fwd[i].a1;
-			for (int k = 0; k < 16; ++k)
-				if (std::fabs(a1[k] - f1[k]) > 1e-3f) { mismatch = true; break; }
-		}
-		if (mismatch)
-		{
-			int fixedN = 0;
-			for (size_t i = 0; i < nb; ++i)
-			{
-				if (!realIB[i]) continue;
-				aiMatrix4x4 pgi = outBones[i].parent >= 0 ? bake[outBones[i].parent] : aiMatrix4x4();
-				pgi.Inverse();
-				aiMatrix4x4 loc = pgi * bake[i];
-				aiVector3D p, s; aiQuaternion r;
-				loc.Decompose(s, r, p);
-				outBones[i].localPos[0] = p.x; outBones[i].localPos[1] = p.y; outBones[i].localPos[2] = p.z;
-				outBones[i].localRot[0] = r.x; outBones[i].localRot[1] = r.y;
-				outBones[i].localRot[2] = r.z; outBones[i].localRot[3] = r.w;
-				outBones[i].localScale[0] = s.x; outBones[i].localScale[1] = s.y; outBones[i].localScale[2] = s.z;
-				++fixedN;
-			}
-			std::cout << "[Import]\tskeleton bind rebuilt from inverse binds (" << fixedN
-			          << " bones: node rest pose != bake pose)" << std::endl;
-		}
-	}
-}
-
-void Mesh::ImportAISkeleton(const aiScene* scene, std::vector<MeshBone>& outBones)
-{
-	outBones.clear();
-	if (!scene) return;
-	std::vector<aiMesh*> all;
-	for (unsigned int i = 0; i < scene->mNumMeshes; ++i)
-		if (scene->mMeshes[i]->HasBones()) all.push_back(scene->mMeshes[i]);
-	if (all.empty()) return;
-	std::map<std::string, int> index;
-	BuildSkeleton(all, scene, outBones, index);
-}
-
-// Skeleton from the NODE hierarchy (no skinned meshes to source bones from): the named
-// nodes + their ancestors, bind = the node transforms, identity inverse binds. Animation
-// packs (Mixamo "without skin" FBX) get a REAL skeleton this way, so their clips carry a
-// skelGuid with true bind poses and chain-retarget like any skinned rig.
-void Mesh::ImportAISkeletonFromNodes(const aiScene* scene, const std::vector<std::string>& nodeNames,
-                                     std::vector<MeshBone>& outBones)
-{
-	outBones.clear();
-	if (!scene || !scene->mRootNode) return;
-	std::set<const aiNode*> needed;
-	for (const std::string& nm : nodeNames)
-	{
-		const aiNode* n = scene->mRootNode->FindNode(nm.c_str());
-		for (; n; n = n->mParent) needed.insert(n);
-	}
-	if (needed.empty()) return;
-	struct Walker
-	{
-		std::set<const aiNode*>& needed;
-		std::vector<MeshBone>&   bones;
-		void Walk(const aiNode* n, int parent)
-		{
-			int self = parent;
-			if (needed.count(n))
-			{
-				MeshBone mb;
-				mb.name   = n->mName.C_Str();
-				mb.parent = parent;
-				for (int k = 0; k < 16; ++k) mb.invBind[k] = (k % 5 == 0) ? 1.0f : 0.0f;
-				aiVector3D p, s; aiQuaternion r;
-				n->mTransformation.Decompose(s, r, p);
-				mb.localPos[0] = p.x; mb.localPos[1] = p.y; mb.localPos[2] = p.z;
-				mb.localRot[0] = r.x; mb.localRot[1] = r.y; mb.localRot[2] = r.z; mb.localRot[3] = r.w;
-				mb.localScale[0] = s.x; mb.localScale[1] = s.y; mb.localScale[2] = s.z;
-				self = (int)bones.size();
-				bones.push_back(mb);
-			}
-			for (unsigned int c = 0; c < n->mNumChildren; ++c) Walk(n->mChildren[c], self);
-		}
-	} w{ needed, outBones };
-	w.Walk(scene->mRootNode, -1);
-}
-
-// The shared indexed builder behind ImportAIMesh/ImportAIMeshes (see Mesh.h for the contract).
-// srcLodOf: authored LOD level per source mesh (sorted, level-contiguous) - the levels become
-// the mesh's LOD chain verbatim and the auto-simplify chain is skipped.
-static void BuildMeshInto(Mesh* m, const std::vector<aiMesh*>& meshes, const aiScene* sc,
-                          std::vector<unsigned int>* outSlotMats,
-                          const std::vector<MeshBone>* sharedSkeleton,
-                          const std::vector<int>* srcLodOf = nullptr)
-{
-	// Material SLOTS: dedup aiMaterial indices in first-seen order.
-	std::vector<unsigned int> slotMat;
-	auto slotOf = [&slotMat](unsigned int mi) -> int
+	// Material SLOTS: dedup source material indices in first-seen order.
+	std::vector<int> slotMat;
+	auto slotOf = [&slotMat](int mi) -> int
 	{
 		for (size_t s = 0; s < slotMat.size(); ++s) if (slotMat[s] == mi) return (int)s;
 		slotMat.push_back(mi);
 		return (int)slotMat.size() - 1;
 	};
 
-	// Skeleton: the SHARED scene palette (skin indices point into the .nuskel; the mesh
-	// embeds nothing), else a per-call merged skeleton embedded into the mesh (legacy API).
-	std::map<std::string, int> boneIdx;
 	bool anyBones = false;
-	for (aiMesh* am : meshes) anyBones = anyBones || am->HasBones();
-	bool skin = false;
-	if (sharedSkeleton && anyBones)
-	{
-		for (size_t i = 0; i < sharedSkeleton->size(); ++i) boneIdx[(*sharedSkeleton)[i].name] = (int)i;
-		skin = !sharedSkeleton->empty();
-	}
-	else if (sc && anyBones)
-	{
-		BuildSkeleton(meshes, sc, m->bones, boneIdx);
-		skin = !m->bones.empty();
-	}
+	for (const MeshSourcePart& pt : src.parts) anyBones = anyBones || !pt.boneIdx.empty();
+	const bool skin = anyBones && !src.skeleton.empty();
+	if (skin && src.embedSkeleton) m->bones = src.skeleton;
 
 	size_t totalV = 0;
 	bool anyUV = false, anyTan = false, anyUV2 = false, anyCol = false;
-	for (aiMesh* am : meshes)
+	for (const MeshSourcePart& pt : src.parts)
 	{
-		totalV += am->mNumVertices;
-		anyUV  = anyUV  || am->HasTextureCoords(0);
-		anyTan = anyTan || (am->mTangents && am->mBitangents && am->HasNormals());
-		anyUV2 = anyUV2 || am->HasTextureCoords(1);
-		anyCol = anyCol || am->HasVertexColors(0);
+		totalV += pt.pos.size() / 3;
+		anyUV  = anyUV  || !pt.uv.empty();
+		anyTan = anyTan || !pt.tan.empty();
+		anyUV2 = anyUV2 || !pt.uv2.empty();
+		anyCol = anyCol || !pt.col.empty();
 	}
-	if (totalV == 0) return;
+	if (totalV == 0) return m;
 
 	std::vector<float> pos(totalV * 3, 0.f), nrm(totalV * 3, 0.f);
 	std::vector<float> uv (anyUV  ? totalV * 2 : 0, 0.f);
@@ -354,13 +126,12 @@ static void BuildMeshInto(Mesh* m, const std::vector<aiMesh*>& meshes, const aiS
 	std::vector<float>          bWgt(skin ? totalV * 4 : 0, 0.f);
 	std::vector<uint32_t> idx;
 
-	// Morph targets, merged by NAME across the node's meshes: dense deltas over the whole
-	// vertex range (a mesh without that target contributes zeros).
+	// Morph targets, merged by NAME across the parts: dense deltas over the whole vertex range.
 	std::vector<std::string> morphNames;
 	std::vector<std::vector<float>> morphPos, morphNrm;
-	auto morphOf = [&](const char* nm) -> int
+	auto morphOf = [&](const std::string& nm) -> int
 	{
-		std::string n2 = (nm && nm[0]) ? nm : ("morph" + std::to_string(morphNames.size()));
+		const std::string n2 = nm.empty() ? ("morph" + std::to_string(morphNames.size())) : nm;
 		for (size_t i = 0; i < morphNames.size(); ++i) if (morphNames[i] == n2) return (int)i;
 		morphNames.push_back(n2);
 		morphPos.emplace_back(totalV * 3, 0.f);
@@ -369,158 +140,100 @@ static void BuildMeshInto(Mesh* m, const std::vector<aiMesh*>& meshes, const aiS
 	};
 
 	uint32_t vbase = 0;
-	for (aiMesh* am : meshes)
+	std::vector<int> partSections;   // section index per part (-1 = no triangles)
+	for (const MeshSourcePart& pt : src.parts)
 	{
-		const uint32_t nv = am->mNumVertices;
-		for (uint32_t v = 0; v < nv; ++v)
+		const uint32_t nv = (uint32_t)(pt.pos.size() / 3);
+		auto copyStream = [&](const std::vector<float>& in, std::vector<float>& out, size_t comps)
 		{
-			const size_t d = (size_t)(vbase + v);
-			pos[d * 3 + 0] = am->mVertices[v].x; pos[d * 3 + 1] = am->mVertices[v].y; pos[d * 3 + 2] = am->mVertices[v].z;
-			if (am->HasNormals())
-			{ nrm[d * 3 + 0] = am->mNormals[v].x; nrm[d * 3 + 1] = am->mNormals[v].y; nrm[d * 3 + 2] = am->mNormals[v].z; }
-			if (anyUV && am->HasTextureCoords(0))
-			{ uv[d * 2 + 0] = am->mTextureCoords[0][v].x; uv[d * 2 + 1] = am->mTextureCoords[0][v].y; }
-			if (anyTan && am->mTangents && am->mBitangents && am->HasNormals())
-			{
-				const aiVector3D& T = am->mTangents[v];
-				const aiVector3D& B = am->mBitangents[v];
-				const aiVector3D& N = am->mNormals[v];
-				const aiVector3D  c = N ^ T;   // cross
-				tan[d * 4 + 0] = T.x; tan[d * 4 + 1] = T.y; tan[d * 4 + 2] = T.z;
-				tan[d * 4 + 3] = (c * B < 0.0f) ? -1.0f : 1.0f;   // MikkTSpace handedness
-			}
-			if (anyUV2 && am->HasTextureCoords(1))
-			{ uv2[d * 2 + 0] = am->mTextureCoords[1][v].x; uv2[d * 2 + 1] = am->mTextureCoords[1][v].y; }
-			if (anyCol && am->HasVertexColors(0))
-			{
-				const aiColor4D& c4 = am->mColors[0][v];
-				col[d * 4 + 0] = c4.r; col[d * 4 + 1] = c4.g; col[d * 4 + 2] = c4.b; col[d * 4 + 3] = c4.a;
-			}
-		}
-		if (skin && am->HasBones())   // 4 strongest weights per vertex, normalized below
+			if (in.empty() || out.empty()) return;
+			const size_t n = std::min((size_t)nv * comps, in.size());
+			memcpy(&out[(size_t)vbase * comps], in.data(), n * sizeof(float));
+		};
+		copyStream(pt.pos, pos, 3); copyStream(pt.nrm, nrm, 3);
+		copyStream(pt.uv, uv, 2);   copyStream(pt.tan, tan, 4);
+		copyStream(pt.uv2, uv2, 2); copyStream(pt.col, col, 4);
+		if (skin && !pt.boneIdx.empty())
 		{
-			for (unsigned int b = 0; b < am->mNumBones; ++b)
-			{
-				auto bi = boneIdx.find(am->mBones[b]->mName.C_Str());
-				if (bi == boneIdx.end()) continue;
-				for (unsigned int wi = 0; wi < am->mBones[b]->mNumWeights; ++wi)
-				{
-					const aiVertexWeight& aw = am->mBones[b]->mWeights[wi];
-					if (aw.mVertexId >= am->mNumVertices || aw.mWeight <= 0.0f) continue;
-					const size_t d = ((size_t)vbase + aw.mVertexId) * 4;
-					int weakest = 0;
-					for (int k = 1; k < 4; ++k) if (bWgt[d + k] < bWgt[d + weakest]) weakest = k;
-					if (aw.mWeight > bWgt[d + weakest])
-					{ bIdx[d + weakest] = (unsigned short)std::min(bi->second, 65535); bWgt[d + weakest] = aw.mWeight; }
-				}
-			}
+			const size_t n = std::min((size_t)nv * 4, pt.boneIdx.size());
+			for (size_t k = 0; k < n; ++k) { bIdx[(size_t)vbase * 4 + k] = pt.boneIdx[k]; bWgt[(size_t)vbase * 4 + k] = k < pt.boneWgt.size() ? pt.boneWgt[k] : 0.f; }
 		}
-
-		for (unsigned int mk = 0; mk < am->mNumAnimMeshes; ++mk)   // blend shapes
+		for (const MeshSourcePart::Morph& mo : pt.morphs)   // blend shapes
 		{
-			const aiAnimMesh* an = am->mAnimMeshes[mk];
-			if (!an || !an->mVertices) continue;
-			const int mi2 = morphOf(an->mName.C_Str());
-			for (uint32_t v = 0; v < nv && v < an->mNumVertices; ++v)
-			{
-				const size_t d = (size_t)(vbase + v) * 3;
-				morphPos[mi2][d + 0] = an->mVertices[v].x - am->mVertices[v].x;
-				morphPos[mi2][d + 1] = an->mVertices[v].y - am->mVertices[v].y;
-				morphPos[mi2][d + 2] = an->mVertices[v].z - am->mVertices[v].z;
-				if (an->mNormals && am->HasNormals())
-				{
-					morphNrm[mi2][d + 0] = an->mNormals[v].x - am->mNormals[v].x;
-					morphNrm[mi2][d + 1] = an->mNormals[v].y - am->mNormals[v].y;
-					morphNrm[mi2][d + 2] = an->mNormals[v].z - am->mNormals[v].z;
-				}
-			}
+			const int mi2 = morphOf(mo.name);
+			const size_t n = std::min((size_t)nv * 3, mo.posDelta.size());
+			for (size_t k = 0; k < n; ++k) morphPos[mi2][(size_t)vbase * 3 + k] = mo.posDelta[k];
+			const size_t nn = std::min((size_t)nv * 3, mo.nrmDelta.size());
+			for (size_t k = 0; k < nn; ++k) morphNrm[mi2][(size_t)vbase * 3 + k] = mo.nrmDelta[k];
 		}
-
 		MeshSection sec;
 		sec.firstIndex = (uint32_t)idx.size();
-		sec.slot = slotOf(am->mMaterialIndex);
-		for (unsigned int f = 0; f < am->mNumFaces; ++f)
+		sec.slot = slotOf(pt.material);
+		for (size_t f = 0; f + 2 < pt.indices.size(); f += 3)
 		{
-			const aiFace& face = am->mFaces[f];
-			if (face.mNumIndices != 3) continue;   // lines/points survive some importers
-			idx.push_back(vbase + face.mIndices[0]);
-			idx.push_back(vbase + face.mIndices[1]);
-			idx.push_back(vbase + face.mIndices[2]);
+			if (pt.indices[f] >= nv || pt.indices[f + 1] >= nv || pt.indices[f + 2] >= nv) continue;
+			idx.push_back(vbase + pt.indices[f]); idx.push_back(vbase + pt.indices[f + 1]); idx.push_back(vbase + pt.indices[f + 2]);
 		}
 		sec.indexCount = (uint32_t)idx.size() - sec.firstIndex;
-		if (sec.indexCount > 0) m->sections.push_back(sec);
+		if (sec.indexCount > 0) { partSections.push_back((int)m->sections.size()); m->sections.push_back(sec); }
+		else partSections.push_back(-1);
 		vbase += nv;
 	}
-	if (idx.empty()) { m->sections.clear(); return; }
+	if (idx.empty()) { m->sections.clear(); return m; }
 
 	if (skin)   // normalize the weight quads
 		for (size_t d = 0; d < totalV; ++d)
 		{
 			float sum = bWgt[d * 4] + bWgt[d * 4 + 1] + bWgt[d * 4 + 2] + bWgt[d * 4 + 3];
-			if (sum <= 0.0f) continue;   // unweighted vertex (mesh without bones in the merge): stays at bind
+			if (sum <= 0.0f) continue;   // unweighted vertex (a rigid part in the merge): stays at bind
 			for (int k = 0; k < 4; ++k) bWgt[d * 4 + k] /= sum;
 		}
 
-	// Per-mesh inverse binds: when THIS mesh's binds disagree with the shared skeleton's
-	// canonical set (glTF bakes every skin in its own space — invBind is per SKIN, not per
-	// skeleton), embed the skeleton with the mesh's OWN binds swapped in; the skinning
-	// palette prefers embedded binds, so every mesh lands in the same scene space.
-	if (sharedSkeleton && skin && m->bones.empty())
+	// Per-part inverse binds: when THIS mesh's binds disagree with the shared skeleton's
+	// canonical set (glTF bakes every skin in its own space), embed the skeleton with the
+	// part's OWN binds swapped in; the skinning palette prefers embedded binds.
+	if (skin && !src.embedSkeleton)
 	{
 		bool differs = false;
-		std::map<int, const aiMatrix4x4*> own;
-		for (aiMesh* am : meshes)
-		{
-			if (!am->HasBones()) continue;
-			for (unsigned int b = 0; b < am->mNumBones; ++b)
+		std::map<int, const std::array<float, 16>*> own;
+		for (const MeshSourcePart& pt : src.parts)
+			for (const auto& kv : pt.ownInvBind)
 			{
-				auto bi = boneIdx.find(am->mBones[b]->mName.C_Str());
-				if (bi == boneIdx.end()) continue;
-				own[bi->second] = &am->mBones[b]->mOffsetMatrix;
-				float col[16];
-				AiToCol16(am->mBones[b]->mOffsetMatrix, col);
-				const float* skv = (*sharedSkeleton)[bi->second].invBind;
+				if (kv.first < 0 || kv.first >= (int)src.skeleton.size()) continue;
+				own[kv.first] = &kv.second;
+				const float* skv = src.skeleton[kv.first].invBind;
 				for (int k = 0; k < 16 && !differs; ++k)
-					if (std::fabs(col[k] - skv[k]) > 1e-3f) differs = true;
+					if (std::fabs(kv.second[k] - skv[k]) > 1e-3f) differs = true;
 			}
-		}
 		if (differs)
 		{
-			m->bones = *sharedSkeleton;   // canonical hierarchy/locals, own inverse binds
-			for (const auto& kv : own) AiToCol16(*kv.second, m->bones[kv.first].invBind);
+			m->bones = src.skeleton;   // canonical hierarchy/locals, own inverse binds
+			for (const auto& kv : own) for (int k = 0; k < 16; ++k) m->bones[kv.first].invBind[k] = (*kv.second)[k];
 		}
 	}
 
-	// --- meshoptimizer: vertex-cache order per section, then the auto-LOD chain ------------
+	// --- meshoptimizer: vertex-cache order per section, then the LOD chain ------------------
 	for (const MeshSection& s : m->sections)
 		meshopt_optimizeVertexCache(idx.data() + s.firstIndex, idx.data() + s.firstIndex, s.indexCount, totalV);
 
-	// Authored LODs (source _LOD0/_LOD1/... nodes): the levels ship as-is, one MeshLOD per
-	// level over its contiguous section run - the source artist's chain wins over auto-LOD.
+	// Authored LODs (source _LOD0/_LOD1/... parts): the levels ship as-is, one MeshLOD per
+	// level over its contiguous section run - the artist's chain wins over auto-LOD.
 	bool authoredLods = false;
-	if (srcLodOf && srcLodOf->size() == meshes.size())
+	if (src.authoredLods)
 	{
 		int maxLevel = 0;
-		for (int l : *srcLodOf) maxLevel = std::max(maxLevel, l);
+		for (const MeshSourcePart& pt : src.parts) maxLevel = std::max(maxLevel, pt.lodLevel);
 		if (maxLevel > 0)
 		{
 			authoredLods = true;
 			static const float kLevelScreen[] = { 0.0f, 0.35f, 0.15f, 0.06f, 0.02f };
-			// meshes arrive level-sorted, so each level's sections are already contiguous;
-			// a mesh with no triangles produced no section - walk sections by source order.
-			auto hasTris = [](aiMesh* am)
-			{
-				for (unsigned int f = 0; f < am->mNumFaces; ++f)
-					if (am->mFaces[f].mNumIndices == 3) return true;
-				return false;
-			};
 			int sec = 0;
 			for (int level = 0; level <= maxLevel; ++level)
 			{
 				MeshLOD ml;
 				ml.firstSection = sec;
-				for (size_t i = 0; i < meshes.size(); ++i)
-					if ((*srcLodOf)[i] == level && hasTris(meshes[i])) ++sec;
+				for (size_t i = 0; i < src.parts.size(); ++i)
+					if (src.parts[i].lodLevel == level && partSections[i] >= 0) ++sec;
 				ml.sectionCount = sec - ml.firstSection;
 				ml.screenSize = level < 5 ? kLevelScreen[level] : 0.01f;
 				if (ml.sectionCount > 0) m->lods.push_back(ml);
@@ -634,31 +347,9 @@ static void BuildMeshInto(Mesh* m, const std::vector<aiMesh*>& meshes, const aiS
 		m->morphs.push_back(std::move(mt));
 	}
 	m->numSlots = slotMat.empty() ? 1 : (int)slotMat.size();
-	if (sc)
-		for (unsigned int mi : slotMat)
-			m->slotNames.push_back(mi < sc->mNumMaterials ? sc->mMaterials[mi]->GetName().C_Str() : "");
+	for (int mi : slotMat)
+		m->slotNames.push_back(mi >= 0 && mi < (int)src.materialNames.size() ? src.materialNames[mi] : "");
 	if (outSlotMats) *outSlotMats = slotMat;
-}
-
-void Mesh::ImportAIMesh(aiMesh* mesh, const aiScene* scene)
-{
-	BuildMeshInto(this, { mesh }, scene, nullptr, nullptr);
-	strncpy(name, mesh->mName.C_Str(), sizeof(name) - 1);
-	name[sizeof(name) - 1] = 0;
-}
-
-Mesh* Mesh::ImportAIMeshes(const std::vector<aiMesh*>& meshes, const aiScene* scene,
-                           std::vector<unsigned int>* outSlotMats,
-                           const std::vector<MeshBone>* sharedSkeleton,
-                           const std::vector<int>* srcLodOf)
-{
-	Mesh* m = new Mesh();
-	BuildMeshInto(m, meshes, scene, outSlotMats, sharedSkeleton, srcLodOf);
-	if (!meshes.empty())
-	{
-		strncpy(m->name, meshes[0]->mName.C_Str(), sizeof(m->name) - 1);
-		m->name[sizeof(m->name) - 1] = 0;
-	}
 	return m;
 }
 

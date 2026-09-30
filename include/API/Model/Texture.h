@@ -6,6 +6,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <boost/function.hpp>
 #include <cstdint>
 #include "reflect/Reflect.h"   // NUKE_CLASS (reflected asset)
 #include "API/Model/Package.h" // pak cook layout + the header-only pak source
@@ -119,6 +120,16 @@ public:
     // Native asset format (.nutex, binary): header + decoded pixels — import decodes source
     // images into this so nothing references the source at runtime.
     bool            SaveToFile(const std::string& path) const;
+    // Image decode (stb: png/jpg/tga/bmp/psd/gif frame 0/hdr/pic/pnm) to RGBA8. False = not an image.
+    static bool DecodeImage(const unsigned char* bytes, size_t size, std::vector<unsigned char>& rgba, int& w, int& h);
+    static bool DecodeImageFile(const std::string& path, std::vector<unsigned char>& rgba, int& w, int& h);
+    // Cook RGBA8 into this texture: BC1 (opaque) / BC3 (alpha) / BC5 (Usage Normal) + a box mip chain;
+    // non-multiple-of-4 sizes are edge-padded. `progress` (optional) gets the fraction [0..1].
+    void BuildFromRGBA(const std::vector<unsigned char>& rgba, int w, int h, int usage,
+                       const boost::function<void(float)>& progress = boost::function<void(float)>());
+    // An animated sequence (GIF): `frames` full RGBA8 frames stacked, BC per frame, no mips.
+    void BuildFramesFromRGBA(const std::vector<unsigned char>& rgba, int w, int h, int frames, const std::vector<int>& delaysMs,
+                             const boost::function<void(float)>& progress = boost::function<void(float)>());
     static Texture* LoadFromFile(const std::string& path);
     static int      FormatVersion();   // the .nutex version this build writes
     static Texture* LoadFromMemory(const std::string& data);   // packed content (3.2)

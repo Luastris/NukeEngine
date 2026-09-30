@@ -10,7 +10,6 @@
 #include "Shader.h"
 #include "Vector.h"
 #include "reflect/Reflect.h"
-#include <assimp/material.h>
 
 namespace nuke {
 
@@ -313,7 +312,6 @@ public:
     Texture* flow = nullptr;       // anisotropy flow map
 
     Shader*      shader = nullptr;
-    aiMaterial*  aiMat  = nullptr;
 
     // Shader asset ref; default = engine "world".
     [[nuke::prop(asset="shader", label="Shader")]] std::string shaderGuid = "world";
@@ -421,7 +419,6 @@ public:
 
     Material();
 
-    void ImportAiMaterial(aiMaterial* m);   // name + color only (textures handled by the importer)
     void Resolve();                         // bind diff/norm/spec from ResDB by GUID
     // Deep copy for instancing: edits live on the instance and save with the world, never touching
     // the original .numat. Re-resolves its texture/shader pointers from ResDB.

@@ -204,7 +204,12 @@ extern "C" { NUKE_ABI_STAMP int nuke_build_debug = 0; }
 //       NukeAdapterInfo; Config gained `quality` (appended; ["quality"] = preset / overrides / adapter); Foliage
 //       gained its quality stamp (appended); new reflected Quality facade (API/Model/Quality.h) capping the
 //       authored settings at push time. Also (no layout change): Migrations facade + Cvars q.*.
-#define NUKE_ENGINE_ABI 56
+//   57: NukeExchange (2026-09-29). The assimp importer left the engine for the "exchange" SERVICE (service/iExchange.h,
+//       module NukeExchange, assimp static): Material LOST its assimp pointer (layout shift), Mesh lost the
+//       ImportAI* entry points and gained the neutral MeshSource + Mesh::Build, Texture gained DecodeImage /
+//       BuildFromRGBA / BuildFramesFromRGBA; import/assimporter.h -> import/Importer.h (the engine facade:
+//       images, audio, plugin importers, the service for models); new reflected Exchange facade (import / export).
+#define NUKE_ENGINE_ABI 57
 extern "C" { NUKE_ABI_STAMP int nuke_engine_abi = NUKE_ENGINE_ABI; }
 
 namespace nuke {

@@ -97,7 +97,6 @@ else()
     find_package(Boost REQUIRED COMPONENTS atomic chrono container filesystem system thread)
     set(_nuke_boost Boost::atomic Boost::chrono Boost::container Boost::filesystem Boost::system Boost::thread)
 endif()
-find_package(assimp CONFIG REQUIRED)
 find_package(glm CONFIG REQUIRED)
 find_package(meshoptimizer CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
@@ -123,7 +122,6 @@ target_link_libraries(NukeEngine PUBLIC
     glm::glm
     nlohmann_json::nlohmann_json
     PRIVATE
-    assimp::assimp
     meshoptimizer::meshoptimizer
     $<IF:$<TARGET_EXISTS:zstd::libzstd_shared>,zstd::libzstd_shared,zstd::libzstd_static>
     ${_nuke_zlib}
@@ -143,7 +141,7 @@ set_target_properties(NukeEngine PROPERTIES
     INSTALL_NAME_DIR "@rpath"
     BUILD_WITH_INSTALL_NAME_DIR TRUE)
 
-# Windows: the dependency DLLs (boost, assimp + its transitives, zstd, zlib...) land beside
+# Windows: the dependency DLLs (boost, zstd, zlib, meshoptimizer...) land beside
 # the engine — the msbuild-era vcpkg applocal step did this; with the shared pool the copy
 # is explicit. copy_if_different: cheap on incremental builds.
 if(WIN32)

@@ -6,15 +6,13 @@
 #include "Transform.h"
 #include "Material.h"
 #include "Fracture.h"   // baked Voronoi pieces (P2)
-#include <assimp/mesh.h>
+#include <array>
 #include <boost/container/list.hpp>
 #include <memory>
 #include <string>
 #include <vector>
 #include "../../../NukeEngine.h"
 #include "reflect/Reflect.h"   // NUKE_CLASS (reflected asset)
-
-struct aiScene;   // fwd (skin import needs the node hierarchy)
 
 namespace nuke {
 
@@ -50,6 +48,36 @@ struct MeshLOD
 	int   firstSection = 0;
 	int   sectionCount = 0;
 	float screenSize   = 0.0f;   // approx bounding-sphere diameter / viewport height; 0 = always
+};
+
+// A source mesh in the engine's NEUTRAL form - what an importer module hands Mesh::Build: one
+// part per sub-mesh of a node (its own material, LOD level, streams, skin weights, morphs).
+struct MeshSourcePart
+{
+	std::string name;
+	int material = 0;                 // source material index (slots dedup in first-seen order)
+	int lodLevel = 0;                 // authored LOD level (parts arrive level-sorted); 0 = base
+	std::vector<float> pos, nrm;      // 3 per vertex (nrm may be empty)
+	std::vector<float> uv, uv2;       // 2 per vertex (empty = absent)
+	std::vector<float> tan;           // 4 per vertex: xyz + handedness (MikkTSpace)
+	std::vector<float> col;           // 4 per vertex RGBA
+	std::vector<uint32_t> indices;    // triangles
+	std::vector<unsigned short> boneIdx;   // 4 per vertex into MeshSource::skeleton (empty = rigid)
+	std::vector<float>          boneWgt;   // 4 per vertex (Build normalizes)
+	// This part's OWN inverse binds by skeleton index where a file bakes every skin in its own
+	// space (glTF): Build embeds the skeleton with these swapped in when they differ.
+	std::vector<std::pair<int, std::array<float, 16>>> ownInvBind;
+	struct Morph { std::string name; std::vector<float> posDelta, nrmDelta; };   // dense over the part
+	std::vector<Morph> morphs;
+};
+struct MeshSource
+{
+	std::string name;
+	std::vector<MeshSourcePart> parts;
+	std::vector<std::string> materialNames;   // by source material index (slot labels)
+	bool authoredLods = false;                // parts carry lodLevel: the chain ships verbatim, no auto-simplify
+	std::vector<struct MeshBone> skeleton;    // the palette the parts' bone indices point into (empty = rigid)
+	bool embedSkeleton = false;               // true = the mesh embeds `skeleton` (legacy, no .nuskel); else it references the shared palette
 };
 
 class NUKEENGINE_API Mesh
@@ -218,28 +246,11 @@ public:
 
 	Mesh();
 
-	// `scene` (optional) enables skin import: bone weights + the skeleton from the node tree.
-	// Produces an INDEXED single-section mesh (v4); wrapper over the multi-mesh builder below.
-	void ImportAIMesh(aiMesh* mesh, const aiScene* scene = nullptr);
-
-	// Build ONE indexed mesh from a node's aiMesh list: a section per source mesh, material
-	// SLOTS deduped in list order (outSlotMats = slot -> aiScene material index), merged
-	// skeleton, tangents/uv2/color streams, meshopt vertex-cache+fetch optimization and an
-	// auto-generated LOD chain (simplified index ranges appended after the LOD0 sections).
-	// srcLodOf: authored LOD level per source mesh (callers pass level-sorted lists) — the
-	// levels become the LOD chain verbatim and the auto-simplify chain is skipped.
-	static Mesh* ImportAIMeshes(const std::vector<aiMesh*>& meshes, const aiScene* scene,
-	                            std::vector<unsigned int>* outSlotMats = nullptr,
-	                            const std::vector<MeshBone>* sharedSkeleton = nullptr,
-	                            const std::vector<int>* srcLodOf = nullptr);
-	// The merged skeleton of EVERY skinned mesh in the scene — the .nuskel source. Empty
-	// result = no bones anywhere. Bone indices of meshes built with `sharedSkeleton` point
-	// into this palette (mesh embeds NO skeleton of its own then).
-	static void ImportAISkeleton(const aiScene* scene, std::vector<MeshBone>& outBones);
-	// Skeleton from named NODES (+ ancestors) when the file has no skinned meshes to source
-	// bones from — animation packs (Mixamo "without skin") get real bind poses this way.
-	static void ImportAISkeletonFromNodes(const aiScene* scene, const std::vector<std::string>& nodeNames,
-	                                      std::vector<MeshBone>& outBones);
+	// Build ONE indexed mesh from its neutral source: a section per part, material SLOTS deduped
+	// in part order (outSlotMats = slot -> source material index), the shared or embedded
+	// skeleton, tangents/uv2/color streams, morph targets merged by name, meshopt vertex-cache
+	// + fetch optimization and an auto-generated LOD chain (authored LOD parts ship verbatim).
+	static Mesh* Build(const MeshSource& src, std::vector<int>* outSlotMats = nullptr);
 
 	// Primitive factories; registered in ResDB under "builtin:<name>".
 	static Mesh* CreateCube();

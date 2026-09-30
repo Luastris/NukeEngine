@@ -20,45 +20,6 @@ using json = nlohmann::json;
 
 Material::Material() {}
 
-void Material::ImportAiMaterial(aiMaterial* m) {
-	aiString nm;
-	if (m->Get(AI_MATKEY_NAME, nm) == AI_SUCCESS) matName = nm.C_Str();
-
-	aiColor3D col(1.f, 1.f, 1.f);
-	if (m->Get(AI_MATKEY_COLOR_DIFFUSE, col) == AI_SUCCESS) { color.r = col.r; color.g = col.g; color.b = col.b; }
-	float opacity = 1.f;
-	if (m->Get(AI_MATKEY_OPACITY, opacity) == AI_SUCCESS) color.a = opacity;
-
-	// PBR scalar factors (glTF / PBR materials).
-	float mf = 0.f, rf = 1.f, sf = 1.f;
-	if (m->Get(AI_MATKEY_METALLIC_FACTOR, mf)  == AI_SUCCESS) metallic  = mf;
-	if (m->Get(AI_MATKEY_ROUGHNESS_FACTOR, rf) == AI_SUCCESS) roughness = rf;
-#ifdef AI_MATKEY_SPECULAR_FACTOR
-	if (m->Get(AI_MATKEY_SPECULAR_FACTOR, sf)  == AI_SUCCESS) specular  = sf;   // KHR_materials_specular
-#endif
-	aiColor3D ec(0.f, 0.f, 0.f);
-	if (m->Get(AI_MATKEY_COLOR_EMISSIVE, ec) == AI_SUCCESS)
-	{
-		emissive.r = ec.r; emissive.g = ec.g; emissive.b = ec.b;
-		if (ec.r > 0.f || ec.g > 0.f || ec.b > 0.f) emissiveIntensity = 1.0f;
-	}
-
-	// glTF alpha mode -> engine blend (MASK = cutout at the file's cutoff, BLEND = transparent).
-	aiString am;
-	if (m->Get("$mat.gltf.alphaMode", 0, 0, am) == AI_SUCCESS)
-	{
-		if (!strcmp(am.C_Str(), "MASK"))
-		{
-			blendMode = Cutout;
-			float cut = 0.5f;
-			if (m->Get("$mat.gltf.alphaCutoff", 0, 0, cut) == AI_SUCCESS)
-				alphaCutoff = std::max(0.01f, cut);
-		}
-		else if (!strcmp(am.C_Str(), "BLEND")) blendMode = Transparent;
-	}
-
-	aiMat = m;   // textures are converted + assigned (as .nutex GUIDs) by the importer
-}
 
 Material* Material::Clone() const
 {

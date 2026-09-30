@@ -23,6 +23,7 @@
 #include "API/Model/DevConsole.h"
 #include "API/Model/Environment.h"
 #include "API/Model/Events.h"
+#include "API/Model/Exchange.h"
 #include "API/Model/Fire.h"
 #include "API/Model/Foliage.h"
 #include "API/Model/ForceField.h"
@@ -814,6 +815,17 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("Cancel", &Events::Cancel));
 		Reflect_SetMethodDoc("Events", "Cancel", "", "id");
 		t.methods.push_back(MakeMethod("PendingCount", &Events::PendingCount));
+	}
+	{
+		TypeInfo& t = TypeOf<Exchange>();
+		t.base = "Object";
+		t.methods.push_back(MakeMethod("Available", &Exchange::Available));
+		t.methods.push_back(MakeMethod("Import", &Exchange::Import));
+		Reflect_SetMethodDoc("Exchange", "Import", "Any supported file -> native assets in destDir (content-relative or absolute; \"\" = content/Imported). Queued.", "srcFile,destDir");
+		t.methods.push_back(MakeMethod("Export", &Exchange::Export));
+		Reflect_SetMethodDoc("Exchange", "Export", "kind: \"mesh\" (id = mesh GUID), \"prefab\" (id = .nuprefab path, content-relative or absolute), \"clip\" (id = clip GUID). Queued.", "kind,id,dstFile");
+		t.methods.push_back(MakeMethod("ImportExtensions", &Exchange::ImportExtensions));
+		t.methods.push_back(MakeMethod("ExportExtensions", &Exchange::ExportExtensions));
 	}
 	{
 		TypeInfo& t = TypeOf<FireState>();

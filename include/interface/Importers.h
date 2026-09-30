@@ -9,7 +9,7 @@
 namespace nuke {
 
 // A plugin-registered asset importer: converts an external file format into native engine assets.
-// Registered from NUKEModule::OnLoad. AssImporter::ImportAny consults these BEFORE its built-in
+// Registered from NUKEModule::OnLoad. Importer::ImportAny consults these BEFORE its built-in
 // dispatch, so a matching importer wins.
 struct AssetImporter
 {

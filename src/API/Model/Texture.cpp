@@ -11,7 +11,8 @@
 #include <cmath>
 #include <vector>
 #include <initializer_list>
-#include <stb_dxt.h>   // BC encode (stb_compress_*); implementation lives in assimporter.cpp (same binary)
+#include <stb_dxt.h>     // BC encode (stb_compress_*); the implementation lives in import/stb_impl.cpp
+#include <stb_image.h>   // image decode (same)
 
 namespace nuke {
 
@@ -139,6 +140,178 @@ std::vector<unsigned char> Texture::DecodeRGBA() const
 	const_cast<Texture*>(this)->EnsurePixels();
 	if (renderTexture || width <= 0 || height <= 0) return {};
 	return decodeMip0(this);   // RGBA8 passthrough (frame 0) or BC decode
+}
+
+// ---- import-side cooking (moved from the importer: the image path and the exchange module share it) ----
+namespace {
+// BC-compress one RGBA level (any size; partial edge blocks clamp) -> appended to `out`. 8=BC1, 16=BC3.
+void BCLevel(std::vector<unsigned char>& out, const unsigned char* rgba, int w, int h, int blockBytes, int alpha)
+{
+	const int bx = (w + 3) / 4, by = (h + 3) / 4;
+	size_t base = out.size();
+	out.resize(base + (size_t)bx * by * blockBytes);
+	unsigned char* dst = out.data() + base;
+	for (int byi = 0; byi < by; ++byi)
+		for (int bxi = 0; bxi < bx; ++bxi)
+		{
+			unsigned char block[64];
+			for (int py = 0; py < 4; ++py)
+				for (int px = 0; px < 4; ++px)
+				{
+					int sx = bxi * 4 + px; if (sx >= w) sx = w - 1;
+					int sy = byi * 4 + py; if (sy >= h) sy = h - 1;
+					const unsigned char* s = &rgba[((size_t)sy * w + sx) * 4];
+					unsigned char* d = &block[(py * 4 + px) * 4];
+					d[0] = s[0]; d[1] = s[1]; d[2] = s[2]; d[3] = s[3];
+				}
+			stb_compress_dxt_block(dst, block, alpha, STB_DXT_NORMAL);
+			dst += blockBytes;
+		}
+}
+// Edge-replicate pad an RGBA image up to a multiple of 4 (so any size can be BC-compressed).
+std::vector<unsigned char> PadTo4(const std::vector<unsigned char>& rgba0, int w0, int h0, int& wOut, int& hOut)
+{
+	wOut = (w0 + 3) & ~3; hOut = (h0 + 3) & ~3;
+	if (wOut == w0 && hOut == h0) return rgba0;
+	std::vector<unsigned char> p((size_t)wOut * hOut * 4);
+	for (int y = 0; y < hOut; ++y)
+	{
+		int sy = y < h0 ? y : h0 - 1;
+		for (int x = 0; x < wOut; ++x)
+		{
+			int sx = x < w0 ? x : w0 - 1;
+			const unsigned char* s = &rgba0[((size_t)sy * w0 + sx) * 4];
+			unsigned char* d = &p[((size_t)y * wOut + x) * 4];
+			d[0] = s[0]; d[1] = s[1]; d[2] = s[2]; d[3] = s[3];
+		}
+	}
+	return p;
+}
+// BC5 (RG) block level for normal maps: a BC4 block of R then one of G (16B per 4x4).
+void BC5Level(std::vector<unsigned char>& out, const unsigned char* rgba, int w, int h)
+{
+	const int bx = (w + 3) / 4, by = (h + 3) / 4;
+	size_t base = out.size();
+	out.resize(base + (size_t)bx * by * 16);
+	unsigned char* dst = out.data() + base;
+	for (int byi = 0; byi < by; ++byi)
+		for (int bxi = 0; bxi < bx; ++bxi)
+		{
+			unsigned char R[16], G[16];
+			for (int py = 0; py < 4; ++py)
+				for (int px = 0; px < 4; ++px)
+				{
+					int sx = bxi * 4 + px; if (sx >= w) sx = w - 1;
+					int sy = byi * 4 + py; if (sy >= h) sy = h - 1;
+					const unsigned char* s = &rgba[((size_t)sy * w + sx) * 4];
+					R[py * 4 + px] = s[0]; G[py * 4 + px] = s[1];
+				}
+			stb_compress_bc4_block(dst,     R);
+			stb_compress_bc4_block(dst + 8, G);
+			dst += 16;
+		}
+}
+}  // namespace
+
+bool Texture::DecodeImage(const unsigned char* bytes, size_t size, std::vector<unsigned char>& rgba, int& w, int& h)
+{
+	int n = 0;
+	unsigned char* px = (bytes && size) ? stbi_load_from_memory(bytes, (int)size, &w, &h, &n, 4) : nullptr;
+	if (!px) return false;
+	rgba.assign(px, px + (size_t)w * h * 4);
+	stbi_image_free(px);
+	return true;
+}
+
+bool Texture::DecodeImageFile(const std::string& path, std::vector<unsigned char>& rgba, int& w, int& h)
+{
+	int n = 0;
+	unsigned char* px = stbi_load(path.c_str(), &w, &h, &n, 4);
+	if (!px) return false;
+	rgba.assign(px, px + (size_t)w * h * 4);
+	stbi_image_free(px);
+	return true;
+}
+
+void Texture::BuildFromRGBA(const std::vector<unsigned char>& rgba0, int w0, int h0, int usageIn, const boost::function<void(float)>& prog)
+{
+	usage = (Usage)usageIn;
+	if (w0 <= 0 || h0 <= 0) { format = FMT_RGBA8; mipCount = 1; width = w0; height = h0; pixels = rgba0; return; }
+	const bool bc5 = (usageIn == UsageNormal);   // normal maps -> BC5 (RG), z reconstructed in-shader
+	bool hasA = false;
+	if (!bc5) for (size_t i = 3; i < rgba0.size(); i += 4) if (rgba0[i] < 255) { hasA = true; break; }
+	const int blockBytes = bc5 ? 16 : (hasA ? 16 : 8), alpha = hasA ? 1 : 0;
+	format = bc5 ? FMT_BC5 : (hasA ? FMT_BC3 : FMT_BC1);
+	pixels.clear();
+
+	int w, h;
+	std::vector<unsigned char> cur = PadTo4(rgba0, w0, h0, w, h);   // top level padded to a multiple of 4
+	width = w; height = h;
+	double totalPx = 0.0, donePx = 0.0;
+	if (prog)
+	{
+		for (int tw = w, th = h;;)   // pixel total across the whole mip chain
+		{
+			totalPx += (double)tw * th;
+			if (tw == 1 && th == 1) break;
+			tw = tw > 1 ? tw / 2 : 1; th = th > 1 ? th / 2 : 1;
+		}
+		prog(0.0f);
+	}
+	int mips = 0;
+	while (true)
+	{
+		if (bc5) BC5Level(pixels, cur.data(), w, h);
+		else     BCLevel(pixels, cur.data(), w, h, blockBytes, alpha);
+		++mips;
+		if (prog) { donePx += (double)w * h; prog((float)(donePx / totalPx)); }
+		if (w == 1 && h == 1) break;
+		const int nw = w > 1 ? w / 2 : 1, nh = h > 1 ? h / 2 : 1;
+		std::vector<unsigned char> nx((size_t)nw * nh * 4);
+		for (int y = 0; y < nh; ++y)
+			for (int x = 0; x < nw; ++x)
+			{
+				int x0 = x * 2, y0 = y * 2, x1 = (x * 2 + 1 < w) ? x * 2 + 1 : x0, y1 = (y * 2 + 1 < h) ? y * 2 + 1 : y0;
+				const unsigned char* s0 = &cur[((size_t)y0 * w + x0) * 4]; const unsigned char* s1 = &cur[((size_t)y0 * w + x1) * 4];
+				const unsigned char* s2 = &cur[((size_t)y1 * w + x0) * 4]; const unsigned char* s3 = &cur[((size_t)y1 * w + x1) * 4];
+				unsigned char* d = &nx[((size_t)y * nw + x) * 4];
+				if (alpha)
+				{
+					// alpha-weighted rgb: plain averaging bleeds transparent texels' black into the mips
+					const int aS = s0[3] + s1[3] + s2[3] + s3[3];
+					for (int c = 0; c < 3; ++c)
+						d[c] = aS ? (unsigned char)((s0[c] * s0[3] + s1[c] * s1[3] + s2[c] * s2[3] + s3[c] * s3[3]) / aS)
+						          : (unsigned char)((s0[c] + s1[c] + s2[c] + s3[c]) / 4);
+					d[3] = (unsigned char)(aS / 4);
+				}
+				else
+					for (int c = 0; c < 4; ++c) d[c] = (unsigned char)((s0[c] + s1[c] + s2[c] + s3[c]) / 4);
+			}
+		cur.swap(nx); w = nw; h = nh;
+	}
+	mipCount = mips;
+}
+
+void Texture::BuildFramesFromRGBA(const std::vector<unsigned char>& all, int w, int h, int frames, const std::vector<int>& delaysMs, const boost::function<void(float)>& prog)
+{
+	if (w <= 0 || h <= 0 || frames < 1) return;
+	const size_t fb = (size_t)w * h * 4;
+	frameCount = frames;
+	frameDelaysMs.assign(frames, 100);
+	for (int k = 0; k < frames && k < (int)delaysMs.size(); ++k) if (delaysMs[k] > 0) frameDelaysMs[k] = delaysMs[k];
+	bool hasA = false;
+	for (size_t p = 0; p < fb * frames && !hasA; p += 4) if (all[p + 3] < 255) hasA = true;
+	const int gbb = hasA ? 16 : 8, galpha = hasA ? 1 : 0;
+	format = hasA ? FMT_BC3 : FMT_BC1; mipCount = 1; pixels.clear();
+	int pw = 0, ph = 0;
+	for (int k = 0; k < frames; ++k)
+	{
+		if (prog) prog((float)k / (float)frames);
+		std::vector<unsigned char> frame(all.begin() + (size_t)k * fb, all.begin() + (size_t)(k + 1) * fb);
+		std::vector<unsigned char> padded = PadTo4(frame, w, h, pw, ph);
+		BCLevel(pixels, padded.data(), pw, ph, gbb, galpha);
+	}
+	width = pw; height = ph;
 }
 
 bool Texture::Recompress(int targetFormat)
