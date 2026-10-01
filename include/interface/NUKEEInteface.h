@@ -212,7 +212,11 @@ extern "C" { NUKE_ABI_STAMP int nuke_build_debug = 0; }
 //   58: HDR screenshots (2026-09-30). iRender gained requestHDRCapture + captureTargetHDR (vtable END): the
 //       tonemap input read back as display-referred nits; Game.ScreenshotHDR writes Rec.2100 PQ 16-bit PNG
 //       (cICP) or scRGB JPEG XR (.jxr, Windows WIC).
-#define NUKE_ENGINE_ABI 58
+//   59: tracked + hover vehicles (2026-10-01). NukeWheelDesc gained longFriction / latFriction / side, NukeVehicleDesc
+//       gained type + track / hover parameters (both appended; engine = sole producer); Vehicle gained Type + the
+//       Tracks / Hover sections; new component HoverThruster (child of a hover chassis). createVehicle builds all
+//       three kinds - no new virtuals.
+#define NUKE_ENGINE_ABI 59
 extern "C" { NUKE_ABI_STAMP int nuke_engine_abi = NUKE_ENGINE_ABI; }
 
 namespace nuke {

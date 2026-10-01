@@ -134,6 +134,12 @@ struct NukeWheelDesc
 	bool  driven = false;              // receives engine torque
 	float maxBrakeTorque = 1500.0f;
 	float maxHandBrakeTorque = 0.0f;   // usually the rear wheels
+	// ABI: appended (the engine is the sole producer). Tracked vehicles: tyre friction of the
+	// track pad under this wheel and which track it belongs to (-1 = by the sign of pos.x).
+	float longFriction = 4.0f, latFriction = 2.0f;
+	int   side = -1;
+	// Hover vehicles reuse the record as a THRUSTER: pos = thruster, suspensionMax = hover
+	// height, frequency / damping = the lift spring; radius/width/steer/brakes unused.
 };
 
 // A wheeled vehicle over an existing chassis body. Driven wheels pair into differentials in
@@ -145,6 +151,20 @@ struct NukeVehicleDesc
 	int   wheelCount = 0;
 	float maxTorque = 500.0f;          // engine Nm
 	float maxRPM = 6000.0f;
+	// ABI: appended (engine = sole producer). type: 0 wheeled, 1 tracked (two tracks, wheels by
+	// side, engine + brakes act on the tracks), 2 hover (no constraint: thrusters push the chassis
+	// up on springs, thrust / turn / grip forces at the body).
+	int   type = 0;
+	float trackInertia = 10.0f;        // kg m^2 of a track + its wheels, at the driven wheel
+	float trackDamping = 0.5f;         // dw/dt = -c w
+	float trackBrakeTorque = 15000.0f; // Nm the brakes apply on a track
+	float trackDiffRatio = 6.0f;       // gear box -> driven wheel
+	float hoverThrust = 0.0f;          // N along the chassis forward at full throttle
+	float hoverTurn = 0.0f;            // Nm about the chassis up at full steer
+	float hoverGrip = 0.0f;            // lateral velocity damping, 1/s (0 = skates freely)
+	float hoverUpright = 0.0f;         // self-righting torque per radian of tilt, x mass
+	float hoverAngularDamping = 0.0f;  // spin damping, 1/s, x mass
+	float hoverBrake = 0.0f;           // N against the forward velocity at full brake
 };
 
 // Per-wheel state after a step.

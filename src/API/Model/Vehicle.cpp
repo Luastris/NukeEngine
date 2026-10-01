@@ -13,10 +13,18 @@
 #include <nlohmann/json.hpp>
 #include <algorithm>
 #include <cmath>
+#include <iostream>
 
 namespace nuke {
 
 void Wheel::Init(Atom* parent)
+{
+	atom = parent;
+	transform = &parent->GetTransform();
+	parent->components.push_back(this);
+}
+
+void HoverThruster::Init(Atom* parent)
 {
 	atom = parent;
 	transform = &parent->GetTransform();
@@ -52,21 +60,37 @@ void Vehicle::Build()
 	wheelAtoms.clear();
 	for (Atom* c : atom->children)
 	{
-		Wheel* w = c ? c->GetComponent<Wheel>() : nullptr;
-		if (!w) continue;
+		if (!c) continue;
 		NukeWheelDesc d;
 		Vector3 lp = c->GetTransform().position;
 		d.pos[0] = (float)lp.x; d.pos[1] = (float)lp.y; d.pos[2] = (float)lp.z;
-		d.radius = w->radius;
-		d.width = w->width;
-		d.suspensionMin = w->suspensionMin;
-		d.suspensionMax = w->suspensionMax;
-		d.frequency = w->frequency;
-		d.damping = w->damping;
-		d.maxSteerDeg = w->maxSteerDeg;
-		d.driven = w->driven;
-		d.maxBrakeTorque = w->maxBrakeTorque;
-		d.maxHandBrakeTorque = w->maxHandBrakeTorque;
+		if (type == 2)   // hover: the thrusters are the "wheels" of the record
+		{
+			HoverThruster* th = c->GetComponent<HoverThruster>();
+			if (!th) continue;
+			d.suspensionMin = 0.0f;
+			d.suspensionMax = th->hoverHeight;
+			d.frequency = th->frequency;
+			d.damping = th->damping;
+		}
+		else
+		{
+			Wheel* w = c->GetComponent<Wheel>();
+			if (!w) continue;
+			d.radius = w->radius;
+			d.width = w->width;
+			d.suspensionMin = w->suspensionMin;
+			d.suspensionMax = w->suspensionMax;
+			d.frequency = w->frequency;
+			d.damping = w->damping;
+			d.maxSteerDeg = w->maxSteerDeg;
+			d.driven = w->driven;
+			d.maxBrakeTorque = w->maxBrakeTorque;
+			d.maxHandBrakeTorque = w->maxHandBrakeTorque;
+			d.longFriction = trackLongFriction;
+			d.latFriction = trackLatFriction;
+			d.side = w->trackSide - 1;   // Auto -> -1 (by the sign of x)
+		}
 		descs.push_back(d);
 		wheelAtoms.push_back(c->id.id);
 	}
@@ -77,7 +101,23 @@ void Vehicle::Build()
 	vd.wheelCount = (int)descs.size();
 	vd.maxTorque = maxTorque;
 	vd.maxRPM = maxRPM;
+	vd.type = type;
+	vd.trackInertia = trackInertia;
+	vd.trackDamping = trackDamping;
+	vd.trackBrakeTorque = trackBrakeTorque;
+	vd.trackDiffRatio = trackDiffRatio;
+	vd.hoverThrust = hoverThrust;
+	vd.hoverTurn = hoverTurn;
+	vd.hoverGrip = hoverGrip;
+	vd.hoverUpright = hoverUpright;
+	vd.hoverAngularDamping = hoverAngularDamping;
+	vd.hoverBrake = hoverBrake;
 	handle = ph->createVehicle(vd);
+	if (!handle)
+		std::cout << "[Vehicle]\t'" << atom->name << "': the physics provider refused the "
+		          << (type == 1 ? "tracked" : type == 2 ? "hover" : "wheeled") << " vehicle ("
+		          << descs.size() << (type == 2 ? " thrusters" : " wheels")
+		          << (type == 1 ? "; a tracked vehicle needs wheels on BOTH sides" : "") << ")" << std::endl;
 	skidCool.assign(descs.size(), 0.0);
 }
 
@@ -120,10 +160,11 @@ void Vehicle::FixedUpdate()
 	}
 }
 
-// Wheel pose write-back at render cadence: the child atoms carry the visual wheels.
+// Wheel pose write-back at render cadence: the child atoms carry the visual wheels (a hover's
+// thrusters stay where they are placed).
 void Vehicle::Update()
 {
-	if (!handle || !atom) return;
+	if (!handle || !atom || type == 2) return;
 	iPhysics* ph = Physics::Scene();
 	World* w = Game::GetWorld();
 	if (!ph || !w) return;
