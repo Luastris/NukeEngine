@@ -73,8 +73,9 @@ void main()
         lobeRough = clamp(0.05 + (1.0 - exp(-dist / 260.0)) * 0.13, 0.05, 0.3);   // WaterReflRough (nukewater_slope.hlsl)
     }
     RayDesc ray; ray.Origin = wpos + N * 0.08 + R * 0.05; ray.Direction = R; ray.TMin = 0.02; ray.TMax = maxD;
-    RTPayload p; p.color = 0.0; p.depth = 1; p.hitT = maxD; p.rough = lobeRough; p.flags = isWater ? RT_PAY_SURFACE : 0u;
+    RTPayload p = RTNewPayload(1u, maxD, lobeRough, isWater ? RT_PAY_SURFACE : 0u);
     TraceRay(g_TLAS, RAY_FLAG_NONE, RT_REFLECT_MASK, 0, 1, 0, ray, p);   // only reflection-visible instances
+    RTCompose(p);   // sprites crossed on the way, over the hit
     {   // the reflected leg through the froxel fog (the camera -> mirror leg comes with the fog
         // composite). Fog volumes lie in the water too (silt, sand): the whole leg, over the
         // water's own fog and never dyed by it.

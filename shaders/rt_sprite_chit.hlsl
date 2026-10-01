@@ -1,28 +1,14 @@
 #include "rt_common.hlsl"
-#include "rt_water_shade.hlsli"
 
-// Closest hit for sprites: lit like the triangle path with the quad facing the ray. No specular
-// recursion: particles are matte (black albedo, the colour rides the emissive).
+// Closest hit for sprites: never reached - the any-hit ignores every sprite hit after stacking
+// its layer (rt_sprite_ahit.hlsl). Kept for the hit group; shades the quad as a layer would.
 [shader("closesthit")]
 void main(inout RTPayload p, in SpriteAttr attr)
 {
     p.hitT = RayTCurrent();
     RTInstanceData inst = g_Instances[InstanceID()];
-    float3 wdir   = WorldRayDirection();
-    float3 hitN   = -wdir;
-    float3 hitPos = WorldRayOrigin() + wdir * RayTCurrent();
-    float2 uv     = attr.uv;
-    float3 albedo = pow(max(SampleAlbedo(inst, uv), 0.0), 2.2);   // sRGB -> linear
-    float  metal  = inst.albedoMetal.w, rough = inst.emissiveRough.w;
-    SampleMR(inst, uv, metal, rough);
-    float  ao     = SampleAO(inst, uv);
-    float3 spec   = SampleSpec(inst, uv);
-    float4 dc     = FetchSpriteColor(inst, PrimitiveIndex(), attr.along);
-    albedo       *= dc.rgb;
-    float3 emiss  = inst.emissiveRough.rgb * SampleEmissiveMap(inst, uv) * dc.rgb * dc.a;
-    // The raster sprite passes write this colour RAW: in the LDR pipeline it is the displayed
-    // value, so the reflection carries the radiance that displays as the same colour.
-    if (g_SkyParams.z > 0.5) emiss = RTDisplayToLinear(emiss);
-    float3 col    = ShadeSurface(hitPos, hitN, -wdir, albedo, metal, rough, emiss, ao, spec);
-    p.color = RTWaterFinish(WorldRayOrigin(), wdir, hitPos, col, p.depth, p.flags);
+    float4 dc = FetchSpriteColor(inst, PrimitiveIndex(), attr.along);
+    float3 c  = inst.emissiveRough.rgb * SampleEmissiveMap(inst, attr.uv) * dc.rgb * dc.a;
+    if (g_SkyParams.z > 0.5) c = RTDisplayToLinear(c);
+    p.color = c;
 }

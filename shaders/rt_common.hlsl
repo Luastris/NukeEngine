@@ -1,7 +1,54 @@
 // Shared RT reflection code: payload, bindless geometry/material fetch, environment and the PBR model.
 // The renderer CONCATENATES this ahead of rt_rgen / rt_rmiss / rt_rchit (it is not #included).
 
-struct RTPayload { float3 color; uint depth; float hitT; float rough; uint flags; };   // color = reflected radiance; depth = current recursion depth; hitT = hit distance (TMax on a miss); rough = the lobe's roughness (the sky blurs by it on a miss; 0 = mirror)
+// Sprites (particle quads / trail ribbons) never stop a ray: their any-hit stacks the nearest
+// RT_SPRITE_LAYERS of them in the payload (premultiplied colour, alpha, distance) and the caller
+// composites them over the hit after the trace (RTCompose) - soft edges and real transparency,
+// as the raster blends them; a layer behind the hit is dropped there.
+#define RT_SPRITE_LAYERS 4
+struct RTPayload
+{
+    float3 color; uint depth; float hitT; float rough; uint flags;   // color = reflected radiance; depth = current recursion depth; hitT = hit distance (TMax on a miss); rough = the lobe's roughness (the sky blurs by it on a miss; 0 = mirror)
+    float4 spr[RT_SPRITE_LAYERS];   // rgb premultiplied, a = coverage (0 for additive)
+    float  sprT[RT_SPRITE_LAYERS];
+    uint   sprN;
+};
+RTPayload RTNewPayload(uint depth, float tMax, float rough, uint flags)
+{
+    RTPayload p; p.color = 0.0; p.depth = depth; p.hitT = tMax; p.rough = rough; p.flags = flags; p.sprN = 0u;
+    [unroll] for (int i = 0; i < RT_SPRITE_LAYERS; ++i) { p.spr[i] = 0.0; p.sprT[i] = 1.0e30; }
+    return p;
+}
+// Any-hit side: keep the layer if it is among the nearest; the list stays sorted by distance.
+void RTPushSprite(inout RTPayload p, float3 premul, float a, float t)
+{
+    int n = (int)p.sprN;
+    if (n == RT_SPRITE_LAYERS)
+    {
+        // Full: the two farthest layers merge into one (over), so a dense cloud keeps its
+        // coverage; only their relative order with a layer landing between them is approximate.
+        if (t >= p.sprT[n - 1])
+        {
+            p.spr[n - 1].rgb += premul * (1.0 - p.spr[n - 1].a); p.spr[n - 1].a += a * (1.0 - p.spr[n - 1].a);
+            return;
+        }
+        p.spr[n - 2].rgb += p.spr[n - 1].rgb * (1.0 - p.spr[n - 2].a); p.spr[n - 2].a += p.spr[n - 1].a * (1.0 - p.spr[n - 2].a);
+        n--;
+    }
+    int i = n;   // insertion slot; the farther layers shift up one
+    [unroll] for (int k = RT_SPRITE_LAYERS - 1; k >= 1; --k)
+        if (k <= n && i == k && t < p.sprT[k - 1]) { p.spr[k] = p.spr[k - 1]; p.sprT[k] = p.sprT[k - 1]; i = k - 1; }
+    p.spr[i] = float4(premul, a); p.sprT[i] = t;
+    p.sprN = (uint)(n + 1);
+}
+// After TraceRay: the layers in front of the hit over the hit's radiance, back to front.
+void RTCompose(inout RTPayload p)
+{
+    float3 c = p.color;
+    [unroll] for (int i = RT_SPRITE_LAYERS - 1; i >= 0; --i)
+        if (i < (int)p.sprN && p.sprT[i] < p.hitT) c = p.spr[i].rgb + c * (1.0 - p.spr[i].a);
+    p.color = c;
+}
 // flags: RT_PAY_SURFACE = the ray left the WATER SURFACE into the air (a water pixel's reflection, the crossing's
 // reflected leg, the transmitted leg from below). Its origin sits inside the wave band, which RTUnderEye reads as
 // "under water": without the flag the miss / hit tails shade it as a submerged ray surfacing - the sky through the
@@ -49,7 +96,8 @@ struct SurfaceIn  { float3 worldPos; float3 worldNormal; float2 uv; float3 viewD
 struct SurfaceOut { float3 albedo; float metallic; float roughness; float3 emissive; float alpha; bool unlit; };
 
 cbuffer RTRefCB { float4x4 g_InvProj; float4x4 g_InvView; float4 g_RTCam; float4 g_RTParams; float4 g_RTWater; float4 g_RTWaterCol; float4 g_RTWaterAbs;
-                  float4 g_RTWaterCasc; float4 g_RTWaterRip0; float4 g_RTWaterRip1; float4 g_RTWaterCau; float4 g_RTWaterCau1; };
+                  float4 g_RTWaterCasc; float4 g_RTWaterRip0; float4 g_RTWaterRip1; float4 g_RTWaterCau; float4 g_RTWaterCau1; float4 g_RTClear; };
+// g_RTClear = the camera's clear colour (what the raster shows where there is no sky), w = 1 when the sky is off.
 // g_RTCam = (camera xyz, game clock); g_RTParams = (intensity, maxDist, maxDepth, roughCut); g_RTWater = (level, on, fade, wave band); g_RTWaterAbs = (absorb.rgb, 1/opacityDepth);
 // g_RTWaterCol = (scatter x tint, w = the pixel's angular size in radians: the wave maps' mip by footprint);
 // g_RTWaterCasc = (cascade sizes 0..2, waveScale); g_RTWaterRip0 = (ripple window origin xz, extent, 1/extent); g_RTWaterRip1 = (height scale, sim valid, texel size, detail)
@@ -101,6 +149,22 @@ float3 SkyColor(float3 d)
                            : lerp(g_SkyHorizon.rgb, g_SkyGround.rgb, saturate(-up));
     return c * g_SkyParams.x;
 }
+// LDR pipeline (g_SkyParams.z): a displayed colour (tonemapped + sRGB, what world.ps and the raw
+// sprite passes leave in the scene) back to the linear radiance the trace works in. Inverse of
+// the extended Reinhard + encode below.
+float3 RTDisplayToLinear(float3 c)
+{
+    float W = (g_SkyParams.w > 1e-3) ? g_SkyParams.w : 1.0;
+    float3 y = min(pow(max(c, 0.0), 2.2), 0.999);
+    return max(0.5 * W * W * ((y - 1.0) + sqrt((1.0 - y) * (1.0 - y) + 4.0 * y / (W * W))), 0.0);
+}
+float3 RTLinearToDisplay(float3 c)
+{
+    float W = (g_SkyParams.w > 1e-3) ? g_SkyParams.w : 1.0;
+    c = c * (1.0 + c / (W * W)) / (1.0 + c);
+    return pow(max(c, 0.0), 1.0 / 2.2);
+}
+
 // --- Water along a ray. The TLAS carries no water surface, so it is approximated by the flat rest plane.
 // Submerged length of the segment [a -> b].
 float RTWaterUnder(float3 a, float3 b)
@@ -160,6 +224,10 @@ float3 EnvSample(float3 dir, float rough)   // probe (parallax-free), the sky ma
 float3 EnvMiss(float3 dir, float rough)
 {
     if (g_Misc.z > 0.5) return SkyMapSample(g_SkyMap, g_SkyMap_sampler, dir, rough);
+    // No sky: the raster clears to the camera colour, so a ray that leaves the scene sees that
+    // (the LDR pipeline displays the clear colour raw -> back to the radiance that shows as it).
+    if (g_RTClear.w > 0.5 && g_ProbePos.w < 0.5)
+        return (g_SkyParams.z > 0.5) ? RTDisplayToLinear(g_RTClear.rgb) : g_RTClear.rgb;
     return EnvSample(dir, rough);
 }
 float3 EnvMiss(float3 dir) { return EnvMiss(dir, 0.0); }
@@ -266,22 +334,6 @@ float3 ApplyNormalMap(RTInstanceData inst, uint prim, float2 uv, float3 geomN, f
     if (inst.nrmFlipG != 0u) nxy.y = -nxy.y;   // OpenGL green convention; RG + reconstructed Z works for BC5
     float nz = sqrt(saturate(1.0 - dot(nxy, nxy)));
     return normalize(nxy.x * T + nxy.y * B + nz * N);
-}
-
-// LDR pipeline (g_SkyParams.z): a displayed colour (tonemapped + sRGB, what world.ps and the raw
-// sprite passes leave in the scene) back to the linear radiance the trace works in. Inverse of
-// the extended Reinhard + encode below.
-float3 RTDisplayToLinear(float3 c)
-{
-    float W = (g_SkyParams.w > 1e-3) ? g_SkyParams.w : 1.0;
-    float3 y = min(pow(max(c, 0.0), 2.2), 0.999);
-    return max(0.5 * W * W * ((y - 1.0) + sqrt((1.0 - y) * (1.0 - y) + 4.0 * y / (W * W))), 0.0);
-}
-float3 RTLinearToDisplay(float3 c)
-{
-    float W = (g_SkyParams.w > 1e-3) ? g_SkyParams.w : 1.0;
-    c = c * (1.0 + c / (W * W)) / (1.0 + c);
-    return pow(max(c, 0.0), 1.0 / 2.2);
 }
 
 // Shadow ray inside a reflection: 1 = lit, 0 = occluded.

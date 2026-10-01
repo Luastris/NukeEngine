@@ -1,5 +1,6 @@
 // Final post stage: tonemap and encode only; the *.post.hlsl chain runs before it.
-// g_Post.y = mode: 0 passthrough, 1 SDR (Reinhard + sRGB), 2 HDR10 (nits -> Rec2020 -> PQ).
+// g_Post.y = mode: 0 passthrough, 1 SDR (Reinhard + sRGB), 2 HDR10 (nits -> Rec2020 -> PQ),
+// 3 scRGB (nits / 80, linear Rec709 - the float swap chain Vulkan drivers offer for HDR).
 Texture2D    g_HDR;
 SamplerState g_HDR_sampler;
 cbuffer PostCB { float4 g_Post; float4 g_Grade; };   // only g_Post.y (mode) used here
@@ -26,6 +27,12 @@ float4 main(in PSIn i) : SV_Target
     // g_Post.x = transparent window: alpha goes to the DirectComposition backbuffer PREMULTIPLIED.
     float  a    = (g_Post.x > 0.5) ? saturate(hdr.a) : 1.0;
 
+    if (mode > 2.5)   // scRGB: linear HDR -> nits -> 1.0 = 80 nits
+    {
+        float paperWhite = g_Post.z > 1.0 ? g_Post.z : 200.0;
+        float peak       = g_Post.w > paperWhite ? g_Post.w : 1000.0;
+        return float4(min(max(c, 0.0) * paperWhite, peak) / 80.0 * a, a);
+    }
     if (mode > 1.5)   // HDR10: linear HDR -> nits -> Rec2020 -> PQ
     {
         float paperWhite = g_Post.z > 1.0 ? g_Post.z : 200.0;   // diffuse-white nits

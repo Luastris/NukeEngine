@@ -82,8 +82,9 @@ float3 RTWaterShade(float3 P, float3 d, float3 beyond, float lumT, uint depth)
     {
         RayDesc ray; ray.Origin = P + N * 0.05 + R * 0.05; ray.Direction = R; ray.TMin = 0.02;
         ray.TMax = (g_RTParams.y > 0.5) ? g_RTParams.y : 1000.0;
-        RTPayload p2; p2.color = 0.0; p2.depth = depth + 1; p2.hitT = ray.TMax; p2.rough = 0.1; p2.flags = RT_PAY_SURFACE;   // into the air off the surface
+        RTPayload p2 = RTNewPayload(depth + 1u, ray.TMax, 0.1, RT_PAY_SURFACE);   // into the air off the surface
         TraceRay(g_TLAS, RAY_FLAG_NONE, RT_REFLECT_MASK, 0, 1, 0, ray, p2);
+        RTCompose(p2);
         refl = p2.color;
     }
     else refl = EnvSample(R, 0.1);
@@ -203,8 +204,9 @@ float3 RTWaterShadeBelow(float3 P, float3 d, uint depth)
         if (depth < (uint)g_RTParams.z)
         {
             RayDesc ray; ray.Origin = P + N * 0.05; ray.Direction = Tdir; ray.TMin = 0.02; ray.TMax = maxD;
-            RTPayload p2; p2.color = 0.0; p2.depth = depth + 1; p2.hitT = ray.TMax; p2.rough = 0.0; p2.flags = RT_PAY_SURFACE;   // the transmitted leg is in the air
+            RTPayload p2 = RTNewPayload(depth + 1u, maxD, 0.0, RT_PAY_SURFACE);   // the transmitted leg is in the air
             TraceRay(g_TLAS, RAY_FLAG_NONE, RT_REFLECT_MASK, 0, 1, 0, ray, p2);
+            RTCompose(p2);
             above = p2.color;
         }
         else above = EnvMiss(Tdir);
@@ -216,8 +218,9 @@ float3 RTWaterShadeBelow(float3 P, float3 d, uint depth)
         if (depth < (uint)g_RTParams.z)
         {
             RayDesc ray; ray.Origin = P - N * 0.05; ray.Direction = R; ray.TMin = 0.02; ray.TMax = maxD;
-            RTPayload p2; p2.color = 0.0; p2.depth = depth + 1; p2.hitT = ray.TMax; p2.rough = 0.0; p2.flags = 0u;   // back down: under water
+            RTPayload p2 = RTNewPayload(depth + 1u, maxD, 0.0, 0u);   // back down: under water
             TraceRay(g_TLAS, RAY_FLAG_NONE, RT_REFLECT_MASK, 0, 1, 0, ray, p2);   // its own tail fogs the run
+            RTCompose(p2);
             below = p2.color;
         }
         else below = RTUnderFog(float3(0.0, 0.0, 0.0), 1.0e4, P);   // the column at infinity
