@@ -95,13 +95,8 @@ void main()
     // radiance. Mix in linear and re-encode (the same extended Reinhard as world.ps).
     if (g_SkyParams.z > 0.5)
     {
-        float W = (g_SkyParams.w > 1e-3) ? g_SkyParams.w : 1.0;
-        float3 lin = pow(max(base, 0.0), 2.2);
-        float3 y = min(lin, 0.999);
-        lin = max(0.5 * W * W * ((y - 1.0) + sqrt((1.0 - y) * (1.0 - y) + 4.0 * y / (W * W))), 0.0);
-        float3 mix = lerp(lin, p.color, k);
-        mix = mix * (1.0 + mix / (W * W)) / (1.0 + mix);
-        g_Output[px] = float4(pow(max(mix, 0.0), 1.0 / 2.2), 1.0);
+        float3 mix = lerp(RTDisplayToLinear(base), p.color, k);
+        g_Output[px] = float4(RTLinearToDisplay(mix), 1.0);
         return;
     }
     g_Output[px] = float4(lerp(base, p.color, k), 1.0);

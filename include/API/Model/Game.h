@@ -179,6 +179,10 @@ public:
 	// Queue a capture of the current game image; it happens at the end of this frame's render.
 	// Format by extension (.png/.bmp/.tga, default png). Slow — GPU flush + readback.
 	[[nuke::func]] static bool Screenshot(const std::string& file);
+	// HDR capture: the scene BEFORE the tonemap, written display-referred as an HDR display shows it
+	// (paper white / peak nits of the project). .png = 16-bit Rec.2100 PQ with a cICP chunk (the
+	// OBS / browser / Photos HDR PNG); .jxr = scRGB half-float JPEG XR (Game Bar style; Windows).
+	[[nuke::func]] static bool ScreenshotHDR(const std::string& file);
 	static void FlushScreenshot();   // host-side: the renderer calls it at end of frame (pre-Present)
 };
 

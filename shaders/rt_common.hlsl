@@ -12,6 +12,7 @@ struct RTPayload { float3 color; uint depth; float hitT; float rough; uint flags
 // excluded = 0xFF & ~RT_REFLECT_BIT. Both color and shadow rays inside a reflection use this mask.
 #define RT_REFLECT_BIT  0x01
 #define RT_REFLECT_MASK 0x01
+#define RT_SHADOW_MASK  0x02   // shadow casters (TLAS instance mask bit, as the raster RayQuery consumers)
 
 RaytracingAccelerationStructure g_TLAS;
 RWTexture2D<float4>             g_Output;          // ray-gen writes the final composited reflection here
@@ -267,14 +268,30 @@ float3 ApplyNormalMap(RTInstanceData inst, uint prim, float2 uv, float3 geomN, f
     return normalize(nxy.x * T + nxy.y * B + nz * N);
 }
 
+// LDR pipeline (g_SkyParams.z): a displayed colour (tonemapped + sRGB, what world.ps and the raw
+// sprite passes leave in the scene) back to the linear radiance the trace works in. Inverse of
+// the extended Reinhard + encode below.
+float3 RTDisplayToLinear(float3 c)
+{
+    float W = (g_SkyParams.w > 1e-3) ? g_SkyParams.w : 1.0;
+    float3 y = min(pow(max(c, 0.0), 2.2), 0.999);
+    return max(0.5 * W * W * ((y - 1.0) + sqrt((1.0 - y) * (1.0 - y) + 4.0 * y / (W * W))), 0.0);
+}
+float3 RTLinearToDisplay(float3 c)
+{
+    float W = (g_SkyParams.w > 1e-3) ? g_SkyParams.w : 1.0;
+    c = c * (1.0 + c / (W * W)) / (1.0 + c);
+    return pow(max(c, 0.0), 1.0 / 2.2);
+}
+
 // Shadow ray inside a reflection: 1 = lit, 0 = occluded.
 float RTShadow(float3 origin, float3 L, float maxD)
 {
     RayDesc r; r.Origin = origin; r.Direction = L; r.TMin = 0.02; r.TMax = maxD;
     RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> q;
-    // Reflect mask, not the 0x02 caster bit world.ps uses: mask bits are OR-tested, so
-    // "reflect-visible AND casts" cannot be expressed in one trace.
-    q.TraceRayInline(g_TLAS, RAY_FLAG_NONE, RT_REFLECT_MASK, r);
+    // The caster bit, as world.ps: a reflected shadow exists exactly where the direct view has one
+    // (an emitter with Cast Shadows off is reflect-visible and must not shade the ground).
+    q.TraceRayInline(g_TLAS, RAY_FLAG_NONE, RT_SHADOW_MASK, r);
     // Non-opaque candidates (cutout quads) get an albedo-alpha test; procedural candidates are
     // the sprites, turned toward the shadow ray.
     while (q.Proceed())

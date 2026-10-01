@@ -209,7 +209,10 @@ extern "C" { NUKE_ABI_STAMP int nuke_build_debug = 0; }
 //       ImportAI* entry points and gained the neutral MeshSource + Mesh::Build, Texture gained DecodeImage /
 //       BuildFromRGBA / BuildFramesFromRGBA; import/assimporter.h -> import/Importer.h (the engine facade:
 //       images, audio, plugin importers, the service for models); new reflected Exchange facade (import / export).
-#define NUKE_ENGINE_ABI 57
+//   58: HDR screenshots (2026-09-30). iRender gained requestHDRCapture + captureTargetHDR (vtable END): the
+//       tonemap input read back as display-referred nits; Game.ScreenshotHDR writes Rec.2100 PQ 16-bit PNG
+//       (cICP) or scRGB JPEG XR (.jxr, Windows WIC).
+#define NUKE_ENGINE_ABI 58
 extern "C" { NUKE_ABI_STAMP int nuke_engine_abi = NUKE_ENGINE_ABI; }
 
 namespace nuke {

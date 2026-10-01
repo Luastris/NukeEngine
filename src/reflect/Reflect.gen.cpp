@@ -1059,6 +1059,8 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("IsHideFromCapture", &Game::IsHideFromCapture));
 		t.methods.push_back(MakeMethod("Screenshot", &Game::Screenshot));
 		Reflect_SetMethodDoc("Game", "Screenshot", "Queue a capture of the current game image; it happens at the end of this frame's render. Format by extension (.png/.bmp/.tga, default png). Slow — GPU flush + readback.", "file");
+		t.methods.push_back(MakeMethod("ScreenshotHDR", &Game::ScreenshotHDR));
+		Reflect_SetMethodDoc("Game", "ScreenshotHDR", "HDR capture: the scene BEFORE the tonemap, written display-referred as an HDR display shows it (paper white / peak nits of the project). .png = 16-bit Rec.2100 PQ with a cICP chunk (the OBS / browser / Photos HDR PNG); .jxr = scRGB half-float JPEG XR (Game Bar style; Windows).", "file");
 	}
 	{
 		TypeInfo& t = TypeOf<InstancedMesh>();

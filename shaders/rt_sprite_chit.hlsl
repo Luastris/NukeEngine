@@ -20,6 +20,9 @@ void main(inout RTPayload p, in SpriteAttr attr)
     float4 dc     = FetchSpriteColor(inst, PrimitiveIndex(), attr.along);
     albedo       *= dc.rgb;
     float3 emiss  = inst.emissiveRough.rgb * SampleEmissiveMap(inst, uv) * dc.rgb * dc.a;
+    // The raster sprite passes write this colour RAW: in the LDR pipeline it is the displayed
+    // value, so the reflection carries the radiance that displays as the same colour.
+    if (g_SkyParams.z > 0.5) emiss = RTDisplayToLinear(emiss);
     float3 col    = ShadeSurface(hitPos, hitN, -wdir, albedo, metal, rough, emiss, ao, spec);
     p.color = RTWaterFinish(WorldRayOrigin(), wdir, hitPos, col, p.depth, p.flags);
 }

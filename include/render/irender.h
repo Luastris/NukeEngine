@@ -931,6 +931,12 @@ public:
     virtual bool getAdapterInfo(NukeAdapterInfo& out) { (void)out; return false; }
     // Scales the adaptive displacement tessellation factor (1 = as authored, 0 = off). (ABI 56)
     virtual void setTessellationScale(float scale) { (void)scale; }
+    // HDR screenshot (ABI 58): arm a capture of `rtId`'s tonemap INPUT (the linear scene after the
+    // post chain; 0 = backbuffer camera) at its next tonemap, then read it back as display-referred
+    // linear Rec.709 nits (the HDR10 mapping: paper white, peak) - w*h*3 floats. False until the
+    // armed frame has been drawn. An LDR pipeline decodes its sRGB result to nits at paper white.
+    virtual void requestHDRCapture(uint64_t rtId) { (void)rtId; }
+    virtual bool captureTargetHDR(uint64_t rtId, int& w, int& h, std::vector<float>& rgbNits) { (void)rtId; (void)w; (void)h; (void)rgbNits; return false; }
     // ABI: new virtuals are appended at the END of the class, NEVER inserted mid-vtable —
     // plugins are separate DLLs built at different times, and an inserted slot shifts every later one.
 };

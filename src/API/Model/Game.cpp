@@ -18,6 +18,14 @@
 #include <mutex>                  // screenshot request handoff (update thread -> render)
 #define STB_IMAGE_WRITE_IMPLEMENTATION   // Screenshot encoder (the only engine TU with it)
 #include <stb_image_write.h>
+#include <zlib.h>                        // HDR PNG (16-bit, deflate + crc)
+#include <cstring>
+#include <cmath>
+#ifdef _WIN32
+#include <wincodec.h>                    // JPEG XR encoder (scRGB half floats)
+#pragma comment(lib, "windowscodecs.lib")
+#pragma comment(lib, "ole32.lib")
+#endif
 
 namespace nuke {
 
@@ -440,6 +448,8 @@ bool   Game::IsHideFromCapture() { return Config::getSingleton()->window.hideFro
 // The request is queued and consumed at the end of World::Render, where the frame is fully
 // drawn; the mutex covers the update/fixed thread setting it while the render thread reads it.
 static std::mutex gShotMx;
+static bool gShotHDR = false;    // the pending request is an HDR one (ScreenshotHDR)
+static int  gShotHDRWait = 0;    // frames the HDR capture has been waited for
 
 bool Game::Screenshot(const std::string& file)
 {
@@ -447,7 +457,126 @@ bool Game::Screenshot(const std::string& file)
 	if (!app->render || file.empty()) return false;
 	std::lock_guard<std::mutex> lk(gShotMx);
 	app->pendingScreenshot = file;
+	gShotHDR = false;
 	return true;
+}
+
+bool Game::ScreenshotHDR(const std::string& file)
+{
+	AppInstance* app = AppInstance::GetSingleton();
+	if (!app->render || file.empty()) return false;
+	std::lock_guard<std::mutex> lk(gShotMx);
+	app->pendingScreenshot = file;
+	gShotHDR = true; gShotHDRWait = 0;
+	app->render->requestHDRCapture((uint64_t)app->uiTarget);   // taken at this target's next tonemap
+	return true;
+}
+
+// ---- HDR encoders ---------------------------------------------------------------------------------
+static const float kRec709To2020[9] = { 0.627402f, 0.329292f, 0.043306f, 0.069095f, 0.919544f, 0.011360f, 0.016394f, 0.088028f, 0.895578f };
+static float PQEncode(float nits)   // SMPTE ST 2084, nits -> [0,1]
+{
+	const float L = std::pow(std::max(nits, 0.0f) / 10000.0f, 0.1593017578125f);
+	return std::pow((0.8359375f + 18.8515625f * L) / (1.0f + 18.6875f * L), 78.84375f);
+}
+static uint16_t FloatToHalf(float f)
+{
+	uint32_t u; std::memcpy(&u, &f, 4);
+	const uint32_t sign = (u >> 16) & 0x8000u; int e = (int)((u >> 23) & 0xFF) - 127 + 15; uint32_t m = u & 0x7FFFFFu;
+	if (e >= 31) return (uint16_t)(sign | 0x7BFFu);                    // clamp to the largest finite half
+	if (e <= 0)
+	{
+		if (e < -10) return (uint16_t)sign;
+		m |= 0x800000u; const int shift = 14 - e;
+		return (uint16_t)(sign | ((m + (1u << (shift - 1)) - 1 + ((m >> shift) & 1)) >> shift));
+	}
+	return (uint16_t)(sign | ((uint32_t)e << 10) | ((m + 0xFFFu + ((m >> 13) & 1)) >> 13));
+}
+// 16-bit RGB PNG, Rec.2100 PQ: cICP (BT.2020 primaries, PQ transfer, identity matrix, full range)
+// tells HDR-aware viewers how to show it; SDR viewers still open it (as a flat, desaturated image).
+static bool WritePngPQ(const std::string& file, int w, int h, const std::vector<float>& nits)
+{
+	std::vector<uint8_t> raw((size_t)h * (1 + (size_t)w * 6));
+	for (int y = 0; y < h; ++y)
+	{
+		uint8_t* row = raw.data() + (size_t)y * (1 + (size_t)w * 6);
+		*row++ = 0;   // filter: none
+		for (int x = 0; x < w; ++x)
+		{
+			const float* p = nits.data() + ((size_t)y * w + x) * 3;
+			for (int k = 0; k < 3; ++k)
+			{
+				const float c = kRec709To2020[k * 3] * p[0] + kRec709To2020[k * 3 + 1] * p[1] + kRec709To2020[k * 3 + 2] * p[2];
+				const uint16_t v = (uint16_t)std::lround(std::min(std::max(PQEncode(c), 0.0f), 1.0f) * 65535.0f);
+				*row++ = (uint8_t)(v >> 8); *row++ = (uint8_t)(v & 0xFF);   // big-endian samples
+			}
+		}
+	}
+	uLongf zlen = compressBound((uLong)raw.size());
+	std::vector<uint8_t> z(zlen);
+	if (compress2(z.data(), &zlen, raw.data(), (uLong)raw.size(), 6) != Z_OK) return false;
+	z.resize(zlen);
+	boost::filesystem::ofstream out(boost::filesystem::path(file), std::ios::binary);
+	if (!out) return false;
+	auto be32 = [](uint32_t v, uint8_t* d) { d[0] = (uint8_t)(v >> 24); d[1] = (uint8_t)(v >> 16); d[2] = (uint8_t)(v >> 8); d[3] = (uint8_t)v; };
+	auto chunk = [&](const char* type, const uint8_t* data, size_t n) {
+		uint8_t hdr[8]; be32((uint32_t)n, hdr); std::memcpy(hdr + 4, type, 4);
+		out.write((const char*)hdr, 8);
+		if (n) out.write((const char*)data, (std::streamsize)n);
+		uLong crc = crc32(0L, Z_NULL, 0); crc = crc32(crc, hdr + 4, 4); if (n) crc = crc32(crc, data, (uInt)n);
+		uint8_t c[4]; be32((uint32_t)crc, c); out.write((const char*)c, 4);
+	};
+	static const uint8_t sig[8] = { 137, 80, 78, 71, 13, 10, 26, 10 };
+	out.write((const char*)sig, 8);
+	uint8_t ihdr[13]; be32((uint32_t)w, ihdr); be32((uint32_t)h, ihdr + 4); ihdr[8] = 16; ihdr[9] = 2; ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0;
+	chunk("IHDR", ihdr, 13);
+	const uint8_t cicp[4] = { 9, 16, 0, 1 };
+	chunk("cICP", cicp, 4);
+	chunk("IDAT", z.data(), z.size());
+	chunk("IEND", nullptr, 0);
+	return (bool)out;
+}
+// JPEG XR with scRGB half floats (1.0 = 80 nits, Rec.709 primaries, linear) - what Game Bar saves.
+static bool WriteJxrScRGB(const std::string& file, int w, int h, const std::vector<float>& nits)
+{
+#ifdef _WIN32
+	std::vector<uint16_t> px((size_t)w * h * 4);
+	for (size_t i = 0, n = (size_t)w * h; i < n; ++i)
+	{
+		px[i * 4 + 0] = FloatToHalf(nits[i * 3 + 0] / 80.0f);
+		px[i * 4 + 1] = FloatToHalf(nits[i * 3 + 1] / 80.0f);
+		px[i * 4 + 2] = FloatToHalf(nits[i * 3 + 2] / 80.0f);
+		px[i * 4 + 3] = FloatToHalf(1.0f);
+	}
+	const HRESULT coInit = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+	bool ok = false;
+	{
+		IWICImagingFactory* fac = nullptr; IWICStream* stream = nullptr; IWICBitmapEncoder* enc = nullptr;
+		IWICBitmapFrameEncode* frame = nullptr; IPropertyBag2* props = nullptr;
+		const std::wstring wpath = boost::filesystem::path(file).wstring();
+		WICPixelFormatGUID fmt = GUID_WICPixelFormat64bppRGBAHalf;
+		if (SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&fac)))
+		    && SUCCEEDED(fac->CreateStream(&stream)) && SUCCEEDED(stream->InitializeFromFilename(wpath.c_str(), GENERIC_WRITE))
+		    && SUCCEEDED(fac->CreateEncoder(GUID_ContainerFormatWmp, nullptr, &enc)) && SUCCEEDED(enc->Initialize(stream, WICBitmapEncoderNoCache))
+		    && SUCCEEDED(enc->CreateNewFrame(&frame, &props)) && SUCCEEDED(frame->Initialize(props))
+		    && SUCCEEDED(frame->SetSize((UINT)w, (UINT)h)) && SUCCEEDED(frame->SetPixelFormat(&fmt))
+		    && fmt == GUID_WICPixelFormat64bppRGBAHalf
+		    && SUCCEEDED(frame->WritePixels((UINT)h, (UINT)w * 8, (UINT)((size_t)w * h * 8), (BYTE*)px.data()))
+		    && SUCCEEDED(frame->Commit()) && SUCCEEDED(enc->Commit()))
+			ok = true;
+		if (props) props->Release();
+		if (frame) frame->Release();
+		if (enc) enc->Release();
+		if (stream) stream->Release();
+		if (fac) fac->Release();
+	}
+	if (SUCCEEDED(coInit)) CoUninitialize();
+	return ok;
+#else
+	(void)file; (void)w; (void)h; (void)nits;
+	std::cout << "[Game]\t\tScreenshotHDR: .jxr needs the Windows JPEG XR codec - use .png (Rec.2100 PQ)" << std::endl;
+	return false;
+#endif
 }
 
 // Called by World::Render once every camera finished; captures uiTarget (editor PIE viewport)
@@ -463,17 +592,35 @@ void Game::FlushScreenshot()
 	}
 	if (!app->render) return;
 	int w = 0, h = 0;
-	std::vector<uint8_t> rgba;
-	if (!app->render->captureTarget((uint64_t)app->uiTarget, w, h, rgba) || w <= 0 || h <= 0)
-	{
-		std::cout << "[Game]\t\tScreenshot: capture failed" << std::endl;
-		return;
-	}
 	std::string ext;
 	{
 		size_t dot = file.find_last_of('.');
 		if (dot != std::string::npos) ext = file.substr(dot + 1);
 		for (char& c : ext) c = (char)std::tolower((unsigned char)c);
+	}
+	if (gShotHDR)
+	{
+		std::vector<float> nits;
+		if (!app->render->captureTargetHDR((uint64_t)app->uiTarget, w, h, nits) || w <= 0 || h <= 0)
+		{
+			// The request landed after this frame's tonemap: the copy comes with the next one.
+			std::lock_guard<std::mutex> lk(gShotMx);
+			if (++gShotHDRWait < 4 && app->pendingScreenshot.empty()) { app->pendingScreenshot = file; return; }
+			gShotHDR = false;
+			std::cout << "[Game]\t\tScreenshotHDR: capture failed" << std::endl;
+			return;
+		}
+		gShotHDR = false;
+		const bool ok = (ext == "jxr") ? WriteJxrScRGB(file, w, h, nits) : WritePngPQ(file, w, h, nits);
+		std::cout << "[Game]\t\tScreenshotHDR " << (ok ? "saved: " : "FAILED: ") << file
+		          << " (" << w << "x" << h << ", " << (ext == "jxr" ? "scRGB JPEG XR" : "Rec.2100 PQ PNG") << ")" << std::endl;
+		return;
+	}
+	std::vector<uint8_t> rgba;
+	if (!app->render->captureTarget((uint64_t)app->uiTarget, w, h, rgba) || w <= 0 || h <= 0)
+	{
+		std::cout << "[Game]\t\tScreenshot: capture failed" << std::endl;
+		return;
 	}
 	int ok = 0;
 	if (ext == "bmp")      ok = stbi_write_bmp(file.c_str(), w, h, 4, rgba.data());
