@@ -143,6 +143,9 @@ public:
 	[[nuke::func]] Vector3 ScreenRayDir(double px, double py);
 	// The world point `depth` units along that ray.
 	[[nuke::func]] Vector3 ScreenToWorldPoint(double px, double py, double depth);
+	// World point -> GAME-SCREEN pixels (x, y; top-left origin) + the view depth in z (negative =
+	// behind the camera). Rectilinear / ortho (the Panini remap is not inverted here).
+	[[nuke::func]] Vector3 WorldToScreen(const Vector3& worldPos);
 
 	// Procedural view shake (anim Shake notifies, hits, explosions): an impulse of `amplitude`
 	// world units wobbling at `frequency` Hz fades out over `duration` seconds. Impulses stack;

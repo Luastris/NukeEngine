@@ -166,6 +166,7 @@ public:
     // spelling); the GUI takes the bytes from here. nullptr = not (yet) loaded.
     const std::string* Font(const std::string& rel) const;
     void               RegisterFont(const std::string& rel, const std::string& bytes);
+    std::vector<std::string> FontList() const;   // every registered font key (the inspector's font picker)
 private:
     // FileIndex plumbing (WatchContent): the subscription, the scan gate and what arrived meanwhile.
     long long fsSub = 0;

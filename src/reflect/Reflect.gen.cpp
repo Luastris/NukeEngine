@@ -73,6 +73,7 @@
 #include "API/Model/Transform.h"
 #include "API/Model/VariantSet.h"
 #include "API/Model/Vehicle.h"
+#include "API/Model/Widget.h"
 #include "API/Model/Wind.h"
 #include "API/Model/World.h"
 #include "input/Input.h"
@@ -471,6 +472,8 @@ bool NukeReflectInit() {
 		Reflect_SetMethodDoc("Camera", "ScreenRayDir", "", "px,py");
 		t.methods.push_back(MakeMethod("ScreenToWorldPoint", &Camera::ScreenToWorldPoint));
 		Reflect_SetMethodDoc("Camera", "ScreenToWorldPoint", "The world point `depth` units along that ray.", "px,py,depth");
+		t.methods.push_back(MakeMethod("WorldToScreen", &Camera::WorldToScreen));
+		Reflect_SetMethodDoc("Camera", "WorldToScreen", "World point -> GAME-SCREEN pixels (x, y; top-left origin) + the view depth in z (negative = behind the camera). Rectilinear / ortho (the Panini remap is not inverted here).", "worldPos");
 		t.methods.push_back(MakeMethod("AddShake", &Camera::AddShake));
 		Reflect_SetMethodDoc("Camera", "AddShake", "Procedural view shake (anim Shake notifies, hits, explosions): an impulse of `amplitude` world units wobbling at `frequency` Hz fades out over `duration` seconds. Impulses stack; the offset perturbs only the rendered view, never the transform.", "amplitude,frequency,duration");
 		t.create = []() -> void* { return new Camera(); };
@@ -1941,21 +1944,16 @@ bool NukeReflectInit() {
 	}
 	{
 		TypeInfo& t = TypeOf<Sprite>();
-		t.base = "Component";
+		t.base = "Widget";
 		t.category = "UI & 2D";
 		t.fields.push_back(MakeField("textureGuid", &Sprite::textureGuid, "texture", "Texture"));
 		t.fields.push_back(MakeField("tint", &Sprite::tint, "", "Tint"));
-		t.fields.push_back(MakeField("width", &Sprite::width, "", "Width"));
-		t.fields.push_back(MakeField("height", &Sprite::height, "", "Height"));
 		t.fields.push_back(MakeField("pivotX", &Sprite::pivotX, "", "Pivot X", 0.0f, 1.0f));
 		t.fields.push_back(MakeField("pivotY", &Sprite::pivotY, "", "Pivot Y", 0.0f, 1.0f));
-		t.fields.push_back(MakeField("mode", &Sprite::mode, "", "Mode", 0.0f, 0.0f, "Plane,Billboard"));
 		t.fields.push_back(MakeField("flipX", &Sprite::flipX, "", "Flip X"));
 		t.fields.push_back(MakeField("flipY", &Sprite::flipY, "", "Flip Y"));
 		t.methods.push_back(MakeMethod("SetTint", &Sprite::SetTint));
 		Reflect_SetMethodDoc("Sprite", "SetTint", "Reflected API (C#/Lua).", "r,g,b,a");
-		t.methods.push_back(MakeMethod("SetSize", &Sprite::SetSize));
-		Reflect_SetMethodDoc("Sprite", "SetSize", "", "w,h");
 		t.methods.push_back(MakeMethod("SetPivot", &Sprite::SetPivot));
 		Reflect_SetMethodDoc("Sprite", "SetPivot", "", "x,y");
 		t.methods.push_back(MakeMethod("SetFrame", &Sprite::SetFrame));
@@ -2263,6 +2261,22 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("WheelSlip", &Vehicle::WheelSlip));
 		Reflect_SetMethodDoc("Vehicle", "WheelSlip", "", "i");
 		t.create = []() -> void* { return new Vehicle(); };
+	}
+	{
+		TypeInfo& t = TypeOf<Widget>();
+		t.base = "Component";
+		t.fields.push_back(MakeField("width", &Widget::width, "", "Width"));
+		t.fields.push_back(MakeField("height", &Widget::height, "", "Height"));
+		t.fields.push_back(MakeField("mode", &Widget::mode, "", "Mode", 0.0f, 0.0f, "Plane,Billboard"));
+		t.fields.back().tip = "Outside a canvas: lie in the transform, or face the camera";
+		t.fields.push_back(MakeField("raycastTarget", &Widget::raycastTarget, "", "Raycast Target"));
+		t.fields.back().tip = "The pointer can hit this widget (clicks stop here)";
+		t.fields.push_back(MakeField("clipChildren", &Widget::clipChildren, "", "Clip Children"));
+		t.fields.back().tip = "Descendants draw only inside this rect (screen canvases): masks, scroll views";
+		t.fields.push_back(MakeField("overlay", &Widget::overlay, "", "Overlay"));
+		t.fields.back().tip = "Outside a canvas: draw after post over everything (no depth test) and take the pointer through walls";
+		t.methods.push_back(MakeMethod("SetSize", &Widget::SetSize));
+		Reflect_SetMethodDoc("Widget", "SetSize", "", "w,h");
 	}
 	{
 		TypeInfo& t = TypeOf<WindZone>();

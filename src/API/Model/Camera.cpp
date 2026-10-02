@@ -391,7 +391,7 @@ Vector3 Camera::ScreenRayOrigin(double px, double py)
 		const double ow = oh * (w / h);
 		Vector3 f0 = viewValid ? viewFwd : transform->direction();
 		Vector3 u = viewValid ? viewUp : transform->up();
-		Vector3 r(f0.y * u.z - f0.z * u.y, f0.z * u.x - f0.x * u.z, f0.x * u.y - f0.y * u.x);
+		Vector3 r(u.y * f0.z - u.z * f0.y, u.z * f0.x - u.x * f0.z, u.x * f0.y - u.y * f0.x);   // right = up x fwd
 		return Vector3(p.x + ndcx * ow * r.x + ndcy * oh * u.x,
 		               p.y + ndcx * ow * r.y + ndcy * oh * u.y,
 		               p.z + ndcx * ow * r.z + ndcy * oh * u.z);
@@ -409,7 +409,7 @@ Vector3 Camera::ScreenRayDir(double px, double py)
 	const double ndcy = 1.0 - py / h * 2.0;
 	const double thf = std::tan((double)fov * 0.5 * 0.017453292519943295);
 	Vector3 u = viewValid ? viewUp : transform->up();
-	Vector3 r(f.y * u.z - f.z * u.y, f.z * u.x - f.x * u.z, f.x * u.y - f.y * u.x);
+	Vector3 r(u.y * f.z - u.z * f.y, u.z * f.x - u.x * f.z, u.x * f.y - u.y * f.x);   // right = up x fwd (the renderer's basis)
 	// Rectilinear: the pixel's direction is (xr, yr, 1) in view space. Panini (the renderer's
 	// remap, see panini.ps): the pixel is a point of the cylindrical image; invert it to the
 	// azimuth/elevation and take the same view-space direction.
@@ -436,6 +436,34 @@ Vector3 Camera::ScreenRayDir(double px, double py)
 	const double len = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
 	if (len > 1e-12) { d.x /= len; d.y /= len; d.z /= len; }
 	return d;
+}
+
+Vector3 Camera::WorldToScreen(const Vector3& wp)
+{
+	if (!transform) return Vector3(0, 0, -1);
+	const double w = std::max(1.0, Screen::Width()), h = std::max(1.0, Screen::Height());
+	Vector3 p = viewValid ? viewPos : transform->globalPosition();
+	Vector3 f = viewValid ? viewFwd : transform->direction();
+	Vector3 u = viewValid ? viewUp : transform->up();
+	// Screen right = up x forward (the renderer's basis: +X lands on the right of a +Z look).
+	Vector3 r(u.y * f.z - u.z * f.y, u.z * f.x - u.x * f.z, u.x * f.y - u.y * f.x);
+	Vector3 d(wp.x - p.x, wp.y - p.y, wp.z - p.z);
+	const double vx = d.x * r.x + d.y * r.y + d.z * r.z;
+	const double vy = d.x * u.x + d.y * u.y + d.z * u.z;
+	const double vz = d.x * f.x + d.y * f.y + d.z * f.z;
+	double ndcx, ndcy;
+	if (projBlend >= 0.5f)
+	{
+		const double oh = (orthoSize > 1e-4f) ? orthoSize : 1.0, ow = oh * (w / h);
+		ndcx = vx / ow; ndcy = vy / oh;
+	}
+	else
+	{
+		if (vz <= 1e-6) return Vector3(-1e9, -1e9, vz);
+		const double thf = std::tan((double)fov * 0.5 * 0.017453292519943295);
+		ndcx = vx / (vz * thf * (w / h)); ndcy = vy / (vz * thf);
+	}
+	return Vector3((ndcx + 1.0) * 0.5 * w, (1.0 - ndcy) * 0.5 * h, vz);
 }
 
 Vector3 Camera::ScreenToWorldPoint(double px, double py, double depth)

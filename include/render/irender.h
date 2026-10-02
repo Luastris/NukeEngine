@@ -279,6 +279,19 @@ struct NukeGpuBind { const char* name; uint64_t res; };
 // A GPU-resident pooled mesh's streams (gpuMeshReserve).
 struct NukeGpuMeshRange { uint64_t pos, nrm, col, idx; uint32_t vOff, iOff, vCap, iCap; };
 
+// Sticky parameters of the sprite draws that follow setSpriteParams (abi 61, canvas widgets):
+// SDF text (the texture's red channel is a signed distance, 0.5 = the edge) and a clip rect.
+struct NukeSpriteParams
+{
+	int   sdf = 0;               // 1 = SDF alpha: smoothstep around 0.5, outline below it
+	float sdfSoft = 0.0f;        // extra edge softness in distance units (0 = pixel-exact)
+	float outlineWidth = 0.0f;   // outline band below the edge, distance units (0 = none)
+	float outline[4] = { 0, 0, 0, 1 };   // outline colour
+	int   clip = 0;              // 1 = clip screen sprites to clipRect
+	float clipRect[4] = { 0, 0, 0, 0 };  // {x0, y0, x1, y1} in the canvas's reference px, centre origin, +y up
+	int   overlay = 0;           // 1 = world quads draw after post with no depth test (a HUD through walls)
+};
+
 class iRender
 {
     friend class NukeOGL;
@@ -984,6 +997,10 @@ public:
     virtual void renderGBufferObjectIndirect(Mesh* mesh, Material* mat, const float pos[3], const float quat[4], const float scale[3],
                                              uint64_t argsBuf, uint64_t argsOffset)
     { (void)mesh; (void)mat; (void)pos; (void)quat; (void)scale; (void)argsBuf; (void)argsOffset; }
+    // ---- Canvas widgets (abi 61) --------------------------------------------------------------
+    // Sticky parameters for the drawSprite / drawSpriteScreen(Ex) calls that follow: SDF text and a
+    // clip rect (screen sprites). nullptr = back to the defaults. Call between beginCamera/endCamera.
+    virtual void setSpriteParams(const NukeSpriteParams* p) { (void)p; }
     // ABI: new virtuals are appended at the END of the class, NEVER inserted mid-vtable —
     // plugins are separate DLLs built at different times, and an inserted slot shifts every later one.
 };

@@ -5,34 +5,25 @@
 #include "Include.h"
 #include "reflect/Reflect.h"
 #include "API/Model/Color.h"
+#include "API/Model/Widget.h"
 #include <string>
 
 namespace nuke {
 
 class Texture;
 
-// How a sprite quad is oriented. Reflected enum (typed in C#/Lua, combo in the inspector).
-enum class SpriteMode : int { Plane = 0, Billboard = 1 };
-template<> struct NukeEnumInfo<SpriteMode>
+// A textured quad: the image widget. The rect, Plane / Billboard mode and raycast flag come
+// from Widget (width / height in world units); on a canvas it is the UI image (nine-slice via
+// the texture's slices), outside one a world sprite. Drawn unlit, alpha-blended after the
+// opaque geometry (depth-tested).
+class NUKEENGINE_API Sprite : public Widget
 {
-	static constexpr bool reflected = true;
-	static const char* Name() { return "SpriteMode"; }
-	static void Register() { Reflect_RegisterEnum("SpriteMode", { "Plane", "Billboard" }); }
-};
-
-// A textured quad in the world. Plane mode lies in the atom's transform; Billboard mode always
-// faces the camera. Drawn unlit and alpha-blended after the opaque geometry (depth-tested).
-class NUKEENGINE_API Sprite : public Component
-{
-	NUKE_CLASS(Sprite, Component, "UI & 2D")
+	NUKE_CLASS(Sprite, Widget, "UI & 2D")
 public:
 	[[nuke::prop(asset="texture", label="Texture")]] std::string textureGuid;
 	[[nuke::prop(label="Tint")]]   Color tint = Color(1.0f, 1.0f, 1.0f, 1.0f);
-	[[nuke::prop(label="Width")]]  float width  = 1.0f;   // quad size in world units
-	[[nuke::prop(label="Height")]] float height = 1.0f;
 	[[nuke::prop(label="Pivot X", min=0, max=1)]] float pivotX = 0.5f;   // 0 = left edge, 1 = right edge
 	[[nuke::prop(label="Pivot Y", min=0, max=1)]] float pivotY = 0.5f;   // 0 = bottom edge, 1 = top edge
-	[[nuke::prop(label="Mode", enum="Plane,Billboard")]] SpriteMode mode = SpriteMode::Plane;
 	[[nuke::prop(label="Flip X")]] bool flipX = false;
 	[[nuke::prop(label="Flip Y")]] bool flipY = false;
 	// (nine-slice lives ON THE TEXTURE — Texture::nineSlice + slice borders, set in the slicer.)
@@ -46,7 +37,6 @@ public:
 
 	// Reflected API (C#/Lua).
 	[[nuke::func]] void SetTint(double r, double g, double b, double a);
-	[[nuke::func]] void SetSize(double w, double h);
 	[[nuke::func]] void SetPivot(double x, double y);
 	[[nuke::func]] void SetFrame(double u0v, double v0v, double u1v, double v1v);   // UV region (atlas cell)
 

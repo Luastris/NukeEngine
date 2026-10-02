@@ -221,7 +221,12 @@ extern "C" { NUKE_ABI_STAMP int nuke_build_debug = 0; }
 //       gpuDispatchIndirect / gpuReadback / gpuReadbackPoll / gpuMeshReserve / renderObjectIndirect /
 //       renderGBufferObjectIndirect (vtable END) + NukeGpuBind / NukeGpuMeshRange: the terrain's field and
 //       Surface-Nets mesher run on the GPU through it (3.3).
-#define NUKE_ENGINE_ABI 60
+//   61: canvas widgets (2026-10-02, NukePrism PR-1/2). New engine component base Widget (API/Model/Widget.h:
+//       rect + Plane/Billboard mode + raycast flag, OnCanvasDraw) and CanvasDrawCtx; Sprite DERIVES from Widget
+//       (width / height / mode moved to the base - same field names, worlds load unchanged; layout shift);
+//       World lays out / picks / draws any Widget under a canvas or as a world quad; iRender gained
+//       setSpriteParams (vtable END) + NukeSpriteParams (SDF text, clip rect); Camera::WorldToScreen.
+#define NUKE_ENGINE_ABI 61
 extern "C" { NUKE_ABI_STAMP int nuke_engine_abi = NUKE_ENGINE_ABI; }
 
 namespace nuke {

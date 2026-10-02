@@ -31,6 +31,7 @@
 #include "API/Model/Sprite.h"
 #include "API/Model/Canvas.h"
 #include "API/Model/RectAnchor.h"
+#include "API/Model/Widget.h"
 #include "API/Model/Decal.h"
 #include "API/Model/Collider.h"
 #include "API/Model/Jobs.h"
@@ -161,7 +162,9 @@ static void PickRec(bc::list<Atom*>& gos, const glm::vec3& ro, const glm::vec3& 
 		// A canvas re-parents the coordinate space for its subtree (same rule as rendering).
 		Canvas* here = atom->GetComponent<Canvas>();
 		Canvas* cur  = here ? here : ctx;
-		if (here && here->transform)
+		// The canvas FRAME is an editor selection aid: gameplay picks (UI occlusion, scripts) see
+		// through it and hit only its widgets.
+		if (here && here->transform && editorVolumes)
 		{
 			const float es = (here->mode == CanvasMode::WorldSpace) ? 1.0f : here->PxToWorld();
 			Transform* t = here->transform;
@@ -256,6 +259,42 @@ static void PickRec(bc::list<Atom*>& gos, const glm::vec3& ro, const glm::vec3& 
 				{ bestDist = tHit; best = atom; }
 			}
 		}
+		// Other widgets (not sprites — those were tested above): under a canvas the rect lies in
+		// the canvas plane, centre on the atom; outside one it is a world quad (Plane / Billboard).
+		for (Component* c : atom->components)
+			if (Widget* wg = dynamic_cast<Widget*>(c))
+			{
+				if (!wg->enabled || !wg->transform || dynamic_cast<Sprite*>(c)) continue;
+				Transform& t = atom->GetTransform();
+				Vector3 p = t.globalPosition(), s = t.globalScale();
+				glm::vec3 center((float)p.x, (float)p.y, (float)p.z), rgt, up;
+				if (cur && cur->transform && cur != here)
+				{
+					Vector3 cp = cur->transform->globalPosition(), R = cur->transform->right(), U = cur->transform->up();
+					glm::vec3 c0((float)cp.x, (float)cp.y, (float)cp.z);
+					rgt = glm::normalize(glm::vec3((float)R.x, (float)R.y, (float)R.z));
+					up  = glm::normalize(glm::vec3((float)U.x, (float)U.y, (float)U.z));
+					glm::vec3 dv = center - c0;
+					center = c0 + rgt * glm::dot(dv, rgt) + up * glm::dot(dv, up);
+				}
+				else if (wg->mode == SpriteMode::Billboard)
+				{
+					glm::vec3 n = -rd;
+					glm::vec3 uref = (fabsf(glm::dot(glm::vec3(0, 1, 0), rd)) > 0.99f) ? glm::vec3(1, 0, 0) : glm::vec3(0, 1, 0);
+					rgt = glm::normalize(glm::cross(uref, n));
+					up  = glm::normalize(glm::cross(n, rgt));
+				}
+				else
+				{
+					Vector3 R = t.right(), U = t.up();
+					rgt = glm::normalize(glm::vec3((float)R.x, (float)R.y, (float)R.z));
+					up  = glm::normalize(glm::vec3((float)U.x, (float)U.y, (float)U.z));
+				}
+				const float halfW = wg->width * 0.5f * (float)s.x, halfH = wg->height * 0.5f * (float)s.y;
+				float tHit;
+				if (RayQuad(ro, rd, center, rgt, up, halfW, halfH, tHit) && tHit < bestDist)
+				{ bestDist = tHit; best = atom; }
+			}
 		if (atom->children.size() > 0) PickRec(atom->children, ro, rd, bestDist, best, cur, editorVolumes);
 	}
 }
@@ -1596,24 +1635,157 @@ static void EmitWorldSprite(iRender* r, Sprite* sp, const Vector3& center, const
 	r->drawSprite(sp->tex, cc, rv, upv, uvr, tn);
 }
 
-struct ScreenSpr { Sprite* sp; Canvas* cv; };
+// An entry of the draw lists: a sprite OR a widget, its canvas, and the clip rect an ancestor
+// widget (Clip Children) imposes on screen canvases (reference px, centre origin).
+struct ScreenSpr { Sprite* sp; Canvas* cv; Widget* wg = nullptr; bool hasClip = false; float clip[4] = { 0, 0, 0, 0 }; };
 static void GatherSprites(bc::list<Atom*>& gos, Canvas* ctx, std::vector<ScreenSpr>& world, std::vector<ScreenSpr>& screen,
-                          unsigned int mask)
+                          unsigned int mask, const float* clipIn = nullptr)
 {
 	for (Atom* atom : gos)
 	{
 		if (!atom || !atom->enabled) continue;
 		Canvas* here = atom->GetComponent<Canvas>();
 		Canvas* cur  = here ? here : ctx;   // a canvas re-parents the coordinate space for its subtree
+		const float* clip = here ? nullptr : clipIn;   // a new canvas starts unclipped
+		const bool screenCv = cur && cur->mode != CanvasMode::WorldSpace;
+		auto entry = [&](Sprite* sp, Widget* wg)
+		{
+			ScreenSpr e; e.sp = sp; e.wg = wg; e.cv = cur;
+			if (clip) { e.hasClip = true; memcpy(e.clip, clip, sizeof(e.clip)); }
+			(screenCv ? screen : world).push_back(e);
+		};
+		float clipHere[4]; const float* clipOut = clip;
 		if (LayerVisible(atom, mask))
-			if (Sprite* sp = atom->GetComponent<Sprite>())
-				if (sp->enabled)
+		{
+			for (Component* c : atom->components)
+				if (Widget* wg = dynamic_cast<Widget*>(c))
 				{
-					if (cur && cur->mode != CanvasMode::WorldSpace) screen.push_back({ sp, cur });
-					else                                            world.push_back({ sp, cur });
+					if (!wg->enabled) continue;
+					Sprite* sp = dynamic_cast<Sprite*>(c);
+					entry(sp, sp ? nullptr : wg);
+					// Clip Children: this rect (intersected with the inherited one) clips the subtree.
+					if (wg->clipChildren && screenCv && cur->transform && wg->transform)
+					{
+						const float ppu = cur->pixelsPerUnit > 0.01f ? cur->pixelsPerUnit : 100.0f;
+						Vector3 p = wg->transform->globalPosition(), cp = cur->transform->globalPosition(), sc = wg->transform->globalScale();
+						const float cx = (float)(p.x - cp.x) * ppu, cy = (float)(p.y - cp.y) * ppu;
+						const float hw = wg->width * (float)sc.x * ppu * 0.5f, hh = wg->height * (float)sc.y * ppu * 0.5f;
+						clipHere[0] = cx - hw; clipHere[1] = cy - hh; clipHere[2] = cx + hw; clipHere[3] = cy + hh;
+						if (clip)
+						{
+							clipHere[0] = std::max(clipHere[0], clip[0]); clipHere[1] = std::max(clipHere[1], clip[1]);
+							clipHere[2] = std::min(clipHere[2], clip[2]); clipHere[3] = std::min(clipHere[3], clip[3]);
+						}
+						clipOut = clipHere;
+					}
 				}
-		GatherSprites(atom->children, cur, world, screen, mask);
+		}
+		GatherSprites(atom->children, cur, world, screen, mask, clipOut);
 	}
+}
+
+// Sticky clip for the sprite path from a gathered entry (screen canvases only).
+static void ApplyEntryClip(iRender* r, const ScreenSpr& e)
+{
+	if (!e.hasClip) return;
+	NukeSpriteParams p; p.clip = 1; memcpy(p.clipRect, e.clip, sizeof(p.clipRect));
+	r->setSpriteParams(&p);
+}
+
+// ---- CanvasDrawCtx: the engine maps a widget's quads to the canvas mode ----
+void CanvasDrawCtx::Quad(Texture* tex, float x, float y, float qw, float qh, const float uv[4], const float tint[4])
+{
+	if (!r || !tex || qw <= 0.0f || qh <= 0.0f) return;
+	if (mode == 0)
+	{
+		const float rr[4] = { rect[0] + x, rect[1] + y, qw, qh };
+		r->drawSpriteScreenEx(tex, rr, refSize, uv, tint, queue, scaleMode);
+		return;
+	}
+	const float c[3]  = { (float)(center.x + R.x * x + U.x * y), (float)(center.y + R.y * x + U.y * y), (float)(center.z + R.z * x + U.z * y) };
+	const float rv[3] = { (float)R.x * qw * 0.5f, (float)R.y * qw * 0.5f, (float)R.z * qw * 0.5f };
+	const float uv3[3] = { (float)U.x * qh * 0.5f, (float)U.y * qh * 0.5f, (float)U.z * qh * 0.5f };
+	r->drawSprite(tex, c, rv, uv3, uv, tint);
+}
+void CanvasDrawCtx::Params(const NukeSpriteParams* p)
+{
+	if (!r) return;
+	if (mode != 0)   // world quad: the overlay flag stays in force whatever the widget asks for
+	{
+		NukeSpriteParams m = p ? *p : NukeSpriteParams(); m.overlay = overlay;
+		r->setSpriteParams(&m);
+		return;
+	}
+	if (!hasClip) { r->setSpriteParams(p); return; }
+	// The ancestor clip stays in force: merge (intersect) it into whatever the widget asks for.
+	NukeSpriteParams m = p ? *p : NukeSpriteParams();
+	if (m.clip)
+	{
+		m.clipRect[0] = std::max(m.clipRect[0], clip[0]); m.clipRect[1] = std::max(m.clipRect[1], clip[1]);
+		m.clipRect[2] = std::min(m.clipRect[2], clip[2]); m.clipRect[3] = std::min(m.clipRect[3], clip[3]);
+	}
+	else { m.clip = 1; memcpy(m.clipRect, clip, sizeof(m.clipRect)); }
+	r->setSpriteParams(&m);
+}
+
+// One widget on a screen canvas (or its editor-plane preview) / a world canvas / no canvas at
+// all (a world quad: Plane in the transform or a Billboard on the camera basis).
+static void DrawWidget(iRender* r, Widget* wg, Canvas* cv, Camera* cam, bool editorCam, float pxToWorld,
+                       const Vector3* camR = nullptr, const Vector3* camU = nullptr, const ScreenSpr* entry = nullptr)
+{
+	if (!wg->transform) return;
+	CanvasDrawCtx ctx;
+	ctx.r = r; ctx.atom = wg->atom; ctx.canvas = cv; ctx.cam = cam;
+	if (entry && entry->hasClip && cv && cv->mode != CanvasMode::WorldSpace && !editorCam)
+	{ ctx.hasClip = true; memcpy(ctx.clip, entry->clip, sizeof(ctx.clip)); }
+	Vector3 wpos = wg->transform->globalPosition();
+	Vector3 sc   = wg->transform->globalScale();
+	if (!cv || !cv->transform)
+	{
+		const bool bb = wg->mode == SpriteMode::Billboard && camR && camU;
+		ctx.mode = 1;
+		ctx.center = wpos;
+		ctx.R = bb ? *camR : wg->transform->right();
+		ctx.U = bb ? *camU : wg->transform->up();
+		ctx.w = wg->width * (float)sc.x; ctx.h = wg->height * (float)sc.y;
+		ctx.pxToUnits = pxToWorld;
+		ctx.overlay = wg->overlay ? 1 : 0;
+		if (ctx.overlay) ctx.Params(nullptr);
+		wg->OnCanvasDraw(ctx);
+		r->setSpriteParams(nullptr);
+		return;
+	}
+	Vector3 cpos = cv->transform->globalPosition();
+	const bool worldCanvas = cv->mode == CanvasMode::WorldSpace;
+	const float ppu = cv->pixelsPerUnit > 0.01f ? cv->pixelsPerUnit : 100.0f;
+	if (worldCanvas || editorCam)
+	{
+		// A world quad lying in the canvas plane: the position projected onto it, canvas axes.
+		Vector3 R = cv->transform->right(), U = cv->transform->up();
+		Vector3 dv(wpos.x - cpos.x, wpos.y - cpos.y, wpos.z - cpos.z);
+		const double du = dv.x*R.x + dv.y*R.y + dv.z*R.z, dvU = dv.x*U.x + dv.y*U.y + dv.z*U.z;
+		ctx.mode = 1;
+		ctx.center = Vector3(cpos.x + R.x*du + U.x*dvU, cpos.y + R.y*du + U.y*dvU, cpos.z + R.z*du + U.z*dvU);
+		ctx.R = R; ctx.U = U;
+		ctx.w = wg->width * (float)sc.x; ctx.h = wg->height * (float)sc.y;
+		ctx.pxToUnits = editorCam && !worldCanvas ? 1.0f / ppu : pxToWorld;
+		ctx.editorPlane = editorCam && !worldCanvas;
+		ctx.overlay = (worldCanvas && cv->renderQueue == CanvasQueue::AfterPost) ? 1 : 0;   // a world canvas's AfterPost = over everything
+	}
+	else
+	{
+		if (cv->targetCamera && (!cam || cv->targetCamera != cam->atom)) return;   // bound to another camera
+		ctx.mode = 0;
+		ctx.rect[0] = (float)(wpos.x - cpos.x) * ppu; ctx.rect[1] = (float)(wpos.y - cpos.y) * ppu;
+		ctx.refSize[0] = cv->width; ctx.refSize[1] = cv->height;
+		ctx.queue = cv->renderQueue == CanvasQueue::AfterPost ? 1 : 0;
+		ctx.scaleMode = (int)cv->scaling;
+		ctx.w = wg->width * (float)sc.x * ppu; ctx.h = wg->height * (float)sc.y * ppu;
+		ctx.pxToUnits = 1.0f;
+	}
+	if (ctx.hasClip || ctx.overlay) ctx.Params(nullptr);   // the ancestor clip / overlay applies even to a widget that never sets params
+	wg->OnCanvasDraw(ctx);
+	r->setSpriteParams(nullptr);   // a widget never leaks its params
 }
 static void DrawSprites(bc::list<Atom*>& hierarchy, const NukeCameraDesc& d, const Vector3& camPos, iRender* r,
                         Camera* cam, unsigned int mask)
@@ -1632,6 +1804,7 @@ static void DrawSprites(bc::list<Atom*>& hierarchy, const NukeCameraDesc& d, con
 		for (ScreenSpr& s : screen)
 		{
 			Sprite* sp = s.sp; Canvas* cv = s.cv;
+			if (s.wg) { DrawWidget(r, s.wg, cv, cam, editorCam, kSpritePxToWorld, nullptr, nullptr, &s); continue; }
 			if (!sp->transform || sp->textureGuid.empty()) continue;
 			if (!sp->tex || sp->tex->guid != sp->textureGuid) sp->tex = ResDB::getSingleton()->GetTexture(sp->textureGuid);
 			if (!sp->tex) continue;
@@ -1666,8 +1839,10 @@ static void DrawSprites(bc::list<Atom*>& hierarchy, const NukeCameraDesc& d, con
 			float rect[4]    = { (float)(spos.x - cpos.x) * ppu, (float)(spos.y - cpos.y) * ppu,
 			                     sp->width * (float)sc.x * ppu, sp->height * (float)sc.y * ppu };
 			float refSize[2] = { cv->width, cv->height };
+			ApplyEntryClip(r, s);
 			EmitScreenSprite(r, sp, rect, refSize, uvr, tn,
 			                 cv->renderQueue == CanvasQueue::AfterPost ? 1 : 0, (int)cv->scaling);
+			if (s.hasClip) r->setSpriteParams(nullptr);
 		}
 	}
 	if (sprites.empty()) return;
@@ -1681,15 +1856,17 @@ static void DrawSprites(bc::list<Atom*>& hierarchy, const NukeCameraDesc& d, con
 	Vector3 camU(camF.y*camR.z - camF.z*camR.y, camF.z*camR.x - camF.x*camR.z, camF.x*camR.y - camF.y*camR.x);
 
 	auto d2 = [&](const Vector3& p) { double dx=p.x-camPos.x, dy=p.y-camPos.y, dz=p.z-camPos.z; return dx*dx+dy*dy+dz*dz; };
-	std::sort(sprites.begin(), sprites.end(), [&](const ScreenSpr& a, const ScreenSpr& b) {
-		Vector3 pa = a.sp->transform ? a.sp->transform->globalPosition() : Vector3();
-		Vector3 pb = b.sp->transform ? b.sp->transform->globalPosition() : Vector3();
+	auto trOf = [](const ScreenSpr& e) -> Transform* { return e.sp ? e.sp->transform : e.wg->transform; };
+	std::stable_sort(sprites.begin(), sprites.end(), [&](const ScreenSpr& a, const ScreenSpr& b) {
+		Vector3 pa = trOf(a) ? trOf(a)->globalPosition() : Vector3();
+		Vector3 pb = trOf(b) ? trOf(b)->globalPosition() : Vector3();
 		return d2(pa) > d2(pb);   // farthest first
 	});
 
 	for (ScreenSpr& ws : sprites)
 	{
 		Sprite* sp = ws.sp;
+		if (ws.wg) { DrawWidget(r, ws.wg, ws.cv, cam, false, kSpritePxToWorld, &camR, &camU); continue; }
 		if (!sp->transform || sp->textureGuid.empty()) continue;
 		if (!sp->tex || sp->tex->guid != sp->textureGuid) sp->tex = ResDB::getSingleton()->GetTexture(sp->textureGuid);
 		if (!sp->tex) continue;
@@ -1722,7 +1899,10 @@ static void DrawSprites(bc::list<Atom*>& hierarchy, const NukeCameraDesc& d, con
 		if (sp->flipY) std::swap(v0, v1);
 		float uvr[4] = { u0, v0, u1, v1 };
 		float tn[4]  = { sp->tint.r, sp->tint.g, sp->tint.b, sp->tint.a };
+		const bool ovl = ws.cv ? ws.cv->renderQueue == CanvasQueue::AfterPost : sp->overlay;
+		if (ovl) { NukeSpriteParams p; p.overlay = 1; r->setSpriteParams(&p); }
 		EmitWorldSprite(r, sp, c, rU, uU, halfW, halfH, kSpritePxToWorld, uvr, tn);
+		if (ovl) r->setSpriteParams(nullptr);
 	}
 }
 
@@ -1761,16 +1941,17 @@ static void ApplyCanvasLayouts(bc::list<Atom*>& gos, Canvas* ctx)
 					}
 					else { cx = (float)(gpos.x - cp.x) * ppu; cy = (float)(gpos.y - cp.y) * ppu; }
 
-					// Element size in canvas units; anchors on a sprite-less atom pin the point.
-					Sprite* sp = atom->GetComponent<Sprite>();
-					float w = sp ? sp->width  * (float)gsc.x * ppu : 0.0f;
-					float h = sp ? sp->height * (float)gsc.y * ppu : 0.0f;
+					// Element size in canvas units (any Widget: sprites included); anchors on a
+					// rect-less atom pin the point.
+					Widget* wg = atom->GetComponent<Widget>();
+					float w = wg ? wg->width  * (float)gsc.x * ppu : 0.0f;
+					float h = wg ? wg->height * (float)gsc.y * ppu : 0.0f;
 
 					if (ra->left && ra->right)        // both edges pinned -> stretch with the canvas
 					{
 						w  = cur->width - ra->distLeft - ra->distRight; if (w < 1.0f) w = 1.0f;
 						cx = -hw + ra->distLeft + w * 0.5f;
-						if (sp) sp->width = w / (ppu * (float)(gsc.x != 0.0 ? gsc.x : 1.0));
+						if (wg) wg->width = w / (ppu * (float)(gsc.x != 0.0 ? gsc.x : 1.0));
 					}
 					else if (ra->left)  cx = -hw + ra->distLeft  + w * 0.5f;
 					else if (ra->right) cx =  hw - ra->distRight - w * 0.5f;
@@ -1779,7 +1960,7 @@ static void ApplyCanvasLayouts(bc::list<Atom*>& gos, Canvas* ctx)
 					{
 						h  = cur->height - ra->distBottom - ra->distTop; if (h < 1.0f) h = 1.0f;
 						cy = -hh + ra->distBottom + h * 0.5f;
-						if (sp) sp->height = h / (ppu * (float)(gsc.y != 0.0 ? gsc.y : 1.0));
+						if (wg) wg->height = h / (ppu * (float)(gsc.y != 0.0 ? gsc.y : 1.0));
 					}
 					else if (ra->bottom) cy = -hh + ra->distBottom + h * 0.5f;
 					else if (ra->top)    cy =  hh - ra->distTop    - h * 0.5f;

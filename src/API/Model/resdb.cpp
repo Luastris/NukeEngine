@@ -364,6 +364,12 @@ const std::string* ResDB::Font(const std::string& rel) const
 	return it == fontByRel.end() ? nullptr : &it->second;
 }
 
+std::vector<std::string> ResDB::FontList() const
+{
+	std::vector<std::string> v;
+	for (auto& kv : fontByRel) v.push_back(kv.first);
+	return v;
+}
 void ResDB::RegisterFont(const std::string& rel, const std::string& bytes)
 {
 	if (rel.empty() || bytes.empty()) return;

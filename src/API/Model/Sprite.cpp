@@ -2,7 +2,7 @@
 
 namespace nuke {
 
-Sprite::Sprite() : Component("Sprite") {}
+Sprite::Sprite() : Widget("Sprite") {}
 
 void Sprite::Init(Atom* parent)
 {
@@ -20,7 +20,6 @@ void Sprite::SetTint(double r, double g, double b, double a)
 {
 	tint = Color((float)r, (float)g, (float)b, (float)a);
 }
-void Sprite::SetSize(double w, double h)   { width = (float)w; height = (float)h; }
 void Sprite::SetPivot(double x, double y)  { pivotX = (float)x; pivotY = (float)y; }
 void Sprite::SetFrame(double u0v, double v0v, double u1v, double v1v)
 {
