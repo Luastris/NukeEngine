@@ -216,7 +216,12 @@ extern "C" { NUKE_ABI_STAMP int nuke_build_debug = 0; }
 //       gained type + track / hover parameters (both appended; engine = sole producer); Vehicle gained Type + the
 //       Tracks / Hover sections; new component HoverThruster (child of a hover chassis). createVehicle builds all
 //       three kinds - no new virtuals.
-#define NUKE_ENGINE_ABI 59
+//   60: module compute seam (2026-10-01). iRender gained gpuSupported / gpuCreateBuffer / gpuUpdateBuffer /
+//       gpuCopyBuffer / gpuCreateTexture3D / gpuUpdateTexture3D / gpuDestroy / gpuCreateCompute / gpuDispatch /
+//       gpuDispatchIndirect / gpuReadback / gpuReadbackPoll / gpuMeshReserve / renderObjectIndirect /
+//       renderGBufferObjectIndirect (vtable END) + NukeGpuBind / NukeGpuMeshRange: the terrain's field and
+//       Surface-Nets mesher run on the GPU through it (3.3).
+#define NUKE_ENGINE_ABI 60
 extern "C" { NUKE_ABI_STAMP int nuke_engine_abi = NUKE_ENGINE_ABI; }
 
 namespace nuke {

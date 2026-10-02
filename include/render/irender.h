@@ -274,6 +274,11 @@ struct NukeInstanceData
     float custom[4] = { 0, 0, 0, 0 };   // free per-instance data for shaders
 };
 
+// Module compute (abi 60): one named binding of a dispatch.
+struct NukeGpuBind { const char* name; uint64_t res; };
+// A GPU-resident pooled mesh's streams (gpuMeshReserve).
+struct NukeGpuMeshRange { uint64_t pos, nrm, col, idx; uint32_t vOff, iOff, vCap, iCap; };
+
 class iRender
 {
     friend class NukeOGL;
@@ -937,6 +942,48 @@ public:
     // armed frame has been drawn. An LDR pipeline decodes its sRGB result to nits at paper white.
     virtual void requestHDRCapture(uint64_t rtId) { (void)rtId; }
     virtual bool captureTargetHDR(uint64_t rtId, int& w, int& h, std::vector<float>& rgbNits) { (void)rtId; (void)w; (void)h; (void)rgbNits; return false; }
+    // ---- Module compute (abi 60) --------------------------------------------------------------
+    // Opaque GPU handles for modules that keep their math on the GPU (the terrain field +
+    // mesher): buffers, 3D textures, compute pipelines compiled from an HLSL string, dispatches
+    // bound by variable NAME (the shader's declaration picks SRV / UAV / constant buffer; a
+    // `cbuffer Params` receives the per-dispatch constants), async readbacks, and pooled meshes
+    // whose streams a compute shader writes directly. 0 = failure / none. Main thread only,
+    // outside the camera passes (a module's Update is the place).
+    virtual bool     gpuSupported() { return false; }
+    // usage: 0 structured (stride > 0), 1 raw (ByteAddressBuffer), 2 raw + indirect draw/dispatch args.
+    virtual uint64_t gpuCreateBuffer(uint64_t bytes, int usage, uint32_t stride, const void* init) { (void)bytes; (void)usage; (void)stride; (void)init; return 0; }
+    virtual void     gpuUpdateBuffer(uint64_t buf, uint64_t offset, const void* data, uint64_t bytes) { (void)buf; (void)offset; (void)data; (void)bytes; }
+    virtual void     gpuCopyBuffer(uint64_t src, uint64_t srcOff, uint64_t dst, uint64_t dstOff, uint64_t bytes) { (void)src; (void)srcOff; (void)dst; (void)dstOff; (void)bytes; }
+    // format: 0 R8_SNORM, 1 R8_UINT, 2 R8_SINT, 3 R32_UINT.
+    virtual uint64_t gpuCreateTexture3D(int w, int h, int d, int format, const void* init) { (void)w; (void)h; (void)d; (void)format; (void)init; return 0; }
+    virtual void     gpuUpdateTexture3D(uint64_t tex, int x, int y, int z, int w, int h, int d, const void* data, uint32_t rowBytes, uint32_t sliceBytes)
+    { (void)tex; (void)x; (void)y; (void)z; (void)w; (void)h; (void)d; (void)data; (void)rowBytes; (void)sliceBytes; }
+    virtual void     gpuDestroy(uint64_t res) { (void)res; }   // buffers, textures and pipelines
+    virtual uint64_t gpuCreateCompute(const char* name, const char* hlsl, const char* entry) { (void)name; (void)hlsl; (void)entry; return 0; }
+    virtual void     gpuDispatch(uint64_t pipe, const NukeGpuBind* binds, int bindCount, const void* params, uint32_t paramBytes,
+                                 uint32_t gx, uint32_t gy, uint32_t gz)
+    { (void)pipe; (void)binds; (void)bindCount; (void)params; (void)paramBytes; (void)gx; (void)gy; (void)gz; }
+    virtual void     gpuDispatchIndirect(uint64_t pipe, const NukeGpuBind* binds, int bindCount, const void* params, uint32_t paramBytes,
+                                         uint64_t argsBuf, uint64_t argsOffset)
+    { (void)pipe; (void)binds; (void)bindCount; (void)params; (void)paramBytes; (void)argsBuf; (void)argsOffset; }
+    // Readback: the copy is issued now; poll on LATER frames — 1 = done (data copied, ticket
+    // freed), 0 = not yet, -1 = unknown ticket.
+    virtual uint64_t gpuReadback(uint64_t buf, uint64_t offset, uint64_t bytes) { (void)buf; (void)offset; (void)bytes; return 0; }
+    virtual int      gpuReadbackPoll(uint64_t ticket, void* dst, uint64_t bytes) { (void)ticket; (void)dst; (void)bytes; return -1; }
+    // GPU-resident pooled mesh: reserve `verts` / `inds` elements of the shared stream arena for
+    // `mesh` (no CPU arrays; re-reserving frees the old ranges). The streams come back as gpu
+    // buffer handles (raw, UAV-writable: pos/nrm = 3 floats, col = 4 floats, idx = uint32 per
+    // element) with the element offsets the writer adds. The mesh draws like any pooled mesh —
+    // Mesh::numVerts / numIndices (set by the module once known) size the plain draws and the
+    // BLAS; the *Indirect draws take this frame's count from an args buffer the compute wrote
+    // (DrawIndexedIndirect layout: indexCount, instanceCount, firstIndex, baseVertex, firstInstance).
+    virtual bool gpuMeshReserve(Mesh* mesh, uint32_t verts, uint32_t inds, NukeGpuMeshRange& out) { (void)mesh; (void)verts; (void)inds; (void)out; return false; }
+    virtual void renderObjectIndirect(Mesh* mesh, Material* mat, const float pos[3], const float quat[4], const float scale[3],
+                                      uint64_t argsBuf, uint64_t argsOffset)
+    { (void)mesh; (void)mat; (void)pos; (void)quat; (void)scale; (void)argsBuf; (void)argsOffset; }
+    virtual void renderGBufferObjectIndirect(Mesh* mesh, Material* mat, const float pos[3], const float quat[4], const float scale[3],
+                                             uint64_t argsBuf, uint64_t argsOffset)
+    { (void)mesh; (void)mat; (void)pos; (void)quat; (void)scale; (void)argsBuf; (void)argsOffset; }
     // ABI: new virtuals are appended at the END of the class, NEVER inserted mid-vtable —
     // plugins are separate DLLs built at different times, and an inserted slot shifts every later one.
 };
