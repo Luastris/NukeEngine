@@ -45,6 +45,7 @@ public:
 	int     queue = 0;
 	int     scaleMode = 0;
 	int     overlay = 0;   // world quad: after post, no depth (Widget.overlay / a world canvas's AfterPost queue)
+	float   alpha = 1.0f;  // accumulated Opacity of this widget and its ancestors; Quad multiplies the tint by it
 	Vector3 center, R, U;
 };
 
@@ -73,6 +74,7 @@ public:
 	[[nuke::prop(label="Raycast Target", tip="The pointer can hit this widget (clicks stop here)")]] bool raycastTarget = true;
 	[[nuke::prop(label="Clip Children", tip="Descendants draw only inside this rect (screen canvases): masks, scroll views")]] bool clipChildren = false;
 	[[nuke::prop(label="Overlay", tip="Outside a canvas: draw after post over everything (no depth test) and take the pointer through walls")]] bool overlay = false;
+	[[nuke::prop(label="Opacity", min=0, max=1, tip="Transparency of this widget AND everything under it (1 = opaque, 0 = invisible); multiplies down the hierarchy")]] float opacity = 1.0f;
 
 	explicit Widget(const char* typeName = "Widget");
 

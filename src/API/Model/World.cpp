@@ -404,6 +404,20 @@ bc::list<Atom*>& World::GetHierarchy()
 
 static boost::atomic<uint64_t> g_hierVersion(1);
 uint64_t World::HierarchyVersion() { return g_hierVersion.load(boost::memory_order_relaxed); }
+
+static std::vector<std::pair<long long, World::ContactHandler>> g_contactTaps;
+static long long g_contactTapNext = 1;
+long long World::SubscribeContacts(ContactHandler fn)
+{
+	if (!fn) return 0;
+	g_contactTaps.emplace_back(g_contactTapNext, std::move(fn));
+	return g_contactTapNext++;
+}
+void World::UnsubscribeContacts(long long id)
+{
+	for (size_t i = 0; i < g_contactTaps.size(); ++i)
+		if (g_contactTaps[i].first == id) { g_contactTaps.erase(g_contactTaps.begin() + i); return; }
+}
 void     World::BumpHierarchy()    { g_hierVersion.fetch_add(1, boost::memory_order_relaxed); }
 
 void World::Add(Atom* atom)
@@ -1019,6 +1033,11 @@ static void DispatchContacts(iPhysics* p, const std::map<uint64_t, Collider*>& b
 			};
 			notify(aa, ab);
 			notify(ab, aa);
+			if (!g_contactTaps.empty())
+			{
+				const auto taps = g_contactTaps;   // a handler may unsubscribe while we run
+				for (const auto& tp : taps) tp.second(aa, ab, trigger, enter, ev[i].point, ev[i].normal, ev[i].speed);
+			}
 			// P2: a hard enough hit breaks a destructible (or one of its standing pieces).
 			if (enter && !trigger)
 			{
@@ -1577,10 +1596,50 @@ static bool BuildNinePatch(Texture* tex, int sl, int sr, int st, int sb,
 	return true;
 }
 
+// Fill Amount, horizontal / vertical: one axis-aligned piece (centre c, half extent h along the
+// axis, uv lo->hi along it) cut at the amount's limit; false = nothing left. Radial fill goes
+// through the sprite params (the shader cuts by uv), see FillParams.
+struct FillCut { bool on = false; int axis = 0; float limit = 0; bool keepLow = true; };
+static FillCut MakeFillCut(Sprite* sp, float cx, float cy, float w, float h)
+{
+	FillCut fc;
+	if (sp->fillMethod != 1 && sp->fillMethod != 2) return fc;
+	fc.on = true; fc.axis = sp->fillMethod == 1 ? 0 : 1;
+	const float lo = (fc.axis == 0 ? cx - w * 0.5f : cy - h * 0.5f), ext = (fc.axis == 0 ? w : h);
+	const bool rev = fc.axis == 0 ? sp->flipX : sp->flipY;   // flipped = fill from the other side
+	fc.keepLow = !rev;
+	fc.limit = rev ? lo + ext * (1.0f - sp->fillAmount) : lo + ext * sp->fillAmount;
+	return fc;
+}
+// Applies the cut to a piece: c / half along the axis, (uvLo, uvHi) = the uv at the low / high end.
+static bool ApplyFillCut(const FillCut& fc, float& c, float& half, float& uvLo, float& uvHi)
+{
+	if (!fc.on) return true;
+	float a = c - half, b = c + half;
+	if (b - a < 1e-6f) return false;
+	const float ua = uvLo, ub = uvHi;
+	if (fc.keepLow) { if (fc.limit <= a) return false; if (fc.limit < b) { uvHi = ua + (ub - ua) * (fc.limit - a) / (b - a); b = fc.limit; } }
+	else            { if (fc.limit >= b) return false; if (fc.limit > a) { uvLo = ua + (ub - ua) * (fc.limit - a) / (b - a); a = fc.limit; } }
+	c = (a + b) * 0.5f; half = (b - a) * 0.5f;
+	return true;
+}
+// Radial fill rides the params (uv-based in the shader); returns true when it set them.
+static bool FillParams(iRender* r, Sprite* sp, const float uvr[4])
+{
+	if (sp->fillMethod != 3) return false;
+	NukeSpriteParams p; p.fill[0] = 3.0f; p.fill[1] = sp->fillAmount;
+	p.fillUv[0] = std::min(uvr[0], uvr[2]); p.fillUv[1] = std::min(uvr[1], uvr[3]); p.fillUv[2] = std::max(uvr[0], uvr[2]); p.fillUv[3] = std::max(uvr[1], uvr[3]);
+	r->setSpriteParams(&p);
+	return true;
+}
+
 // Emits one screen sprite: a single rect, or the 3x3 nine-slice grid when enabled.
 static void EmitScreenSprite(iRender* r, Sprite* sp, const float rect[4], const float refSize[2],
                              const float uvr[4], const float tn[4], int queue, int scaleMode)
 {
+	if (sp->fillAmount <= 0.0f && sp->fillMethod != 0) return;
+	const bool radial = FillParams(r, sp, uvr);
+	const FillCut fc = MakeFillCut(sp, rect[0], rect[1], rect[2], rect[3]);
 	NinePatch np;
 	const int sl = sp->flipX ? sp->tex->sliceRight  : sp->tex->sliceLeft;
 	const int sr = sp->flipX ? sp->tex->sliceLeft   : sp->tex->sliceRight;
@@ -1595,11 +1654,25 @@ static void EmitScreenSprite(iRender* r, Sprite* sp, const float rect[4], const 
 				if (np.rw[c] <= 0.0f || np.rh[rr] <= 0.0f) continue;
 				float r2[4]  = { rect[0] + np.rx[c], rect[1] + np.ry[rr], np.rw[c], np.rh[rr] };
 				float uv2[4] = { np.u[c], np.v[2 - rr], np.u[c + 1], np.v[3 - rr] };
+				float hx = r2[2] * 0.5f, hy = r2[3] * 0.5f;
+				bool keep = true;
+				if (fc.axis == 0) keep = ApplyFillCut(fc, r2[0], hx, uv2[0], uv2[2]);
+				else              keep = ApplyFillCut(fc, r2[1], hy, uv2[3], uv2[1]);   // +y up: the low end is the bottom (v1)
+				if (!keep) continue;
+				r2[2] = hx * 2.0f; r2[3] = hy * 2.0f;
 				r->drawSpriteScreenEx(sp->tex, r2, refSize, uv2, tn, queue, scaleMode);
 			}
+		if (radial) r->setSpriteParams(nullptr);
 		return;
 	}
-	r->drawSpriteScreenEx(sp->tex, rect, refSize, uvr, tn, queue, scaleMode);
+	float rc[4] = { rect[0], rect[1], rect[2], rect[3] }, uvc[4] = { uvr[0], uvr[1], uvr[2], uvr[3] };
+	float hx = rc[2] * 0.5f, hy = rc[3] * 0.5f;
+	bool keep = true;
+	if (fc.axis == 0) keep = ApplyFillCut(fc, rc[0], hx, uvc[0], uvc[2]);
+	else              keep = ApplyFillCut(fc, rc[1], hy, uvc[3], uvc[1]);
+	rc[2] = hx * 2.0f; rc[3] = hy * 2.0f;
+	if (keep) r->drawSpriteScreenEx(sp->tex, rc, refSize, uvc, tn, queue, scaleMode);
+	if (radial) r->setSpriteParams(nullptr);
 }
 
 // Emits one world-quad sprite (centre + unit axes + half extents), single quad or nine-slice.
@@ -1607,6 +1680,20 @@ static void EmitScreenSprite(iRender* r, Sprite* sp, const float rect[4], const 
 static void EmitWorldSprite(iRender* r, Sprite* sp, const Vector3& center, const Vector3& Rn, const Vector3& Un,
                             float halfW, float halfH, float pxToOut, const float uvr[4], const float tn[4])
 {
+	if (sp->fillAmount <= 0.0f && sp->fillMethod != 0) return;
+	const bool radial = FillParams(r, sp, uvr);
+	const FillCut fc = MakeFillCut(sp, 0.0f, 0.0f, halfW * 2.0f, halfH * 2.0f);   // in the quad's (R, U) plane
+	auto emit = [&](float ox, float oy, float hx, float hy, float uv2[4])
+	{
+		bool keep = true;
+		if (fc.axis == 0) keep = ApplyFillCut(fc, ox, hx, uv2[0], uv2[2]);
+		else              keep = ApplyFillCut(fc, oy, hy, uv2[3], uv2[1]);
+		if (!keep) return;
+		float c3[3]  = { (float)(center.x + Rn.x * ox + Un.x * oy), (float)(center.y + Rn.y * ox + Un.y * oy), (float)(center.z + Rn.z * ox + Un.z * oy) };
+		float rv2[3]  = { (float)Rn.x * hx, (float)Rn.y * hx, (float)Rn.z * hx };
+		float upv2[3] = { (float)Un.x * hy, (float)Un.y * hy, (float)Un.z * hy };
+		r->drawSprite(sp->tex, c3, rv2, upv2, uv2, tn);
+	};
 	NinePatch np;
 	const int sl = sp->flipX ? sp->tex->sliceRight  : sp->tex->sliceLeft;
 	const int sr = sp->flipX ? sp->tex->sliceLeft   : sp->tex->sliceRight;
@@ -1619,27 +1706,22 @@ static void EmitWorldSprite(iRender* r, Sprite* sp, const Vector3& center, const
 			for (int rr = 0; rr < 3; ++rr)
 			{
 				if (np.rw[c] <= 0.0f || np.rh[rr] <= 0.0f) continue;
-				float c3[3]  = { (float)(center.x + Rn.x * np.rx[c] + Un.x * np.ry[rr]),
-				                 (float)(center.y + Rn.y * np.rx[c] + Un.y * np.ry[rr]),
-				                 (float)(center.z + Rn.z * np.rx[c] + Un.z * np.ry[rr]) };
-				float rv2[3]  = { (float)Rn.x * np.rw[c] * 0.5f, (float)Rn.y * np.rw[c] * 0.5f, (float)Rn.z * np.rw[c] * 0.5f };
-				float upv2[3] = { (float)Un.x * np.rh[rr] * 0.5f, (float)Un.y * np.rh[rr] * 0.5f, (float)Un.z * np.rh[rr] * 0.5f };
 				float uv2[4]  = { np.u[c], np.v[2 - rr], np.u[c + 1], np.v[3 - rr] };
-				r->drawSprite(sp->tex, c3, rv2, upv2, uv2, tn);
+				emit(np.rx[c], np.ry[rr], np.rw[c] * 0.5f, np.rh[rr] * 0.5f, uv2);
 			}
+		if (radial) r->setSpriteParams(nullptr);
 		return;
 	}
-	float rv[3]  = { (float)Rn.x * halfW, (float)Rn.y * halfW, (float)Rn.z * halfW };
-	float upv[3] = { (float)Un.x * halfH, (float)Un.y * halfH, (float)Un.z * halfH };
-	float cc[3]  = { (float)center.x, (float)center.y, (float)center.z };
-	r->drawSprite(sp->tex, cc, rv, upv, uvr, tn);
+	float uvc[4] = { uvr[0], uvr[1], uvr[2], uvr[3] };
+	emit(0.0f, 0.0f, halfW, halfH, uvc);
+	if (radial) r->setSpriteParams(nullptr);
 }
 
 // An entry of the draw lists: a sprite OR a widget, its canvas, and the clip rect an ancestor
 // widget (Clip Children) imposes on screen canvases (reference px, centre origin).
-struct ScreenSpr { Sprite* sp; Canvas* cv; Widget* wg = nullptr; bool hasClip = false; float clip[4] = { 0, 0, 0, 0 }; };
+struct ScreenSpr { Sprite* sp; Canvas* cv; Widget* wg = nullptr; bool hasClip = false; float clip[4] = { 0, 0, 0, 0 }; float alpha = 1.0f; };
 static void GatherSprites(bc::list<Atom*>& gos, Canvas* ctx, std::vector<ScreenSpr>& world, std::vector<ScreenSpr>& screen,
-                          unsigned int mask, const float* clipIn = nullptr)
+                          unsigned int mask, const float* clipIn = nullptr, float alphaIn = 1.0f)
 {
 	for (Atom* atom : gos)
 	{
@@ -1648,9 +1730,14 @@ static void GatherSprites(bc::list<Atom*>& gos, Canvas* ctx, std::vector<ScreenS
 		Canvas* cur  = here ? here : ctx;   // a canvas re-parents the coordinate space for its subtree
 		const float* clip = here ? nullptr : clipIn;   // a new canvas starts unclipped
 		const bool screenCv = cur && cur->mode != CanvasMode::WorldSpace;
+		// Opacity multiplies down the hierarchy: this atom's widgets and every descendant.
+		float alphaHere = alphaIn;
+		for (Component* c : atom->components)
+			if (Widget* wg0 = dynamic_cast<Widget*>(c))
+				if (wg0->enabled) alphaHere *= std::min(1.0f, std::max(0.0f, wg0->opacity));
 		auto entry = [&](Sprite* sp, Widget* wg)
 		{
-			ScreenSpr e; e.sp = sp; e.wg = wg; e.cv = cur;
+			ScreenSpr e; e.sp = sp; e.wg = wg; e.cv = cur; e.alpha = alphaHere;
 			if (clip) { e.hasClip = true; memcpy(e.clip, clip, sizeof(e.clip)); }
 			(screenCv ? screen : world).push_back(e);
 		};
@@ -1680,7 +1767,7 @@ static void GatherSprites(bc::list<Atom*>& gos, Canvas* ctx, std::vector<ScreenS
 					}
 				}
 		}
-		GatherSprites(atom->children, cur, world, screen, mask, clipOut);
+		GatherSprites(atom->children, cur, world, screen, mask, clipOut, alphaHere);
 	}
 }
 
@@ -1696,6 +1783,8 @@ static void ApplyEntryClip(iRender* r, const ScreenSpr& e)
 void CanvasDrawCtx::Quad(Texture* tex, float x, float y, float qw, float qh, const float uv[4], const float tint[4])
 {
 	if (!r || !tex || qw <= 0.0f || qh <= 0.0f) return;
+	const float ta[4] = { tint[0], tint[1], tint[2], tint[3] * alpha };   // the accumulated Opacity
+	tint = ta;
 	if (mode == 0)
 	{
 		const float rr[4] = { rect[0] + x, rect[1] + y, qw, qh };
@@ -1736,6 +1825,8 @@ static void DrawWidget(iRender* r, Widget* wg, Canvas* cv, Camera* cam, bool edi
 	if (!wg->transform) return;
 	CanvasDrawCtx ctx;
 	ctx.r = r; ctx.atom = wg->atom; ctx.canvas = cv; ctx.cam = cam;
+	ctx.alpha = entry ? entry->alpha : std::min(1.0f, std::max(0.0f, wg->opacity));
+	if (ctx.alpha <= 0.001f) return;   // fully transparent: nothing to draw
 	if (entry && entry->hasClip && cv && cv->mode != CanvasMode::WorldSpace && !editorCam)
 	{ ctx.hasClip = true; memcpy(ctx.clip, entry->clip, sizeof(ctx.clip)); }
 	Vector3 wpos = wg->transform->globalPosition();
@@ -1815,7 +1906,7 @@ static void DrawSprites(bc::list<Atom*>& hierarchy, const NukeCameraDesc& d, con
 			if (sp->flipX) std::swap(u0, u1);
 			if (sp->flipY) std::swap(v0, v1);
 			float uvr[4] = { u0, v0, u1, v1 };
-			float tn[4]  = { sp->tint.r, sp->tint.g, sp->tint.b, sp->tint.a };
+			float tn[4]  = { sp->tint.r, sp->tint.g, sp->tint.b, sp->tint.a * s.alpha };
 
 			// Children keep world-authored units: convert to reference pixels via pixelsPerUnit.
 			const float ppu = cv->pixelsPerUnit > 0.01f ? cv->pixelsPerUnit : 100.0f;
@@ -1866,7 +1957,7 @@ static void DrawSprites(bc::list<Atom*>& hierarchy, const NukeCameraDesc& d, con
 	for (ScreenSpr& ws : sprites)
 	{
 		Sprite* sp = ws.sp;
-		if (ws.wg) { DrawWidget(r, ws.wg, ws.cv, cam, false, kSpritePxToWorld, &camR, &camU); continue; }
+		if (ws.wg) { DrawWidget(r, ws.wg, ws.cv, cam, false, kSpritePxToWorld, &camR, &camU, &ws); continue; }
 		if (!sp->transform || sp->textureGuid.empty()) continue;
 		if (!sp->tex || sp->tex->guid != sp->textureGuid) sp->tex = ResDB::getSingleton()->GetTexture(sp->textureGuid);
 		if (!sp->tex) continue;
@@ -1898,7 +1989,7 @@ static void DrawSprites(bc::list<Atom*>& hierarchy, const NukeCameraDesc& d, con
 		if (sp->flipX) std::swap(u0, u1);
 		if (sp->flipY) std::swap(v0, v1);
 		float uvr[4] = { u0, v0, u1, v1 };
-		float tn[4]  = { sp->tint.r, sp->tint.g, sp->tint.b, sp->tint.a };
+		float tn[4]  = { sp->tint.r, sp->tint.g, sp->tint.b, sp->tint.a * ws.alpha };
 		const bool ovl = ws.cv ? ws.cv->renderQueue == CanvasQueue::AfterPost : sp->overlay;
 		if (ovl) { NukeSpriteParams p; p.overlay = 1; r->setSpriteParams(&p); }
 		EmitWorldSprite(r, sp, c, rU, uU, halfW, halfH, kSpritePxToWorld, uvr, tn);
@@ -1916,36 +2007,39 @@ static void ApplyCanvasLayouts(bc::list<Atom*>& gos, Canvas* ctx)
 		if (!atom || !atom->enabled) continue;
 		Canvas* here = atom->GetComponent<Canvas>();
 		Canvas* cur  = here ? here : ctx;
+		// A mode switch (inspector, script) keeps a size that still is the other mode's default:
+		// 10x10 world units is a 10 px screen canvas and nothing fits in it.
+		if (here && here->lastMode != (int)here->mode)
+		{
+			const bool screen = here->mode != CanvasMode::WorldSpace;
+			if (here->lastMode >= 0)
+			{
+				if (screen && here->width <= 32.0f && here->height <= 32.0f) { here->width = 1280.0f; here->height = 720.0f; }
+				else if (!screen && here->width >= 100.0f && here->height >= 100.0f) { here->width = 10.0f; here->height = 10.0f; }
+			}
+			here->lastMode = (int)here->mode;
+		}
 		if (cur && cur != here && cur->transform)
 			if (RectAnchor* ra = atom->GetComponent<RectAnchor>())
 				if (ra->enabled && (ra->left || ra->right || ra->top || ra->bottom))
 				{
-					const bool  world = (cur->mode == CanvasMode::WorldSpace);
-					const float ppu = world ? 1.0f : (cur->pixelsPerUnit > 0.01f ? cur->pixelsPerUnit : 100.0f);
-					const float hw = cur->width * 0.5f, hh = cur->height * 0.5f;
-
+					RectAnchor::Frame f;
+					if (!ra->Measure(f)) { ApplyCanvasLayouts(atom->children, cur); continue; }
+					// Not where the pass left it (gizmo, inspector, a tween, a script): the
+					// anchors follow the element. Only a canvas change moves an element.
+					const float eps = f.world ? 1e-5f : 1e-3f;
+					if (ra->laidOut && (std::fabs(f.cx - ra->lastCx) > eps || std::fabs(f.cy - ra->lastCy) > eps
+					                 || std::fabs(f.w - ra->lastW) > eps || std::fabs(f.h - ra->lastH) > eps))
+						ra->CaptureFromPose();
+					const bool  world = f.world;
+					const float ppu = f.ppu, hw = f.hw, hh = f.hh;
 					Transform* ct = cur->transform;
 					Transform& t  = atom->GetTransform();
 					Vector3 cp = ct->globalPosition();
-					Vector3 gpos = t.globalPosition();
-					Vector3 gsc  = t.globalScale();
+					Vector3 gsc = t.globalScale();
 					Vector3 R = ct->right(), U = ct->up();
-
-					// Current centre in canvas units (centre-origin).
-					float cx, cy;
-					if (world)
-					{
-						Vector3 d(gpos.x - cp.x, gpos.y - cp.y, gpos.z - cp.z);
-						cx = (float)(d.x*R.x + d.y*R.y + d.z*R.z);
-						cy = (float)(d.x*U.x + d.y*U.y + d.z*U.z);
-					}
-					else { cx = (float)(gpos.x - cp.x) * ppu; cy = (float)(gpos.y - cp.y) * ppu; }
-
-					// Element size in canvas units (any Widget: sprites included); anchors on a
-					// rect-less atom pin the point.
+					float cx = f.cx, cy = f.cy, w = f.w, h = f.h;
 					Widget* wg = atom->GetComponent<Widget>();
-					float w = wg ? wg->width  * (float)gsc.x * ppu : 0.0f;
-					float h = wg ? wg->height * (float)gsc.y * ppu : 0.0f;
 
 					if (ra->left && ra->right)        // both edges pinned -> stretch with the canvas
 					{
@@ -1971,6 +2065,7 @@ static void ApplyCanvasLayouts(bc::list<Atom*>& gos, Canvas* ctx)
 					else
 						gp = Vector3(cp.x + cx / ppu, cp.y + cy / ppu, cp.z);   // transform units; Z pinned
 					t.SetGlobal(gp, t.globalRotation(), gsc);
+					ra->lastCx = cx; ra->lastCy = cy; ra->lastW = w; ra->lastH = h; ra->laidOut = true;
 				}
 		ApplyCanvasLayouts(atom->children, cur);
 	}

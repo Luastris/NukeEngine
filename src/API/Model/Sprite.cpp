@@ -20,6 +20,7 @@ void Sprite::SetTint(double r, double g, double b, double a)
 {
 	tint = Color((float)r, (float)g, (float)b, (float)a);
 }
+void Sprite::SetFill(double amount) { fillAmount = amount < 0.0 ? 0.0f : amount > 1.0 ? 1.0f : (float)amount; }
 void Sprite::SetPivot(double x, double y)  { pivotX = (float)x; pivotY = (float)y; }
 void Sprite::SetFrame(double u0v, double v0v, double u1v, double v1v)
 {

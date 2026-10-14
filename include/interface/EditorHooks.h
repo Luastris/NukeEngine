@@ -8,6 +8,8 @@
 
 namespace nuke {
 
+class Component;
+
 // Generic editor extension points: a module registers, the editor renders — the editor never
 // knows who registered. Modules unregister by id in Shutdown (callbacks die with the DLL).
 
@@ -45,6 +47,37 @@ NUKEENGINE_API const std::vector<EditorViewportOverlay>& ViewportOverlays();
 // (drag/insert/delete handles + undo). The engine Spline is built in; modules register theirs.
 NUKEENGINE_API void RegisterCurveComponent(const std::string& typeName);
 NUKEENGINE_API const std::vector<std::string>& CurveComponents();
+
+// A small square icon button right BEHIND one reflected field's widget, in every inspector that
+// draws reflected fields (world, prefab windows): a module's per-field action, e.g. a pin that
+// writes the current value into the field. `click` gets the object the field belongs to and
+// returns true when it changed it (the inspector marks the edit).
+struct EditorFieldButton
+{
+	std::string id;                                  // unique key (unregister / re-register)
+	std::string typeName;                            // TypeInfo name owning the field
+	std::string field;                               // reflected field name
+	std::string icon;                                // glyph (icon font, UTF-8)
+	std::string tip;
+	std::function<bool(void* obj)> click;
+	std::function<void(void* obj)> update;           // optional: every frame the field's row is drawn, before the widget
+};
+// A module-drawn widget REPLACING the default one of a reflected field (a combo over a dynamic
+// list, a custom picker). `draw` gets the owning object and the hidden ImGui id to use; the item
+// width is already set. Returns true when it changed the object.
+struct EditorFieldWidget
+{
+	std::string id;                                  // unique key (unregister / re-register)
+	std::string typeName, field;
+	std::function<bool(void* obj, const char* imguiId)> draw;
+};
+NUKEENGINE_API void RegisterFieldWidget(const EditorFieldWidget& w);
+NUKEENGINE_API void UnregisterFieldWidget(const std::string& id);
+NUKEENGINE_API const std::vector<EditorFieldWidget>& FieldWidgets();
+
+NUKEENGINE_API void RegisterFieldButton(const EditorFieldButton& b);
+NUKEENGINE_API void UnregisterFieldButton(const std::string& id);
+NUKEENGINE_API const std::vector<EditorFieldButton>& FieldButtons();
 
 // Purge every hook a module registered (see Modular.h PurgeModuleRegistrations).
 NUKEENGINE_API void UnregisterEditorHooksOf(const std::string& moduleDll);

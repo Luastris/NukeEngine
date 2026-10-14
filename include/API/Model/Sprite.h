@@ -26,6 +26,8 @@ public:
 	[[nuke::prop(label="Pivot Y", min=0, max=1)]] float pivotY = 0.5f;   // 0 = bottom edge, 1 = top edge
 	[[nuke::prop(label="Flip X")]] bool flipX = false;
 	[[nuke::prop(label="Flip Y")]] bool flipY = false;
+	[[nuke::prop(label="Fill Method", enum="None,Horizontal,Vertical,Radial", tip="Show only `Fill Amount` of the sprite: left to right (Flip X reverses), bottom to top (Flip Y reverses), clockwise from the top")]] int fillMethod = 0;
+	[[nuke::prop(label="Fill Amount", min=0, max=1)]] float fillAmount = 1.0f;
 	// (nine-slice lives ON THE TEXTURE — Texture::nineSlice + slice borders, set in the slicer.)
 
 	// Runtime UV region within the texture (full frame by default), driven by SpriteAnimator.
@@ -38,6 +40,7 @@ public:
 	// Reflected API (C#/Lua).
 	[[nuke::func]] void SetTint(double r, double g, double b, double a);
 	[[nuke::func]] void SetPivot(double x, double y);
+	[[nuke::func]] void SetFill(double amount);   // 0..1 (bars, cooldown rings)
 	[[nuke::func]] void SetFrame(double u0v, double v0v, double u1v, double v1v);   // UV region (atlas cell)
 
 	void Init(Atom* parent) override;

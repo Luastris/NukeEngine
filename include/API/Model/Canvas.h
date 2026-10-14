@@ -47,8 +47,11 @@ public:
 	// Screen-space only: WithWorld = drawn before post effects, AfterPost = on the final image.
 	[[nuke::prop(label="Render Queue", enum="WithWorld,AfterPost")]] CanvasQueue renderQueue = CanvasQueue::AfterPost;
 	// WorldSpace: rectangle size in WORLD units. ScreenSpace: reference resolution in PIXELS.
-	[[nuke::prop(label="Width")]]  float width  = 10.0f;
-	[[nuke::prop(label="Height")]] float height = 10.0f;
+	// Switching the mode swaps the other mode's default size (10x10 units <-> 1280x720 px) when the
+	// size still is that default - a 10 px screen canvas shows nothing (user 2026-10-03).
+	[[nuke::prop(label="Width",  tip="World Space: world units. Screen modes: reference px (the canvas is this many px wide, scaled over the screen)")]]  float width  = 10.0f;
+	[[nuke::prop(label="Height", tip="World Space: world units. Screen modes: reference px")]] float height = 10.0f;
+	int lastMode = -1;   // runtime: the mode the size was last checked against
 	// Screen-space: how the reference resolution maps onto the target (aspect handling).
 	[[nuke::prop(label="Scaling", enum="Fit,Stretch,Expand,FitWidth,FitHeight")]] CanvasScale scaling = CanvasScale::Fit;
 	// Screen-space: how many reference PIXELS one world unit of a child covers. The editor's

@@ -321,6 +321,12 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("GetParent", &Atom::GetParent));
 		t.methods.push_back(MakeMethod("AddChild", &Atom::AddChild));
 		Reflect_SetMethodDoc("Atom", "AddChild", "", "newChild");
+		t.methods.push_back(MakeMethod("GetChildCount", &Atom::GetChildCount));
+		Reflect_SetMethodDoc("Atom", "GetChildCount", "Children for scripts (C++ walks `children`): direct ones by index in hierarchy order, the count, and the first descendant of a name at ANY depth (depth-first). Null when none.", "");
+		t.methods.push_back(MakeMethod("GetChild", &Atom::GetChild));
+		Reflect_SetMethodDoc("Atom", "GetChild", "", "index");
+		t.methods.push_back(MakeMethod("FindChild", &Atom::FindChild));
+		Reflect_SetMethodDoc("Atom", "FindChild", "", "name");
 		t.methods.push_back(MakeMethod("Destroy", &Atom::Destroy));
 		Reflect_SetMethodDoc("Atom", "Destroy", "DEFERRED destruction: the subtree is deleted at the end of the current Update.", "");
 		t.methods.push_back(MakeMethod("GetTimeScale", &Atom::GetTimeScale));
@@ -485,7 +491,9 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("mode", &Canvas::mode, "", "Mode", 0.0f, 0.0f, "WorldSpace,ScreenSpaceOverlay,ScreenSpaceCamera"));
 		t.fields.push_back(MakeField("renderQueue", &Canvas::renderQueue, "", "Render Queue", 0.0f, 0.0f, "WithWorld,AfterPost"));
 		t.fields.push_back(MakeField("width", &Canvas::width, "", "Width"));
+		t.fields.back().tip = "World Space: world units. Screen modes: reference px (the canvas is this many px wide, scaled over the screen)";
 		t.fields.push_back(MakeField("height", &Canvas::height, "", "Height"));
+		t.fields.back().tip = "World Space: world units. Screen modes: reference px";
 		t.fields.push_back(MakeField("scaling", &Canvas::scaling, "", "Scaling", 0.0f, 0.0f, "Fit,Stretch,Expand,FitWidth,FitHeight"));
 		t.fields.push_back(MakeField("pixelsPerUnit", &Canvas::pixelsPerUnit, "", "Pixels Per Unit"));
 		t.fields.push_back(MakeField("sortOrder", &Canvas::sortOrder, "", "Sort Order"));
@@ -1952,10 +1960,15 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("pivotY", &Sprite::pivotY, "", "Pivot Y", 0.0f, 1.0f));
 		t.fields.push_back(MakeField("flipX", &Sprite::flipX, "", "Flip X"));
 		t.fields.push_back(MakeField("flipY", &Sprite::flipY, "", "Flip Y"));
+		t.fields.push_back(MakeField("fillMethod", &Sprite::fillMethod, "", "Fill Method", 0.0f, 0.0f, "None,Horizontal,Vertical,Radial"));
+		t.fields.back().tip = "Show only `Fill Amount` of the sprite: left to right (Flip X reverses), bottom to top (Flip Y reverses), clockwise from the top";
+		t.fields.push_back(MakeField("fillAmount", &Sprite::fillAmount, "", "Fill Amount", 0.0f, 1.0f));
 		t.methods.push_back(MakeMethod("SetTint", &Sprite::SetTint));
 		Reflect_SetMethodDoc("Sprite", "SetTint", "Reflected API (C#/Lua).", "r,g,b,a");
 		t.methods.push_back(MakeMethod("SetPivot", &Sprite::SetPivot));
 		Reflect_SetMethodDoc("Sprite", "SetPivot", "", "x,y");
+		t.methods.push_back(MakeMethod("SetFill", &Sprite::SetFill));
+		Reflect_SetMethodDoc("Sprite", "SetFill", "", "amount");
 		t.methods.push_back(MakeMethod("SetFrame", &Sprite::SetFrame));
 		Reflect_SetMethodDoc("Sprite", "SetFrame", "", "u0v,v0v,u1v,v1v");
 		t.create = []() -> void* { return new Sprite(); };
@@ -2275,6 +2288,8 @@ bool NukeReflectInit() {
 		t.fields.back().tip = "Descendants draw only inside this rect (screen canvases): masks, scroll views";
 		t.fields.push_back(MakeField("overlay", &Widget::overlay, "", "Overlay"));
 		t.fields.back().tip = "Outside a canvas: draw after post over everything (no depth test) and take the pointer through walls";
+		t.fields.push_back(MakeField("opacity", &Widget::opacity, "", "Opacity", 0.0f, 1.0f));
+		t.fields.back().tip = "Transparency of this widget AND everything under it (1 = opaque, 0 = invisible); multiplies down the hierarchy";
 		t.methods.push_back(MakeMethod("SetSize", &Widget::SetSize));
 		Reflect_SetMethodDoc("Widget", "SetSize", "", "w,h");
 	}

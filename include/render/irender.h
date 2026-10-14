@@ -290,6 +290,10 @@ struct NukeSpriteParams
 	int   clip = 0;              // 1 = clip screen sprites to clipRect
 	float clipRect[4] = { 0, 0, 0, 0 };  // {x0, y0, x1, y1} in the canvas's reference px, centre origin, +y up
 	int   overlay = 0;           // 1 = world quads draw after post with no depth test (a HUD through walls)
+	float weight = 0.0f;         // SDF: edge threshold shift (+ = bolder), distance units
+	float skew = 0.0f;           // italic: x offset per unit of height from the quad centre (0.2 = 11 deg)
+	float fill[2] = { 0.0f, 1.0f };          // {method 0 none / 1 horizontal / 2 vertical / 3 radial, amount 0..1} by uv
+	float fillUv[4] = { 0.0f, 0.0f, 1.0f, 1.0f };   // the sprite's uv region the fill is measured in
 };
 
 class iRender

@@ -226,7 +226,11 @@ extern "C" { NUKE_ABI_STAMP int nuke_build_debug = 0; }
 //       (width / height / mode moved to the base - same field names, worlds load unchanged; layout shift);
 //       World lays out / picks / draws any Widget under a canvas or as a world quad; iRender gained
 //       setSpriteParams (vtable END) + NukeSpriteParams (SDF text, clip rect); Camera::WorldToScreen.
-#define NUKE_ENGINE_ABI 61
+//   62: editor attach-on-drop + anchor write-back (2026-10-14). AssetCreator gained dropOnAtom (appended): the
+//       owning module attaches its asset to an atom on a browser drop (.lua -> ScriptComponent, .cs -> CSharpScript);
+//       RectAnchor gained its layout cache (lastCx/lastCy/lastW/lastH/laidOut, appended): anchors follow a moved
+//       element; World gained SubscribeContacts / UnsubscribeContacts (statics, no vtable change).
+#define NUKE_ENGINE_ABI 62
 extern "C" { NUKE_ABI_STAMP int nuke_engine_abi = NUKE_ENGINE_ABI; }
 
 namespace nuke {

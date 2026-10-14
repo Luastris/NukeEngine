@@ -11,6 +11,40 @@ static std::vector<EditorViewportOverlay>& Overlays() { static std::vector<Edito
 static std::map<std::string, std::string>& ToggleOwner()  { static std::map<std::string, std::string> m; return m; }
 static std::map<std::string, std::string>& OverlayOwner() { static std::map<std::string, std::string> m; return m; }
 static std::map<std::string, std::string>& CurveOwner()   { static std::map<std::string, std::string> m; return m; }
+static std::vector<EditorFieldButton>& FieldBtns() { static std::vector<EditorFieldButton> p; return p; }
+static std::map<std::string, std::string>& FieldBtnOwner() { static std::map<std::string, std::string> m; return m; }
+
+void RegisterFieldButton(const EditorFieldButton& b)
+{
+	if (b.id.empty() || b.typeName.empty() || b.field.empty() || !b.click) return;
+	FieldBtnOwner()[b.id] = RegisteringModule();
+	for (EditorFieldButton& e : FieldBtns())
+		if (e.id == b.id) { e = b; return; }
+	FieldBtns().push_back(b);
+}
+void UnregisterFieldButton(const std::string& id)
+{
+	FieldBtns().erase(std::remove_if(FieldBtns().begin(), FieldBtns().end(),
+	                  [&](const EditorFieldButton& e) { return e.id == id; }), FieldBtns().end());
+}
+const std::vector<EditorFieldButton>& FieldButtons() { return FieldBtns(); }
+
+static std::vector<EditorFieldWidget>& FieldWids() { static std::vector<EditorFieldWidget> p; return p; }
+static std::map<std::string, std::string>& FieldWidOwner() { static std::map<std::string, std::string> m; return m; }
+void RegisterFieldWidget(const EditorFieldWidget& w)
+{
+	if (w.id.empty() || w.typeName.empty() || w.field.empty() || !w.draw) return;
+	FieldWidOwner()[w.id] = RegisteringModule();
+	for (EditorFieldWidget& e : FieldWids())
+		if (e.id == w.id) { e = w; return; }
+	FieldWids().push_back(w);
+}
+void UnregisterFieldWidget(const std::string& id)
+{
+	FieldWids().erase(std::remove_if(FieldWids().begin(), FieldWids().end(),
+	                  [&](const EditorFieldWidget& e) { return e.id == id; }), FieldWids().end());
+}
+const std::vector<EditorFieldWidget>& FieldWidgets() { return FieldWids(); }
 
 void RegisterEditorToggle(const EditorToggle& t)
 {
@@ -75,6 +109,10 @@ void UnregisterEditorHooksOf(const std::string& moduleDll)
 	                 [&](const EditorViewportOverlay& e) { return owned(OverlayOwner(), e.id); }), Overlays().end());
 	Curves().erase(std::remove_if(Curves().begin(), Curves().end(),
 	               [&](const std::string& c) { return owned(CurveOwner(), c); }), Curves().end());
+	FieldBtns().erase(std::remove_if(FieldBtns().begin(), FieldBtns().end(),
+	                  [&](const EditorFieldButton& e) { return owned(FieldBtnOwner(), e.id); }), FieldBtns().end());
+	FieldWids().erase(std::remove_if(FieldWids().begin(), FieldWids().end(),
+	                  [&](const EditorFieldWidget& e) { return owned(FieldWidOwner(), e.id); }), FieldWids().end());
 }
 
 }  // namespace nuke

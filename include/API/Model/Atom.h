@@ -112,6 +112,11 @@ public:
 	[[nuke::func]] Atom* GetParent();
 
 	[[nuke::func]] void AddChild(Atom* newChild);
+	// Children for scripts (C++ walks `children`): direct ones by index in hierarchy order, the
+	// count, and the first descendant of a name at ANY depth (depth-first). Null when none.
+	[[nuke::func]] double GetChildCount();
+	[[nuke::func]] Atom*  GetChild(double index);
+	[[nuke::func]] Atom*  FindChild(const std::string& name);
 
     template <class T>
 	void Update() {

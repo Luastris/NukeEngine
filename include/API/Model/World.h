@@ -9,6 +9,7 @@
 #include <memory>
 #include <utility>
 #include <vector>
+#include <functional>   // ContactHandler
 #include <nlohmann/json_fwd.hpp>   // LoadFromJson (async load hands over a pre-parsed document)
 
 namespace nuke {
@@ -141,6 +142,12 @@ public:
 	// data and rebuild it only when something changed, never per frame.
 	static uint64_t HierarchyVersion();
 	static void     BumpHierarchy();
+	// Contact tap: every physics contact of any world, after the components' OnCollision* /
+	// OnTrigger* hooks ran (script subscriptions on atoms that carry no script). Game thread.
+	// point / normal / speed are the begin-phase data (zeros on exit). Returns a cancel id.
+	using ContactHandler = std::function<void(Atom* a, Atom* b, bool trigger, bool enter, const float point[3], const float normal[3], float speed)>;
+	static long long SubscribeContacts(ContactHandler fn);
+	static void      UnsubscribeContacts(long long id);
 
 private:
 	boost::recursive_mutex gameLock;

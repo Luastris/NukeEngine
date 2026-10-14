@@ -185,6 +185,24 @@ void Atom::AddChild(Atom* newChild) {
 	World::BumpHierarchy();
 }
 
+double Atom::GetChildCount() { return (double)children.size(); }
+
+Atom* Atom::GetChild(double index)
+{
+	long i = (long)index;
+	if (i < 0 || i >= (long)children.size()) return nullptr;
+	for (Atom* c : children) if (i-- == 0) return c;
+	return nullptr;
+}
+
+Atom* Atom::FindChild(const std::string& name)
+{
+	for (Atom* c : children) if (c && c->name == name) return c;
+	for (Atom* c : children)
+		if (Atom* f = c ? c->FindChild(name) : nullptr) return f;
+	return nullptr;
+}
+
 void Atom::Reset() {}
 void Atom::Pause() {}
 void Atom::Destroy()

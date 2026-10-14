@@ -7,6 +7,8 @@
 #include <vector>
 
 namespace nuke {
+class Atom;
+class Component;
 
 // A plugin-registered file-type descriptor. The plugin supplies only DATA (no file IO); the
 // editor creates files from it, picks icons, chooses syntax highlighting, and calls the
@@ -24,6 +26,10 @@ struct AssetCreator
 	std::string syntaxLanguage;       // highlighting id for the file editor, e.g. "lua"
 	// Optional: draw type-specific inspector UI for a selected file of this type.
 	std::function<void(const std::string& path)> inspector;
+	// Optional: the asset ATTACHES to an atom when dropped on one (hierarchy row, viewport hit,
+	// prefab editor) - a script becomes its component. `path` is content-relative with generic
+	// separators. Returns the component it added (null = nothing done). ABI: appended (abi 62).
+	std::function<Component*(Atom* atom, const std::string& path)> dropOnAtom;
 };
 
 NUKEENGINE_API void RegisterAssetCreator(const std::string& label, const std::string& ext,
