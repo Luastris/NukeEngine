@@ -18,6 +18,7 @@ struct ComponentIcon
 
 NUKEENGINE_API void RegisterComponentIcon(const ComponentIcon& desc);
 NUKEENGINE_API const std::vector<ComponentIcon>& ComponentIcons();
+NUKEENGINE_API void RegisterBuiltinComponentIcons();   // the engine declares the icons of its own components (AppInstance boot)
 
 }  // namespace nuke
 

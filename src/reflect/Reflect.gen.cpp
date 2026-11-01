@@ -9,6 +9,7 @@
 #include "API/Model/Audio.h"
 #include "API/Model/AudioListener.h"
 #include "API/Model/AudioSource.h"
+#include "API/Model/AudioVolume.h"
 #include "API/Model/BlendSpace.h"
 #include "API/Model/Camera.h"
 #include "API/Model/Canvas.h"
@@ -54,6 +55,7 @@
 #include "API/Model/RectAnchor.h"
 #include "API/Model/ReflectionProbe.h"
 #include "API/Model/Retarget.h"
+#include "API/Model/ReverbZone.h"
 #include "API/Model/Rigidbody.h"
 #include "API/Model/Rope.h"
 #include "API/Model/Screen.h"
@@ -373,6 +375,23 @@ bool NukeReflectInit() {
 		t.methods.push_back(MakeMethod("GetNote", &Audio::GetNote));
 		t.methods.push_back(MakeMethod("GetNoteStrength", &Audio::GetNoteStrength));
 		t.methods.push_back(MakeMethod("GetBeatPhase", &Audio::GetBeatPhase));
+		t.methods.push_back(MakeMethod("LoadMixer", &Audio::LoadMixer));
+		Reflect_SetMethodDoc("Audio", "LoadMixer", "Mixer (D1): the project's .numix - buses by name, levels for meters, the spatial mode.", "contentRel");
+		t.methods.push_back(MakeMethod("MixerPath", &Audio::MixerPath));
+		t.methods.push_back(MakeMethod("Bus", &Audio::Bus));
+		Reflect_SetMethodDoc("Audio", "Bus", "", "name");
+		t.methods.push_back(MakeMethod("BusCount", &Audio::BusCount));
+		t.methods.push_back(MakeMethod("BusName", &Audio::BusName));
+		Reflect_SetMethodDoc("Audio", "BusName", "", "bus");
+		t.methods.push_back(MakeMethod("BusLevel", &Audio::BusLevel));
+		Reflect_SetMethodDoc("Audio", "BusLevel", "", "bus,channel");
+		t.methods.push_back(MakeMethod("SetBusSend", &Audio::SetBusSend));
+		Reflect_SetMethodDoc("Audio", "SetBusSend", "", "bus,target,level");
+		t.methods.push_back(MakeMethod("GetBusSend", &Audio::GetBusSend));
+		Reflect_SetMethodDoc("Audio", "GetBusSend", "", "bus,target");
+		t.methods.push_back(MakeMethod("SetSpatialMode", &Audio::SetSpatialMode));
+		Reflect_SetMethodDoc("Audio", "SetSpatialMode", "", "mode");
+		t.methods.push_back(MakeMethod("GetSpatialMode", &Audio::GetSpatialMode));
 	}
 	{
 		TypeInfo& t = TypeOf<AudioListener>();
@@ -385,7 +404,8 @@ bool NukeReflectInit() {
 		t.base = "Component";
 		t.category = "Audio";
 		t.fields.push_back(MakeField("clip", &AudioSource::clip, "audio", "Clip"));
-		t.fields.push_back(MakeField("bus", &AudioSource::bus, "", "Bus", 0.0f, 0.0f, "Music,SFX"));
+		t.fields.push_back(MakeField("bus", &AudioSource::bus, "", "Bus"));
+		t.fields.back().widget = "audiobus";
 		t.fields.push_back(MakeField("volume", &AudioSource::volume, "", "Volume", 0.0f, 2.0f));
 		t.fields.push_back(MakeField("pitch", &AudioSource::pitch, "", "Pitch", 0.1f, 3.0f));
 		t.fields.push_back(MakeField("loop", &AudioSource::loop, "", "Loop"));
@@ -394,13 +414,37 @@ bool NukeReflectInit() {
 		t.fields.push_back(MakeField("minDist", &AudioSource::minDist, "", "Min Distance"));
 		t.fields.push_back(MakeField("maxDist", &AudioSource::maxDist, "", "Max Distance"));
 		t.fields.push_back(MakeField("decode", &AudioSource::decode, "", "Decode", 0.0f, 0.0f, "Auto,Memory,Stream"));
+		t.fields.push_back(MakeField("occlusion", &AudioSource::occlusion, "", "Occlusion"));
 		t.methods.push_back(MakeMethod("Play", &AudioSource::Play));
 		Reflect_SetMethodDoc("AudioSource", "Play", "Script/game control (auto-bound via component reflection).", "");
 		t.methods.push_back(MakeMethod("Stop", &AudioSource::Stop));
 		t.methods.push_back(MakeMethod("SetPaused", &AudioSource::SetPaused));
 		Reflect_SetMethodDoc("AudioSource", "SetPaused", "", "paused");
 		t.methods.push_back(MakeMethod("IsPlaying", &AudioSource::IsPlaying));
+		t.methods.push_back(MakeMethod("Occlusion", &AudioSource::Occlusion));
 		t.create = []() -> void* { return new AudioSource(); };
+	}
+	{
+		TypeInfo& t = TypeOf<AudioVolume>();
+		t.base = "Component";
+		t.category = "Audio";
+		t.fields.push_back(MakeField("shape", &AudioVolume::shape, "", "Shape", 0.0f, 0.0f, "Sphere,Box"));
+		t.fields.push_back(MakeField("radius", &AudioVolume::radius, "", "Radius"));
+		t.fields.push_back(MakeField("halfExtents", &AudioVolume::halfExtents, "", "Half Extents"));
+		t.fields.push_back(MakeField("priority", &AudioVolume::priority, "", "Priority"));
+		t.fields.back().tip = "Higher wins where volumes overlap (blended in ascending order).";
+		t.fields.push_back(MakeField("blendDistance", &AudioVolume::blendDistance, "", "Blend Distance"));
+		t.fields.back().tip = "Metres outside the shape over which the influence fades to nothing.";
+		t.fields.push_back(MakeField("weight", &AudioVolume::weight, "", "Weight", 0.0f, 1.0f));
+		t.fields.back().tip = "Full influence inside the shape.";
+		t.fields.push_back(MakeField("mixer", &AudioVolume::mixer, "file:.numix", "Mixer"));
+		t.fields.back().tip = "Mixer snapshot: inside, the live mix blends toward this asset's bus volumes, sends and effect parameters (buses matched by name, effects by type and position); empty = none";
+		t.fields.push_back(MakeField("bus", &AudioVolume::bus, "", "Effects Bus"));
+		t.fields.back().tip = "The bus this volume's own effects ride on while the listener is inside";
+		t.fields.back().widget = "audiobus";
+		t.fields.push_back(MakeField("effectsData", &AudioVolume::effectsData));
+		t.fields.back().hidden = true;
+		t.create = []() -> void* { return new AudioVolume(); };
 	}
 	{
 		TypeInfo& t = TypeOf<BlendSpace>();
@@ -1667,6 +1711,32 @@ bool NukeReflectInit() {
 		t.base = "Object";
 		t.methods.push_back(MakeMethod("Bake", &Retargeter::Bake));
 		Reflect_SetMethodDoc("Retargeter", "Bake", "clipRef = guid or name; dstSkelGuid = target .nuskel; outContentRel = content-relative .nuanim path to write. Returns the new clip's guid (\"\" on failure). The baked clip is registered in the ResDB immediately.", "clipRef,dstSkelGuid,outContentRel");
+	}
+	{
+		TypeInfo& t = TypeOf<ReverbZone>();
+		t.base = "Component";
+		t.category = "Audio";
+		t.fields.push_back(MakeField("bus", &ReverbZone::bus, "", "Bus"));
+		t.fields.back().tip = "The bus whose reverb effect this zone drives; -1 = every reverb effect in the mix";
+		t.fields.back().widget = "audiobus";
+		t.fields.push_back(MakeField("shape", &ReverbZone::shape, "", "Shape", 0.0f, 0.0f, "Sphere,Box"));
+		t.fields.push_back(MakeField("radius", &ReverbZone::radius, "", "Radius"));
+		t.fields.push_back(MakeField("halfExtents", &ReverbZone::halfExtents, "", "Half Extents"));
+		t.fields.push_back(MakeField("priority", &ReverbZone::priority, "", "Priority"));
+		t.fields.back().tip = "Higher wins where zones overlap (blended in ascending order).";
+		t.fields.push_back(MakeField("blendDistance", &ReverbZone::blendDistance, "", "Blend Distance"));
+		t.fields.back().tip = "Metres outside the shape over which the room fades back out.";
+		t.fields.push_back(MakeField("weight", &ReverbZone::weight, "", "Weight", 0.0f, 1.0f));
+		t.fields.push_back(MakeField("roomSize", &ReverbZone::roomSize, "", "Room Size", 0.0f, 1.0f));
+		t.fields.back().tip = "Decay length: 0 closet, 1 cathedral";
+		t.fields.push_back(MakeField("damping", &ReverbZone::damping, "", "Damping", 0.0f, 1.0f));
+		t.fields.back().tip = "High-frequency loss per reflection";
+		t.fields.push_back(MakeField("wet", &ReverbZone::wet, "", "Wet", 0.0f, 1.0f));
+		t.fields.back().tip = "The reverb's level while the listener is in this zone";
+		t.fields.push_back(MakeField("width", &ReverbZone::width, "", "Width", 0.0f, 1.0f));
+		t.fields.push_back(MakeField("preDelay", &ReverbZone::preDelay, "", "Pre-Delay", 0.0f, 200.0f));
+		t.fields.back().tip = "ms before the first reflection (room size cue)";
+		t.create = []() -> void* { return new ReverbZone(); };
 	}
 	{
 		TypeInfo& t = TypeOf<Rigidbody>();

@@ -8,6 +8,7 @@
 #include <string>
 
 namespace nuke {
+class iAudio;
 
 // Plays an audio file, optionally at the atom's position. Thin driver over the audio service;
 // the clip is a plain ogg/wav/mp3/flac in project content, by content-relative path.
@@ -17,8 +18,9 @@ class NUKEENGINE_API AudioSource : public Component
 	NUKE_CLASS(AudioSource, Component, "Audio")
 public:
 	[[nuke::prop(asset="audio", label="Clip")]]        std::string clip;        // content-relative path
-	enum Bus : int { Music = 0, SFX = 1 };
-	[[nuke::prop(label="Bus", enum="Music,SFX")]]      Bus   bus = SFX;
+	// A mixer bus by index (0 Music, 1 SFX, 2 Preview, then the project's own); the inspector
+	// lists the live mixer's bus names. Scripts: Audio.Bus("Ambient").
+	[[nuke::prop(label="Bus", widget="audiobus")]]     int   bus = 1;
 	[[nuke::prop(label="Volume", min=0, max=2)]]       float volume = 1.0f;
 	[[nuke::prop(label="Pitch",  min=0.1, max=3)]]     float pitch = 1.0f;
 	[[nuke::prop(label="Loop")]]                       bool  loop = false;
@@ -28,12 +30,16 @@ public:
 	[[nuke::prop(label="Max Distance", min=0.1)]]      float maxDist = 50.0f;
 	enum DecodeMode : int { Auto = 0, Memory = 1, Stream = 2 };
 	[[nuke::prop(label="Decode", enum="Auto,Memory,Stream")]] DecodeMode decode = Auto;
+	// Spatial voices: geometry between the listener and the source (physics raycast, amortized
+	// over frames) muffles and attenuates the voice, smoothly.
+	[[nuke::prop(label="Occlusion")]]                  bool  occlusion = true;
 
 	// Script/game control (auto-bound via component reflection).
 	[[nuke::func]] void Play();
 	[[nuke::func]] void Stop();
 	[[nuke::func]] void SetPaused(bool paused);
 	[[nuke::func]] bool IsPlaying();
+	[[nuke::func]] double Occlusion();   // the current smoothed occlusion 0..1 (spatial voices)
 
 	uint64_t voice = 0;   // live voice handle (0 = none); runtime only, not serialized
 
@@ -49,6 +55,13 @@ public:
 private:
 	bool started = false;        // playOnStart consumed (rearmed on Reset/stop)
 	float lastVolume = -1.0f, lastPitch = -1.0f;   // push live inspector edits to the voice
+	float occl = 0.0f, occlTarget = 0.0f, occlSent = -1.0f;   // D3: raycast target, smoothed, last pushed
+	// The voice follows the GAME clock: pitch x (Game.TimeScale x the TimeVolume scale), paused while
+	// that product is 0 (a stopped world is silent, not a 0.01-pitch drone); the script's own pause
+	// (SetPaused) is kept apart so time resuming never un-pauses what a script paused.
+	bool userPaused = false, timeFrozen = false;
+	static double ClockScale();        // Game.TimeScale (play mode) x Time::LocalScale()
+	void PushPause(iAudio* a);         // userPaused || timeFrozen -> the voice
 };
 
 }  // namespace nuke

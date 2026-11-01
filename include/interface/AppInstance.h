@@ -68,6 +68,9 @@ public:
 	// Resolve a content path: absolute -> as-is; else prefer <contentRoot>/path, falling back
 	// to a cwd-relative path if that exists.
 	std::string ResolveContent(const std::string& path) const;
+	// The project's audio mixer asset (content-relative .numix; "audioMixer" in the .nuproj).
+	// Missing file = the built-in Music / SFX / Preview layout. ABI: appended (abi 63).
+	std::string audioMixerPath;   // the project's .numix (content-relative; "" = built-in defaults)
 
 	// --- World load/save. Paths are relative to the project content root (ResolveContent).
 	std::string currentWorldPath;                     // content-relative path of the open world ("" = unsaved)

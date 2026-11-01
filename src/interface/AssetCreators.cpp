@@ -1,6 +1,7 @@
 #include "interface/AssetCreators.h"
 #include "interface/IconsFileTypes.h"
 #include "interface/Modular.h"   // RegisteringModule: entries remember their module
+#include "API/Model/AudioMixer.h"   // the .numix creator's template = the default mixer
 #include <map>
 #include <algorithm>
 #include <cctype>
@@ -77,7 +78,7 @@ void RegisterBuiltinFileIcons()
 		{ ".nuinput",   ICON_FT_INPUT },       { ".nupak",     ICON_FT_PACKAGE },
 		{ ".nucursor",  ICON_FT_IMAGE },       { ".nupair",    ICON_FT_ANIM },
 		{ ".numod",     ICON_FT_MOD },         { ".nusave",    ICON_FT_SAVE },
-		{ ".nuproj",    ICON_FT_PROJECT },
+		{ ".nuproj",    ICON_FT_PROJECT },     { ".numix",     ICON_FT_AUDIO },
 		// media the engine imports natively
 		{ ".png", ICON_FT_IMAGE }, { ".jpg", ICON_FT_IMAGE }, { ".jpeg", ICON_FT_IMAGE },
 		{ ".tga", ICON_FT_IMAGE }, { ".bmp", ICON_FT_IMAGE },  { ".ico",  ICON_FT_IMAGE },
@@ -126,6 +127,18 @@ void RegisterBuiltinFileIcons()
 			"      { \"action\": \"Steer\", \"controls\": [\"Key.A\"], \"scale\": -1, \"phase\": 1 },\n"
 			"      { \"action\": \"Brake\", \"controls\": [\"Key.Space\"], \"scale\": 1, \"phase\": 1 },\n"
 			"      { \"action\": \"Handbrake\", \"controls\": [\"Key.C\"], \"scale\": 1, \"phase\": 1 }\n    ] }\n  ]\n}\n";
+		RegisterAssetCreator(c);
+	}
+	// Built-in creator: audio mixer asset (buses / effect chains / reverb) - the built-in default layout.
+	{
+		AssetCreator c;
+		c.label = "Audio Mixer";
+		c.ext = ".numix";
+		c.baseName = "NewMixer";
+		c.category = "Audio";
+		c.icon = ICON_FT_AUDIO;
+		c.textEditable = true;
+		c.content = AudioMixer::Default().SaveToString();
 		RegisterAssetCreator(c);
 	}
 	// Built-in creator: paired-animation asset (two roles in one synchronized interaction).

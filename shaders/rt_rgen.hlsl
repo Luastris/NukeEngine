@@ -72,7 +72,11 @@ void main()
         const float dist = length(wpos - g_RTCam.xyz);
         lobeRough = clamp(0.05 + (1.0 - exp(-dist / 260.0)) * 0.13, 0.05, 0.3);   // WaterReflRough (nukewater_slope.hlsl)
     }
-    RayDesc ray; ray.Origin = wpos + N * 0.08 + R * 0.05; ray.Direction = R; ray.TMin = 0.02; ray.TMax = maxD;
+    // The leg starts a hair off the surface ALONG ITS NORMAL only. The old push along R itself
+    // (5 cm) carried the origin of a downward leg through the floor a mirror stands on: those rays
+    // missed the floor and returned the sky - a bright line along every contact edge.
+    if (dot(R, N) < 0.02) R = normalize(R + N * (0.02 - dot(R, N)));   // never into the reflector's own surface
+    RayDesc ray; ray.Origin = wpos + N * 0.02; ray.Direction = R; ray.TMin = 0.0; ray.TMax = maxD;
     RTPayload p = RTNewPayload(1u, maxD, lobeRough, isWater ? RT_PAY_SURFACE : 0u);
     TraceRay(g_TLAS, RAY_FLAG_NONE, RT_REFLECT_MASK, 0, 1, 0, ray, p);   // only reflection-visible instances
     RTCompose(p);   // sprites crossed on the way, over the hit

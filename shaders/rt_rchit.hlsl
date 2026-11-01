@@ -39,7 +39,11 @@ void main(inout RTPayload p, in BuiltInTriangleIntersectionAttributes attr)
     if (RTUnderEye(hitPos)) { env = (g_RTWaterCau1.y > 0.5) ? RTUnderFog(float3(0.0, 0.0, 0.0), 1.0e4, hitPos) : RTUnderAmb(hitPos); traced = env; }
     if (p.depth < (uint)g_RTParams.z)
     {
-        RayDesc ray; ray.Origin = hitPos + hitN * 0.08 + R * 0.05; ray.Direction = R; ray.TMin = 0.02;
+        // Off the GEOMETRIC surface along its normal only (see rt_rgen: a push along R dived
+        // through the floor at contact edges); a normal-mapped R that points into the face is lifted.
+        float3 gN = geomN; if (dot(gN, wdir) > 0.0) gN = -gN;
+        if (dot(R, gN) < 0.02) R = normalize(R + gN * (0.02 - dot(R, gN)));
+        RayDesc ray; ray.Origin = hitPos + gN * 0.02; ray.Direction = R; ray.TMin = 0.0;
         ray.TMax = (g_RTParams.y > 0.5) ? g_RTParams.y : 1000.0;
         RTPayload p2 = RTNewPayload(p.depth + 1u, ray.TMax, 0.0, 0u);
         TraceRay(g_TLAS, RAY_FLAG_NONE, RT_REFLECT_MASK, 0, 1, 0, ray, p2);   // only reflection-visible instances

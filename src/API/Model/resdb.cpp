@@ -16,6 +16,7 @@
 #include "API/Model/NukeRig.h"  // C1 canonical rig + rename presets (builtins)
 #include "render/irender.h"
 #include "interface/AppInstance.h"   // GuidForContentPath: content root + ResolveContent
+#include "API/Model/AudioVolume.h"    // .numix changed on disk -> the volumes' snapshot cache
 #include "input/Input.h"         // .nuinput content -> gameplay input system
 #include "API/Model/Loc.h"       // localization/<lang>.json content -> string tables
 #include <boost/filesystem.hpp>
@@ -841,6 +842,7 @@ void ResDB::OnFileChanged(const std::string& abs, int kind, bool isDir)
 	}
 	std::string ext = bfs::path(abs).extension().string();
 	for (char& ch : ext) ch = (char)tolower((unsigned char)ch);
+	if (ext == ".numix") { AudioVolume::InvalidateSnapshots(); return; }   // a mixer snapshot edited / saved / removed: the volumes reload it
 	if (kind == 1)   // removed
 	{
 		if (LocTablePath(bfs::path(abs))) { Loc::RemoveTable(bfs::path(abs).stem().string()); return; }

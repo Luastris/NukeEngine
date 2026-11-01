@@ -230,7 +230,18 @@ extern "C" { NUKE_ABI_STAMP int nuke_build_debug = 0; }
 //       owning module attaches its asset to an atom on a browser drop (.lua -> ScriptComponent, .cs -> CSharpScript);
 //       RectAnchor gained its layout cache (lastCx/lastCy/lastW/lastH/laidOut, appended): anchors follow a moved
 //       element; World gained SubscribeContacts / UnsubscribeContacts (statics, no vtable change).
-#define NUKE_ENGINE_ABI 62
+//   63: audio DSP (2026-10-14, D1-D4). iAudio gained the mixer seam at the vtable END (effectTypeCount /
+//       effectTypeInfo / effectParamInfo / setMixer / mixerBusCount / setBusEffects / setBusReverbSend / setReverb /
+//       busLevel / setVoiceOcclusion / setSpatialMode / getSpatialMode) + the PODs NukeAudioParamInfo /
+//       NukeAudioEffectInfo / NukeAudioEffect / NukeAudioBusDesc; engine AudioMixer (.numix asset) + ReverbZone
+//       component; AudioSource.bus is an int (any mixer bus) + Occlusion; AppInstance.audioMixerPath (appended).
+//       2026-10-18, same cycle: the fixed aux reverb went - generic SENDS (iAudio::setBusSends +
+//       NukeAudioSend, setBusEffectParams; setBusReverbSend / setReverb stay as no-op slots); .numix v2
+//       (buses carry "sends", the reverb is an effect in an aux bus's chain); ReverbZone.bus (appended).
+//       2026-11-01, same cycle: AudioSource gained userPaused / timeFrozen + ClockScale / PushPause (appended) - a
+//       voice follows the game clock (pitch x Game.TimeScale x the TimeVolume scale, paused at 0, the script's
+//       SetPaused kept apart); ReverbZone brings its own reverb to a bus whose chain has none.
+#define NUKE_ENGINE_ABI 63
 extern "C" { NUKE_ABI_STAMP int nuke_engine_abi = NUKE_ENGINE_ABI; }
 
 namespace nuke {

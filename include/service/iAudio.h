@@ -38,6 +38,44 @@ struct NukeAudioAnalysis
 	float bpm       = 0.0f;     // rough tempo estimate (0 = unknown yet)
 };
 
+// ---- D1 mixer PODs (engine abi 63) -------------------------------------------------------
+// An effect parameter as the backend describes it (the mixer panel draws from this schema).
+struct NukeAudioParamInfo
+{
+	char  name[24];
+	float min = 0.0f, max = 1.0f, def = 0.0f;
+	int   unit = 0;   // 0 linear, 1 dB, 2 Hz, 3 ms, 4 ratio
+	float neutral = 0.0f;   // the value at which the effect passes the signal unchanged (audio volumes fade effects in from it)
+};
+struct NukeAudioEffectInfo
+{
+	char type[16];    // "eq", "compressor", "limiter", "delay", "reverb", "lowpass", "highpass", "gain"
+	char label[32];
+	int  paramCount = 0;
+};
+// One effect instance on a bus chain.
+struct NukeAudioEffect
+{
+	char  type[16] = { 0 };
+	int   enabled = 1;
+	float p[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+};
+// One bus of the mixer layout; index = NukeVoiceDesc::bus (0 Music, 1 SFX, 2 Preview by default).
+struct NukeAudioBusDesc
+{
+	char  name[32] = { 0 };
+	int   parent = -1;          // another bus's index, -1 = the master
+	float volume = 1.0f;
+	float reverbSend = 0.0f;    // unused since the generic sends (kept for layout)
+};
+// One send of a bus: a parallel route into another bus (an aux return is an ordinary bus whose
+// chain holds the effect - reverb, delay, ...), at `level` (0..1).
+struct NukeAudioSend
+{
+	int   bus = -1;
+	float level = 0.0f;
+};
+
 // The audio service contract: the active backend implements it and hands it to the loader via
 // NUKEModule::queryService(). Voices are opaque uint64 handles (0 = invalid).
 // Threading: called only from the game/render thread; the backend's device callback stays internal.
@@ -101,6 +139,35 @@ public:
 	// sample rate, is the stream's PLAYBACK CLOCK (video sync).
 	virtual uint64_t streamQueued(uint64_t voice) { return 0; }
 	virtual void     closeStream(uint64_t voice) { stop(voice); }
+
+	// ---- D1 mixer: dynamic buses, per-bus effect chains, metering (engine abi 63) ----------
+	// The backend's effect schema: types and their parameters (the mixer panel is built from it).
+	virtual int  effectTypeCount() { return 0; }
+	virtual bool effectTypeInfo(int index, NukeAudioEffectInfo& out) { return false; }
+	virtual bool effectParamInfo(const char* type, int param, NukeAudioParamInfo& out) { return false; }
+	// Replace the bus layout. Buses keep their INDEX identity: a voice on bus i plays on through a
+	// re-apply; buses past `count` stop their voices. At least 3 buses (bus 2 = Preview by contract).
+	virtual bool setMixer(const NukeAudioBusDesc* buses, int count) { return false; }
+	virtual int  mixerBusCount() { return 3; }
+	// The effect chain of a bus (-1 = the master chain), replaced as a whole.
+	virtual bool setBusEffects(int bus, const NukeAudioEffect* fx, int count) { return false; }
+	// Superseded by setBusSends / a reverb effect in an aux bus's chain (vtable slots kept; no-ops).
+	virtual void setBusReverbSend(int bus, float level) {}
+	virtual void setReverb(const NukeAudioEffect& reverb) {}
+	// Peak |sample| of the last mixed block: bus >= 0, -1 = master.
+	virtual float busLevel(int bus, int channel) { return 0.0f; }
+	// ---- D3 occlusion: 0 = clear, 1 = behind geometry (lowpass + attenuation, smoothed) ------
+	virtual void setVoiceOcclusion(uint64_t voice, float amount) {}
+	// ---- D4 spatial: 0 = the backend's panning spatializer, 1 = binaural (structural HRTF model);
+	// applies to voices started after the call.
+	virtual void setSpatialMode(int mode) {}
+	virtual int  getSpatialMode() { return 0; }
+	// ---- Sends (same ABI cycle): a bus's parallel routes into other buses, replaced as a whole.
+	// Targets that would loop back (through parents or sends) are dropped by the backend.
+	virtual bool setBusSends(int bus, const NukeAudioSend* sends, int count) { return false; }
+	// Live parameters of one effect of a bus's chain (-1 = master; index = position in the chain
+	// as pushed by setBusEffects) without rebuilding the chain - reverb zones drive rooms with it.
+	virtual bool setBusEffectParams(int bus, int index, const float p[8]) { return false; }
 };
 
 }  // namespace nuke

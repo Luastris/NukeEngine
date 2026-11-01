@@ -2,6 +2,7 @@
 #define BOOST_CHRONO_HEADER_ONLY
 #include "interface/AppInstance.h"
 #include "interface/AssetCreators.h"
+#include "interface/ComponentIcons.h"   // RegisterBuiltinComponentIcons
 #include "API/Model/World.h"
 #include "API/Model/JsonDoc.h"
 #include "API/Model/Migrations.h"
@@ -489,6 +490,7 @@ AppInstance::AppInstance()
 	config = Config::getSingleton();
 	
 	RegisterBuiltinFileIcons();   // the engine declares the icons of its own file types
+	RegisterBuiltinComponentIcons();   // ... and of its own mesh-less components
 	if (!menuStrip)
 		menuStrip = new MenuStrip();
 	if (!editorWindows)

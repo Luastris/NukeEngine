@@ -57,6 +57,9 @@
 #include "service/iAudio.h"
 #include "API/Model/Audio.h"
 #include "API/Model/AudioListener.h"
+#include "API/Model/AudioMixer.h"
+#include "API/Model/ReverbZone.h"
+#include "API/Model/AudioVolume.h"
 #include <cmath>
 #include <cstdlib>   // getenv (NUKE_BODY_DEBUG)
 #include <map>
@@ -2508,6 +2511,27 @@ static void EmitSelectionGizmos(Atom* a)
 		}
 	}
 
+	// Audio volumes: the same bounds (+ the blend band, dim) as the time / post-fx volumes.
+	auto audioBounds = [&](int shape, float radius, const Vector3& halfExtents, float blend, const Color& c)
+	{
+		const Vector3 scl = t.globalScale();
+		if (shape == 0)
+		{
+			DebugDraw::WireSphere(pos, ScaleRadius(radius, scl), c);
+			if (blend > 0.0f) DebugDraw::WireSphere(pos, ScaleRadius(radius, scl) + blend, Color(c.r, c.g, c.b, 0.35));
+		}
+		else
+		{
+			const Vector3 he = ScaleExtents(halfExtents, scl);
+			DebugDraw::WireBox(pos, he, rot, c);
+			if (blend > 0.0f) DebugDraw::WireBox(pos, Vector3(he.x + blend, he.y + blend, he.z + blend), rot, Color(c.r, c.g, c.b, 0.35));
+		}
+	};
+	if (ReverbZone* rz = a->GetComponent<ReverbZone>())
+		audioBounds(rz->shape, rz->radius, rz->halfExtents, rz->blendDistance, Color(0.3, 0.75, 1.0, 1.0));    // reverb zones: sky blue
+	if (AudioVolume* av = a->GetComponent<AudioVolume>())
+		audioBounds(av->shape, av->radius, av->halfExtents, av->blendDistance, Color(0.3, 1.0, 0.55, 1.0));    // audio volumes: green
+
 	if (WindZone* wz = a->GetComponent<WindZone>())
 	{
 		const Color c(0.35, 0.9, 0.75, 1.0);   // wind zones: teal bounds + direction/radial arrows
@@ -2555,6 +2579,180 @@ static Shader* UpscaleStageShader()
 	for (Shader* sh : ResDB::getSingleton()->shaders)
 		if (sh && sh->isPost && sh->rendererHandle && sh->name == "upscale") return sh;
 	return nullptr;
+}
+
+// ---- the live mix: project mixer + audio volumes + reverb zones around the listener ----------
+// Every frame the effective bus volumes, sends and effect parameters are derived from the project
+// mixer, then the active AudioVolumes blend over them in ascending priority (a mixer snapshot:
+// matching buses / sends / effects; the volume's own effects appended to its bus, faded in from
+// each parameter's neutral value) and the ReverbZones over the reverb effects. Only what differs
+// from the last push reaches the backend; a whole-mixer apply (panel, LoadMixer) resets the cache.
+namespace {
+struct BusPush
+{
+	float volume = -1.0f;
+	std::vector<NukeAudioSend> sends;
+	std::vector<std::vector<float>> params;   // per effect (base + appended), 8 each
+	std::string sig;                           // the appended effects' identity (chain rebuilt when it changes)
+	bool pushedSends = false;
+};
+std::vector<BusPush> gMixPush;
+unsigned gMixApply = ~0u;
+NukeAudioEffect MixPod(const AudioMixer::Effect& e)
+{
+	NukeAudioEffect o;
+	std::strncpy(o.type, e.type.c_str(), sizeof(o.type) - 1); o.type[sizeof(o.type) - 1] = 0;
+	o.enabled = e.enabled ? 1 : 0;
+	std::memcpy(o.p, e.p, sizeof(o.p));
+	return o;
+}
+const float* NeutralOf(iAudio* au, const std::string& type)
+{
+	static std::map<std::string, std::vector<float>> cache;
+	auto it = cache.find(type);
+	if (it == cache.end())
+	{
+		std::vector<float> n(8, 0.0f);
+		NukeAudioParamInfo pi{};
+		for (int p = 0; p < 8 && au->effectParamInfo(type.c_str(), p, pi); ++p) n[p] = pi.neutral;
+		it = cache.emplace(type, n).first;
+	}
+	return it->second.data();
+}
+}  // namespace
+
+static void AudioMixDriver(iAudio* au, const Vector3& lisPos, bool auxiliary)
+{
+	const AudioMixer& mix = AudioMixer::Current();
+	const int nb = (int)mix.buses.size();
+	if (AudioMixer::ApplyCount() != gMixApply || (int)gMixPush.size() != nb + 1) { gMixApply = AudioMixer::ApplyCount(); gMixPush.assign(nb + 1, BusPush()); }   // + the master (slot nb)
+	auto liveAtom = [](Atom* a) { bool live = true; for (; a && live; a = a->parent) live = a->enabled; return live; };
+	std::vector<std::pair<AudioVolume*, float>> vols;
+	std::vector<std::pair<ReverbZone*, float>> zones;
+	if (!auxiliary)
+	{
+		for (AudioVolume* v : AudioVolume::All())
+			if (v && v->enabled && v->atom && liveAtom(v->atom)) { const float w = v->WeightAt(lisPos); if (w > 0.0005f) vols.emplace_back(v, w); }
+		for (ReverbZone* z : ReverbZone::All())
+			if (z && z->enabled && z->atom && liveAtom(z->atom)) { const float w = z->WeightAt(lisPos); if (w > 0.0005f) zones.emplace_back(z, w); }
+	}
+	std::stable_sort(vols.begin(), vols.end(), [](const auto& a, const auto& b) { return a.first->priority < b.first->priority; });
+	std::stable_sort(zones.begin(), zones.end(), [](const auto& a, const auto& b) { return a.first->priority < b.first->priority; });
+	// One bus (bi >= 0) or the master (bi = -1): the project's base, the snapshots blended over it
+	// (volume, sends, the params of the effects both chains share by position + type; a snapshot's
+	// OTHER effects / sends join faded in from neutral / 0), the reverb zones, the volumes' own effects.
+	auto blend = [&](int bi, const AudioMixer::Bus& b)
+	{
+		const bool master = bi < 0;
+		float vol = b.volume;
+		std::vector<std::pair<std::string, float>> sends; for (const AudioMixer::Send& s : b.sends) sends.emplace_back(s.bus, s.level);
+		std::vector<std::vector<float>> params; for (const AudioMixer::Effect& e : b.effects) params.emplace_back(e.p, e.p + 8);
+		std::vector<AudioMixer::Effect> appended; std::string sig;
+		// mixer snapshots
+		for (auto& vw : vols)
+		{
+			const AudioMixer* snap = vw.first->Snapshot();
+			if (!snap) continue;
+			AudioMixer::Bus smaster; const AudioMixer::Bus* sb = nullptr;
+			if (master) { smaster.volume = snap->masterVolume; smaster.effects = snap->master; sb = &smaster; }
+			else { const int si = snap->BusIndex(b.name); if (si < 0) continue; sb = &snap->buses[si]; }
+			const float w = vw.second;
+			vol += (sb->volume - vol) * w;
+			for (const AudioMixer::Send& ss : sb->sends)
+			{
+				bool have = false;
+				for (auto& s : sends) if (s.first == ss.bus) { s.second += (ss.level - s.second) * w; have = true; break; }
+				if (!have) sends.emplace_back(ss.bus, ss.level * w);   // only in the snapshot: faded in from 0
+			}
+			size_t i = 0;
+			for (; i < params.size() && i < sb->effects.size() && sb->effects[i].type == b.effects[i].type; ++i)
+				for (int p = 0; p < 8; ++p) params[i][p] += (sb->effects[i].p[p] - params[i][p]) * w;
+			for (size_t k = i; k < sb->effects.size(); ++k)   // the snapshot's own effects: appended, from neutral
+			{
+				const AudioMixer::Effect& e = sb->effects[k];
+				if (!e.enabled || e.type.empty()) continue;
+				AudioMixer::Effect f = e;
+				const float* n = NeutralOf(au, e.type);
+				for (int p = 0; p < 8; ++p) f.p[p] = n[p] + (e.p[p] - n[p]) * w;
+				appended.push_back(f);
+				sig += "snap:" + std::to_string((unsigned long long)vw.first->atom->id.id) + ':' + std::to_string(k) + ':' + e.type + ';';
+			}
+		}
+		// reverb zones: the first reverb effect's room (a zone with no bus drives every reverb in the mix)
+		const int ri = mix.EffectIndex(bi, "reverb");
+		if (ri >= 0)
+			for (auto& zw : zones)
+			{
+				if (zw.first->bus >= 0 && zw.first->bus != bi) continue;
+				const float w = zw.second;
+				const float v[5] = { zw.first->roomSize, zw.first->damping, zw.first->wet, zw.first->width, zw.first->preDelay };
+				const int   idx[5] = { 0, 1, 2, 4, 5 };
+				for (int i = 0; i < 5; ++i) params[ri][idx[i]] += (v[i] - params[ri][idx[i]]) * w;
+			}
+		// the volumes' own effects on this bus, faded in from neutral
+		for (auto& vw : vols)
+		{
+			if (master || vw.first->bus != bi) continue;
+			vw.first->EnsureParsed();
+			for (size_t k = 0; k < vw.first->effects.size(); ++k)
+			{
+				const AudioMixer::Effect& e = vw.first->effects[k];
+				if (!e.enabled || e.type.empty()) continue;
+				AudioMixer::Effect f = e;
+				const float* n = NeutralOf(au, e.type);
+				for (int p = 0; p < 8; ++p) f.p[p] = n[p] + (e.p[p] - n[p]) * vw.second;
+				appended.push_back(f);
+				sig += std::to_string((unsigned long long)vw.first->atom->id.id) + ':' + std::to_string(k) + ':' + e.type + ';';
+			}
+		}
+		// A bus with NO reverb in its chain: the zones bring their own (appended, wet 0 = silent
+		// outside every zone, so the chain stays put and only the room parameters move).
+		if (!master && ri < 0 && b.name != "Preview")
+		{
+			bool owned = false;
+			for (ReverbZone* z : ReverbZone::All())
+				if (z && z->enabled && z->atom && (z->bus < 0 || z->bus == bi)) { owned = true; break; }
+			if (owned)
+			{
+				AudioMixer::Effect f; f.type = "reverb"; f.enabled = true;
+				const float* n = NeutralOf(au, "reverb");
+				for (int p = 0; p < 8; ++p) f.p[p] = n[p];
+				for (auto& zw : zones)
+				{
+					if (zw.first->bus >= 0 && zw.first->bus != bi) continue;
+					const float w = zw.second;
+					const float v[5] = { zw.first->roomSize, zw.first->damping, zw.first->wet, zw.first->width, zw.first->preDelay };
+					const int   idx[5] = { 0, 1, 2, 4, 5 };
+					for (int i = 0; i < 5; ++i) f.p[idx[i]] += (v[i] - f.p[idx[i]]) * w;
+				}
+				appended.push_back(f);
+				sig += "zone:reverb;";
+			}
+		}
+		BusPush& ps = gMixPush[master ? nb : bi];
+		if (sig != ps.sig)
+		{
+			std::vector<NukeAudioEffect> fx; for (const AudioMixer::Effect& e : b.effects) fx.push_back(MixPod(e)); for (const AudioMixer::Effect& e : appended) fx.push_back(MixPod(e));
+			au->setBusEffects(bi, fx.data(), (int)fx.size());
+			ps.sig = sig; ps.params.clear();
+		}
+		for (const AudioMixer::Effect& e : appended) params.emplace_back(e.p, e.p + 8);
+		for (size_t i = 0; i < params.size(); ++i)
+		{
+			if (i < ps.params.size() && ps.params[i] == params[i]) continue;
+			au->setBusEffectParams(bi, (int)i, params[i].data());
+		}
+		ps.params = params;
+		if (ps.volume != vol) { if (master) au->setMasterVolume(vol); else au->setBusVolume(bi, vol); ps.volume = vol; }
+		if (master) return;
+		std::vector<NukeAudioSend> ss;
+		for (auto& s : sends) { const int t = mix.BusIndex(s.first); if (t < 0 || t == bi) continue; NukeAudioSend d; d.bus = t; d.level = s.second; ss.push_back(d); }
+		bool same = ps.pushedSends && ss.size() == ps.sends.size();
+		for (size_t i = 0; same && i < ss.size(); ++i) same = ss[i].bus == ps.sends[i].bus && ss[i].level == ps.sends[i].level;
+		if (!same) { au->setBusSends(bi, ss.data(), (int)ss.size()); ps.sends = ss; ps.pushedSends = true; }
+	};
+	for (int bi = 0; bi < nb; ++bi) blend(bi, mix.buses[bi]);
+	{ AudioMixer::Bus mb; mb.name = "Master"; mb.volume = mix.masterVolume; mb.effects = mix.master; blend(-1, mb); }
 }
 
 void World::Render(iRender* r)
@@ -2685,6 +2883,8 @@ void World::Render(iRender* r)
 				if (!mc && !cams.empty()) mc = cams[0];
 				if (mc && mc->transform) ears = mc->transform;
 			}
+			AudioMixer::EnsureApplied(au);   // the project's buses / chains, once per backend init
+			Vector3 lisPos(0, 0, 0);
 			if (ears)
 			{
 				Vector3 p = ears->globalPosition(), f = ears->direction(), u = ears->up();
@@ -2692,7 +2892,12 @@ void World::Render(iRender* r)
 				float lf[3] = { (float)f.x, (float)f.y, (float)f.z };
 				float lu[3] = { (float)u.x, (float)u.y, (float)u.z };
 				au->setListener(lp, lf, lu);
+				Audio::SetListenerPose(p, f, u);
+				lisPos = p;
 			}
+			// The live mix = the project mixer with the audio volumes and reverb zones around the
+			// listener blended over it (see AudioMixDriver).
+			AudioMixDriver(au, lisPos, auxiliary);
 			au->setGamePaused(AppInstance::GetSingleton()->playState == 2);
 			au->update((float)Time::getSingleton()->delta);
 			Audio::Refresh();   // cache this frame's analysis

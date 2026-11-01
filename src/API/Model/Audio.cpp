@@ -1,14 +1,58 @@
 // Audio facade — null-safe pass-through to the "audio" service + the per-frame analysis snapshot.
 #include "API/Model/Audio.h"
+#include "API/Model/AudioMixer.h"
 #include "API/Model/Time.h"
 #include "interface/Services.h"
 #include "interface/AppInstance.h"
 #include <boost/filesystem.hpp>
+#include <algorithm>
 #include <cctype>
 
 namespace nuke {
 
 static NukeAudioAnalysis gSnap;   // this frame's analysis (game thread only)
+static Vector3 gLisPos(0, 0, 0), gLisFwd(0, 0, 1), gLisUp(0, 1, 0);
+
+bool        Audio::LoadMixer(const std::string& contentRel) { return AudioMixer::Load(contentRel); }
+std::string Audio::MixerPath()                              { return AudioMixer::CurrentPath(); }
+double      Audio::Bus(const std::string& name)             { return (double)AudioMixer::Current().BusIndex(name); }
+double      Audio::BusCount()                               { return (double)AudioMixer::Current().buses.size(); }
+std::string Audio::BusName(double bus)
+{
+	const AudioMixer& m = AudioMixer::Current();
+	const int b = (int)bus;
+	return (b >= 0 && b < (int)m.buses.size()) ? m.buses[b].name : std::string();
+}
+double Audio::BusLevel(double bus, double channel) { iAudio* a = GetService<iAudio>(); return a ? (double)a->busLevel((int)bus, (int)channel) : 0.0; }
+void Audio::SetBusSend(double bus, double target, double level)
+{
+	AudioMixer& m = AudioMixer::Current();
+	const int b = (int)bus, t = (int)target;
+	if (b < 0 || b >= (int)m.buses.size() || t < 0 || t >= (int)m.buses.size() || t == b) return;
+	std::vector<AudioMixer::Send>& ss = m.buses[b].sends;
+	const std::string name = m.buses[t].name;
+	auto it = std::find_if(ss.begin(), ss.end(), [&](const AudioMixer::Send& s) { return s.bus == name; });
+	if (level <= 0.0) { if (it != ss.end()) ss.erase(it); }
+	else if (it != ss.end()) it->level = (float)level;
+	else ss.push_back({ name, (float)level });
+	if (iAudio* a = GetService<iAudio>()) m.ApplySends(a, b);
+}
+double Audio::GetBusSend(double bus, double target)
+{
+	const AudioMixer& m = AudioMixer::Current();
+	const int b = (int)bus, t = (int)target;
+	if (b < 0 || b >= (int)m.buses.size() || t < 0 || t >= (int)m.buses.size()) return 0.0;
+	for (const AudioMixer::Send& s : m.buses[b].sends) if (s.bus == m.buses[t].name) return s.level;
+	return 0.0;
+}
+void   Audio::SetSpatialMode(double mode)
+{
+	AudioMixer::Current().spatialMode = (int)mode == 1 ? 1 : 0;
+	if (iAudio* a = GetService<iAudio>()) a->setSpatialMode((int)mode);
+}
+double Audio::GetSpatialMode()  { iAudio* a = GetService<iAudio>(); return a ? (double)a->getSpatialMode() : (double)AudioMixer::Current().spatialMode; }
+void   Audio::SetListenerPose(const Vector3& pos, const Vector3& fwd, const Vector3& up) { gLisPos = pos; gLisFwd = fwd; gLisUp = up; }
+const Vector3& Audio::ListenerPos() { return gLisPos; }
 
 bool Audio::Available() { return GetService<iAudio>() != nullptr; }
 

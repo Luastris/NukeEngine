@@ -51,7 +51,21 @@ public:
 	[[nuke::func]] static double GetNoteStrength();
 	[[nuke::func]] static double GetBeatPhase();     // 0..1 between beats
 
+	// Mixer (D1): the project's .numix - buses by name, levels for meters, the spatial mode.
+	[[nuke::func]] static bool        LoadMixer(const std::string& contentRel);   // load + apply a mixer asset
+	[[nuke::func]] static std::string MixerPath();                               // the live mixer's asset ("" = built-in defaults)
+	[[nuke::func]] static double      Bus(const std::string& name);              // bus index by name (-1 = none); use it as the `bus` of Play / AudioSource
+	[[nuke::func]] static double      BusCount();
+	[[nuke::func]] static std::string BusName(double bus);
+	[[nuke::func]] static double      BusLevel(double bus, double channel);      // peak of the last mixed block (0..1+): bus -1 = master; channel 0 L / 1 R
+	[[nuke::func]] static void        SetBusSend(double bus, double target, double level);   // a send into another bus (0 removes it), applied live + kept in the live mixer
+	[[nuke::func]] static double      GetBusSend(double bus, double target);
+	[[nuke::func]] static void        SetSpatialMode(double mode);              // 0 = panning, 1 = binaural (voices started from now on)
+	[[nuke::func]] static double      GetSpatialMode();
+
 	// --- engine internals (not reflected) ---
+	static void           SetListenerPose(const Vector3& pos, const Vector3& fwd, const Vector3& up);   // World::Render, every frame
+	static const Vector3& ListenerPos();
 	static const NukeAudioAnalysis& Analysis();      // this frame's cached snapshot
 	static void Refresh();                           // pull the snapshot (World::Render, once per frame)
 	// Fill a system post-param (g_NukeAudio / g_NukeNote / g_NukeChromaA..C) from the
