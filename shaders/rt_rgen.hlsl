@@ -92,7 +92,8 @@ void main()
     // Attenuate the reflection by whatever water the camera -> reflector segment crossed
     // (a point on the surface itself lies inside the water's wave band: not "through" it).
     // A submerged camera's leg is the underwater post's (it fogs the composited pixel).
-    if (!RTUnderEye(g_RTCam.xyz)) k *= RTWaterTrans(g_RTCam.xyz, wpos);
+    // The water's own pixel is never "through" water to an eye in the air, however far a funnel sinks it.
+    if (!isWater && !RTInHole(wpos) && !RTUnderEye(g_RTCam.xyz)) k *= RTWaterTrans(g_RTCam.xyz, wpos);
     // A sprite drawn over the reflector (a puff in front of a mirror, above the water) is part
     // of the base colour, not of the reflector: it keeps its share of the pixel.
     k *= 1.0 - g_Cover.Load(int3(px, 0)).r;

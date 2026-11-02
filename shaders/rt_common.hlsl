@@ -96,7 +96,12 @@ struct SurfaceIn  { float3 worldPos; float3 worldNormal; float2 uv; float3 viewD
 struct SurfaceOut { float3 albedo; float metallic; float roughness; float3 emissive; float alpha; bool unlit; };
 
 cbuffer RTRefCB { float4x4 g_InvProj; float4x4 g_InvView; float4 g_RTCam; float4 g_RTParams; float4 g_RTWater; float4 g_RTWaterCol; float4 g_RTWaterAbs;
-                  float4 g_RTWaterCasc; float4 g_RTWaterRip0; float4 g_RTWaterRip1; float4 g_RTWaterCau; float4 g_RTWaterCau1; float4 g_RTClear; };
+                  float4 g_RTWaterCasc; float4 g_RTWaterRip0; float4 g_RTWaterRip1; float4 g_RTWaterCau; float4 g_RTWaterCau1; float4 g_RTClear;
+                  float4 g_RTVortexN; float4 g_RTVortex[16]; float4 g_RTFoam;
+                  float4 g_RTWhirl; float4 g_RTWhirlGrid[8]; };
+// g_RTVortexN = (whirlpool count, deepest funnel m, water time, swell height); g_RTVortex = the whirlpools (SetRTWaterVortices), 2 per funnel
+// g_RTFoam = (foam tint.rgb, foam cover, its sign = wake field live)
+// g_RTWhirl = (simulated, carried-detail phase, 0, 0); g_RTWhirlGrid = (grid center xz, 1 / extent, side) per whirlpool
 // g_RTClear = the camera's clear colour (what the raster shows where there is no sky), w = 1 when the sky is off.
 // g_RTCam = (camera xyz, game clock); g_RTParams = (intensity, maxDist, maxDepth, roughCut); g_RTWater = (level, on, fade, wave band); g_RTWaterAbs = (absorb.rgb, 1/opacityDepth);
 // g_RTWaterCol = (scatter x tint, w = the pixel's angular size in radians: the wave maps' mip by footprint);
@@ -109,6 +114,10 @@ Texture2D g_SkyMap;    SamplerState g_SkyMap_sampler;   // the sky map (skymap.h
 Texture2D g_WaterNrm1; SamplerState g_WaterNrm1_sampler;
 Texture2D g_WaterNrm2; SamplerState g_WaterNrm2_sampler;
 Texture2D<float> g_WaterRipple; SamplerState g_WaterRipple_sampler;
+Texture2D<float> g_WaterSimFoam; SamplerState g_WaterSimFoam_sampler;   // the wake foam field (SetRTWaterFoam, over the ripple window)
+Texture2D g_WaterLace; SamplerState g_WaterLace_sampler;                // the foam lace: height, slope
+Texture2DArray<float4> g_WaterWhirl; SamplerState g_WaterWhirl_sampler; // simulated whirlpools: h, u, v, foam
+Texture2DArray<float4> g_WaterWhirlUV;                                  // and where their water came from (the same sampler)
 Texture2D<float> g_WaterCaustic; SamplerState g_WaterCaustic_sampler;   // the photon tile (SetRTWaterCaustic; density 1 = neutral)
 
 #define MAX_LIGHTS 256   // must match world.ps and the renderer's FrameCB
@@ -208,7 +217,65 @@ float3 RTWaterTransRay(float3 o, float3 d, float tMax)
 // "Under" reaches up through the wave band: the drawn surface rides above the rest level by
 // up to the band, and a wall's pixels between the level and a crest are under water too (they
 // mirrored the dry world otherwise - a torn bright line along every crest meeting a mirror).
-bool RTUnderEye(float3 o) { return g_RTWater.y > 0.5 && o.y < g_RTWater.x + g_RTWater.w; }
+// The whirlpool funnels' height at a world XZ (<= 0). Must match NukeWater's nukewater_vortex.hlsl.
+float RTFunnelSpeed(float r, float4 A, float4 B)
+{
+    float l = sqrt(r * r + B.w * B.w) / max(A.z, 1e-3);
+    float w = 1.0 - B.y * l;
+    return abs(B.x) * saturate(w) * (1.0 - smoothstep(0.7, 1.0, l)) * smoothstep(0.0, 0.6, w);
+}
+// The spiral swells on it (nukewater_vortex.hlsl WaterVortexSwell).
+float RTFunnelSwell(float2 d, float r, float4 A, float4 B, float v)
+{
+    float rc = max(r, A.w);
+    float amp = min(0.45 * v * abs(B.x) / 9.81, 0.15 * rc) * smoothstep(0.35, 1.1, r / max(A.w, 1e-3)) * g_RTVortexN.w;
+    if (amp <= 1e-4) return 0.0;
+    float sg = (B.x < 0.0) ? -1.0 : 1.0;
+    float th = atan2(d.y, d.x);
+    float lr = log(max(r / max(A.w, 1e-3), 0.05));
+    float om = abs(B.x) / max(A.z, 0.5);
+    float t = g_RTVortexN.z;
+    float p1 = exp(2.2 * (cos(5.0 * th - 10.0 * sg * lr + sg * 14.3 * om * t) - 1.0))
+             * (0.75 + 0.25 * sin(2.0 * th + 1.3 * om * t));
+    float p2 = exp(2.2 * (cos(3.0 * th - 7.0 * sg * lr + sg * 15.0 * om * t + 1.7) - 1.0))
+             * (0.75 + 0.25 * sin(th - 2.1 * om * t + 0.6));
+    return amp * (p1 + 0.55 * p2 - 0.36);
+}
+float RTFunnelH(float2 xz)
+{
+    float h = 0.0;
+    if (g_RTWhirl.x > 0.5)   // Simulated: the sim's own height
+    {
+        [loop] for (int i = 0; i < (int)g_RTVortexN.x; ++i)
+        {
+            float2 uv = (xz - g_RTWhirlGrid[i].xy) * g_RTWhirlGrid[i].z + 0.5;
+            if (uv.x > 0.0 && uv.y > 0.0 && uv.x < 1.0 && uv.y < 1.0)
+                h += g_WaterWhirl.SampleLevel(g_WaterWhirl_sampler, float3(uv, (float)i), 0.0).x;
+        }
+        return h * g_RTVortexN.w;
+    }
+    [loop] for (int i = 0; i < (int)g_RTVortexN.x; ++i)
+    {
+        float4 A = g_RTVortex[i * 2], B = g_RTVortex[i * 2 + 1];
+        float r = length(xz - A.xy);
+        float re = sqrt(max(A.z * A.z - B.w * B.w, 0.0));
+        if (r >= re) continue;
+        float v = RTFunnelSpeed(r, A, B), vi = RTFunnelSpeed(A.w, A, B);
+        float q = min(r, A.w) / max(A.w, 1e-3);
+        h -= (v * v * log(max(re / max(max(r, A.w), 1e-3), 1.0)) + vi * vi * 0.5 * (1.0 - q * q)) / 9.81;
+        h += RTFunnelSwell(xz - A.xy, r, A, B, v);
+    }
+    return h;
+}
+
+// A point in the air a whirlpool holds below the level: dry, however low it stands.
+bool RTInHole(float3 p)
+{
+    if (g_RTVortexN.x < 0.5) return false;
+    float h = RTFunnelH(p.xz);
+    return h < -1e-3 && p.y > g_RTWater.x + h + g_RTWater.w;
+}
+bool RTUnderEye(float3 o) { return g_RTWater.y > 0.5 && o.y < g_RTWater.x + g_RTWater.w && !RTInHole(o); }
 
 float3 EnvSample(float3 dir, float rough)   // probe (parallax-free), the sky map, analytic sky, or flat ambient when sky is off
 {
